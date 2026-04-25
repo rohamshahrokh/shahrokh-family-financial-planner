@@ -3,6 +3,7 @@ import { useAppStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { useHashLocation } from "wouter/use-hash-location";
 import familyImg from "@assets/family.jpeg";
 
 export default function LoginPage() {
@@ -11,6 +12,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const { login } = useAppStore();
   const { toast } = useToast();
+  const [, navigate] = useHashLocation();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,6 +23,7 @@ export default function LoginPage() {
     if (username === "Roham" && password === "YaraJana2025") {
       login();
       toast({ title: "Welcome back, Roham", description: "Your financial command center is ready." });
+      navigate("/dashboard");
     } else {
       toast({ title: "Access Denied", description: "Invalid credentials. Please try again.", variant: "destructive" });
     }
