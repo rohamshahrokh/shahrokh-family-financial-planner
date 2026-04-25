@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
+import { useHashLocation } from "wouter/use-hash-location";
 import { useAppStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,8 +21,14 @@ const navItems = [
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
+  const [, navigate] = useHashLocation();
   const { theme, toggleTheme, logout, lastSaved } = useAppStore();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
 
   const isActive = (href: string) => {
     if (href === "/" || href === "/dashboard") return location === "/" || location === "/dashboard";
@@ -96,7 +103,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </button>
           <button
             className="sidebar-link w-full text-red-400 hover:text-red-300 hover:bg-red-950/30"
-            onClick={logout}
+            onClick={handleLogout}
             data-testid="button-logout"
           >
             <LogOut className="w-4 h-4" />
