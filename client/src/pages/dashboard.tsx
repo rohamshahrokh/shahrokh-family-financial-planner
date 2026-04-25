@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { formatCurrency, calcSavingsRate, projectNetWorth } from "@/lib/finance";
+import { formatCurrency, safeNum, calcSavingsRate, projectNetWorth } from "@/lib/finance";
 import { useAppStore } from "@/lib/store";
 import KpiCard from "@/components/KpiCard";
 import SaveButton from "@/components/SaveButton";
@@ -50,21 +50,32 @@ export default function DashboardPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['/api/snapshot'] })
   });
 
-  const snap = snapshot || {
-    ppor: 1510000, cash: 220000, super_balance: 85000, stocks: 0, crypto: 0,
-    cars: 65000, iran_property: 150000, mortgage: 1200000, other_debts: 19000,
-    monthly_income: 22000, monthly_expenses: 14540
+  // Always produce a fully-populated snap with safe numeric defaults.
+  // safeNum() converts undefined / null / NaN / "" → 0 so no arithmetic
+  // can ever produce NaN regardless of what the API or localStorage returns.
+  const snap = {
+    ppor:             safeNum(snapshot?.ppor)             || 1510000,
+    cash:             safeNum(snapshot?.cash)             || 220000,
+    super_balance:    safeNum(snapshot?.super_balance)    || 85000,
+    stocks:           safeNum(snapshot?.stocks),
+    crypto:           safeNum(snapshot?.crypto),
+    cars:             safeNum(snapshot?.cars)             || 65000,
+    iran_property:    safeNum(snapshot?.iran_property)    || 150000,
+    mortgage:         safeNum(snapshot?.mortgage)         || 1200000,
+    other_debts:      safeNum(snapshot?.other_debts)      || 19000,
+    monthly_income:   safeNum(snapshot?.monthly_income)   || 22000,
+    monthly_expenses: safeNum(snapshot?.monthly_expenses) || 14540,
   };
 
-  const totalAssets = snap.ppor + snap.cash + snap.super_balance + snap.stocks + snap.crypto + snap.cars + snap.iran_property;
+  const totalAssets      = snap.ppor + snap.cash + snap.super_balance + snap.stocks + snap.crypto + snap.cars + snap.iran_property;
   const totalLiabilities = snap.mortgage + snap.other_debts;
-  const netWorth = totalAssets - totalLiabilities;
-  const surplus = snap.monthly_income - snap.monthly_expenses;
-  const savingsRate = calcSavingsRate(snap.monthly_income, snap.monthly_expenses);
-  const propertyEquity = snap.ppor - snap.mortgage;
+  const netWorth         = totalAssets - totalLiabilities;
+  const surplus          = snap.monthly_income - snap.monthly_expenses;
+  const savingsRate      = calcSavingsRate(snap.monthly_income, snap.monthly_expenses);
+  const propertyEquity   = snap.ppor - snap.mortgage;
 
-  const stocksTotal = stocks.reduce((s: number, st: any) => s + (st.current_holding * st.current_price), 0);
-  const cryptoTotal = cryptos.reduce((s: number, c: any) => s + (c.current_holding * c.current_price), 0);
+  const stocksTotal = stocks.reduce((s: number, st: any) => s + safeNum(st.current_holding) * safeNum(st.current_price), 0);
+  const cryptoTotal = cryptos.reduce((s: number, c: any) => s + safeNum(c.current_holding) * safeNum(c.current_price), 0);
   const totalInvestments = stocksTotal + cryptoTotal;
 
   // 10-year projection
@@ -175,7 +186,7 @@ export default function DashboardPage() {
         <KpiCard
           label="Property Equity"
           value={formatCurrency(propertyEquity, true)}
-          subValue={`${((propertyEquity / snap.ppor) * 100).toFixed(0)}% LVR met`}
+          subValue={`${(snap.ppor > 0 ? (propertyEquity / snap.ppor) * 100 : 0).toFixed(0)}% LVR met`}
           trend={1}
           icon={<Home />}
           accent="hsl(142,60%,45%)"
