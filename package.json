@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
+    "build:client": "vite build",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push"
@@ -43,12 +44,6 @@
     "@supabase/supabase-js": "^2.104.1",
     "@tanstack/react-query": "^5.60.5",
     "better-sqlite3": "^11.7.0",
-    "esbuild": "^0.25.0",
-    "autoprefixer": "^10.4.20",
-    "vite": "^7.3.0",
-    "@vitejs/plugin-react": "^4.7.0",
-    "tailwindcss": "^3.4.17",
-    "@tailwindcss/typography": "^0.5.15",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -87,6 +82,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "^4.1.18",
     "@types/better-sqlite3": "^7.6.12",
     "@types/express": "^5.0.0",
@@ -97,10 +93,15 @@
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
     "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.8",
+    "esbuild": "^0.25.0",
     "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.17",
     "tsx": "^4.20.5",
-    "typescript": "5.6.3"
+    "typescript": "5.6.3",
+    "vite": "^7.3.0"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"
