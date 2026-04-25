@@ -1,18 +1,30 @@
 // ─── Financial Calculation Engine ────────────────────────────────────
 
+/**
+ * safeNum — converts any value to a finite number.
+ * undefined / null / "" / NaN all become 0.
+ * Preserves valid positive and negative numbers.
+ */
+export function safeNum(v: unknown): number {
+  if (v === null || v === undefined || v === "") return 0;
+  const n = Number(v);
+  return isFinite(n) ? n : 0;
+}
+
 export const formatCurrency = (amount: number, compact = false): string => {
-  if (compact && Math.abs(amount) >= 1_000_000) {
-    return `$${(amount / 1_000_000).toFixed(2)}M`;
+  const n = safeNum(amount); // guard: never format NaN
+  if (compact && Math.abs(n) >= 1_000_000) {
+    return `$${(n / 1_000_000).toFixed(2)}M`;
   }
-  if (compact && Math.abs(amount) >= 1_000) {
-    return `$${(amount / 1_000).toFixed(0)}K`;
+  if (compact && Math.abs(n) >= 1_000) {
+    return `$${(n / 1_000).toFixed(0)}K`;
   }
   return new Intl.NumberFormat('en-AU', {
     style: 'currency',
     currency: 'AUD',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount);
+  }).format(n);
 };
 
 export const formatPct = (value: number, decimals = 1) =>
@@ -188,19 +200,23 @@ export function projectNetWorth(params: {
   const results: YearlyProjection[] = [];
   const currentYear = new Date().getFullYear();
 
-  let ppor = s.ppor;
-  let cash = s.cash;
-  let superBal = s.super_balance;
-  let stockVal = s.stocks;
-  let cryptoVal = s.crypto;
-  let mortgage = s.mortgage;
-  let otherDebts = s.other_debts;
-  let monthlyIncome = s.monthly_income;
-  let monthlyExpenses = s.monthly_expenses;
+  // Guard every field — if snapshot came back with undefined/NaN fields
+  // (e.g. field name mismatch), calculations silently use 0 instead of NaN.
+  let ppor           = safeNum(s.ppor);
+  let cash           = safeNum(s.cash);
+  let superBal       = safeNum(s.super_balance);
+  let stockVal       = safeNum(s.stocks);
+  let cryptoVal      = safeNum(s.crypto);
+  let mortgage       = safeNum(s.mortgage);
+  let otherDebts     = safeNum(s.other_debts);
+  let monthlyIncome  = safeNum(s.monthly_income);
+  let monthlyExpenses = safeNum(s.monthly_expenses);
+  const cars         = safeNum(s.cars);
+  const iranProp     = safeNum(s.iran_property);
 
   for (let y = 1; y <= years; y++) {
     const year = currentYear + y;
-    const startNW = (ppor + cash + superBal + stockVal + cryptoVal + s.cars + s.iran_property) - (mortgage + otherDebts);
+    const startNW = (ppor + cash + superBal + stockVal + cryptoVal + cars + iranProp) - (mortgage + otherDebts);
 
     // PPOR growth
     ppor *= (1 + pporGrowth / 100);
@@ -252,7 +268,7 @@ export function projectNetWorth(params: {
     cash += annualSurplus * 0.5; // 50% saved
 
     // Calculate totals
-    const totalAssets = ppor + cash + superBal + stocksTotal + cryptoTotal + s.cars * 0.8 + s.iran_property + propValue;
+    const totalAssets = ppor + cash + superBal + stocksTotal + cryptoTotal + cars * 0.8 + iranProp + propValue;
     const totalLiabilities = mortgage + otherDebts * Math.max(0, 1 - y * 0.1) + propLoans;
     const endNW = totalAssets - totalLiabilities;
     const passiveIncome = propRent + stocksTotal * 0.02 + cryptoTotal * 0.01;
