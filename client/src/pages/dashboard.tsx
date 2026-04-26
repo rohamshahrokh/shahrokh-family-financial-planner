@@ -45,11 +45,18 @@ import {
   RefreshCw,
   Eye,
   EyeOff,
+  Flame,
+  Shield,
+  Sword,
+  Building2,
+  Clock,
+  AlertTriangle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import familyImg from "@assets/family.jpeg";
 import AIInsightsCard from "@/components/AIInsightsCard";
+import { Link } from "wouter";
 
 // ─── Chart colours ────────────────────────────────────────────────────────────
 const COLORS = [
@@ -210,6 +217,57 @@ export default function DashboardPage() {
   );
 
   const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
+
+  // ─── Wealth Strategy Summary Cards ───────────────────────────────────────
+  const wealthCards = useMemo(() => {
+    // FIRE progress
+    const currentInvestable = snap.cash + snap.super_balance + snap.stocks + snap.crypto + stocksTotal + cryptoTotal;
+    const requiredFIRE = (10000 * 12) / 0.04; // default: $10k/mo at 4% SWR
+    const fireProgress = Math.min(100, Math.round((currentInvestable / requiredFIRE) * 100));
+
+    // Emergency score
+    const totalMonthly = snap.monthly_expenses + snap.mortgage / 12;
+    const monthsCovered = snap.cash / totalMonthly;
+    const emergencyScore = Math.min(100, Math.round((monthsCovered / 6) * 100));
+    const emergencyAlert = emergencyScore < 50;
+
+    // Debt priority
+    const totalDebt = snap.mortgage + snap.other_debts;
+    const debtToIncome = totalDebt / (snap.monthly_income * 12);
+    const debtAlert = debtToIncome > 5;
+
+    // Property readiness (rough)
+    const targetIP = 750000;
+    const depositNeeded = targetIP * 0.2 + targetIP * 0.035; // 20% + stamp duty
+    const depositReady = Math.min(100, Math.round((snap.cash * 0.7 / depositNeeded) * 100));
+
+    // Retirement age estimate (rough)
+    const currentInvestable2 = snap.cash + snap.super_balance + snap.stocks + snap.crypto + stocksTotal + cryptoTotal;
+    const targetFIRE = (8000 * 12) / 0.04;
+    const monthlySaving = Math.max(surplus, 100);
+    const r = 0.07 / 12;
+    let months = 0;
+    let accum = currentInvestable2;
+    while (accum < targetFIRE && months < 600) {
+      accum = accum * (1 + r) + monthlySaving;
+      months++;
+    }
+    const fireAge = 36 + Math.round(months / 12); // default current age 36
+
+    // Hidden money (simple estimate)
+    const hiddenMonthly = Math.round(snap.other_debts * 0.15 / 12 + Math.max(0, snap.cash - snap.monthly_expenses * 6) * 0.04 / 12);
+
+    return [
+      { label: "FIRE Progress", value: `${fireProgress}%`, sub: "of target capital", Icon: Flame, alert: fireProgress < 20 },
+      { label: "Emergency", value: `${emergencyScore}/100`, sub: `${Math.round(monthsCovered)}mo covered`, Icon: Shield, alert: emergencyAlert },
+      { label: "Total Debt", value: formatCurrency(totalDebt, true), sub: debtAlert ? "High debt ratio" : "Manageable", Icon: Sword, alert: debtAlert },
+      { label: "IP Readiness", value: `${depositReady}%`, sub: "deposit ready", Icon: Building2, alert: depositReady < 30 },
+      { label: "FIRE Age", value: `~${fireAge}`, sub: "est. financial freedom", Icon: Clock, alert: fireAge > 60 },
+      { label: "Hidden Money", value: `${formatCurrency(hiddenMonthly * 12, true)}/yr`, sub: "potential savings", Icon: Eye, alert: hiddenMonthly > 500 },
+      { label: "Savings Rate", value: `${savingsRate.toFixed(0)}%`, sub: savingsRate < 20 ? "Below target" : "On track", Icon: AlertTriangle, alert: savingsRate < 20 },
+    ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap, surplus, savingsRate, stocksTotal, cryptoTotal]);
 
   const masterCFData = useMemo(() => {
     if (cashFlowView === "annual") {
@@ -434,6 +492,22 @@ export default function DashboardPage() {
           icon={<Target />}
           accent="hsl(20,80%,55%)"
         />
+      </div>
+
+      {/* ─── Wealth Strategy Summary Cards ─────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+        {wealthCards.map(card => (
+          <Link key={card.label} href={`/wealth-strategy`}>
+            <div className={`bg-card border rounded-xl p-3 cursor-pointer hover:border-primary/50 transition-colors ${card.alert ? 'border-red-800/50' : 'border-border'}`}>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <card.Icon className={`w-3.5 h-3.5 ${card.alert ? 'text-red-400' : 'text-primary'}`} />
+                <span className="text-xs text-muted-foreground truncate">{card.label}</span>
+              </div>
+              <p className={`text-sm font-bold leading-none ${card.alert ? 'text-red-400' : ''}`}>{card.value}</p>
+              {card.sub && <p className="text-xs text-muted-foreground/70 mt-0.5 truncate">{card.sub}</p>}
+            </div>
+          </Link>
+        ))}
       </div>
 
       {/* ─── Financial Snapshot Edit ───────────────────────────────────────── */}
