@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { formatCurrency, safeNum, calcSavingsRate, projectNetWorth } from "@/lib/finance";
+import { formatCurrency, safeNum, calcSavingsRate, projectNetWorth, buildCashFlowSeries, aggregateCashFlowToAnnual } from "@/lib/finance";
 import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import KpiCard from "@/components/KpiCard";
@@ -12,11 +12,20 @@ import {
 } from "recharts";
 import {
   TrendingUp, DollarSign, Home, CreditCard,
-  PiggyBank, Calendar, Layers, Target, Edit2, Check, X, RefreshCw
+  PiggyBank, Calendar, Layers, Target, Edit2, Check, X, RefreshCw, Eye, EyeOff
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import familyImg from "@assets/family.jpeg";
+
+// ─── Privacy mask helper ──────────────────────────────────────────────────────
+// When privacy mode is ON, replace any dollar/percent value with bullets.
+function mask(value: string, hidden: boolean, type: 'currency' | 'pct' | 'text' = 'currency'): string {
+  if (!hidden) return value;
+  if (type === 'pct') return '•••%';
+  if (type === 'text') return '••••••';
+  return '$••••••';
+}
 
 const COLORS = ['hsl(43,85%,55%)', 'hsl(188,60%,48%)', 'hsl(142,60%,45%)', 'hsl(20,80%,55%)', 'hsl(270,60%,60%)', 'hsl(0,72%,51%)'];
 
@@ -36,11 +45,12 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export default function DashboardPage() {
   const qc = useQueryClient();
-  const { chartView } = useAppStore();
+  const { chartView, privacyMode, togglePrivacy } = useAppStore();
   const [editSnap, setEditSnap] = useState(false);
   const [snapDraft, setSnapDraft] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(getLastSync);
+  const [cashFlowView, setCashFlowView] = useState<'monthly' | 'annual'>('annual');
 
   const handleSyncFromCloud = useCallback(async () => {
     setSyncing(true);
@@ -115,12 +125,57 @@ export default function DashboardPage() {
     { name: 'Crypto', value: cryptoTotal + snap.crypto },
   ].filter(d => d.value > 0);
 
-  // Monthly cash flow data
+  // Monthly cash flow data (simple bar for snapshot)
   const cashFlowData = [
     { month: 'Income', value: snap.monthly_income, fill: 'hsl(142,60%,45%)' },
     { month: 'Expenses', value: snap.monthly_expenses, fill: 'hsl(0,72%,51%)' },
     { month: 'Surplus', value: surplus, fill: 'hsl(43,85%,55%)' },
   ];
+
+  // ─── Master Cash Flow Series (2025 → 2035) ───────────────────────────
+  const cashFlowSeries = useMemo(() => buildCashFlowSeries({
+    snapshot: snap,
+    expenses: expenses as any[],
+    properties: properties as any[],
+  }), [snap, expenses, properties]);
+
+  const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
+
+  // Derive what to show in the master CF chart
+  const masterCFData = useMemo(() => {
+    if (cashFlowView === 'annual') {
+      return cashFlowAnnual.map(y => ({
+        label: y.year.toString(),
+        income: y.income,
+        expenses: y.totalExpenses,
+        mortgage: y.mortgageRepayment,
+        rental: y.rentalIncome,
+        netCF: y.netCashFlow,
+        balance: y.endingBalance,
+        hasActuals: y.hasActualMonths > 0,
+      }));
+    } else {
+      // Monthly — show last 24 months + next 12 months (manageable range)
+      const now = new Date();
+      const cutoffStart = new Date(now.getFullYear() - 1, now.getMonth() - 11, 1);
+      const cutoffEnd   = new Date(now.getFullYear() + 1, now.getMonth() + 11, 1);
+      return cashFlowSeries
+        .filter(m => {
+          const d = new Date(m.year, m.month - 1, 1);
+          return d >= cutoffStart && d <= cutoffEnd;
+        })
+        .map(m => ({
+          label: m.label,
+          income: m.income,
+          expenses: m.totalExpenses,
+          mortgage: m.mortgageRepayment,
+          rental: m.rentalIncome,
+          netCF: m.netCashFlow,
+          balance: m.cumulativeBalance,
+          hasActuals: m.isActual,
+        }));
+    }
+  }, [cashFlowView, cashFlowAnnual, cashFlowSeries]);
 
   // Net worth growth chart data
   const nwGrowthData = projection.map(p => ({
@@ -166,22 +221,34 @@ export default function DashboardPage() {
           <div className="text-right">
             <p className="text-xs text-muted-foreground mb-1">Estimated Net Worth</p>
             <div className="text-2xl font-bold num-display" style={{ color: 'hsl(43,85%,65%)' }}>
-              {formatCurrency(netWorth)}
+              {mask(formatCurrency(netWorth), privacyMode)}
             </div>
             <p className="text-xs text-muted-foreground">Brisbane, QLD · AUD</p>
+            <div className="flex gap-1.5 mt-2 justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={togglePrivacy}
+              className="h-7 text-xs gap-1.5"
+              style={{ borderColor: 'rgba(196,165,90,0.3)', color: 'hsl(43,85%,65%)' }}
+            >
+              {privacyMode ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+              {privacyMode ? 'Show Values' : 'Hide Values'}
+            </Button>
             <Button
               size="sm"
               variant="outline"
               onClick={handleSyncFromCloud}
               disabled={syncing}
-              className="mt-2 h-7 text-xs gap-1.5"
+              className="h-7 text-xs gap-1.5"
               style={{ borderColor: 'rgba(196,165,90,0.3)', color: 'hsl(43,85%,65%)' }}
             >
               <RefreshCw className={`w-3 h-3 ${syncing ? 'animate-spin' : ''}`} />
               {syncing ? 'Syncing...' : 'Sync From Cloud'}
             </Button>
+            </div>
             {lastSync && (
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground mt-1 text-right">
                 Last synced: {new Date(lastSync).toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' })}
               </p>
             )}
@@ -193,21 +260,21 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-3">
         <KpiCard
           label="Net Worth"
-          value={formatCurrency(netWorth, true)}
-          subValue={`${savingsRate.toFixed(0)}% savings rate`}
+          value={mask(formatCurrency(netWorth, true), privacyMode)}
+          subValue={mask(`${savingsRate.toFixed(0)}% savings rate`, privacyMode, 'pct')}
           trend={1}
           icon={<DollarSign />}
         />
         <KpiCard
           label="Monthly Surplus"
-          value={formatCurrency(surplus)}
-          subValue={`${formatCurrency(surplus * 12)} / year`}
+          value={mask(formatCurrency(surplus), privacyMode)}
+          subValue={mask(`${formatCurrency(surplus * 12)} / year`, privacyMode)}
           trend={1}
           icon={<TrendingUp />}
         />
         <KpiCard
           label="Total Investments"
-          value={formatCurrency(totalInvestments, true)}
+          value={mask(formatCurrency(totalInvestments, true), privacyMode)}
           subValue="Stocks + Crypto"
           trend={totalInvestments > 0 ? 1 : 0}
           icon={<Layers />}
@@ -215,15 +282,15 @@ export default function DashboardPage() {
         />
         <KpiCard
           label="Property Equity"
-          value={formatCurrency(propertyEquity, true)}
-          subValue={`${(snap.ppor > 0 ? (propertyEquity / snap.ppor) * 100 : 0).toFixed(0)}% LVR met`}
+          value={mask(formatCurrency(propertyEquity, true), privacyMode)}
+          subValue={mask(`${(snap.ppor > 0 ? (propertyEquity / snap.ppor) * 100 : 0).toFixed(0)}% LVR met`, privacyMode, 'pct')}
           trend={1}
           icon={<Home />}
           accent="hsl(142,60%,45%)"
         />
         <KpiCard
           label="Debt Balance"
-          value={formatCurrency(totalLiabilities, true)}
+          value={mask(formatCurrency(totalLiabilities, true), privacyMode)}
           subValue="Mortgage + Debts"
           trend={-1}
           icon={<CreditCard />}
@@ -231,15 +298,15 @@ export default function DashboardPage() {
         />
         <KpiCard
           label="10-Year Forecast"
-          value={formatCurrency(year10NW, true)}
-          subValue={`From ${formatCurrency(netWorth, true)} today`}
+          value={mask(formatCurrency(year10NW, true), privacyMode)}
+          subValue={mask(`From ${formatCurrency(netWorth, true)} today`, privacyMode)}
           trend={1}
           icon={<Calendar />}
           accent="hsl(270,60%,60%)"
         />
         <KpiCard
           label="Passive Income"
-          value={formatCurrency(passiveIncome, true)}
+          value={mask(formatCurrency(passiveIncome, true), privacyMode)}
           subValue="Rental + Dividends"
           trend={passiveIncome > 0 ? 1 : 0}
           icon={<PiggyBank />}
@@ -247,8 +314,8 @@ export default function DashboardPage() {
         />
         <KpiCard
           label="Savings Rate"
-          value={`${savingsRate.toFixed(1)}%`}
-          subValue={`${formatCurrency(surplus * 12)} saved / yr`}
+          value={mask(`${savingsRate.toFixed(1)}%`, privacyMode, 'pct')}
+          subValue={mask(`${formatCurrency(surplus * 12)} saved / yr`, privacyMode)}
           trend={savingsRate > 20 ? 1 : savingsRate > 0 ? 0 : -1}
           icon={<Target />}
           accent="hsl(20,80%,55%)"
@@ -443,6 +510,114 @@ export default function DashboardPage() {
               <p className="text-xs">Add expenses in the Expense Tracker</p>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* ─── Master Cash Flow Chart 2025-2035 ──────────────── */}
+      <div className="rounded-xl border border-border bg-card p-5">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <h3 className="text-sm font-bold">Master Cash Flow Forecast</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Actual expenses (tracked) + forecast (snapshot) · 2025 – 2035
+            </p>
+          </div>
+          <div className="flex items-center gap-1 rounded-lg border border-border p-0.5">
+            <button
+              onClick={() => setCashFlowView('monthly')}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                cashFlowView === 'monthly'
+                  ? 'bg-primary text-primary-foreground font-semibold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => setCashFlowView('annual')}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                cashFlowView === 'annual'
+                  ? 'bg-primary text-primary-foreground font-semibold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Annual
+            </button>
+          </div>
+        </div>
+
+        {/* Legend */}
+        <div className="flex gap-4 mb-3 flex-wrap">
+          {[
+            { color: 'hsl(142,60%,45%)', label: 'Income' },
+            { color: 'hsl(0,72%,51%)', label: 'Expenses' },
+            { color: 'hsl(43,85%,55%)', label: 'Net CF' },
+            { color: 'hsl(188,60%,48%)', label: 'Balance' },
+          ].map(l => (
+            <div key={l.label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <div className="w-2.5 h-2.5 rounded-sm" style={{ background: l.color }} />
+              {l.label}
+            </div>
+          ))}
+        </div>
+
+        <ResponsiveContainer width="100%" height={260}>
+          <LineChart data={masterCFData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 9, fill: 'hsl(220,10%,55%)' }}
+              interval={cashFlowView === 'annual' ? 0 : 'preserveStartEnd'}
+              angle={cashFlowView === 'monthly' ? -30 : 0}
+              textAnchor={cashFlowView === 'monthly' ? 'end' : 'middle'}
+              height={cashFlowView === 'monthly' ? 40 : 20}
+            />
+            <YAxis
+              tick={{ fontSize: 9, fill: 'hsl(220,10%,55%)' }}
+              tickFormatter={v => {
+                const abs = Math.abs(v);
+                if (abs >= 1_000_000) return `$${(v/1_000_000).toFixed(1)}M`;
+                if (abs >= 1_000) return `$${(v/1_000).toFixed(0)}K`;
+                return `$${v}`;
+              }}
+            />
+            <Tooltip
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null;
+                return (
+                  <div className="bg-card border border-border rounded-lg px-3 py-2 text-xs shadow-xl">
+                    <p className="text-muted-foreground mb-1 font-semibold">{label}</p>
+                    {payload.map((p: any, i: number) => (
+                      <p key={i} style={{ color: p.color }}>{p.name}: {formatCurrency(p.value, true)}</p>
+                    ))}
+                  </div>
+                );
+              }}
+            />
+            <Line type="monotone" dataKey="income" stroke="hsl(142,60%,45%)" strokeWidth={1.5} dot={false} name="Income" />
+            <Line type="monotone" dataKey="expenses" stroke="hsl(0,72%,51%)" strokeWidth={1.5} dot={false} name="Expenses" />
+            <Line type="monotone" dataKey="netCF" stroke="hsl(43,85%,55%)" strokeWidth={2} dot={false} name="Net CF" />
+            <Line type="monotone" dataKey="balance" stroke="hsl(188,60%,48%)" strokeWidth={1.5} strokeDasharray="4 2" dot={false} name="Balance" />
+          </LineChart>
+        </ResponsiveContainer>
+
+        {/* Summary row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-border text-center text-xs">
+          {(() => {
+            const latest = cashFlowAnnual.find(y => y.year === new Date().getFullYear()) || cashFlowAnnual[0];
+            const yr2035 = cashFlowAnnual[cashFlowAnnual.length - 1];
+            return [
+              { label: `${new Date().getFullYear()} Net CF`, value: formatCurrency(latest?.netCashFlow || 0, true), color: (latest?.netCashFlow || 0) >= 0 ? 'text-emerald-400' : 'text-red-400' },
+              { label: `${new Date().getFullYear()} Balance`, value: formatCurrency(latest?.endingBalance || 0, true), color: 'text-primary' },
+              { label: '2035 Net CF', value: formatCurrency(yr2035?.netCashFlow || 0, true), color: (yr2035?.netCashFlow || 0) >= 0 ? 'text-emerald-400' : 'text-red-400' },
+              { label: '2035 Balance', value: formatCurrency(yr2035?.endingBalance || 0, true), color: 'num-display' },
+            ].map(s => (
+              <div key={s.label}>
+                <p className="text-muted-foreground">{s.label}</p>
+                <p className={`font-bold num-display mt-0.5 ${s.color}`}>{s.value}</p>
+              </div>
+            ));
+          })()}
         </div>
       </div>
 
