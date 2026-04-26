@@ -7,6 +7,7 @@ import { useAppStore } from "@/lib/store";
 import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
+import AIInsightsCard from "@/components/AIInsightsCard";
 import { Input } from "@/components/ui/input";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -701,6 +702,16 @@ export default function StocksPage() {
           </div>
         </div>
       )}
+
+      {/* ─── AI Insights ───────────────────────────────────────────────────── */}
+      <AIInsightsCard
+        pageKey="stocks"
+        pageLabel="Stocks Portfolio"
+        getData={() => {
+        if (!stocks?.length) return { count: 0 };
+        return { stocks: stocks.map((s: any) => ({ ticker: s.ticker, shares: s.shares, avgBuy: s.avg_buy_price, current: s.current_price, pnl: ((s.current_price - s.avg_buy_price) * s.shares).toFixed(2), sector: s.sector })) };
+      }}
+      />
     </div>
   );
 }
