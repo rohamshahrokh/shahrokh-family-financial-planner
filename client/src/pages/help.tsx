@@ -1,1062 +1,1878 @@
 /**
  * help.tsx — Shahrokh Family Financial Planner
- * Complete help and documentation page covering every feature,
- * calculation methodology, and FAQ.
+ * Fully bilingual (English + Persian/Farsi) help and documentation page.
+ * Language stored in localStorage key `sf_help_lang`.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   LayoutDashboard, Receipt, Home, TrendingUp, Bitcoin,
   FileText, Calculator, Activity, Settings, Shield,
   Trash2, Cloud, FileSpreadsheet, FileDown, Search,
   ChevronDown, ChevronRight, Info, AlertTriangle, CheckCircle,
-  HelpCircle, BookOpen, Zap, Database,
+  HelpCircle, BookOpen, Zap, Database, Globe, Languages,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Section {
+type Lang = "en" | "fa";
+
+interface SectionDef {
   id: string;
   icon: React.ReactNode;
-  title: string;
   color: string;
-  content: React.ReactNode;
+  title: { en: string; fa: string };
+  content: { en: React.ReactNode; fa: React.ReactNode };
+  keywords: { en: string; fa: string };
 }
 
-// ─── Reusable sub-components ──────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
-function Callout({ type, children }: { type: "info" | "warning" | "tip"; children: React.ReactNode }) {
+function Callout({
+  type,
+  children,
+}: {
+  type: "info" | "warning" | "tip";
+  children: React.ReactNode;
+}) {
   const styles = {
-    info:    { bg: "hsl(210,50%,10%)",  border: "hsl(210,60%,35%)", icon: <Info className="w-3.5 h-3.5 shrink-0 text-blue-400" />,    text: "text-blue-300"    },
-    warning: { bg: "hsl(40,50%,10%)",   border: "hsl(43,60%,35%)",  icon: <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-yellow-400" />, text: "text-yellow-300" },
-    tip:     { bg: "hsl(142,50%,8%)",   border: "hsl(142,50%,30%)", icon: <CheckCircle className="w-3.5 h-3.5 shrink-0 text-emerald-400" />, text: "text-emerald-300" },
+    info: {
+      bg: "hsl(210,50%,10%)",
+      border: "hsl(210,60%,35%)",
+      icon: <Info className="w-3.5 h-3.5 shrink-0 text-blue-400" />,
+      text: "text-blue-300",
+    },
+    warning: {
+      bg: "hsl(40,50%,10%)",
+      border: "hsl(43,60%,35%)",
+      icon: <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-yellow-400" />,
+      text: "text-yellow-300",
+    },
+    tip: {
+      bg: "hsl(142,50%,8%)",
+      border: "hsl(142,50%,30%)",
+      icon: <CheckCircle className="w-3.5 h-3.5 shrink-0 text-emerald-400" />,
+      text: "text-emerald-300",
+    },
   };
   const s = styles[type];
   return (
-    <div className="flex gap-2.5 rounded-lg px-3 py-2.5 text-xs my-3"
-      style={{ background: s.bg, border: `1px solid ${s.border}` }}>
+    <div
+      className="flex gap-2.5 rounded-lg px-3 py-2.5 text-xs my-3"
+      style={{ background: s.bg, border: `1px solid ${s.border}` }}
+    >
       {s.icon}
       <span className={s.text}>{children}</span>
     </div>
   );
 }
 
-function Formula({ label, formula, description }: { label: string; formula: string; description?: string }) {
+function Formula({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-border bg-secondary/40 px-4 py-3 my-2">
-      <p className="text-xs text-muted-foreground mb-1 font-semibold uppercase tracking-wider">{label}</p>
-      <code className="text-sm font-mono" style={{ color: "hsl(43,85%,65%)" }}>{formula}</code>
-      {description && <p className="text-xs text-muted-foreground mt-1.5">{description}</p>}
+    <code
+      className="block rounded-md px-3 py-2 text-xs my-2 font-mono leading-relaxed"
+      style={{
+        background: "hsl(224,15%,8%)",
+        border: "1px solid hsl(224,12%,20%)",
+        color: "hsl(43,85%,65%)",
+      }}
+    >
+      {children}
+    </code>
+  );
+}
+
+function Table({ rows }: { rows: [string, string][] }) {
+  return (
+    <div className="overflow-x-auto my-3 rounded-lg" style={{ border: "1px solid hsl(224,12%,20%)" }}>
+      <table className="w-full text-xs">
+        <tbody>
+          {rows.map(([a, b], i) => (
+            <tr
+              key={i}
+              style={{ background: i % 2 === 0 ? "hsl(224,15%,10%)" : "hsl(224,15%,12%)" }}
+            >
+              <td className="px-3 py-2 font-mono" style={{ color: "hsl(43,85%,65%)", borderRight: "1px solid hsl(224,12%,20%)" }}>{a}</td>
+              <td className="px-3 py-2 text-muted-foreground">{b}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
-function FieldList({ fields }: { fields: { name: string; desc: string }[] }) {
-  return (
-    <div className="space-y-1.5 my-3">
-      {fields.map(f => (
-        <div key={f.name} className="flex gap-2 text-xs">
-          <span className="font-semibold text-foreground whitespace-nowrap min-w-[140px]">{f.name}</span>
-          <span className="text-muted-foreground">{f.desc}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SectionBody({ children }: { children: React.ReactNode }) {
-  return <div className="text-sm leading-relaxed text-muted-foreground space-y-3">{children}</div>;
+function PTag({ children }: { children: React.ReactNode }) {
+  return <p className="text-sm text-muted-foreground leading-relaxed mb-3">{children}</p>;
 }
 
 function H3({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-xs font-bold uppercase tracking-wider mt-4 mb-2" style={{ color: "hsl(43,85%,65%)" }}>{children}</h3>;
+  return <h3 className="text-sm font-semibold text-foreground mb-2 mt-4">{children}</h3>;
 }
 
-// ─── Section content definitions ─────────────────────────────────────────────
+function UL({ items }: { items: React.ReactNode[] }) {
+  return (
+    <ul className="list-none space-y-1 mb-3">
+      {items.map((item, i) => (
+        <li key={i} className="flex gap-2 text-sm text-muted-foreground">
+          <span style={{ color: "hsl(43,85%,55%)" }}>▸</span>
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
-const SECTIONS: Section[] = [
-  // ── Dashboard ───────────────────────────────────────────────────────────────
+// ─── Section Definitions ──────────────────────────────────────────────────────
+
+const SECTIONS: SectionDef[] = [
+  // 1. Dashboard
   {
     id: "dashboard",
     icon: <LayoutDashboard className="w-4 h-4" />,
-    title: "Dashboard",
     color: "hsl(43,85%,55%)",
-    content: (
-      <SectionBody>
-        <p>The Dashboard is your financial command centre. It aggregates data from every other section — snapshot values, property, stocks, crypto, and expenses — into a single real-time view of your household wealth.</p>
-
-        <H3>KPI Cards</H3>
-        <FieldList fields={[
-          { name: "Net Worth",        desc: "Total assets minus total liabilities. Updates instantly when you save any financial data." },
-          { name: "Monthly Surplus",  desc: "Monthly income minus monthly expenses from the Financial Snapshot." },
-          { name: "Total Investments",desc: "Sum of stock portfolio value + crypto portfolio value (calculated from holdings × current price)." },
-          { name: "Property Equity",  desc: "PPOR current value minus mortgage balance. Does not include investment property equity." },
-          { name: "Debt Balance",     desc: "Mortgage + all other debts entered in the snapshot." },
-          { name: "10-Year Forecast", desc: "Projected net worth in year 10, based on asset growth rates, contributions, and monthly surplus." },
-          { name: "Passive Income",   desc: "Estimated rental income + dividend income from year 1 of the forecast." },
-          { name: "Savings Rate",     desc: "Monthly surplus ÷ monthly income, expressed as a percentage." },
-        ]} />
-
-        <H3>Financial Snapshot</H3>
-        <p>The snapshot stores your key financial balances. Click <strong className="text-foreground">Edit</strong> to update values, then Save. These feed every calculation in the app.</p>
-        <FieldList fields={[
-          { name: "PPOR",             desc: "Principal Place of Residence — your home's current estimated value." },
-          { name: "Cash",             desc: "Total liquid cash across all bank accounts and offset accounts." },
-          { name: "Super",            desc: "Combined superannuation balance for the household." },
-          { name: "Cars",             desc: "Estimated current market value of all vehicles." },
-          { name: "Iran Property",    desc: "Any overseas property value (estimated in AUD)." },
-          { name: "Mortgage",         desc: "Outstanding PPOR mortgage balance." },
-          { name: "Other Debts",      desc: "Car loans, personal loans, credit card balances, HECS, etc." },
-          { name: "Monthly Income",   desc: "Combined take-home income (after tax) for the household." },
-          { name: "Monthly Expenses", desc: "Estimated total monthly spending (used for forecast when no actuals exist)." },
-        ]} />
-
-        <H3>Charts</H3>
-        <FieldList fields={[
-          { name: "10-Year Net Worth Growth", desc: "Projects net worth year-by-year using growth rates for each asset class." },
-          { name: "Asset Allocation",          desc: "Pie chart showing the percentage breakdown of all assets." },
-          { name: "Monthly Cash Flow",         desc: "Bar chart of income vs expenses vs surplus based on snapshot values." },
-          { name: "Expense Breakdown",         desc: "Pie chart of spending by category from the Expenses table." },
-          { name: "Master Cash Flow Forecast", desc: "Line chart 2025–2035. Past months use actual expenses; future months use snapshot assumptions." },
-          { name: "Year-by-Year Table",        desc: "Detailed 10-year projection table with 16 columns covering every asset class and liability." },
-        ]} />
-
-        <Callout type="info">
-          The "Sync From Cloud" button forces a fresh pull from Supabase and invalidates all local caches. Use this if data looks stale after making changes on another device.
-        </Callout>
-      </SectionBody>
-    ),
+    title: { en: "Dashboard", fa: "داشبورد" },
+    keywords: {
+      en: "dashboard kpi net worth income expenses surplus cash flow savings rate cards",
+      fa: "داشبورد ارزش خالص درآمد هزینه مازاد جریان نقدی پس انداز کارت",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Dashboard is your command centre — six KPI cards give you an instant financial
+            snapshot. Each card auto-recalculates whenever you save data.
+          </PTag>
+          <H3>KPI Cards</H3>
+          <UL items={[
+            <><strong className="text-foreground">Net Worth</strong> — Total market value of everything you own minus everything you owe.</>,
+            <><strong className="text-foreground">Monthly Income</strong> — Sum of all income sources for the selected period.</>,
+            <><strong className="text-foreground">Monthly Expenses</strong> — Total outgoings for the selected period.</>,
+            <><strong className="text-foreground">Monthly Surplus</strong> — How much you keep each month after expenses.</>,
+            <><strong className="text-foreground">Cash Flow</strong> — Actual income/expense trend vs your forecast budget.</>,
+            <><strong className="text-foreground">Savings Rate</strong> — The percentage of income that becomes savings.</>,
+          ]} />
+          <H3>Formulas</H3>
+          <Formula>Net Worth = Total Assets − Total Liabilities</Formula>
+          <Formula>Monthly Surplus = Monthly Income − Monthly Expenses</Formula>
+          <Formula>Savings Rate = (Monthly Surplus ÷ Monthly Income) × 100</Formula>
+          <Formula>Cash Flow = Actual Income/Expense compared against Forecast values</Formula>
+          <Callout type="tip">
+            A Savings Rate above 20% is generally considered healthy. Aim for 30%+ for accelerated
+            wealth building.
+          </Callout>
+          <Callout type="info">
+            All KPI cards respect Privacy Mode — values are masked as $•••••• when enabled.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            داشبورد مرکز فرماندهی مالی شماست — شش کارت آماری کلیدی یک تصویر فوری از وضعیت مالی شما ارائه می‌دهند.
+            هر کارت به‌صورت خودکار پس از ذخیره داده بازمحاسبه می‌شود.
+          </PTag>
+          <H3>کارت‌های آماری</H3>
+          <UL items={[
+            <><strong className="text-foreground">ارزش خالص</strong> — ارزش کل دارایی‌ها منهای کل بدهی‌ها.</>,
+            <><strong className="text-foreground">درآمد ماهانه</strong> — مجموع تمام منابع درآمد در دوره انتخابی.</>,
+            <><strong className="text-foreground">هزینه‌های ماهانه</strong> — مجموع تمام هزینه‌ها در دوره انتخابی.</>,
+            <><strong className="text-foreground">مازاد ماهانه</strong> — مقداری که پس از کسر هزینه‌ها باقی می‌ماند.</>,
+            <><strong className="text-foreground">جریان نقدی</strong> — مقایسه درآمد/هزینه واقعی با پیش‌بینی.</>,
+            <><strong className="text-foreground">نرخ پس‌انداز</strong> — درصدی از درآمد که پس‌انداز می‌شود.</>,
+          ]} />
+          <H3>فرمول‌ها</H3>
+          <Formula>ارزش خالص = کل دارایی‌ها − کل بدهی‌ها</Formula>
+          <Formula>مازاد ماهانه = درآمد ماهانه − هزینه‌های ماهانه</Formula>
+          <Formula>نرخ پس‌انداز = (مازاد ماهانه ÷ درآمد ماهانه) × ۱۰۰</Formula>
+          <Formula>جریان نقدی = مقایسه درآمد/هزینه واقعی با مقادیر پیش‌بینی‌شده</Formula>
+          <Callout type="tip">
+            نرخ پس‌انداز بالای ۲۰٪ به‌طور کلی مناسب است. برای ساخت ثروت سریع‌تر، هدف‌گذاری روی ۳۰٪ یا بیشتر توصیه می‌شود.
+          </Callout>
+          <Callout type="info">
+            تمام کارت‌های آماری از حالت حریم خصوصی پشتیبانی می‌کنند — وقتی فعال باشد، مقادیر به‌صورت $•••••• نمایش داده می‌شوند.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Expenses ─────────────────────────────────────────────────────────────────
+  // 2. Expenses
   {
     id: "expenses",
     icon: <Receipt className="w-4 h-4" />,
-    title: "Expenses",
     color: "hsl(0,72%,51%)",
-    content: (
-      <SectionBody>
-        <p>The Expenses page tracks every household transaction. Data here is used in the Master Cash Flow Forecast to replace estimated expenses with actual figures for months that have passed.</p>
-
-        <H3>Adding an Expense</H3>
-        <p>Click <strong className="text-foreground">Add Expense</strong> or press the + button. Fill in the form and press Save or hit <kbd className="bg-secondary px-1.5 py-0.5 rounded text-xs text-foreground">Enter</kbd>.</p>
-        <FieldList fields={[
-          { name: "Date",            desc: "Transaction date (YYYY-MM-DD). Used for monthly grouping in charts." },
-          { name: "Amount",          desc: "Amount in AUD. Must be greater than zero." },
-          { name: "Category",        desc: "One of 17 preset categories (Mortgage, Childcare, Groceries, etc.)." },
-          { name: "Sub-category",    desc: "Optional free-text label for finer classification." },
-          { name: "Description",     desc: "Free-text description of the transaction." },
-          { name: "Payment Method",  desc: "Bank Transfer, Credit Card, Debit Card, Cash, Offset Account, BPAY." },
-          { name: "Family Member",   desc: "Roham, Fara, Yara, Jana, or Family." },
-          { name: "Recurring",       desc: "Tick if this is a regular recurring payment. Used for double-count detection." },
-          { name: "Notes",           desc: "Optional additional notes." },
-        ]} />
-
-        <H3>Filters</H3>
-        <p>Filter the table before selecting rows for bulk delete or analysis. Filters apply to all analytics cards and charts on the page.</p>
-        <FieldList fields={[
-          { name: "Search",          desc: "Searches description, category, and notes fields." },
-          { name: "Year / Month",    desc: "Filter by calendar year or specific month." },
-          { name: "Category",        desc: "Show only a specific spending category." },
-          { name: "Advanced",        desc: "Date range, sub-category, family member, payment method." },
-        ]} />
-
-        <H3>Bulk Delete</H3>
-        <p>Click any row (or its checkbox) to select it. Once rows are selected a red toolbar appears:</p>
-        <ul className="list-disc pl-4 space-y-1 text-xs">
-          <li>Select page — selects all rows on the current page (20 rows)</li>
-          <li>Select all X filtered — selects every row matching current filters</li>
-          <li>Select all X records — selects every expense in the database</li>
-          <li>Delete X records — opens the confirmation modal</li>
-        </ul>
-        <Callout type="warning">
-          Bulk delete requires password <strong>YaraJana2025</strong> + ticking the confirmation checkbox. An optional Excel backup export is offered before deletion.
-        </Callout>
-
-        <H3>Excel Import / Export</H3>
-        <FieldList fields={[
-          { name: "Export",          desc: "Downloads all expenses as an Excel file." },
-          { name: "Template",        desc: "Downloads a blank Excel template with correct column headers." },
-          { name: "Import Excel",    desc: "Uploads an Excel file. Each row is saved as an individual expense to Supabase." },
-        ]} />
-
-        <H3>Analytics</H3>
-        <p>Charts update dynamically based on the current filter selection:</p>
-        <FieldList fields={[
-          { name: "Spending by Category", desc: "Pie chart of filtered expenses grouped by category." },
-          { name: "Monthly Spend Trend",  desc: "Bar chart of total spend per calendar month." },
-          { name: "Weekly Spend Trend",   desc: "Line chart of total spend per week." },
-          { name: "Avg Monthly by Cat",   desc: "Average monthly spend per category as a horizontal bar." },
-        ]} />
-      </SectionBody>
-    ),
+    title: { en: "Expenses", fa: "هزینه‌ها" },
+    keywords: {
+      en: "expenses tracking source code groceries medical transport entertainment excel import filter bulk delete categories",
+      fa: "هزینه ردیابی کد منبع خواربار پزشکی حمل و نقل سرگرمی اکسل واردات فیلتر حذف گروهی",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Expenses page is the core of day-to-day tracking. Every transaction is tagged with
+            a source code that auto-maps to a category.
+          </PTag>
+          <H3>Source Code System</H3>
+          <PTag>When importing or adding expenses, use these single/double-letter codes:</PTag>
+          <Table rows={[
+            ["D", "Groceries / Supermarket"],
+            ["M", "Health / Medical"],
+            ["T", "Transport / Fuel"],
+            ["E", "Entertainment"],
+            ["C", "Car / Car Expenses"],
+            ["B", "Shopping / Retail"],
+            ["R", "Housing / Mortgage / Rent"],
+            ["G", "Gifts"],
+            ["S", "Fitness / Sport"],
+            ["L", "Debt Repayment"],
+            ["PI", "Insurance"],
+            ["I", "Investment Costs"],
+            ["U", "Utilities"],
+            ["BB", "Kids Expenses"],
+            ["CC", "Childcare"],
+            ["TR", "Travel"],
+          ]} />
+          <H3>Excel Import (4-Column Format)</H3>
+          <UL items={[
+            <>Column A — <strong className="text-foreground">Date</strong> (DD/MM/YYYY or YYYY-MM-DD)</>,
+            <>Column B — <strong className="text-foreground">Amount</strong> (numeric, no $ sign)</>,
+            <>Column C — <strong className="text-foreground">Code</strong> (source code from table above)</>,
+            <>Column D — <strong className="text-foreground">Description</strong> (free text note)</>,
+          ]} />
+          <Callout type="info">
+            Download the template from the Import dialog to get the correct column headers.
+            The importer shows a preview before committing — review it carefully.
+          </Callout>
+          <H3>Filters Available</H3>
+          <UL items={[
+            "Date range picker (from / to)",
+            "Category dropdown (auto-populated from codes)",
+            "Search by description keyword",
+            "Amount range (min / max)",
+          ]} />
+          <H3>Bulk Delete</H3>
+          <PTag>
+            Select rows using checkboxes, then click Delete. A password confirmation modal
+            appears. You must also check "I understand this cannot be undone." An optional
+            backup export is offered before deletion.
+          </PTag>
+          <Callout type="warning">
+            Deleted expenses are permanently removed from Supabase. Always export a backup first.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            صفحه هزینه‌ها هسته اصلی ردیابی روزانه است. هر تراکنش با یک کد منبع برچسب می‌خورد که به‌طور خودکار به دسته‌بندی تبدیل می‌شود.
+          </PTag>
+          <H3>سیستم کد منبع</H3>
+          <PTag>هنگام واردات یا افزودن هزینه‌ها از این کدهای حرفی استفاده کنید:</PTag>
+          <Table rows={[
+            ["D", "خواربار / سوپرمارکت"],
+            ["M", "بهداشت / پزشکی"],
+            ["T", "حمل و نقل / سوخت"],
+            ["E", "سرگرمی"],
+            ["C", "خودرو / هزینه‌های خودرو"],
+            ["B", "خرید / خرده‌فروشی"],
+            ["R", "مسکن / وام مسکن / اجاره"],
+            ["G", "هدایا"],
+            ["S", "تناسب اندام / ورزش"],
+            ["L", "بازپرداخت بدهی"],
+            ["PI", "بیمه"],
+            ["I", "هزینه‌های سرمایه‌گذاری"],
+            ["U", "آب و برق و گاز"],
+            ["BB", "هزینه‌های کودکان"],
+            ["CC", "مراقبت از کودک"],
+            ["TR", "سفر"],
+          ]} />
+          <H3>واردات اکسل (فرمت ۴ ستونی)</H3>
+          <UL items={[
+            <>ستون A — <strong className="text-foreground">تاریخ</strong> (DD/MM/YYYY یا YYYY-MM-DD)</>,
+            <>ستون B — <strong className="text-foreground">مبلغ</strong> (عددی، بدون علامت $)</>,
+            <>ستون C — <strong className="text-foreground">کد</strong> (کد منبع از جدول بالا)</>,
+            <>ستون D — <strong className="text-foreground">توضیحات</strong> (متن آزاد)</>,
+          ]} />
+          <Callout type="info">
+            الگوی اکسل را از پنجره واردات دانلود کنید تا سرستون‌های صحیح داشته باشید.
+            قبل از ذخیره، پیش‌نمایش نمایش داده می‌شود — آن را با دقت بررسی کنید.
+          </Callout>
+          <H3>فیلترهای موجود</H3>
+          <UL items={[
+            "انتخابگر بازه تاریخ (از / تا)",
+            "منوی دسته‌بندی (خودکار از کدها)",
+            "جستجو بر اساس کلمه کلیدی توضیحات",
+            "بازه مبلغ (حداقل / حداکثر)",
+          ]} />
+          <H3>حذف گروهی</H3>
+          <PTag>
+            سطرها را با چک‌باکس انتخاب کنید، سپس روی حذف کلیک کنید. یک پنجره تأیید رمز عبور ظاهر می‌شود.
+            همچنین باید گزینه «می‌دانم که این عمل غیرقابل بازگشت است» را تأیید کنید.
+            قبل از حذف، گزینه صادرات پشتیبان ارائه می‌شود.
+          </PTag>
+          <Callout type="warning">
+            هزینه‌های حذف‌شده به‌طور دائمی از سوپابیس حذف می‌شوند. همیشه ابتدا نسخه پشتیبان صادر کنید.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Property ─────────────────────────────────────────────────────────────────
+  // 3. Property Calculator
   {
     id: "property",
     icon: <Home className="w-4 h-4" />,
-    title: "Property",
-    color: "hsl(142,60%,45%)",
-    content: (
-      <SectionBody>
-        <p>The Property page is an Australian investment property simulator. Each property card models a full purchase, hold, and sale lifecycle with date-aware cash flow projections.</p>
-
-        <H3>Form Sections</H3>
-        <FieldList fields={[
-          { name: "Purchase Details",  desc: "Name, type, purchase date, settlement date, purchase price, deposit, stamp duty (QLD auto-estimated), legal fees, building & pest, loan setup fees." },
-          { name: "Loan Details",      desc: "Loan amount (auto = price − deposit), interest rate, loan type (P&I or Interest Only), loan term, IO period dates. Monthly repayment auto-calculated." },
-          { name: "Current Status",    desc: "Current value and annual capital growth % used for projections." },
-          { name: "Rental Income",     desc: "Rental start date, weekly rent, annual rental growth %, vacancy %, management fee %." },
-          { name: "Running Costs",     desc: "Annual: insurance, council rates, water, maintenance, body corporate, land tax, renovation costs." },
-          { name: "Sale Planning",     desc: "Planned sale date, selling costs %, CGT estimate (50% discount if held > 12 months)." },
-        ]} />
-
-        <H3>Auto-Calculated Outputs</H3>
-        <Formula label="Monthly Repayment (P&I)"
-          formula="P × r(1+r)^n / ((1+r)^n − 1)"
-          description="Where P = loan amount, r = monthly rate (annual rate ÷ 12), n = total months." />
-        <Formula label="Monthly Cash Flow"
-          formula="(Weekly Rent × 52/12 × (1 − Vacancy%) × (1 − Mgmt Fee%)) − Monthly Repayment − (Annual Costs / 12)"
-          description="Positive = cash flow positive property. Negative = negatively geared." />
-        <Formula label="Gross Yield"
-          formula="(Weekly Rent × 52 / Current Value) × 100" />
-        <Formula label="Net Yield"
-          formula="((Weekly Rent × 52 − Annual Costs) / Current Value) × 100" />
-        <Formula label="LVR"
-          formula="(Loan Balance / Current Value) × 100" />
-        <Formula label="Property Equity"
-          formula="Current Value − Loan Balance" />
-        <Formula label="QLD Stamp Duty (estimate)"
-          formula="Sliding scale: 1% up to $350k, 3.5% on $350k–$540k, 4.5% on excess over $540k (simplified estimate)" />
-        <Formula label="CGT Estimate"
-          formula="(Sale Price − Purchase Price − Costs) × 50% discount if held > 12 months"
-          description="Added to taxable income in the Tax Calculator. Does not reduce dashboard net worth automatically." />
-
-        <H3>Date-Aware Projections</H3>
-        <p>If a property's purchase date is in the future, the chart and year-by-year table show $0 for all values (value, equity, loan, cash flow) before that year. This prevents future purchases from distorting current net worth calculations.</p>
-
-        <Callout type="info">
-          Investment property values and loan balances feed into the 10-year net worth projection on the Dashboard. Only properties with a past or present purchase date contribute to current net worth.
-        </Callout>
-      </SectionBody>
-    ),
+    color: "hsl(188,60%,48%)",
+    title: { en: "Property Calculator", fa: "ماشین‌حساب ملک" },
+    keywords: {
+      en: "property calculator stamp duty rental yield capital gains tax CGT roi investment QLD purchase",
+      fa: "ماشین‌حساب ملک عوارض تمبر بازده اجاره مالیات بر عایدی سرمایه بازگشت سرمایه QLD خرید",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Property Calculator is a 6-section form for analysing residential investment
+            properties. It includes purchase costs, ongoing expenses, rental income, capital
+            growth, and CGT — all date-aware.
+          </PTag>
+          <H3>6 Sections</H3>
+          <UL items={[
+            "Purchase Details (price, settlement date, deposit, loan)",
+            "Stamp Duty (QLD sliding-scale calculator, auto-computed)",
+            "Rental Income (weekly rent, vacancy rate, annual projections)",
+            "Ongoing Expenses (rates, insurance, management, maintenance)",
+            "Capital Growth (growth rate %, hold period, future value projection)",
+            "CGT & ROI (capital gains tax including 50% discount, final ROI)",
+          ]} />
+          <H3>Key Formulas</H3>
+          <Formula>Stamp Duty (QLD) — Sliding scale based on purchase price:
+  $0–$5,000       → NIL
+  $5,001–$75,000  → $1.50 per $100 over $5,000
+  $75,001–$540K   → $1,050 + $3.50 per $100 over $75,000
+  $540K–$1M       → $17,325 + $4.50 per $100 over $540,000
+  $1M+            → $38,025 + $5.75 per $100 over $1,000,000</Formula>
+          <Formula>Gross Rental Yield = (Annual Rent ÷ Property Value) × 100</Formula>
+          <Formula>Net Rental Yield = ((Annual Rent − Annual Expenses) ÷ Property Value) × 100</Formula>
+          <Formula>Capital Gain = Sale Price − Purchase Price − Purchase Costs</Formula>
+          <Formula>CGT Payable = Capital Gain × Marginal Rate (× 50% discount if held &gt;12 months)</Formula>
+          <Formula>Annual ROI = (Net Rental Income + Capital Gain) ÷ Total Investment × 100</Formula>
+          <Callout type="info">
+            The 50% CGT discount applies to Australian residents who hold the property for more
+            than 12 months before selling.
+          </Callout>
+          <Callout type="tip">
+            All projection fields use the settlement/purchase date you enter to calculate
+            holding periods automatically.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            ماشین‌حساب ملک یک فرم ۶ بخشی برای تحلیل سرمایه‌گذاری در مسکن است.
+            شامل هزینه‌های خرید، هزینه‌های جاری، درآمد اجاره، رشد سرمایه و مالیات بر عایدی سرمایه — همه به‌صورت تاریخ‌محور.
+          </PTag>
+          <H3>۶ بخش اصلی</H3>
+          <UL items={[
+            "جزئیات خرید (قیمت، تاریخ تسویه، سپرده، وام)",
+            "عوارض تمبر (محاسبه خودکار با مقیاس متغیر QLD)",
+            "درآمد اجاره (اجاره هفتگی، نرخ خالی بودن، پیش‌بینی سالانه)",
+            "هزینه‌های جاری (عوارض شهرداری، بیمه، مدیریت، نگهداری)",
+            "رشد سرمایه (نرخ رشد٪، دوره نگهداری، پیش‌بینی ارزش آینده)",
+            "مالیات بر عایدی سرمایه و ROI (شامل ۵۰٪ تخفیف CGT، بازگشت سرمایه نهایی)",
+          ]} />
+          <H3>فرمول‌های کلیدی</H3>
+          <Formula>بازده اجاره ناخالص = (اجاره سالانه ÷ ارزش ملک) × ۱۰۰</Formula>
+          <Formula>بازده اجاره خالص = ((اجاره سالانه − هزینه‌های سالانه) ÷ ارزش ملک) × ۱۰۰</Formula>
+          <Formula>عایدی سرمایه = قیمت فروش − قیمت خرید − هزینه‌های خرید</Formula>
+          <Formula>مالیات بر عایدی = عایدی × نرخ نهایی (× ۵۰٪ تخفیف اگر بیش از ۱۲ ماه نگهداری شده باشد)</Formula>
+          <Formula>بازگشت سرمایه سالانه = (درآمد اجاره خالص + عایدی سرمایه) ÷ کل سرمایه‌گذاری × ۱۰۰</Formula>
+          <Callout type="info">
+            تخفیف ۵۰٪ CGT برای مقیم‌های استرالیا که ملک را بیش از ۱۲ ماه نگه داشته‌اند اعمال می‌شود.
+          </Callout>
+          <Callout type="tip">
+            تمام فیلدهای پیش‌بینی از تاریخ تسویه/خرید که وارد می‌کنید برای محاسبه خودکار دوره نگهداری استفاده می‌کنند.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Stocks ───────────────────────────────────────────────────────────────────
+  // 4. Stocks Portfolio
   {
     id: "stocks",
     icon: <TrendingUp className="w-4 h-4" />,
-    title: "Stocks",
-    color: "hsl(188,60%,48%)",
-    content: (
-      <SectionBody>
-        <p>The Stocks page is a manual portfolio tracker. There is no live market data feed — all prices are entered manually. This keeps the app offline-capable and avoids third-party API dependencies.</p>
-
-        <H3>Per-Stock Fields</H3>
-        <FieldList fields={[
-          { name: "Ticker",             desc: "ASX or US stock ticker code (e.g. NVDA, VAS)." },
-          { name: "Company Name",       desc: "Display name for the holding." },
-          { name: "Units Owned",        desc: "Number of shares/units currently held." },
-          { name: "Average Buy Price",  desc: "Your average cost per unit across all purchases." },
-          { name: "Current Price",      desc: "Latest market price — enter manually when you want to update." },
-          { name: "Monthly DCA",        desc: "Dollar amount added each month via dollar-cost averaging." },
-          { name: "Expected Return %",  desc: "Annual expected return used for 10-year projection." },
-          { name: "Projection Years",   desc: "How many years to project forward (default 10)." },
-          { name: "Target Allocation %", desc: "Your desired allocation to this stock as % of total portfolio." },
-        ]} />
-
-        <H3>Auto-Calculated Fields</H3>
-        <Formula label="Current Value"    formula="Units Owned × Current Price" />
-        <Formula label="Total Invested"   formula="Units Owned × Average Buy Price" />
-        <Formula label="Unrealised G/L"   formula="Current Value − Total Invested" />
-        <Formula label="Gain/Loss %"      formula="(Current Value − Total Invested) / Total Invested × 100" />
-        <Formula label="Actual Allocation"formula="Current Value / Total Portfolio Value × 100" />
-        <Formula label="10-Year Forecast" formula="FV = PV × (1 + r)^n + PMT × ((1 + r)^n − 1) / r"
-          description="Where PV = current value, r = monthly return, n = months, PMT = monthly DCA." />
-
-        <H3>Portfolio Summary</H3>
-        <p>Above the table, four KPI cards show: Total Invested, Current Portfolio Value, Total Unrealised Gain/Loss, and combined gain/loss percentage. The allocation pie shows actual vs target drift.</p>
-
-        <Callout type="tip">
-          The total stock portfolio value is fed back into the Dashboard's Asset Allocation chart and Net Worth calculation automatically.
-        </Callout>
-      </SectionBody>
-    ),
+    color: "hsl(142,60%,45%)",
+    title: { en: "Stocks Portfolio", fa: "سبد سهام" },
+    keywords: {
+      en: "stocks portfolio ticker shares buy price current price sector unrealised PnL allocation drift",
+      fa: "سهام سبد تیکر سهم قیمت خرید قیمت فعلی بخش سود زیان تخصیص انحراف",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            Track your equity holdings across any exchange. The portfolio table shows real-time
+            performance and allocation breakdown for each position.
+          </PTag>
+          <H3>Fields When Adding a Stock</H3>
+          <UL items={[
+            <><strong className="text-foreground">Ticker</strong> — Stock symbol (e.g. CBA, BHP, AAPL)</>,
+            <><strong className="text-foreground">Shares</strong> — Number of units held</>,
+            <><strong className="text-foreground">Avg Buy Price</strong> — Your average cost per share</>,
+            <><strong className="text-foreground">Current Price</strong> — Latest market price per share</>,
+            <><strong className="text-foreground">Sector</strong> — E.g. Financials, Resources, Technology</>,
+          ]} />
+          <H3>Calculations</H3>
+          <Formula>Market Value = Current Price × Shares</Formula>
+          <Formula>Cost Basis = Avg Buy Price × Shares</Formula>
+          <Formula>Unrealised P&L = (Current Price − Avg Buy Price) × Shares</Formula>
+          <Formula>Unrealised P&L % = ((Current Price − Avg Buy Price) ÷ Avg Buy Price) × 100</Formula>
+          <Formula>Portfolio Allocation = (Stock Market Value ÷ Total Portfolio Value) × 100</Formula>
+          <Formula>Allocation Drift = Actual Allocation % − Target Allocation %</Formula>
+          <Callout type="tip">
+            Update Current Price manually or via your broker statement. Automatic live price
+            feeds are not included in this version.
+          </Callout>
+          <Callout type="info">
+            The portfolio totals feed into the Net Worth KPI on the Dashboard automatically.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            سهام خود را در هر بورسی ردیابی کنید. جدول سبد سهام عملکرد به‌روز و تفکیک تخصیص هر موقعیت را نشان می‌دهد.
+          </PTag>
+          <H3>فیلدها هنگام افزودن سهام</H3>
+          <UL items={[
+            <><strong className="text-foreground">تیکر</strong> — نماد سهام (مثال: CBA، BHP، AAPL)</>,
+            <><strong className="text-foreground">تعداد سهام</strong> — تعداد واحدهای نگهداری‌شده</>,
+            <><strong className="text-foreground">میانگین قیمت خرید</strong> — میانگین هزینه هر سهم</>,
+            <><strong className="text-foreground">قیمت فعلی</strong> — آخرین قیمت بازار به ازای هر سهم</>,
+            <><strong className="text-foreground">بخش</strong> — مثال: مالی، معدن، فناوری</>,
+          ]} />
+          <H3>محاسبات</H3>
+          <Formula>ارزش بازار = قیمت فعلی × تعداد سهام</Formula>
+          <Formula>پایه هزینه = میانگین قیمت خرید × تعداد سهام</Formula>
+          <Formula>سود/زیان تحقق‌نیافته = (قیمت فعلی − میانگین قیمت خرید) × تعداد سهام</Formula>
+          <Formula>سود/زیان٪ = ((قیمت فعلی − میانگین قیمت خرید) ÷ میانگین قیمت خرید) × ۱۰۰</Formula>
+          <Formula>تخصیص سبد = (ارزش بازار سهام ÷ کل ارزش سبد) × ۱۰۰</Formula>
+          <Formula>انحراف تخصیص = تخصیص واقعی٪ − تخصیص هدف٪</Formula>
+          <Callout type="tip">
+            قیمت فعلی را به‌صورت دستی یا از طریق صورتحساب کارگزار خود به‌روز کنید.
+          </Callout>
+          <Callout type="info">
+            مجموع سبد سهام به‌طور خودکار در کارت ارزش خالص داشبورد لحاظ می‌شود.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Crypto ───────────────────────────────────────────────────────────────────
+  // 5. Crypto Portfolio
   {
     id: "crypto",
     icon: <Bitcoin className="w-4 h-4" />,
-    title: "Crypto",
     color: "hsl(43,85%,55%)",
-    content: (
-      <SectionBody>
-        <p>The Crypto page works identically to Stocks but is tailored for cryptocurrency holdings. Holdings are stored with up to 8 decimal places for precision with small-denomination assets.</p>
-
-        <H3>Per-Asset Fields</H3>
-        <FieldList fields={[
-          { name: "Symbol",            desc: "Crypto ticker (BTC, ETH, SOL, etc.)." },
-          { name: "Asset Name",        desc: "Full name (Bitcoin, Ethereum, etc.)." },
-          { name: "Units Owned",       desc: "Amount of the asset held (up to 8 decimal places)." },
-          { name: "Average Buy Price", desc: "Average cost per unit in AUD." },
-          { name: "Current Price",     desc: "Latest price in AUD — enter manually." },
-          { name: "Monthly DCA",       desc: "Regular monthly purchase amount." },
-          { name: "Expected Return %", desc: "Annual growth rate used for projection." },
-        ]} />
-
-        <H3>Calculations</H3>
-        <Formula label="Current Value"   formula="Units × Current Price" />
-        <Formula label="Total Invested"  formula="Units × Average Buy Price" />
-        <Formula label="Unrealised G/L"  formula="Current Value − Total Invested" />
-
-        <Callout type="warning">
-          Crypto valuations are volatile. The expected return % you set is used for long-term projection only. The current value shown is based on your manually entered current price — update it regularly for accurate net worth figures.
-        </Callout>
-      </SectionBody>
-    ),
+    title: { en: "Crypto Portfolio", fa: "سبد رمزارز" },
+    keywords: {
+      en: "crypto bitcoin ethereum portfolio symbol quantity buy price current price PnL allocation digital assets",
+      fa: "رمزارز بیت‌کوین اتریوم سبد نماد تعداد قیمت خرید قیمت فعلی سود زیان تخصیص دارایی دیجیتال",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Crypto Portfolio works identically to the Stocks section but is designed for
+            digital assets. Track any cryptocurrency across exchanges.
+          </PTag>
+          <H3>Fields When Adding a Crypto</H3>
+          <UL items={[
+            <><strong className="text-foreground">Symbol</strong> — Crypto ticker (e.g. BTC, ETH, SOL)</>,
+            <><strong className="text-foreground">Quantity</strong> — Amount of coins/tokens held</>,
+            <><strong className="text-foreground">Avg Buy Price</strong> — Average cost per coin in AUD</>,
+            <><strong className="text-foreground">Current Price</strong> — Latest market price per coin in AUD</>,
+          ]} />
+          <H3>Calculations (same as Stocks)</H3>
+          <Formula>Market Value = Current Price × Quantity</Formula>
+          <Formula>Unrealised P&L = (Current Price − Avg Buy Price) × Quantity</Formula>
+          <Formula>Unrealised P&L % = ((Current Price − Avg Buy Price) ÷ Avg Buy Price) × 100</Formula>
+          <Formula>Portfolio Allocation = (Coin Value ÷ Total Crypto Portfolio Value) × 100</Formula>
+          <Callout type="warning">
+            Crypto prices are highly volatile. Update Current Price regularly for accurate
+            net worth calculations. Stale prices will be flagged in Data Health.
+          </Callout>
+          <Callout type="info">
+            Australian tax rules treat crypto as a Capital Gains Tax (CGT) asset.
+            Consult your accountant for disposal events.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            سبد رمزارز دقیقاً مانند بخش سهام کار می‌کند، اما برای دارایی‌های دیجیتال طراحی شده است.
+            هر رمزارزی را در هر صرافی ردیابی کنید.
+          </PTag>
+          <H3>فیلدها هنگام افزودن رمزارز</H3>
+          <UL items={[
+            <><strong className="text-foreground">نماد</strong> — تیکر رمزارز (مثال: BTC، ETH، SOL)</>,
+            <><strong className="text-foreground">تعداد</strong> — مقدار سکه/توکن نگهداری‌شده</>,
+            <><strong className="text-foreground">میانگین قیمت خرید</strong> — میانگین هزینه هر سکه به دلار استرالیا</>,
+            <><strong className="text-foreground">قیمت فعلی</strong> — آخرین قیمت بازار به ازای هر سکه به AUD</>,
+          ]} />
+          <H3>محاسبات (مشابه سهام)</H3>
+          <Formula>ارزش بازار = قیمت فعلی × تعداد</Formula>
+          <Formula>سود/زیان تحقق‌نیافته = (قیمت فعلی − میانگین قیمت خرید) × تعداد</Formula>
+          <Formula>سود/زیان٪ = ((قیمت فعلی − میانگین قیمت خرید) ÷ میانگین قیمت خرید) × ۱۰۰</Formula>
+          <Formula>تخصیص سبد = (ارزش سکه ÷ کل ارزش سبد رمزارز) × ۱۰۰</Formula>
+          <Callout type="warning">
+            قیمت رمزارزها بسیار نوسانی است. برای محاسبه دقیق ارزش خالص، قیمت فعلی را مرتباً به‌روز کنید.
+            قیمت‌های کهنه در بخش سلامت داده علامت‌گذاری می‌شوند.
+          </Callout>
+          <Callout type="info">
+            قوانین مالیاتی استرالیا رمزارز را به‌عنوان دارایی CGT تلقی می‌کند. برای رویدادهای فروش با حسابدار خود مشورت کنید.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Reports ──────────────────────────────────────────────────────────────────
+  // 6. Reports & Scenarios
   {
     id: "reports",
     icon: <FileText className="w-4 h-4" />,
-    title: "Reports",
     color: "hsl(270,60%,60%)",
-    content: (
-      <SectionBody>
-        <p>The Reports page lets you export your full financial picture, save scenario snapshots, and review a high-level summary of all data in one place.</p>
-
-        <H3>Export Options</H3>
-        <FieldList fields={[
-          { name: "Export Excel",    desc: "Exports all tables (snapshot, expenses, properties, stocks, crypto, projections) as separate sheets in a single Excel workbook." },
-          { name: "Export PDF",      desc: "Generates a formatted PDF report containing net worth summary, asset allocation, 10-year projection, and expense breakdown." },
-          { name: "Export JSON",     desc: "Full raw backup of all data in JSON format. Can be re-imported via Settings > Import Backup." },
-        ]} />
-
-        <H3>Scenarios</H3>
-        <p>A scenario is a saved snapshot of your current data at a point in time. Save a scenario before making major changes so you can compare different strategies (e.g. "Buy IP in 2027" vs "Invest in ETFs instead").</p>
-        <FieldList fields={[
-          { name: "Save Scenario",    desc: "Saves the current snapshot, properties, stocks, and crypto data as a named scenario." },
-          { name: "Load Scenario",    desc: "Restores all data to the saved scenario state." },
-          { name: "Delete Scenario",  desc: "Bulk delete with password confirmation." },
-        ]} />
-
-        <Callout type="info">
-          PDF export uses jsPDF + autoTable. Charts are not included in the PDF — only tabular data. For a visual report, use the Export Excel option which includes chart-ready data.
-        </Callout>
-      </SectionBody>
-    ),
+    title: { en: "Reports & Scenarios", fa: "گزارش‌ها و سناریوها" },
+    keywords: {
+      en: "reports scenarios what-if income expense projection bulk delete password forecast",
+      fa: "گزارش سناریو فرضی درآمد هزینه پیش‌بینی حذف گروهی رمز عبور",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Reports page lets you model financial futures with what-if scenario planning.
+            Compare multiple scenarios side-by-side against your actual data.
+          </PTag>
+          <H3>Creating a Scenario</H3>
+          <UL items={[
+            "Click New Scenario and give it a name (e.g. 'Buy Investment Property 2026')",
+            "Adjust income projections — monthly or annual",
+            "Adjust expense projections by category",
+            "Set a projection horizon (1, 3, 5, or 10 years)",
+            "Save — the scenario is stored in Supabase (sf_scenarios table)",
+          ]} />
+          <H3>Viewing Scenarios</H3>
+          <UL items={[
+            "Chart view overlays multiple scenarios for easy comparison",
+            "Table view shows year-by-year net worth projection",
+            "Delta column shows difference vs current actual trajectory",
+          ]} />
+          <H3>Bulk Delete Scenarios</H3>
+          <PTag>
+            Select one or more scenarios with checkboxes. Click Delete. Enter your app password
+            and confirm the irreversibility checkbox. Scenarios are permanently removed from
+            Supabase.
+          </PTag>
+          <Callout type="tip">
+            Use scenarios for major life events: job change, property purchase, having children,
+            early retirement. Keep your "Base Case" scenario as a reference.
+          </Callout>
+          <Callout type="warning">
+            Scenario deletion is password-protected and requires explicit confirmation.
+            There is no undo — export a backup first.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            صفحه گزارش‌ها به شما امکان می‌دهد آینده‌های مالی را با برنامه‌ریزی سناریوی فرضی مدل‌سازی کنید.
+            چندین سناریو را در کنار داده‌های واقعی مقایسه کنید.
+          </PTag>
+          <H3>ایجاد سناریو</H3>
+          <UL items={[
+            "روی «سناریوی جدید» کلیک کرده و نامی به آن بدهید (مثال: 'خرید ملک سرمایه‌گذاری ۲۰۲۶')",
+            "پیش‌بینی درآمد را تنظیم کنید — ماهانه یا سالانه",
+            "پیش‌بینی هزینه را بر اساس دسته‌بندی تنظیم کنید",
+            "افق پیش‌بینی را تعیین کنید (۱، ۳، ۵ یا ۱۰ سال)",
+            "ذخیره کنید — سناریو در سوپابیس ذخیره می‌شود (جدول sf_scenarios)",
+          ]} />
+          <H3>مشاهده سناریوها</H3>
+          <UL items={[
+            "نمودار چندین سناریو را برای مقایسه آسان روی هم نمایش می‌دهد",
+            "جدول پیش‌بینی ارزش خالص را سال به سال نشان می‌دهد",
+            "ستون دلتا تفاوت با مسیر واقعی فعلی را نشان می‌دهد",
+          ]} />
+          <H3>حذف گروهی سناریوها</H3>
+          <PTag>
+            یک یا چند سناریو را با چک‌باکس انتخاب کنید. روی حذف کلیک کنید. رمز عبور برنامه را وارد کرده
+            و چک‌باکس تأیید غیرقابل بازگشت بودن را تأیید کنید.
+          </PTag>
+          <Callout type="tip">
+            از سناریوها برای رویدادهای بزرگ زندگی استفاده کنید: تغییر شغل، خرید ملک، فرزند، بازنشستگی زودهنگام.
+          </Callout>
+          <Callout type="warning">
+            حذف سناریو با رمز عبور محافظت می‌شود و نیاز به تأیید صریح دارد. بازگشتی وجود ندارد — ابتدا پشتیبان صادر کنید.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Tax Calculator ───────────────────────────────────────────────────────────
+  // 7. Tax Calculator
   {
     id: "tax",
     icon: <Calculator className="w-4 h-4" />,
-    title: "Tax Calculator",
     color: "hsl(20,80%,55%)",
-    content: (
-      <SectionBody>
-        <p>The Tax Calculator estimates Australian income tax for both household members based on 2024-25 ATO tax brackets. All results are estimates only and do not constitute tax advice.</p>
-
-        <H3>Income Tax Brackets (2024-25)</H3>
-        <div className="rounded-lg overflow-hidden border border-border text-xs my-3">
-          <table className="w-full">
-            <thead><tr className="bg-secondary/50"><th className="text-left px-3 py-2 font-semibold">Taxable Income</th><th className="text-left px-3 py-2 font-semibold">Rate</th></tr></thead>
-            <tbody className="divide-y divide-border">
-              {[
-                ["$0 – $18,200", "Nil"],
-                ["$18,201 – $45,000", "19c per $1 over $18,200"],
-                ["$45,001 – $120,000", "$5,092 + 32.5c per $1 over $45,000"],
-                ["$120,001 – $180,000", "$29,467 + 37c per $1 over $120,000"],
-                ["$180,001+", "$51,667 + 45c per $1 over $180,000"],
-              ].map(([range, rate]) => (
-                <tr key={range} className="hover:bg-secondary/20">
-                  <td className="px-3 py-1.5 text-muted-foreground">{range}</td>
-                  <td className="px-3 py-1.5">{rate}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    title: { en: "Tax Calculator (Australian)", fa: "ماشین‌حساب مالیات استرالیا" },
+    keywords: {
+      en: "tax calculator australian ATO income tax FY2026 medicare levy low income offset bracket take home",
+      fa: "مالیات ماشین‌حساب استرالیا ATO درآمد سال مالی عوارض مدیکر آفست کم‌درآمد پایه حقوق دریافتی",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Tax Calculator computes your Australian income tax liability for FY2025–26.
+            Enter gross income and deductions — the calculator handles brackets, Medicare, and offsets.
+          </PTag>
+          <H3>ATO FY2025–26 Tax Brackets</H3>
+          <Table rows={[
+            ["$0 – $18,200", "Nil"],
+            ["$18,201 – $45,000", "19c for each $1 over $18,200"],
+            ["$45,001 – $135,000", "$5,092 + 32.5c for each $1 over $45,000"],
+            ["$135,001 – $190,000", "$34,417 + 37c for each $1 over $135,000"],
+            ["$190,001+", "$54,997 + 45c for each $1 over $190,000"],
+          ]} />
+          <H3>Key Formulas</H3>
+          <Formula>Taxable Income = Gross Income − Deductions</Formula>
+          <Formula>Income Tax = Based on ATO FY2025–26 brackets above</Formula>
+          <Formula>Medicare Levy = Taxable Income × 2% (full levy — threshold rules apply below $26,000)</Formula>
+          <Formula>Low Income Tax Offset (LITO) = up to $700 for incomes under $37,500 (phases out to $66,667)</Formula>
+          <Formula>Effective Tax Rate = (Total Tax ÷ Gross Income) × 100</Formula>
+          <Formula>Take-Home Pay = Gross Income − Income Tax − Medicare Levy + Offsets</Formula>
+          <Callout type="info">
+            This calculator uses your Dashboard salary figure automatically when opened from
+            the Dashboard. You can also enter a custom amount.
+          </Callout>
+          <Callout type="warning">
+            This is for estimation purposes only. Consult a registered tax agent for lodgement.
+            Does not account for HECS/HELP debt, superannuation, or investment income schedules.
+          </Callout>
         </div>
-
-        <H3>Additional Levies & Offsets</H3>
-        <FieldList fields={[
-          { name: "Medicare Levy",    desc: "2% of taxable income. Phase-in applies for incomes between $26,000–$32,500." },
-          { name: "LITO",             desc: "Low Income Tax Offset: up to $700 for income under $37,500. Reduces to $0 at $66,667." },
-          { name: "LMITO",            desc: "Low and Middle Income Tax Offset: $675 for incomes $37,000–$126,000." },
-        ]} />
-
-        <H3>Investment Property Section</H3>
-        <p>Enter rental income and property expenses to calculate negative gearing. The negative gearing amount (when expenses exceed income) reduces your taxable income. Click <strong className="text-foreground">Auto-fill</strong> next to any property to pull its data directly from the Property page.</p>
-        <Formula label="Negative Gearing"
-          formula="Rental Income − (Interest + Rates + Insurance + Maintenance + Other Costs)"
-          description="Negative result = negatively geared. Reduces taxable income by that amount." />
-
-        <H3>Capital Gains Tax</H3>
-        <Formula label="Capital Gain"
-          formula="Sale Price − Purchase Price − Acquisition/Selling Costs" />
-        <Formula label="CGT with Discount"
-          formula="Capital Gain × 50% (if asset held > 12 months)"
-          description="The discounted gain is added to taxable income for the year of sale." />
-
-        <Callout type="warning">
-          This calculator is a planning tool only. Actual tax will differ based on your specific circumstances, deductions, and ATO assessments. Always consult a registered tax agent for advice.
-        </Callout>
-      </SectionBody>
-    ),
+      ),
+      fa: (
+        <div>
+          <PTag>
+            ماشین‌حساب مالیات، بدهی مالیات بر درآمد استرالیایی شما را برای سال مالی ۲۰۲۵–۲۰۲۶ محاسبه می‌کند.
+            درآمد ناخالص و کسورات را وارد کنید — ماشین‌حساب پایه‌های مالیاتی، مدیکر و آفست‌ها را مدیریت می‌کند.
+          </PTag>
+          <H3>پایه‌های مالیاتی ATO سال مالی ۲۰۲۵–۲۰۲۶</H3>
+          <Table rows={[
+            ["$۰ – $۱۸,۲۰۰", "صفر"],
+            ["$۱۸,۲۰۱ – $۴۵,۰۰۰", "۱۹ سنت به ازای هر $۱ بیش از $۱۸,۲۰۰"],
+            ["$۴۵,۰۰۱ – $۱۳۵,۰۰۰", "$۵,۰۹۲ + ۳۲.۵ سنت به ازای هر $۱ بیش از $۴۵,۰۰۰"],
+            ["$۱۳۵,۰۰۱ – $۱۹۰,۰۰۰", "$۳۴,۴۱۷ + ۳۷ سنت به ازای هر $۱ بیش از $۱۳۵,۰۰۰"],
+            ["$۱۹۰,۰۰۱+", "$۵۴,۹۹۷ + ۴۵ سنت به ازای هر $۱ بیش از $۱۹۰,۰۰۰"],
+          ]} />
+          <H3>فرمول‌های کلیدی</H3>
+          <Formula>درآمد مشمول مالیات = درآمد ناخالص − کسورات</Formula>
+          <Formula>مالیات بر درآمد = بر اساس پایه‌های مالیاتی ATO بالا</Formula>
+          <Formula>عوارض مدیکر = درآمد مشمول مالیات × ۲٪</Formula>
+          <Formula>آفست مالیاتی کم‌درآمد (LITO) = تا $۷۰۰ برای درآمدهای زیر $۳۷,۵۰۰</Formula>
+          <Formula>نرخ مؤثر مالیات = (کل مالیات ÷ درآمد ناخالص) × ۱۰۰</Formula>
+          <Formula>حقوق دریافتی = درآمد ناخالص − مالیات بر درآمد − عوارض مدیکر + آفست‌ها</Formula>
+          <Callout type="info">
+            این ماشین‌حساب به‌طور خودکار از عدد حقوق داشبورد شما استفاده می‌کند. می‌توانید مبلغ سفارشی هم وارد کنید.
+          </Callout>
+          <Callout type="warning">
+            این ابزار فقط برای تخمین است. برای اظهارنامه مالیاتی با یک مشاور مالیاتی مشورت کنید.
+            بدهی HECS/HELP، سوپرانیوشن و درآمد سرمایه‌گذاری را پوشش نمی‌دهد.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Net Worth Timeline ────────────────────────────────────────────────────────
+  // 8. Net Worth Timeline
   {
     id: "timeline",
-    icon: <TrendingUp className="w-4 h-4" />,
-    title: "Net Worth Timeline",
+    icon: <Activity className="w-4 h-4" />,
     color: "hsl(188,60%,48%)",
-    content: (
-      <SectionBody>
-        <p>The Net Worth Timeline page shows a detailed month-by-month and year-by-year projection of your household wealth from today to 2035, with four interactive chart views.</p>
-
-        <H3>Data Sources</H3>
-        <FieldList fields={[
-          { name: "Past months",   desc: "Uses actual expenses from the Expenses table where available." },
-          { name: "Future months", desc: "Uses Monthly Income and Monthly Expenses from the Financial Snapshot." },
-          { name: "Property",      desc: "Each property grows at its Capital Growth % per year. Loans reduce by P&I repayments." },
-          { name: "Stocks",        desc: "Portfolio grows at the weighted average Expected Return %, plus monthly DCA additions." },
-          { name: "Crypto",        desc: "Same methodology as stocks." },
-          { name: "Super",         desc: "Grows at 8% p.a. by default (configurable in Settings)." },
-          { name: "Cash",          desc: "Current cash + accumulated monthly surplus over time." },
-        ]} />
-
-        <H3>Charts</H3>
-        <FieldList fields={[
-          { name: "Net Worth over Time",       desc: "Gold area chart showing total net worth (assets − liabilities) year by year." },
-          { name: "Assets vs Liabilities",     desc: "Stacked area chart showing total assets and total liabilities separately." },
-          { name: "Cash Flow over Time",       desc: "Line chart of income, expenses, and net cash flow per period." },
-          { name: "Property Equity over Time", desc: "Area chart of combined property equity as mortgage balances reduce." },
-        ]} />
-
-        <H3>Actual vs Forecast Logic</H3>
-        <p>The model blends actual data with forecasts to give the most accurate possible picture:</p>
-        <ul className="list-disc pl-4 space-y-1 text-xs">
-          <li>For any month where expense records exist in the Expenses table, actual total spending is used instead of the snapshot estimate.</li>
-          <li>For future months with no data, the snapshot's monthly_expenses value is used.</li>
-          <li>The model checks for double-counting: if your snapshot's monthly_expenses already includes mortgage and childcare, but those also appear as individual expense records, the actual month's total is used directly — not added on top of the snapshot figure.</li>
-        </ul>
-
-        <Callout type="tip">
-          Switch between Monthly and Annual view using the toggle at the top of the page. Annual view shows the full 10-year span; Monthly view shows the last 12 and next 12 months in detail.
-        </Callout>
-      </SectionBody>
-    ),
+    title: { en: "Net Worth Timeline", fa: "تاریخچه ارزش خالص" },
+    keywords: {
+      en: "net worth timeline snapshot milestones actual forecast cumulative history",
+      fa: "ارزش خالص تاریخچه عکس فوری نقاط عطف واقعی پیش‌بینی تجمعی",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Net Worth Timeline charts your wealth trajectory over time, showing actual
+            recorded values against your forecast projections.
+          </PTag>
+          <H3>How Data Points Are Added</H3>
+          <UL items={[
+            "Every time you save a Dashboard snapshot, a data point is auto-recorded",
+            "Each point includes: date, net worth, assets total, liabilities total",
+            "Points are stored in the sf_timeline table in Supabase",
+            "Manual data points can also be added for historical backdating",
+          ]} />
+          <H3>Views Available</H3>
+          <UL items={[
+            <><strong className="text-foreground">Actual vs Forecast</strong> — overlays your real trajectory against projected growth</>,
+            <><strong className="text-foreground">Cumulative</strong> — running total of net worth growth since first data point</>,
+            <><strong className="text-foreground">Assets vs Liabilities</strong> — stacked or split bar chart by component</>,
+          ]} />
+          <H3>Milestones</H3>
+          <PTag>
+            Add milestone markers to the timeline (e.g. "Paid off car loan", "Bought property",
+            "Reached $500k net worth"). Milestones appear as vertical markers on the chart.
+          </PTag>
+          <Callout type="tip">
+            Save a Dashboard snapshot at least monthly for meaningful timeline data.
+            The more data points, the more accurate the trend analysis.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            تاریخچه ارزش خالص مسیر ثروت شما را در طول زمان نمودار می‌کند، مقادیر واقعی ثبت‌شده را در مقابل پیش‌بینی‌های شما نشان می‌دهد.
+          </PTag>
+          <H3>نحوه افزودن نقاط داده</H3>
+          <UL items={[
+            "هر بار که یک عکس فوری از داشبورد ذخیره می‌کنید، یک نقطه داده به‌صورت خودکار ثبت می‌شود",
+            "هر نقطه شامل: تاریخ، ارزش خالص، مجموع دارایی‌ها، مجموع بدهی‌ها",
+            "نقاط در جدول sf_timeline سوپابیس ذخیره می‌شوند",
+            "نقاط داده دستی هم می‌توانند برای ثبت تاریخچه گذشته اضافه شوند",
+          ]} />
+          <H3>نماهای موجود</H3>
+          <UL items={[
+            <><strong className="text-foreground">واقعی در مقابل پیش‌بینی</strong> — مسیر واقعی شما را روی رشد پیش‌بینی‌شده نمایش می‌دهد</>,
+            <><strong className="text-foreground">تجمعی</strong> — مجموع انباشته رشد ارزش خالص از اولین نقطه داده</>,
+            <><strong className="text-foreground">دارایی‌ها در مقابل بدهی‌ها</strong> — نمودار میله‌ای تجمیع‌شده یا جداگانه</>,
+          ]} />
+          <H3>نقاط عطف</H3>
+          <PTag>
+            علامت‌های نقطه عطف را به تاریخچه اضافه کنید (مثال: «وام ماشین تسویه شد»، «ملک خریده شد»، «به ارزش خالص ۵۰۰ هزار دلار رسیدیم»).
+            نقاط عطف به‌صورت خطوط عمودی روی نمودار نشان داده می‌شوند.
+          </PTag>
+          <Callout type="tip">
+            حداقل ماهانه یک عکس فوری از داشبورد ذخیره کنید تا داده‌های تاریخچه معنی‌داری داشته باشید.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Data Health ──────────────────────────────────────────────────────────────
+  // 9. Data Health
   {
     id: "data-health",
-    icon: <Activity className="w-4 h-4" />,
-    title: "Data Health",
+    icon: <Zap className="w-4 h-4" />,
     color: "hsl(142,60%,45%)",
-    content: (
-      <SectionBody>
-        <p>The Data Health page is your data maintenance hub. It shows the state of your Supabase sync, detects data quality issues, and provides tools to clean, backup, and restore data.</p>
-
-        <H3>Status Indicators</H3>
-        <FieldList fields={[
-          { name: "Supabase Connection", desc: "Green = connected and responding. Red = unable to reach the database. Tested on page load." },
-          { name: "Last Synced",         desc: "Timestamp of the most recent successful sync (from localStorage)." },
-          { name: "Record Counts",       desc: "Number of rows in each Supabase table: expenses, properties, stocks, crypto, timeline, scenarios." },
-        ]} />
-
-        <H3>Data Quality Checks</H3>
-        <FieldList fields={[
-          { name: "Duplicate Expenses",  desc: "Expenses sharing the same date + amount + category. Common after re-importing a file." },
-          { name: "Missing Dates",       desc: "Expenses with a null or empty date field." },
-          { name: "Missing Categories",  desc: "Expenses with no category assigned." },
-          { name: "Invalid Amounts",     desc: "Expenses with an amount of $0 or less, or a non-numeric value." },
-          { name: "Large Expenses",      desc: "Any single expense over $5,000 is flagged for review." },
-        ]} />
-
-        <H3>Actions</H3>
-        <FieldList fields={[
-          { name: "Sync from Cloud",         desc: "Pulls all data fresh from Supabase and overwrites the local cache." },
-          { name: "Clear Cache & Reload",    desc: "Clears all localStorage sf_* keys, then fetches fresh from Supabase." },
-          { name: "Export Full Backup JSON", desc: "Exports all tables as a single JSON file." },
-          { name: "Export Expenses Excel",   desc: "Exports only the expenses table as xlsx." },
-          { name: "Delete Duplicates",       desc: "Shows duplicate groups and allows selective deletion. Requires password + checkbox." },
-        ]} />
-
-        <Callout type="tip">
-          Run a Data Health check after every large Excel import to catch duplicates before they distort your expense analytics and cash flow forecasts.
-        </Callout>
-      </SectionBody>
-    ),
+    title: { en: "Data Health", fa: "سلامت داده‌ها" },
+    keywords: {
+      en: "data health score missing stale duplicate integrity warnings fix NaN",
+      fa: "سلامت داده امتیاز گمشده کهنه تکراری یکپارچگی هشدار رفع NaN",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            Data Health scans your entire dataset and gives a score out of 100.
+            Each warning tells you exactly what to fix and where.
+          </PTag>
+          <H3>Checks Performed</H3>
+          <UL items={[
+            <><strong className="text-foreground">Missing Fields</strong> — Detects empty required fields (e.g. expense amount = 0 or blank)</>,
+            <><strong className="text-foreground">Stale Prices</strong> — Flags stocks or crypto where Current Price hasn't been updated in 30+ days</>,
+            <><strong className="text-foreground">Duplicate Entries</strong> — Detects expenses with identical date + amount + description</>,
+            <><strong className="text-foreground">NaN Values</strong> — Finds numeric fields that resolved to Not-a-Number (usually from blank text in numeric columns)</>,
+            <><strong className="text-foreground">Unbalanced Snapshot</strong> — Warns if Net Worth calculation gives unexpected result vs asset/liability breakdown</>,
+            <><strong className="text-foreground">Unknown Codes</strong> — Expense records with source codes not in the recognised list</>,
+          ]} />
+          <H3>Scoring</H3>
+          <UL items={[
+            "100 — Perfect, no issues",
+            "80–99 — Minor issues (stale prices, minor missing fields)",
+            "60–79 — Moderate issues (duplicates, some NaN values)",
+            "Below 60 — Critical issues needing immediate attention",
+          ]} />
+          <H3>How to Fix</H3>
+          <UL items={[
+            "Click any warning card to jump to the affected record",
+            "Edit or delete the problematic entry directly",
+            "Re-run scan after fixing to update score",
+          ]} />
+          <Callout type="tip">
+            Run Data Health before generating PDF reports or major financial decisions.
+            A score below 80 may produce unreliable dashboard numbers.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            سلامت داده کل مجموعه داده شما را اسکن می‌کند و امتیازی از ۱۰۰ می‌دهد.
+            هر هشدار دقیقاً به شما می‌گوید چه چیزی را کجا باید رفع کنید.
+          </PTag>
+          <H3>بررسی‌های انجام‌شده</H3>
+          <UL items={[
+            <><strong className="text-foreground">فیلدهای گمشده</strong> — فیلدهای اجباری خالی را شناسایی می‌کند</>,
+            <><strong className="text-foreground">قیمت‌های کهنه</strong> — سهام یا رمزارزی که قیمت فعلی آن‌ها بیش از ۳۰ روز به‌روز نشده را علامت‌گذاری می‌کند</>,
+            <><strong className="text-foreground">ورودی‌های تکراری</strong> — هزینه‌هایی با تاریخ + مبلغ + توضیحات یکسان را شناسایی می‌کند</>,
+            <><strong className="text-foreground">مقادیر NaN</strong> — فیلدهای عددی که به Not-a-Number تبدیل شده‌اند را پیدا می‌کند</>,
+            <><strong className="text-foreground">عکس فوری نامتوازن</strong> — هشدار می‌دهد اگر محاسبه ارزش خالص نتیجه غیرمنتظره‌ای دهد</>,
+            <><strong className="text-foreground">کدهای ناشناخته</strong> — رکوردهای هزینه با کدهای منبع غیرمجاز را شناسایی می‌کند</>,
+          ]} />
+          <H3>امتیازدهی</H3>
+          <UL items={[
+            "۱۰۰ — عالی، هیچ مشکلی وجود ندارد",
+            "۸۰–۹۹ — مشکلات جزئی (قیمت‌های کهنه، فیلدهای گمشده کوچک)",
+            "۶۰–۷۹ — مشکلات متوسط (تکراری‌ها، برخی مقادیر NaN)",
+            "زیر ۶۰ — مشکلات بحرانی نیاز به توجه فوری دارند",
+          ]} />
+          <H3>نحوه رفع</H3>
+          <UL items={[
+            "روی هر کارت هشدار کلیک کنید تا به رکورد مشکل‌دار بروید",
+            "ورودی مشکل‌دار را مستقیماً ویرایش یا حذف کنید",
+            "پس از رفع مشکل، اسکن را مجدداً اجرا کنید تا امتیاز به‌روز شود",
+          ]} />
+          <Callout type="tip">
+            قبل از تولید گزارش PDF یا تصمیمات مالی مهم، سلامت داده را اجرا کنید.
+            امتیاز زیر ۸۰ ممکن است اعداد داشبورد را غیرقابل اعتماد کند.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Settings ─────────────────────────────────────────────────────────────────
-  {
-    id: "settings",
-    icon: <Settings className="w-4 h-4" />,
-    title: "Settings",
-    color: "hsl(220,10%,60%)",
-    content: (
-      <SectionBody>
-        <p>The Settings page lets you configure forecast assumptions, manage your profile, and backup or restore all data.</p>
-
-        <H3>Forecast Assumptions</H3>
-        <FieldList fields={[
-          { name: "Inflation Rate",         desc: "Used to adjust real returns in long-term projections. Default: 3%." },
-          { name: "PPOR Growth Rate",       desc: "Annual capital growth applied to your home value. Default: 6%." },
-          { name: "Super Return Rate",      desc: "Annual return on superannuation. Default: 8%." },
-          { name: "Safe Withdrawal Rate",   desc: "Used to estimate sustainable passive income from investments. Default: 4%." },
-          { name: "Risk Profile",           desc: "Conservative / Moderate / Aggressive. May influence default expected return suggestions." },
-        ]} />
-
-        <H3>User Profile</H3>
-        <FieldList fields={[
-          { name: "Display Name",  desc: "Your name as shown in the app." },
-          { name: "Currency",      desc: "Display currency (AUD default)." },
-          { name: "Timezone",      desc: "Australia/Brisbane default." },
-        ]} />
-
-        <H3>Backup & Restore</H3>
-        <FieldList fields={[
-          { name: "Export All Data",  desc: "Downloads a full JSON backup of all tables." },
-          { name: "Import Backup",    desc: "Restores from a previously exported JSON backup. Merges with existing data." },
-        ]} />
-      </SectionBody>
-    ),
-  },
-
-  // ── Privacy Mode ─────────────────────────────────────────────────────────────
+  // 10. Privacy Mode
   {
     id: "privacy",
     icon: <Shield className="w-4 h-4" />,
-    title: "Privacy Mode",
     color: "hsl(270,60%,60%)",
-    content: (
-      <SectionBody>
-        <p>Privacy Mode hides all sensitive financial values from the screen without affecting any calculations, database values, exports, or Supabase sync.</p>
-
-        <H3>How to Toggle</H3>
-        <p>The <strong className="text-foreground">Show Values / Hide Values</strong> button is in the top navigation bar. It is visible on every page after login.</p>
-        <ul className="list-disc pl-4 space-y-1 text-xs">
-          <li>Default state: <strong className="text-foreground">Hidden</strong> (Privacy Mode ON) on first login</li>
-          <li>Your preference is saved to localStorage and persists across page refreshes and sessions</li>
-          <li>Each device/browser stores its own privacy preference independently</li>
-        </ul>
-
-        <H3>What Is Hidden</H3>
-        <ul className="list-disc pl-4 space-y-1 text-xs">
-          <li>All dollar amounts: replaced with <code className="bg-secondary px-1 rounded">$••••••</code></li>
-          <li>All percentages: replaced with <code className="bg-secondary px-1 rounded">•••%</code></li>
-          <li>Dashboard KPI values, snapshot values, totals</li>
-          <li>Expense amounts, property values, stock/crypto values</li>
-          <li>10-year projection table values</li>
-        </ul>
-
-        <H3>What Is Not Affected</H3>
-        <ul className="list-disc pl-4 space-y-1 text-xs">
-          <li>Labels and headings remain visible</li>
-          <li>Charts still render (data is calculated normally)</li>
-          <li>All calculations run on real numbers</li>
-          <li>Supabase sync continues normally</li>
-          <li>Exports always include real values</li>
-        </ul>
-
-        <Callout type="info">
-          Privacy Mode is designed for screen-sharing or working in a public space. Toggle it off when you need to review actual numbers.
-        </Callout>
-      </SectionBody>
-    ),
+    title: { en: "Privacy Mode", fa: "حالت حریم خصوصی" },
+    keywords: {
+      en: "privacy mode hide values mask financial currency percentage toggle localStorage",
+      fa: "حالت حریم خصوصی مخفی مقادیر پوشش مالی ارز درصد تغییر حالت",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            Privacy Mode masks all financial values across the entire app — useful when working
+            in public spaces or screen-sharing.
+          </PTag>
+          <H3>How to Toggle</H3>
+          <UL items={[
+            "Click the Eye icon in the top navigation bar",
+            "All currency values instantly show as $••••••",
+            "All percentages show as •••%",
+            "Click again to reveal values",
+          ]} />
+          <H3>What is Masked</H3>
+          <UL items={[
+            "All KPI card values on the Dashboard",
+            "All table amounts (expenses, stocks, crypto)",
+            "Chart Y-axis labels",
+            "Net worth figures in the Timeline",
+            "Tax calculator inputs and outputs",
+          ]} />
+          <H3>What is NOT Affected</H3>
+          <UL items={[
+            "Underlying calculations — still run correctly in the background",
+            "Exports — PDF and Excel exports always contain real values",
+            "Source codes and categories — non-monetary fields remain visible",
+          ]} />
+          <Callout type="info">
+            Privacy Mode preference is saved in localStorage key <code style={{ color: "hsl(43,85%,65%)" }}>sf_privacy_mode</code>.
+            It persists across page refreshes but resets on full logout.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            حالت حریم خصوصی تمام مقادیر مالی را در سراسر برنامه پوشش می‌دهد — مفید هنگام کار در مکان‌های عمومی یا اشتراک تصویر.
+          </PTag>
+          <H3>نحوه تغییر حالت</H3>
+          <UL items={[
+            "روی آیکون چشم در نوار ناوبری بالا کلیک کنید",
+            "تمام مقادیر ارزی فوراً به‌صورت $•••••• نشان داده می‌شوند",
+            "تمام درصدها به‌صورت •••٪ نمایش داده می‌شوند",
+            "دوباره کلیک کنید تا مقادیر نمایان شوند",
+          ]} />
+          <H3>چه چیزی پوشیده می‌شود</H3>
+          <UL items={[
+            "تمام مقادیر کارت‌های KPI در داشبورد",
+            "تمام مبالغ جداول (هزینه‌ها، سهام، رمزارز)",
+            "برچسب‌های محور Y نمودار",
+            "ارقام ارزش خالص در تاریخچه",
+            "ورودی‌ها و خروجی‌های ماشین‌حساب مالیات",
+          ]} />
+          <H3>چه چیزی تأثیر نمی‌پذیرد</H3>
+          <UL items={[
+            "محاسبات زیربنایی — همچنان در پس‌زمینه به‌درستی اجرا می‌شوند",
+            "صادرات — PDF و اکسل همیشه مقادیر واقعی را دارند",
+            "کدهای منبع و دسته‌بندی‌ها — فیلدهای غیرپولی قابل مشاهده می‌مانند",
+          ]} />
+          <Callout type="info">
+            تنظیمات حریم خصوصی در <code style={{ color: "hsl(43,85%,65%)" }}>sf_privacy_mode</code> ذخیره می‌شود.
+            در بارگذاری مجدد صفحه باقی می‌ماند اما با خروج کامل از سیستم پاک می‌شود.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Bulk Delete ───────────────────────────────────────────────────────────────
+  // 11. Bulk Delete
   {
     id: "bulk-delete",
     icon: <Trash2 className="w-4 h-4" />,
-    title: "Bulk Delete",
     color: "hsl(0,72%,51%)",
-    content: (
-      <SectionBody>
-        <p>Bulk delete is available on: Expenses, Property, Stocks, Crypto, and Reports (scenarios). It always requires password + checkbox confirmation and can never be triggered by a single click.</p>
-
-        <H3>Step-by-Step for Expenses</H3>
-        <ol className="list-decimal pl-4 space-y-1.5 text-xs">
-          <li>Apply filters if you want to target a specific subset (e.g. all expenses from 2024)</li>
-          <li>Click any row to select it, or use the checkbox column on the left</li>
-          <li>Use the red toolbar that appears: <em>Select page</em>, <em>Select all filtered</em>, or <em>Select all records</em></li>
-          <li>Click <strong className="text-foreground">Delete X records</strong></li>
-          <li>In the modal: optionally click <strong className="text-foreground">Export backup before deleting</strong></li>
-          <li>Enter the password: <code className="bg-secondary px-1.5 py-0.5 rounded text-foreground">YaraJana2025</code></li>
-          <li>Tick "I understand this action cannot be undone"</li>
-          <li>Click the final red <strong className="text-foreground">Delete</strong> button</li>
-        </ol>
-
-        <H3>After Deletion</H3>
-        <p>Deleted records are removed from Supabase immediately and the local cache is updated. The table, dashboard totals, and all charts refresh automatically. There is no undo.</p>
-
-        <Callout type="warning">
-          Always export a backup before running a large bulk delete. The backup is an Excel file containing all selected records that you can re-import if needed.
-        </Callout>
-      </SectionBody>
-    ),
+    title: { en: "Bulk Delete", fa: "حذف گروهی" },
+    keywords: {
+      en: "bulk delete select checkbox password confirm backup modal safe records",
+      fa: "حذف گروهی انتخاب چک‌باکس رمز عبور تأیید پشتیبان پنجره امن رکورد",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            Bulk Delete is available on Expenses, Stocks, Crypto, and Scenarios pages.
+            It is intentionally multi-step to prevent accidental data loss.
+          </PTag>
+          <H3>Step-by-Step Process</H3>
+          <UL items={[
+            "Check the boxes next to the rows you want to delete",
+            "The Delete Selected button becomes active (shows count of selected rows)",
+            "Click Delete Selected — a modal appears",
+            "Review the list of records to be deleted inside the modal",
+            "Optionally: click Export Backup to download the records as Excel before deleting",
+            "Enter your app password in the password field",
+            "Check the box: 'I understand this cannot be undone'",
+            "Click Confirm Delete — records are permanently removed",
+          ]} />
+          <H3>Safety Features</H3>
+          <UL items={[
+            "No single-click delete — always requires modal confirmation",
+            "Password required — same password used to log in",
+            "Irreversibility confirmation checkbox — mandatory",
+            "Optional pre-deletion backup export",
+            "Record count shown at every step",
+          ]} />
+          <Callout type="warning">
+            Once deleted from Supabase, records cannot be recovered unless you exported a backup.
+            There is no recycle bin or undo function.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            حذف گروهی در صفحات هزینه‌ها، سهام، رمزارز و سناریوها موجود است.
+            برای جلوگیری از از دست دادن تصادفی داده، عمداً چند مرحله‌ای طراحی شده است.
+          </PTag>
+          <H3>فرآیند گام به گام</H3>
+          <UL items={[
+            "چک‌باکس‌های کنار سطرهایی که می‌خواهید حذف کنید را علامت بزنید",
+            "دکمه «حذف انتخابی» فعال می‌شود (تعداد سطرهای انتخابی را نشان می‌دهد)",
+            "روی «حذف انتخابی» کلیک کنید — یک پنجره باز می‌شود",
+            "فهرست رکوردهای در حال حذف را در پنجره بررسی کنید",
+            "اختیاری: روی «صادرات پشتیبان» کلیک کنید تا رکوردها را قبل از حذف دانلود کنید",
+            "رمز عبور برنامه را در فیلد رمز وارد کنید",
+            "چک‌باکس: 'می‌دانم که این عمل غیرقابل بازگشت است' را علامت بزنید",
+            "روی «تأیید حذف» کلیک کنید — رکوردها به‌طور دائمی حذف می‌شوند",
+          ]} />
+          <H3>ویژگی‌های ایمنی</H3>
+          <UL items={[
+            "بدون حذف تک‌کلیک — همیشه نیاز به تأیید پنجره دارد",
+            "رمز عبور الزامی — همان رمزی که برای ورود استفاده می‌شود",
+            "چک‌باکس تأیید غیرقابل بازگشت بودن — اجباری",
+            "صادرات پشتیبان اختیاری قبل از حذف",
+            "تعداد رکورد در هر مرحله نشان داده می‌شود",
+          ]} />
+          <Callout type="warning">
+            پس از حذف از سوپابیس، رکوردها قابل بازیابی نیستند مگر اینکه پشتیبان صادر کرده باشید.
+            سطل آشغال یا دکمه بازگشت وجود ندارد.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Supabase Sync ─────────────────────────────────────────────────────────────
+  // 12. Supabase Sync
   {
     id: "supabase",
     icon: <Cloud className="w-4 h-4" />,
-    title: "Supabase Sync",
     color: "hsl(142,60%,45%)",
-    content: (
-      <SectionBody>
-        <p>Supabase is the cloud database that powers cross-device synchronisation. Your data is stored in a PostgreSQL database hosted on Supabase's Australian infrastructure and accessible from any device without a backend server.</p>
-
-        <H3>How Sync Works</H3>
-        <FieldList fields={[
-          { name: "On Save",         desc: "Every save operation writes to Supabase first, then updates the local browser cache." },
-          { name: "On Page Load",    desc: "Every page navigation fetches fresh data from Supabase (staleTime = 0). TanStack Query always re-fetches on mount." },
-          { name: "On Tab Focus",    desc: "Switching back to the app tab triggers a background refetch from Supabase." },
-          { name: "localStorage",    desc: "Used as a fallback cache only. If Supabase is unreachable, the last cached values are shown." },
-        ]} />
-
-        <H3>Tables Used</H3>
-        <div className="rounded-lg overflow-hidden border border-border text-xs my-3">
-          <table className="w-full">
-            <thead><tr className="bg-secondary/50"><th className="text-left px-3 py-2 font-semibold">Table</th><th className="text-left px-3 py-2 font-semibold">Contents</th></tr></thead>
-            <tbody className="divide-y divide-border">
-              {[
-                ["sf_snapshot", "Single row (id = shahrokh-family-main). All financial snapshot fields."],
-                ["sf_expenses", "All expense records. Integer auto-increment PK."],
-                ["sf_properties", "All property records with all simulator fields."],
-                ["sf_stocks", "All stock holdings."],
-                ["sf_crypto", "All crypto holdings."],
-                ["sf_timeline", "Timeline events for the net worth timeline."],
-                ["sf_scenarios", "Saved report scenarios."],
-              ].map(([table, desc]) => (
-                <tr key={table} className="hover:bg-secondary/20">
-                  <td className="px-3 py-1.5 font-mono" style={{ color: "hsl(43,85%,65%)" }}>{table}</td>
-                  <td className="px-3 py-1.5 text-muted-foreground">{desc}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    title: { en: "Supabase Sync", fa: "همگام‌سازی با سوپابیس" },
+    keywords: {
+      en: "supabase sync cloud source truth tables record ID localStorage timestamp upsert",
+      fa: "سوپابیس همگام‌سازی ابری منبع حقیقت جداول شناسه رکورد ذخیره محلی مهر زمانی",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            Supabase is the single source of truth for all your financial data.
+            The app reads from Supabase on load and writes back immediately on save.
+          </PTag>
+          <H3>Data Flow</H3>
+          <UL items={[
+            <><strong className="text-foreground">On App Load</strong> — reads from Supabase first; falls back to localStorage cache if offline</>,
+            <><strong className="text-foreground">On Save</strong> — upserts to Supabase immediately (real-time persistence)</>,
+            <><strong className="text-foreground">LocalStorage</strong> — acts as a temporary cache layer only, not the primary store</>,
+            <><strong className="text-foreground">Sync From Cloud</strong> — button forces a fresh read from Supabase, discarding local cache</>,
+          ]} />
+          <H3>Fixed Record ID</H3>
+          <PTag>
+            All data is tied to a single record ID: <code style={{ color: "hsl(43,85%,65%)" }}>shahrokh-family-main</code>.
+            This means both Shahrokh and Fara share the same dataset automatically.
+          </PTag>
+          <H3>Database Tables</H3>
+          <Table rows={[
+            ["sf_snapshot", "Main dashboard snapshot (net worth, income, expenses, assets, liabilities)"],
+            ["sf_expenses", "Individual expense transactions"],
+            ["sf_properties", "Property investment records"],
+            ["sf_stocks", "Stock portfolio holdings"],
+            ["sf_crypto", "Crypto portfolio holdings"],
+            ["sf_timeline", "Net worth timeline data points"],
+            ["sf_scenarios", "What-if financial scenarios"],
+          ]} />
+          <H3>Last Synced</H3>
+          <PTag>
+            A "Last Synced" timestamp is shown in the app header. This tells you when data was
+            last successfully read from or written to Supabase.
+          </PTag>
+          <Callout type="info">
+            If Supabase is unreachable (no internet), the app operates on the localStorage cache.
+            Data entered offline will be upserted on next successful connection.
+          </Callout>
         </div>
-
-        <H3>Console Log Reference</H3>
-        <FieldList fields={[
-          { name: "[SF] Loaded from Supabase", desc: "Data was successfully read from the cloud database." },
-          { name: "[SF] Saved to Supabase",    desc: "A write operation succeeded." },
-          { name: "[SF] Fallback to local cache", desc: "Supabase was unreachable; local data was used instead." },
-        ]} />
-
-        <Callout type="tip">
-          If your data looks out of sync between desktop and mobile, use the <strong>Sync from Cloud</strong> button on the Dashboard or the Data Health page. This forces a full re-read from Supabase.
-        </Callout>
-      </SectionBody>
-    ),
+      ),
+      fa: (
+        <div>
+          <PTag>
+            سوپابیس منبع اصلی حقیقت برای تمام داده‌های مالی شماست.
+            برنامه هنگام بارگذاری از سوپابیس می‌خواند و بلافاصله پس از ذخیره می‌نویسد.
+          </PTag>
+          <H3>جریان داده</H3>
+          <UL items={[
+            <><strong className="text-foreground">هنگام بارگذاری برنامه</strong> — ابتدا از سوپابیس می‌خواند؛ اگر آفلاین باشد از حافظه محلی استفاده می‌کند</>,
+            <><strong className="text-foreground">هنگام ذخیره</strong> — فوراً در سوپابیس ذخیره می‌شود (پایداری بلادرنگ)</>,
+            <><strong className="text-foreground">حافظه محلی</strong> — فقط به‌عنوان لایه کش موقت عمل می‌کند، نه منبع اصلی</>,
+            <><strong className="text-foreground">همگام‌سازی از ابر</strong> — دکمه‌ای که خواندن تازه از سوپابیس را اجبار می‌کند</>,
+          ]} />
+          <H3>شناسه رکورد ثابت</H3>
+          <PTag>
+            تمام داده‌ها به یک شناسه رکورد ثابت متصل است: <code style={{ color: "hsl(43,85%,65%)" }}>shahrokh-family-main</code>.
+            این یعنی شاهرخ و فرا به‌طور خودکار همان مجموعه داده را به اشتراک می‌گذارند.
+          </PTag>
+          <H3>جداول پایگاه داده</H3>
+          <Table rows={[
+            ["sf_snapshot", "عکس فوری اصلی داشبورد (ارزش خالص، درآمد، هزینه‌ها، دارایی‌ها، بدهی‌ها)"],
+            ["sf_expenses", "تراکنش‌های هزینه فردی"],
+            ["sf_properties", "رکوردهای سرمایه‌گذاری ملک"],
+            ["sf_stocks", "دارایی‌های سبد سهام"],
+            ["sf_crypto", "دارایی‌های سبد رمزارز"],
+            ["sf_timeline", "نقاط داده تاریخچه ارزش خالص"],
+            ["sf_scenarios", "سناریوهای مالی فرضی"],
+          ]} />
+          <H3>آخرین همگام‌سازی</H3>
+          <PTag>
+            یک مهر زمانی «آخرین همگام‌سازی» در هدر برنامه نشان داده می‌شود که آخرین خواندن یا نوشتن موفق را نشان می‌دهد.
+          </PTag>
+          <Callout type="info">
+            اگر سوپابیس در دسترس نباشد (بدون اینترنت)، برنامه روی کش حافظه محلی کار می‌کند.
+            داده‌های وارد‌شده آفلاین در اتصال بعدی به سوپابیس منتقل می‌شوند.
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── Excel Import / Export ─────────────────────────────────────────────────────
+  // 13. Excel Import/Export
   {
     id: "excel",
     icon: <FileSpreadsheet className="w-4 h-4" />,
-    title: "Excel Import / Export",
     color: "hsl(142,60%,45%)",
-    content: (
-      <SectionBody>
-        <p>The app can import and export data in Excel (.xlsx) format. This is the primary way to bulk-load expense history or extract data for external analysis.</p>
-
-        <H3>Importing Expenses</H3>
-        <ol className="list-decimal pl-4 space-y-1.5 text-xs">
-          <li>Go to the Expenses page</li>
-          <li>Click <strong className="text-foreground">Template</strong> to download the correct column format</li>
-          <li>Fill in your data following the template structure</li>
-          <li>Click <strong className="text-foreground">Import Excel</strong> and select your file</li>
-          <li>Each row is validated and saved to Supabase as an individual expense</li>
-        </ol>
-
-        <H3>Template Column Order</H3>
-        <FieldList fields={[
-          { name: "Column A: Date",           desc: "Format: YYYY-MM-DD (e.g. 2026-01-15)" },
-          { name: "Column B: Amount",         desc: "Numeric, in AUD (e.g. 2500)" },
-          { name: "Column C: Category",       desc: "Must match one of the 17 preset categories" },
-          { name: "Column D: Sub-category",   desc: "Optional free text" },
-          { name: "Column E: Description",    desc: "Optional free text" },
-          { name: "Column F: Payment Method", desc: "Optional (Bank Transfer, Credit Card, etc.)" },
-          { name: "Column G: Family Member",  desc: "Optional (Roham Shahrokh, Fara Ghiyasi, etc.)" },
-          { name: "Column H: Recurring",      desc: "Yes or No" },
-          { name: "Column I: Notes",          desc: "Optional free text" },
-        ]} />
-
-        <Callout type="warning">
-          After importing, go to Data Health to check for duplicate records — especially if you import the same file twice by mistake.
-        </Callout>
-
-        <H3>Exporting</H3>
-        <FieldList fields={[
-          { name: "Expenses Export",    desc: "All expenses as a single sheet with all columns." },
-          { name: "Reports Export",     desc: "Multi-sheet workbook: summary, expenses, properties, stocks, crypto, projections." },
-          { name: "Backup Export",      desc: "Pre-delete backup from the BulkDelete modal. Contains only selected records." },
-          { name: "Data Health Export", desc: "Full backup JSON or expenses-only xlsx from the Data Health page." },
-        ]} />
-      </SectionBody>
-    ),
+    title: { en: "Excel Import / Export", fa: "واردات و صادرات اکسل" },
+    keywords: {
+      en: "excel import export template 4 columns date amount code description preview backup",
+      fa: "اکسل واردات صادرات الگو ۴ ستون تاریخ مبلغ کد توضیحات پیش‌نمایش پشتیبان",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            Excel integration allows bulk data import and full data export.
+            Templates ensure the correct format is used every time.
+          </PTag>
+          <H3>Downloading the Template</H3>
+          <UL items={[
+            "Go to Expenses page → Import button → Download Template",
+            "Template has pre-formatted headers: Date | Amount | Code | Description",
+            "Fill in your data — one row per transaction",
+          ]} />
+          <H3>Filling the Template</H3>
+          <Table rows={[
+            ["Column A — Date", "Format: DD/MM/YYYY or YYYY-MM-DD"],
+            ["Column B — Amount", "Positive number, no $ sign, no commas (e.g. 125.50)"],
+            ["Column C — Code", "Source code: D, M, T, E, C, B, R, G, S, L, PI, I, U, BB, CC, TR"],
+            ["Column D — Description", "Free text (e.g. 'Woolworths weekly shop')"],
+          ]} />
+          <H3>Import Process</H3>
+          <UL items={[
+            "Click Import → Choose File → select your filled Excel file",
+            "A preview table shows all rows to be imported",
+            "Rows with unknown codes are flagged with a warning (still imported as 'Other')",
+            "Review the preview, then click Confirm Import",
+            "Data is written to Supabase immediately",
+          ]} />
+          <H3>Export</H3>
+          <UL items={[
+            <><strong className="text-foreground">Export All</strong> — downloads all expenses as a formatted Excel file</>,
+            <><strong className="text-foreground">Export Selected</strong> — downloads only the checked rows (useful for backup before bulk delete)</>,
+            <><strong className="text-foreground">Full Data Export</strong> — from Settings, export all tables (snapshot, stocks, crypto, properties) as a multi-sheet workbook</>,
+          ]} />
+          <Callout type="tip">
+            Export a full backup regularly — monthly is recommended. Store it in a safe location
+            (cloud drive, encrypted USB).
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            یکپارچه‌سازی اکسل امکان واردات داده انبوه و صادرات کامل داده را فراهم می‌کند.
+            الگوها هر بار فرمت صحیح را تضمین می‌کنند.
+          </PTag>
+          <H3>دانلود الگو</H3>
+          <UL items={[
+            "به صفحه هزینه‌ها بروید → دکمه واردات → دانلود الگو",
+            "الگو سرستون‌های از پیش فرمت‌شده دارد: تاریخ | مبلغ | کد | توضیحات",
+            "داده‌های خود را وارد کنید — یک سطر به ازای هر تراکنش",
+          ]} />
+          <H3>پر کردن الگو</H3>
+          <Table rows={[
+            ["ستون A — تاریخ", "فرمت: DD/MM/YYYY یا YYYY-MM-DD"],
+            ["ستون B — مبلغ", "عدد مثبت، بدون علامت $، بدون کاما (مثال: ۱۲۵.۵۰)"],
+            ["ستون C — کد", "کد منبع: D، M، T، E، C، B، R، G، S، L، PI، I، U، BB، CC، TR"],
+            ["ستون D — توضیحات", "متن آزاد (مثال: 'خرید هفتگی ووَل‌وُرتز')"],
+          ]} />
+          <H3>فرآیند واردات</H3>
+          <UL items={[
+            "روی واردات کلیک کنید → انتخاب فایل → فایل اکسل خود را انتخاب کنید",
+            "یک جدول پیش‌نمایش تمام سطرهایی که باید وارد شوند را نشان می‌دهد",
+            "سطرهای با کدهای ناشناخته با هشدار علامت‌گذاری می‌شوند (همچنان به‌عنوان 'سایر' وارد می‌شوند)",
+            "پیش‌نمایش را بررسی کنید، سپس «تأیید واردات» را کلیک کنید",
+            "داده‌ها فوراً در سوپابیس نوشته می‌شوند",
+          ]} />
+          <H3>صادرات</H3>
+          <UL items={[
+            <><strong className="text-foreground">صادرات همه</strong> — تمام هزینه‌ها را به‌صورت فایل اکسل دانلود می‌کند</>,
+            <><strong className="text-foreground">صادرات انتخابی</strong> — فقط سطرهای علامت‌خورده را دانلود می‌کند (مفید قبل از حذف گروهی)</>,
+            <><strong className="text-foreground">صادرات کامل داده</strong> — از تنظیمات، تمام جداول را به‌صورت یک کتاب کار چند‌برگه دانلود کنید</>,
+          ]} />
+          <Callout type="tip">
+            به‌طور منظم یک نسخه پشتیبان کامل صادر کنید — ماهانه توصیه می‌شود.
+            آن را در مکانی امن ذخیره کنید (فضای ابری، USB رمزگذاری‌شده).
+          </Callout>
+        </div>
+      ),
+    },
   },
 
-  // ── PDF Export ────────────────────────────────────────────────────────────────
+  // 14. PDF Export
   {
     id: "pdf",
     icon: <FileDown className="w-4 h-4" />,
-    title: "PDF Export",
     color: "hsl(0,72%,51%)",
-    content: (
-      <SectionBody>
-        <p>PDF export is available from the Reports page. It generates a formatted financial report using jsPDF with autoTable for structured data presentation.</p>
-
-        <H3>What Is Included</H3>
-        <ul className="list-disc pl-4 space-y-1 text-xs">
-          <li>Cover page: Family name, date, and report period</li>
-          <li>Executive summary: Net worth, assets, liabilities, surplus, savings rate</li>
-          <li>Asset allocation table</li>
-          <li>10-year net worth projection table</li>
-          <li>Expense summary by category</li>
-          <li>Property portfolio summary</li>
-          <li>Stocks and crypto holdings</li>
-        </ul>
-
-        <H3>What Is Not Included</H3>
-        <ul className="list-disc pl-4 space-y-1 text-xs">
-          <li>Charts and graphs (PDF is text/table only)</li>
-          <li>Full expense transaction history (too large for PDF; use Excel export)</li>
-        </ul>
-
-        <Callout type="info">
-          For a full visual report including charts, export to Excel and open in Excel or Google Sheets where the data columns can be charted.
-        </Callout>
-      </SectionBody>
-    ),
-  },
-];
-
-// ─── Calculation Methodology ──────────────────────────────────────────────────
-
-const FORMULAS = [
-  { label: "Net Worth",         formula: "Total Assets − Total Liabilities" },
-  { label: "Total Assets",      formula: "PPOR + Cash + Super + Cars + Iran Property + Investment Properties + Stocks (at current price) + Crypto (at current price)" },
-  { label: "Total Liabilities", formula: "PPOR Mortgage + Investment Property Loans + Other Debts" },
-  { label: "Monthly Surplus",   formula: "Monthly Income − Monthly Expenses" },
-  { label: "Savings Rate",      formula: "Monthly Surplus ÷ Monthly Income × 100" },
-  { label: "Property Equity",   formula: "Current Property Value − Outstanding Loan Balance" },
-  { label: "Investment Growth", formula: "FV = PV × (1 + r)^n + DCA × ((1 + r)^n − 1) / r  (compound with contributions)" },
-  { label: "Cash Flow (Month)", formula: "Income − Living Expenses − Mortgage Repayment − Investment Contributions + Rental Income" },
-  { label: "10-Year Forecast",  formula: "Σ (Each asset grown at its rate) − Σ (Liabilities reduced by repayments), evaluated each year 1–10" },
-  { label: "Monthly Repayment", formula: "P × r(1+r)^n ÷ ((1+r)^n − 1)  where r = annual rate ÷ 12, n = term × 12" },
-  { label: "Gross Rental Yield",formula: "(Weekly Rent × 52) ÷ Property Value × 100" },
-  { label: "Negative Gearing",  formula: "Rental Income − (Loan Interest + Property Expenses). Negative result reduces taxable income." },
-];
-
-// ─── FAQ ──────────────────────────────────────────────────────────────────────
-
-const FAQS = [
-  {
-    q: "Why do my numbers change after refreshing the page?",
-    a: "When you refresh, the app re-fetches all data from Supabase. If the numbers change, it means the local cache was different from the cloud database. This usually happens if a save partially failed — the data you see after refresh is the canonical version from Supabase.",
-  },
-  {
-    q: "Why does mobile now show the same data as desktop?",
-    a: "The Phase 2 sync fix changed all read operations to go directly to Supabase first (instead of localStorage). Every page navigation now fetches fresh from the cloud, so both devices always show the same current data. staleTime is set to 0, which means TanStack Query always refetches on component mount.",
-  },
-  {
-    q: "What does Privacy Mode actually do?",
-    a: "It replaces displayed dollar amounts with $•••••• and percentages with •••%. It only affects what is rendered on screen. All calculations, Supabase data, localStorage cache, and exports are completely unaffected. Toggle it with the Show/Hide Values button in the top bar.",
-  },
-  {
-    q: "How do I safely delete all imported expenses from a specific import batch?",
-    a: "Go to Expenses → filter by the date the import was done (use Date From / Date To in Advanced filters, set both to the import date). Then click the header checkbox to select all on the current page, use 'Select all X filtered' from the toolbar to get all of them, export a backup first, then delete. Verify in Data Health afterwards.",
-  },
-  {
-    q: "How do I export a report to share with my accountant?",
-    a: "Go to Reports → click Export Excel for a full multi-sheet workbook, or Export PDF for a formatted document. The Excel export is more comprehensive and includes all raw data across sheets.",
-  },
-  {
-    q: "How do I add a property I plan to buy in the future?",
-    a: "On the Property page, add a new property and set the Purchase Date to the future date (e.g. 2028-01-01). The projection chart and year-by-year table will show $0 for that property in all years before 2028, then include it from 2028 onwards. This prevents future purchases from inflating your current net worth.",
-  },
-  {
-    q: "How does DCA (Dollar Cost Averaging) affect the forecast?",
-    a: "Monthly DCA amounts entered on the Stocks or Crypto pages are added to the monthly cash flow model as investment contributions. They compound forward using the expected return %. The 10-year forecast formula is FV = PV(1+r)^n + PMT × ((1+r)^n − 1)/r, where PMT is the monthly DCA amount.",
-  },
-  {
-    q: "Why is my savings rate showing 0% or a strange number?",
-    a: "The savings rate is calculated from the Financial Snapshot on the Dashboard: Monthly Surplus ÷ Monthly Income. If Monthly Income is set to $0 or the division returns infinity, the rate shows 0. Update the Snapshot with your current income and expenses.",
-  },
-  {
-    q: "Can both Roham and Fara log in at the same time?",
-    a: "Yes — both accounts access the same shared Supabase database. If both make changes simultaneously, the last save wins (Supabase uses UPSERT with a fixed record ID for the snapshot). For collections (expenses, stocks, etc.) each creates separate rows so there is no conflict.",
-  },
-  {
-    q: "What happens if I lose internet access?",
-    a: "The app falls back to the localStorage cache. You can still view all data (from the last sync). Saves will fail silently and are not queued — you will need to re-save when connectivity is restored. The [SF] Fallback to local cache log message will appear in browser console.",
-  },
-];
-
-// ─── Main component ───────────────────────────────────────────────────────────
-
-export default function HelpPage() {
-  const [search, setSearch] = useState("");
-  const [openSections, setOpenSections] = useState<Set<string>>(new Set());
-  const [openFaqs, setOpenFaqs] = useState<Set<number>>(new Set());
-  const [activeTab, setActiveTab] = useState<"sections" | "formulas" | "faq">("sections");
-
-  const toggleSection = (id: string) => {
-    setOpenSections(prev => {
-      const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
-  };
-
-  const toggleFaq = (i: number) => {
-    setOpenFaqs(prev => {
-      const n = new Set(prev);
-      n.has(i) ? n.delete(i) : n.add(i);
-      return n;
-    });
-  };
-
-  const expandAll = () => setOpenSections(new Set(SECTIONS.map(s => s.id)));
-  const collapseAll = () => setOpenSections(new Set());
-
-  // Filter sections by search query
-  const q = search.toLowerCase();
-  const filteredSections = useMemo(() => {
-    if (!q) return SECTIONS;
-    return SECTIONS.filter(s => s.title.toLowerCase().includes(q));
-  }, [q]);
-
-  const filteredFormulas = useMemo(() => {
-    if (!q) return FORMULAS;
-    return FORMULAS.filter(f => f.label.toLowerCase().includes(q) || f.formula.toLowerCase().includes(q));
-  }, [q]);
-
-  const filteredFaqs = useMemo(() => {
-    if (!q) return FAQS;
-    return FAQS.filter(f => f.q.toLowerCase().includes(q) || f.a.toLowerCase().includes(q));
-  }, [q]);
-
-  // Auto-expand sections that match search
-  const searchOpenIds = useMemo(() => {
-    if (!q) return openSections;
-    return new Set([...openSections, ...filteredSections.map(s => s.id)]);
-  }, [q, filteredSections, openSections]);
-
-  return (
-    <div className="space-y-5 pb-10 max-w-4xl mx-auto">
-
-      {/* ─── Header ──────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+    title: { en: "PDF Export", fa: "صادرات PDF" },
+    keywords: {
+      en: "PDF export reports html2canvas print net worth expenses assets layout",
+      fa: "PDF صادرات گزارش‌ها چاپ ارزش خالص هزینه‌ها دارایی‌ها طرح‌بندی",
+    },
+    content: {
+      en: (
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <BookOpen className="w-5 h-5" style={{ color: "hsl(43,85%,55%)" }} />
-            <h1 className="text-xl font-bold">Help &amp; Documentation</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Everything you need to know about the Shahrokh Family Financial Planner — features, formulas, and FAQs.
-          </p>
+          <PTag>
+            Generate a professional PDF summary of your financial position from the Reports page.
+            The output is print-ready and suitable for sharing with accountants or advisors.
+          </PTag>
+          <H3>What's Included in the PDF</H3>
+          <UL items={[
+            "Cover page with family name, date, and period",
+            "Net Worth summary (total assets, liabilities, net worth)",
+            "Expense breakdown by category (table + pie chart)",
+            "Stock and crypto portfolio summary",
+            "Property portfolio summary",
+            "Net Worth timeline chart",
+            "Tax summary (if Tax Calculator was used in this session)",
+          ]} />
+          <H3>How to Generate</H3>
+          <UL items={[
+            "Go to Reports page",
+            "Select the reporting period (month, quarter, year, or custom)",
+            "Click Generate PDF",
+            "The app renders a print-ready layout using html2canvas",
+            "Your browser's save/download dialog appears",
+            "Save as PDF (choose 'Save as PDF' in the print dialog)",
+          ]} />
+          <Callout type="info">
+            PDF generation works best in Chrome or Edge. Safari may have minor rendering differences.
+            Ensure Privacy Mode is OFF before generating if you need real values in the PDF.
+          </Callout>
+          <Callout type="tip">
+            For best quality, use A4 paper size and set margins to "None" or "Minimum" in the print dialog.
+          </Callout>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
-          <Zap className="w-3.5 h-3.5" style={{ color: "hsl(43,85%,55%)" }} />
-          <span>Phase 2 · Version 2.0</span>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            یک خلاصه PDF حرفه‌ای از وضعیت مالی خود را از صفحه گزارش‌ها تولید کنید.
+            خروجی آماده چاپ است و برای اشتراک‌گذاری با حسابداران یا مشاوران مناسب است.
+          </PTag>
+          <H3>محتوای PDF</H3>
+          <UL items={[
+            "صفحه جلد با نام خانواده، تاریخ و دوره",
+            "خلاصه ارزش خالص (کل دارایی‌ها، بدهی‌ها، ارزش خالص)",
+            "تفکیک هزینه بر اساس دسته‌بندی (جدول + نمودار دایره‌ای)",
+            "خلاصه سبد سهام و رمزارز",
+            "خلاصه سبد ملک",
+            "نمودار تاریخچه ارزش خالص",
+            "خلاصه مالیات (اگر ماشین‌حساب مالیات در این جلسه استفاده شده باشد)",
+          ]} />
+          <H3>نحوه تولید</H3>
+          <UL items={[
+            "به صفحه گزارش‌ها بروید",
+            "دوره گزارش را انتخاب کنید (ماه، فصل، سال یا سفارشی)",
+            "روی «تولید PDF» کلیک کنید",
+            "برنامه با html2canvas یک طرح‌بندی آماده چاپ رندر می‌کند",
+            "کادر ذخیره/دانلود مرورگر شما ظاهر می‌شود",
+            "به‌صورت PDF ذخیره کنید",
+          ]} />
+          <Callout type="info">
+            تولید PDF در Chrome یا Edge بهترین عملکرد را دارد.
+            قبل از تولید PDF، مطمئن شوید حالت حریم خصوصی خاموش است.
+          </Callout>
+          <Callout type="tip">
+            برای بهترین کیفیت، اندازه کاغذ A4 و حاشیه «هیچ» یا «حداقل» را در کادر چاپ انتخاب کنید.
+          </Callout>
         </div>
-      </div>
+      ),
+    },
+  },
 
-      {/* ─── Search ──────────────────────────────────────────── */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search documentation..."
-          className="pl-9 h-10 text-sm"
-        />
-      </div>
-
-      {/* ─── Quick navigation cards ───────────────────────────── */}
-      {!q && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-          {[
-            { id: "dashboard",   icon: <LayoutDashboard className="w-4 h-4" />, label: "Dashboard",  color: "hsl(43,85%,55%)" },
-            { id: "expenses",    icon: <Receipt className="w-4 h-4" />,         label: "Expenses",   color: "hsl(0,72%,51%)" },
-            { id: "property",    icon: <Home className="w-4 h-4" />,            label: "Property",   color: "hsl(142,60%,45%)" },
-            { id: "stocks",      icon: <TrendingUp className="w-4 h-4" />,      label: "Stocks",     color: "hsl(188,60%,48%)" },
-            { id: "crypto",      icon: <Bitcoin className="w-4 h-4" />,         label: "Crypto",     color: "hsl(43,85%,55%)" },
-            { id: "tax",         icon: <Calculator className="w-4 h-4" />,      label: "Tax Calc",   color: "hsl(20,80%,55%)" },
-            { id: "privacy",     icon: <Shield className="w-4 h-4" />,          label: "Privacy",    color: "hsl(270,60%,60%)" },
-            { id: "bulk-delete", icon: <Trash2 className="w-4 h-4" />,          label: "Bulk Delete",color: "hsl(0,72%,51%)" },
-            { id: "supabase",    icon: <Cloud className="w-4 h-4" />,           label: "Sync",       color: "hsl(142,60%,45%)" },
-            { id: "excel",       icon: <FileSpreadsheet className="w-4 h-4" />, label: "Excel",      color: "hsl(142,60%,45%)" },
-          ].map(item => (
-            <button
-              key={item.id}
-              onClick={() => {
-                setActiveTab("sections");
-                setOpenSections(prev => new Set([...prev, item.id]));
-                setTimeout(() => {
-                  document.getElementById(`section-${item.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }, 50);
-              }}
-              className="rounded-xl border border-border bg-card p-3 flex flex-col items-center gap-1.5 text-xs font-medium transition-all hover:border-primary/40 hover:bg-secondary/40 text-center"
-            >
-              <span style={{ color: item.color }}>{item.icon}</span>
-              <span className="text-muted-foreground">{item.label}</span>
-            </button>
-          ))}
+  // 15. Settings
+  {
+    id: "settings",
+    icon: <Settings className="w-4 h-4" />,
+    color: "hsl(220,10%,55%)",
+    title: { en: "Settings", fa: "تنظیمات" },
+    keywords: {
+      en: "settings app name theme dark light sync credentials password manage",
+      fa: "تنظیمات نام برنامه تم تیره روشن همگام‌سازی اعتبارنامه رمز عبور مدیریت",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Settings page controls app-wide preferences, display options, and sync behaviour.
+          </PTag>
+          <H3>Display Settings</H3>
+          <UL items={[
+            <><strong className="text-foreground">App Name Display</strong> — change the name shown in the header (e.g. 'Shahrokh Family' or 'Family Wealth Lab')</>,
+            <><strong className="text-foreground">Theme</strong> — toggle between Dark mode (default) and Light mode. Preference saved in localStorage.</>,
+          ]} />
+          <H3>Sync Settings</H3>
+          <UL items={[
+            <><strong className="text-foreground">Sync From Cloud</strong> — force reload all data from Supabase</>,
+            <><strong className="text-foreground">Auto-sync interval</strong> — how often the app checks for remote changes (default: on page load only)</>,
+            <><strong className="text-foreground">Last Synced timestamp</strong> — shows when data was last read from Supabase</>,
+          ]} />
+          <H3>Credential Management</H3>
+          <UL items={[
+            "Change app login password",
+            "View Supabase connection status",
+            "Reset localStorage cache (does not delete Supabase data)",
+          ]} />
+          <Callout type="warning">
+            Resetting localStorage cache will cause the app to reload from Supabase on next launch.
+            Any data entered offline that hasn't synced yet will be lost.
+          </Callout>
         </div>
-      )}
+      ),
+      fa: (
+        <div>
+          <PTag>
+            صفحه تنظیمات، تنظیمات کل برنامه، گزینه‌های نمایش و رفتار همگام‌سازی را کنترل می‌کند.
+          </PTag>
+          <H3>تنظیمات نمایش</H3>
+          <UL items={[
+            <><strong className="text-foreground">نام برنامه</strong> — نامی که در هدر نشان داده می‌شود را تغییر دهید</>,
+            <><strong className="text-foreground">تم</strong> — بین حالت تیره (پیش‌فرض) و روشن جابجا شوید. تنظیمات در حافظه محلی ذخیره می‌شود.</>,
+          ]} />
+          <H3>تنظیمات همگام‌سازی</H3>
+          <UL items={[
+            <><strong className="text-foreground">همگام‌سازی از ابر</strong> — بارگذاری مجدد اجباری همه داده‌ها از سوپابیس</>,
+            <><strong className="text-foreground">فاصله همگام‌سازی خودکار</strong> — چند وقت یک‌بار برنامه تغییرات از راه دور را بررسی می‌کند</>,
+            <><strong className="text-foreground">مهر زمانی آخرین همگام‌سازی</strong> — نشان می‌دهد داده‌ها آخرین بار چه زمانی از سوپابیس خوانده شدند</>,
+          ]} />
+          <H3>مدیریت اعتبارنامه</H3>
+          <UL items={[
+            "تغییر رمز عبور ورود به برنامه",
+            "مشاهده وضعیت اتصال سوپابیس",
+            "بازنشانی کش حافظه محلی (داده‌های سوپابیس را حذف نمی‌کند)",
+          ]} />
+          <Callout type="warning">
+            بازنشانی کش حافظه محلی باعث می‌شود برنامه در راه‌اندازی بعدی از سوپابیس بارگذاری شود.
+            هر داده‌ای که آفلاین وارد شده و هنوز همگام‌سازی نشده از دست می‌رود.
+          </Callout>
+        </div>
+      ),
+    },
+  },
 
-      {/* ─── Tabs ─────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 border-b border-border">
-        {(["sections", "formulas", "faq"] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px capitalize ${
-              activeTab === tab
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {tab === "sections" ? "Sections" : tab === "formulas" ? "Formulas" : "FAQ"}
-          </button>
-        ))}
-        {activeTab === "sections" && !q && (
-          <div className="ml-auto flex gap-2 pb-1">
-            <button onClick={expandAll}   className="text-xs text-muted-foreground hover:text-foreground transition-colors">Expand all</button>
-            <span className="text-muted-foreground text-xs">·</span>
-            <button onClick={collapseAll} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Collapse all</button>
-          </div>
-        )}
-      </div>
-
-      {/* ─── Sections tab ─────────────────────────────────────── */}
-      {activeTab === "sections" && (
-        <div className="space-y-2">
-          {filteredSections.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-8">No sections match your search.</p>
-          )}
-          {filteredSections.map(section => {
-            const isOpen = searchOpenIds.has(section.id);
-            return (
+  // 16. FAQ
+  {
+    id: "faq",
+    icon: <HelpCircle className="w-4 h-4" />,
+    color: "hsl(43,85%,55%)",
+    title: { en: "Frequently Asked Questions", fa: "سؤالات متداول" },
+    keywords: {
+      en: "FAQ questions answers persist mobile import bank NaN stamp duty delete all update deploy vercel github",
+      fa: "سؤالات متداول پاسخ ماندگاری موبایل واردات بانک NaN عوارض تمبر حذف همه به‌روزرسانی انتشار ورسل گیت‌هاب",
+    },
+    content: {
+      en: (
+        <div>
+          <div className="space-y-4">
+            {[
+              {
+                q: "Why does data persist after I close the browser?",
+                a: "All data is saved to Supabase (cloud database) on every save action. localStorage provides a local cache for faster loads, but Supabase is the permanent store. Your data persists across devices, browsers, and browser restarts.",
+              },
+              {
+                q: "Can I use this app on my phone?",
+                a: "Yes — the app is fully responsive. All pages adapt to mobile screen sizes. The navigation collapses to a hamburger menu on small screens. Complex tables (expenses, stocks) scroll horizontally on mobile.",
+              },
+              {
+                q: "How do I import expenses from my bank?",
+                a: "Export your bank statement as an Excel or CSV file from your online banking portal. Then re-map the columns to the 4-column format (Date, Amount, Code, Description). Use the Code column to categorise each transaction with the appropriate source code (D, M, T, etc.). Import using the Expenses → Import button.",
+              },
+              {
+                q: "What if I enter a wrong source code during import?",
+                a: "The importer will flag the unknown code with a warning icon in the preview. The row is still imported but categorised as 'Other / Unknown'. After import, you can edit the record and assign the correct code.",
+              },
+              {
+                q: "Is my financial data secure?",
+                a: "Data is stored in Supabase with your private project URL and anon key. Row Level Security (RLS) can be enabled for additional protection. Privacy Mode masks values on-screen. The app URL (familywealthlab.net) is private — not indexed or publicly listed.",
+              },
+              {
+                q: "Can Fara and I both use the same data?",
+                a: "Yes — both users share the same Supabase record (shahrokh-family-main). Any changes made by either user are immediately visible to the other on next load or sync. There is no conflict resolution — last save wins.",
+              },
+              {
+                q: "How do I fix NaN values on the dashboard?",
+                a: "NaN (Not a Number) usually means a numeric field contains an empty string or invalid text. Go to Data Health — it will identify the specific records. Edit each record and ensure all numeric fields have valid numbers (no blanks, no text, no special characters).",
+              },
+              {
+                q: "How does the property stamp duty calculate?",
+                a: "The Property Calculator uses the Queensland (QLD) Government sliding-scale stamp duty formula. The rate increases in brackets as the purchase price rises. See the Property Calculator section above for the full bracket table.",
+              },
+              {
+                q: "Can I delete all expenses at once?",
+                a: "No — there is no one-click delete all. Bulk delete requires: selecting specific rows → entering your password → checking the irreversibility confirmation → optionally exporting a backup. This multi-step process is intentional to prevent accidental data loss.",
+              },
+              {
+                q: "How do I update the live site (familywealthlab.net)?",
+                a: "Edit the relevant files locally. Commit the changes with git and push to GitHub. Vercel detects the push and automatically deploys within 1–2 minutes. The live site updates without any manual action needed.",
+              },
+            ].map((item, i) => (
               <div
-                key={section.id}
-                id={`section-${section.id}`}
-                className="rounded-xl border border-border bg-card overflow-hidden"
+                key={i}
+                className="rounded-xl p-4"
+                style={{
+                  background: "hsl(224,15%,10%)",
+                  border: "1px solid hsl(224,12%,20%)",
+                }}
               >
-                <button
-                  className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-secondary/20 transition-colors"
-                  onClick={() => toggleSection(section.id)}
-                >
-                  <span style={{ color: section.color }}>{section.icon}</span>
-                  <span className="flex-1 text-sm font-semibold text-foreground">{section.title}</span>
-                  {isOpen
-                    ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-                    : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-                  }
-                </button>
-                {isOpen && (
-                  <div className="px-5 pb-5 pt-1 border-t border-border/60">
-                    {section.content}
-                  </div>
-                )}
+                <p className="text-sm font-semibold text-foreground mb-2 flex gap-2">
+                  <span style={{ color: "hsl(43,85%,55%)" }}>Q{i + 1}.</span>
+                  {item.q}
+                </p>
+                <p className="text-sm text-muted-foreground leading-relaxed pl-6">{item.a}</p>
               </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ─── Formulas tab ─────────────────────────────────────── */}
-      {activeTab === "formulas" && (
-        <div className="space-y-3">
-          <div className="rounded-xl border border-border bg-card p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <Database className="w-4 h-4" style={{ color: "hsl(43,85%,55%)" }} />
-              <h2 className="text-sm font-bold">Calculation Methodology</h2>
-            </div>
-            <p className="text-xs text-muted-foreground mb-4">
-              All calculations are performed client-side in the browser using JavaScript. No data is sent to an external calculation service. Formulas are applied consistently across all pages.
-            </p>
-            {filteredFormulas.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">No formulas match your search.</p>
-            )}
-            {filteredFormulas.map(f => (
-              <Formula key={f.label} label={f.label} formula={f.formula} />
             ))}
           </div>
-
-          {/* Actual vs forecast callout */}
-          {!q && (
-            <div className="rounded-xl border border-border bg-card p-5">
-              <h2 className="text-sm font-bold mb-3">Actual vs Forecast Logic</h2>
-              <SectionBody>
-                <p>The Master Cash Flow Forecast and Net Worth Timeline blend actual data with projections:</p>
-                <ul className="list-disc pl-4 space-y-1.5 text-xs mt-2">
-                  <li><strong className="text-foreground">Historical months</strong> — any month where expense records exist in the Expenses table uses the sum of those actual records as the expense figure for that month.</li>
-                  <li><strong className="text-foreground">Future months</strong> — no expense records exist, so the snapshot's monthly_expenses value is used.</li>
-                  <li><strong className="text-foreground">Double-count guard</strong> — if the snapshot's monthly_expenses already includes mortgage and the Expenses table also contains a mortgage payment for the same month, the actual month total is used as-is (not added on top of the snapshot estimate).</li>
-                  <li><strong className="text-foreground">Investment properties</strong> — rental income is added from the purchase date onwards; loan repayments and expenses are subtracted from the same date.</li>
-                </ul>
-              </SectionBody>
-            </div>
-          )}
         </div>
-      )}
-
-      {/* ─── FAQ tab ──────────────────────────────────────────── */}
-      {activeTab === "faq" && (
-        <div className="space-y-2">
-          {filteredFaqs.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-8">No FAQs match your search.</p>
-          )}
-          {filteredFaqs.map((faq, i) => {
-            const isOpen = openFaqs.has(i);
-            return (
-              <div key={i} className="rounded-xl border border-border bg-card overflow-hidden">
-                <button
-                  className="w-full flex items-start gap-3 px-5 py-4 text-left hover:bg-secondary/20 transition-colors"
-                  onClick={() => toggleFaq(i)}
-                >
-                  <HelpCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "hsl(43,85%,55%)" }} />
-                  <span className="flex-1 text-sm font-medium text-foreground">{faq.q}</span>
-                  {isOpen
-                    ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
-                    : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
-                  }
-                </button>
-                {isOpen && (
-                  <div className="px-5 pb-4 pt-1 border-t border-border/60">
-                    <p className="text-sm text-muted-foreground leading-relaxed">{faq.a}</p>
-                  </div>
-                )}
+      ),
+      fa: (
+        <div>
+          <div className="space-y-4">
+            {[
+              {
+                q: "چرا داده‌ها پس از بستن مرورگر باقی می‌مانند؟",
+                a: "تمام داده‌ها در هر عمل ذخیره به سوپابیس (پایگاه داده ابری) ذخیره می‌شوند. حافظه محلی یک کش محلی برای بارگذاری سریع‌تر فراهم می‌کند، اما سوپابیس منبع اصلی دائمی است. داده‌های شما در دستگاه‌ها، مرورگرها و راه‌اندازی‌های مجدد مرورگر باقی می‌مانند.",
+              },
+              {
+                q: "آیا می‌توانم این برنامه را روی گوشی استفاده کنم؟",
+                a: "بله — این برنامه کاملاً واکنش‌گرا است. تمام صفحات با اندازه‌های صفحه موبایل تطبیق می‌یابند. ناوبری در صفحه‌های کوچک به منوی همبرگری تبدیل می‌شود. جداول پیچیده (هزینه‌ها، سهام) در موبایل به‌صورت افقی اسکرول می‌شوند.",
+              },
+              {
+                q: "چطور هزینه‌ها را از بانکم وارد کنم؟",
+                a: "صورتحساب بانکی خود را از پورتال بانکداری آنلاین به‌صورت Excel یا CSV صادر کنید. سپس ستون‌ها را به فرمت ۴ ستونی (تاریخ، مبلغ، کد، توضیحات) تبدیل کنید. از ستون کد برای دسته‌بندی هر تراکنش با کد منبع مناسب استفاده کنید. با دکمه هزینه‌ها → واردات وارد کنید.",
+              },
+              {
+                q: "اگر کد منبع اشتباه وارد کنم چه می‌شود؟",
+                a: "وارد‌کننده کد ناشناخته را با آیکون هشدار در پیش‌نمایش علامت‌گذاری می‌کند. سطر همچنان وارد می‌شود اما به‌عنوان 'سایر / ناشناخته' دسته‌بندی می‌شود. پس از واردات، می‌توانید رکورد را ویرایش کنید و کد صحیح را تخصیص دهید.",
+              },
+              {
+                q: "آیا اطلاعات مالی من امن است؟",
+                a: "داده‌ها با URL پروژه خصوصی و کلید anon شما در سوپابیس ذخیره می‌شوند. برای حفاظت بیشتر می‌توان Row Level Security را فعال کرد. حالت حریم خصوصی مقادیر را روی صفحه پوشش می‌دهد. URL برنامه (familywealthlab.net) خصوصی است.",
+              },
+              {
+                q: "آیا فرا و من می‌توانیم از همان داده استفاده کنیم؟",
+                a: "بله — هر دو کاربر همان رکورد سوپابیس (shahrokh-family-main) را به اشتراک می‌گذارند. هر تغییری که توسط هر کدام از کاربران ایجاد شود در بارگذاری یا همگام‌سازی بعدی برای دیگری قابل مشاهده است. بدون مدیریت تعارض — آخرین ذخیره برنده می‌شود.",
+              },
+              {
+                q: "چطور مقادیر NaN در داشبورد را رفع کنم؟",
+                a: "NaN (نه یک عدد) معمولاً به این معنی است که یک فیلد عددی حاوی رشته خالی یا متن نامعتبر است. به سلامت داده بروید — رکوردهای خاص را شناسایی می‌کند. هر رکورد را ویرایش کنید و مطمئن شوید تمام فیلدهای عددی اعداد معتبر دارند.",
+              },
+              {
+                q: "عوارض تمبر ملک چطور محاسبه می‌شود؟",
+                a: "ماشین‌حساب ملک از فرمول عوارض تمبر مقیاس متغیر دولت کوئینزلند (QLD) استفاده می‌کند. نرخ با افزایش قیمت خرید در پله‌ها افزایش می‌یابد. جدول کامل پله‌ها را در بخش ماشین‌حساب ملک بالا ببینید.",
+              },
+              {
+                q: "آیا می‌توانم همه هزینه‌ها را یک‌باره حذف کنم؟",
+                a: "خیر — حذف همه با یک کلیک وجود ندارد. حذف گروهی نیاز دارد: انتخاب سطرهای خاص → وارد کردن رمز عبور → تأیید چک‌باکس غیرقابل بازگشت بودن → اختیاری صادرات پشتیبان. این فرآیند چند مرحله‌ای عمدی است تا از از دست دادن تصادفی داده جلوگیری شود.",
+              },
+              {
+                q: "چطور سایت زنده (familywealthlab.net) را به‌روز کنم؟",
+                a: "فایل‌های مربوطه را به‌صورت محلی ویرایش کنید. تغییرات را با git commit کنید و به GitHub push کنید. Vercel push را تشخیص می‌دهد و ظرف ۱–۲ دقیقه به‌طور خودکار استقرار می‌دهد. سایت زنده بدون هیچ اقدام دستی به‌روز می‌شود.",
+              },
+            ].map((item, i) => (
+              <div
+                key={i}
+                className="rounded-xl p-4"
+                style={{
+                  background: "hsl(224,15%,10%)",
+                  border: "1px solid hsl(224,12%,20%)",
+                }}
+              >
+                <p className="text-sm font-semibold text-foreground mb-2 flex gap-2">
+                  <span style={{ color: "hsl(43,85%,55%)" }}>س{i + 1}.</span>
+                  {item.q}
+                </p>
+                <p className="text-sm text-muted-foreground leading-relaxed pr-6">{item.a}</p>
               </div>
-            );
-          })}
+            ))}
+          </div>
         </div>
-      )}
+      ),
+    },
+  },
+];
 
-      {/* ─── Footer ───────────────────────────────────────────── */}
-      <div className="rounded-xl border border-border bg-card p-5 text-center">
-        <p className="text-xs text-muted-foreground">
-          Shahrokh Family Financial Planner · Phase 2 · Built for Roham, Fara, Yara &amp; Jana · Brisbane, QLD · Australia
-        </p>
-        <p className="text-xs text-muted-foreground mt-1">
-          All financial figures are estimates only and do not constitute financial or tax advice.
-        </p>
+// ─── Accordion Item ───────────────────────────────────────────────────────────
+
+function AccordionItem({
+  section,
+  lang,
+  isOpen,
+  onToggle,
+}: {
+  section: SectionDef;
+  lang: Lang;
+  isOpen: boolean;
+  onToggle: () => void;
+}) {
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  return (
+    <div
+      id={section.id}
+      className="rounded-xl overflow-hidden"
+      style={{ border: "1px solid hsl(224,12%,20%)", background: "hsl(224,15%,11%)" }}
+    >
+      {/* Header */}
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-white/5 transition-colors"
+        aria-expanded={isOpen}
+      >
+        <div className="flex items-center gap-3">
+          <span
+            className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0"
+            style={{ background: `${section.color}22`, color: section.color }}
+          >
+            {section.icon}
+          </span>
+          <span
+            className="font-semibold text-sm text-foreground"
+            style={lang === "fa" ? { fontFamily: "'Vazirmatn', 'Tahoma', sans-serif" } : {}}
+          >
+            {section.title[lang]}
+          </span>
+        </div>
+        <span className="text-muted-foreground shrink-0">
+          {isOpen ? (
+            <ChevronDown className="w-4 h-4" />
+          ) : (
+            <ChevronRight className="w-4 h-4" />
+          )}
+        </span>
+      </button>
+
+      {/* Collapsible body */}
+      <div
+        ref={contentRef}
+        style={{
+          maxHeight: isOpen ? `${contentRef.current?.scrollHeight ?? 2000}px` : "0px",
+          overflow: "hidden",
+          transition: "max-height 0.3s ease",
+        }}
+      >
+        <div
+          className="px-5 pb-5 pt-1"
+          style={
+            lang === "fa"
+              ? { fontFamily: "'Vazirmatn', 'Tahoma', sans-serif" }
+              : {}
+          }
+        >
+          {section.content[lang]}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Quick Nav Card ───────────────────────────────────────────────────────────
+
+function NavCard({
+  section,
+  lang,
+  onClick,
+}: {
+  section: SectionDef;
+  lang: Lang;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex flex-col items-center gap-2 p-4 rounded-xl text-center hover:bg-white/5 transition-all hover:scale-[1.02] active:scale-[0.98]"
+      style={{
+        background: "hsl(224,15%,11%)",
+        border: "1px solid hsl(224,12%,20%)",
+      }}
+    >
+      <span
+        className="flex items-center justify-center w-9 h-9 rounded-lg"
+        style={{ background: `${section.color}22`, color: section.color }}
+      >
+        {section.icon}
+      </span>
+      <span
+        className="text-xs font-medium text-muted-foreground leading-tight"
+        style={lang === "fa" ? { fontFamily: "'Vazirmatn', 'Tahoma', sans-serif" } : {}}
+      >
+        {section.title[lang]}
+      </span>
+    </button>
+  );
+}
+
+// ─── Main Help Page ───────────────────────────────────────────────────────────
+
+export default function HelpPage() {
+  // Language state — persisted in localStorage
+  const [lang, setLang] = useState<Lang>(
+    () => (localStorage.getItem("sf_help_lang") as Lang) || "en"
+  );
+
+  // Accordion state — which sections are open
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set());
+
+  // Search query
+  const [query, setQuery] = useState("");
+
+  // Switch language
+  const switchLang = (l: Lang) => {
+    setLang(l);
+    localStorage.setItem("sf_help_lang", l);
+  };
+
+  // Filtered sections based on search
+  const filteredSections = useMemo(() => {
+    if (!query.trim()) return SECTIONS;
+    const q = query.toLowerCase();
+    return SECTIONS.filter(
+      (s) =>
+        s.title.en.toLowerCase().includes(q) ||
+        s.title.fa.toLowerCase().includes(q) ||
+        s.keywords.en.toLowerCase().includes(q) ||
+        s.keywords.fa.toLowerCase().includes(q)
+    );
+  }, [query]);
+
+  // Toggle an accordion section
+  const toggleSection = (id: string) => {
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // Scroll to section and open it
+  const scrollToSection = (id: string) => {
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    // Brief delay to allow DOM to update before scrolling
+    setTimeout(() => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 50);
+  };
+
+  const isRtl = lang === "fa";
+  const fa = (str: string) => (
+    <span style={{ fontFamily: "'Vazirmatn', 'Tahoma', sans-serif" }}>{str}</span>
+  );
+
+  return (
+    <div
+      className="min-h-screen"
+      dir={isRtl ? "rtl" : "ltr"}
+      style={{ background: "hsl(224,15%,8%)" }}
+    >
+      {/* ── Sticky Top Bar ────────────────────────────────────────────────── */}
+      <div
+        className="sticky top-0 z-40 backdrop-blur-md"
+        style={{
+          background: "hsl(224,15%,8%,0.92)",
+          borderBottom: "1px solid hsl(224,12%,20%)",
+        }}
+      >
+        <div className="max-w-4xl mx-auto px-4 py-4 flex flex-col gap-3">
+          {/* Title row + Language switcher */}
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-2.5">
+              <BookOpen className="w-5 h-5" style={{ color: "hsl(43,85%,55%)" }} />
+              <h1 className="text-lg font-bold text-foreground">
+                {lang === "en" ? "Help & Documentation" : fa("راهنما و مستندات")}
+              </h1>
+            </div>
+
+            {/* Language switcher pills */}
+            <div
+              className="flex items-center rounded-lg p-0.5 gap-0.5"
+              style={{ background: "hsl(224,15%,14%)", border: "1px solid hsl(224,12%,22%)" }}
+              role="group"
+              aria-label="Language selector"
+            >
+              <button
+                onClick={() => switchLang("en")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all"
+                style={
+                  lang === "en"
+                    ? {
+                        background: "hsl(43,85%,55%)",
+                        color: "hsl(224,15%,8%)",
+                        fontWeight: 700,
+                      }
+                    : {
+                        color: "hsl(220,10%,55%)",
+                        fontWeight: 500,
+                      }
+                }
+                aria-pressed={lang === "en"}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                English
+              </button>
+              <button
+                onClick={() => switchLang("fa")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all"
+                style={
+                  lang === "fa"
+                    ? {
+                        background: "hsl(43,85%,55%)",
+                        color: "hsl(224,15%,8%)",
+                        fontWeight: 700,
+                        fontFamily: "'Vazirmatn', 'Tahoma', sans-serif",
+                      }
+                    : {
+                        color: "hsl(220,10%,55%)",
+                        fontWeight: 500,
+                        fontFamily: "'Vazirmatn', 'Tahoma', sans-serif",
+                      }
+                }
+                aria-pressed={lang === "fa"}
+              >
+                <Languages className="w-3.5 h-3.5" />
+                فارسی
+              </button>
+            </div>
+          </div>
+
+          {/* Search bar */}
+          <div className="relative">
+            <Search
+              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none"
+              style={isRtl ? { right: "12px" } : { left: "12px" }}
+            />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={
+                lang === "en"
+                  ? "Search sections, formulas, topics…"
+                  : "جستجوی بخش‌ها، فرمول‌ها، موضوعات…"
+              }
+              className="text-sm h-9"
+              style={
+                isRtl
+                  ? {
+                      paddingRight: "36px",
+                      paddingLeft: "12px",
+                      fontFamily: "'Vazirmatn', 'Tahoma', sans-serif",
+                    }
+                  : { paddingLeft: "36px" }
+              }
+            />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                className="absolute top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors text-xs"
+                style={isRtl ? { left: "10px" } : { right: "10px" }}
+                aria-label="Clear search"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
+      {/* ── Main Content ──────────────────────────────────────────────────── */}
+      <div className="max-w-4xl mx-auto px-4 py-6 space-y-8">
+
+        {/* Quick Nav Grid — only show when not searching */}
+        {!query.trim() && (
+          <section>
+            <p
+              className="text-xs font-semibold uppercase tracking-wider mb-3"
+              style={{ color: "hsl(43,85%,55%)" }}
+            >
+              {lang === "en" ? "Quick Navigation" : fa("ناوبری سریع")}
+            </p>
+            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+              {SECTIONS.map((s) => (
+                <NavCard
+                  key={s.id}
+                  section={s}
+                  lang={lang}
+                  onClick={() => scrollToSection(s.id)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Search result count */}
+        {query.trim() && (
+          <p className="text-xs text-muted-foreground">
+            {lang === "en"
+              ? `${filteredSections.length} section${filteredSections.length !== 1 ? "s" : ""} match "${query}"`
+              : fa(`${filteredSections.length} بخش منطبق با "${query}"`)}
+          </p>
+        )}
+
+        {/* Accordion Sections */}
+        {filteredSections.length > 0 ? (
+          <div className="space-y-3">
+            {filteredSections.map((section) => (
+              <AccordionItem
+                key={section.id}
+                section={section}
+                lang={lang}
+                isOpen={openSections.has(section.id)}
+                onToggle={() => toggleSection(section.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div
+            className="text-center py-16 rounded-xl"
+            style={{
+              background: "hsl(224,15%,11%)",
+              border: "1px solid hsl(224,12%,20%)",
+            }}
+          >
+            <HelpCircle className="w-10 h-10 mx-auto mb-3 text-muted-foreground opacity-40" />
+            <p className="text-sm text-muted-foreground">
+              {lang === "en"
+                ? `No sections found for "${query}"`
+                : fa(`هیچ بخشی برای "${query}" یافت نشد`)}
+            </p>
+            <button
+              onClick={() => setQuery("")}
+              className="mt-3 text-xs underline underline-offset-2"
+              style={{ color: "hsl(43,85%,55%)" }}
+            >
+              {lang === "en" ? "Clear search" : fa("پاک کردن جستجو")}
+            </button>
+          </div>
+        )}
+
+        {/* Footer note */}
+        <div
+          className="text-center py-6 text-xs text-muted-foreground rounded-xl"
+          style={{
+            background: "hsl(224,15%,10%)",
+            border: "1px solid hsl(224,12%,18%)",
+          }}
+        >
+          {lang === "en" ? (
+            <>
+              Shahrokh Family Financial Planner — built with React + Vite + Supabase.
+              <br />
+              <span style={{ color: "hsl(43,85%,55%)" }}>familywealthlab.net</span>
+            </>
+          ) : (
+            <span style={{ fontFamily: "'Vazirmatn', 'Tahoma', sans-serif" }}>
+              برنامه برنامه‌ریزی مالی خانواده شاهرخ — ساخته‌شده با React + Vite + Supabase
+              <br />
+              <span style={{ color: "hsl(43,85%,55%)" }}>familywealthlab.net</span>
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
