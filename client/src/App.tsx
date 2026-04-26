@@ -21,16 +21,19 @@ import { Toaster } from "@/components/ui/toaster";
 import { useAppStore } from "./lib/store";
 import { useEffect } from "react";
 
-import LoginPage    from "./pages/login";
-import DashboardPage from "./pages/dashboard";
-import PropertyPage  from "./pages/property";
-import StocksPage    from "./pages/stocks";
-import CryptoPage    from "./pages/crypto";
-import ExpensesPage  from "./pages/expenses";
-import ReportsPage   from "./pages/reports";
-import SettingsPage  from "./pages/settings";
-import Layout        from "./components/Layout";
-import NotFound      from "./pages/not-found";
+import LoginPage      from "./pages/login";
+import DashboardPage  from "./pages/dashboard";
+import PropertyPage   from "./pages/property";
+import StocksPage     from "./pages/stocks";
+import CryptoPage     from "./pages/crypto";
+import ExpensesPage   from "./pages/expenses";
+import ReportsPage    from "./pages/reports";
+import SettingsPage   from "./pages/settings";
+import TaxPage        from "./pages/tax";
+import TimelinePage   from "./pages/timeline";
+import DataHealthPage from "./pages/data-health";
+import Layout         from "./components/Layout";
+import NotFound       from "./pages/not-found";
 
 // ─── Protected route wrapper ──────────────────────────────────────────────────
 
@@ -108,6 +111,27 @@ function AppRouter() {
         <Route path="/settings">
           {isAuthenticated ? (
             <Layout><SettingsPage /></Layout>
+          ) : (
+            <Redirect to="/login" />
+          )}
+        </Route>
+        <Route path="/tax">
+          {isAuthenticated ? (
+            <Layout><TaxPage /></Layout>
+          ) : (
+            <Redirect to="/login" />
+          )}
+        </Route>
+        <Route path="/timeline">
+          {isAuthenticated ? (
+            <Layout><TimelinePage /></Layout>
+          ) : (
+            <Redirect to="/login" />
+          )}
+        </Route>
+        <Route path="/data-health">
+          {isAuthenticated ? (
+            <Layout><DataHealthPage /></Layout>
           ) : (
             <Redirect to="/login" />
           )}
