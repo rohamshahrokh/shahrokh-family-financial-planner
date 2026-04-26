@@ -166,20 +166,14 @@ export async function apiRequest(
   path: string,
   body?: unknown
 ): Promise<Response> {
-  // On Vercel static: serve from localStore (Supabase-first), return a fake Response
+  // On Vercel static: serve from localStore (Supabase-first)
+  // Errors from handleLocalRequest are re-thrown so TanStack Query onError fires correctly.
   if (USE_LOCAL_STORE) {
-    try {
-      const result = await handleLocalRequest(method, path, body);
-      return new Response(JSON.stringify(result), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch (err) {
-      return new Response(JSON.stringify({ message: String(err) }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    const result = await handleLocalRequest(method, path, body);  // throws on Supabase error
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   // Local dev: hit the real Express backend
