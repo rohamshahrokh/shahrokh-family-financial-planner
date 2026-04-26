@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Home, TrendingUp, Bitcoin, FileText,
   Settings, LogOut, Sun, Moon, Menu, X, Bell,
   ChevronRight, DollarSign, Receipt, Clock,
-  Eye, EyeOff, Calculator, Activity, HelpCircle,
+  Eye, EyeOff, Calculator, Activity, HelpCircle, Sparkles,
 } from "lucide-react";
 
 const navItems = [
@@ -20,6 +20,7 @@ const navItems = [
   { href: "/tax", label: "Tax Calculator", icon: Calculator },
   { href: "/timeline", label: "Net Worth Timeline", icon: TrendingUp },
   { href: "/data-health", label: "Data Health", icon: Activity },
+  { href: "/ai-insights", label: "AI Insights", icon: Sparkles },
   { href: "/help", label: "Help", icon: HelpCircle },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
