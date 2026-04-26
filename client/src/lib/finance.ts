@@ -309,3 +309,237 @@ export function calcCAGR(startValue: number, endValue: number, years: number): n
   if (startValue <= 0 || years === 0) return 0;
   return (Math.pow(endValue / startValue, 1 / years) - 1) * 100;
 }
+
+// ─── Master Cash Flow Series ──────────────────────────────────────────
+// Produces a month-by-month cash flow series from Jan 2025 → Dec 2035.
+// Actual expenses are the source of truth for historical months.
+// Financial Snapshot assumptions fill in the future (forecast).
+//
+// Double-counting logic:
+//   - If the expenses array contains any row with category 'Mortgage' for a given
+//     month, we skip adding PPOR mortgage repayment from the snapshot for that month.
+//   - Investment properties contribute rental income / loan costs only from their
+//     purchase_date onward (or Jan 2025 if no purchase_date).
+
+export interface CashFlowMonth {
+  key: string;          // e.g. "2025-01"
+  label: string;        // e.g. "Jan 2025"
+  year: number;
+  month: number;        // 1-12
+  isActual: boolean;    // true = driven by real expense records
+
+  // Income
+  income: number;       // gross monthly income
+
+  // Expenses
+  actualExpenses: number;   // sum of tracked expense rows for this month
+  forecastExpenses: number; // snapshot-derived forecast (used when no actuals)
+  totalExpenses: number;    // whichever is used
+
+  // Property
+  rentalIncome: number;     // net rental income from investment props
+  mortgageRepayment: number; // PPOR mortgage repayment
+  investmentLoanRepayment: number; // investment property loan repayments
+
+  // Summary
+  netCashFlow: number;       // income + rental - expenses - mortgages
+  cumulativeBalance: number; // running cumulative
+}
+
+export function buildCashFlowSeries(params: {
+  snapshot: {
+    monthly_income: number;
+    monthly_expenses: number;
+    mortgage: number;
+    other_debts: number;
+    cash: number;
+  };
+  expenses: Array<{ date: string; amount: number; category: string }>;
+  properties: Array<{
+    id: number;
+    type: string;
+    purchase_date?: string;
+    loan_amount: number;
+    interest_rate: number;
+    loan_term: number;
+    loan_type: string;
+    weekly_rent: number;
+    rental_growth: number;
+    vacancy_rate: number;
+    management_fee: number;
+    council_rates: number;
+    insurance: number;
+    maintenance: number;
+    capital_growth: number;
+    projection_years: number;
+  }>;
+  inflationRate?: number;   // annual % for expense forecast growth (default 3)
+  incomeGrowthRate?: number; // annual % for income forecast growth (default 3.5)
+}): CashFlowMonth[] {
+  const START_YEAR = 2025;
+  const START_MONTH = 1;
+  const END_YEAR = 2035;
+  const END_MONTH = 12;
+
+  const inflationRate = (params.inflationRate ?? 3) / 100;
+  const incomeGrowthRate = (params.incomeGrowthRate ?? 3.5) / 100;
+  const s = params.snapshot;
+
+  const snap_income   = safeNum(s.monthly_income) || 22000;
+  const snap_expenses = safeNum(s.monthly_expenses) || 14540;
+  const snap_mortgage = safeNum(s.mortgage) || 1200000;
+
+  // Pre-compute PPOR monthly mortgage repayment (fixed amount)
+  const pporMonthlyRepayment = calcMonthlyRepayment(snap_mortgage, 6.5, 30);
+
+  // Pre-build a lookup: "YYYY-MM" → { totalAmount, hasMortgage }
+  const expenseLookup = new Map<string, { total: number; hasMortgage: boolean }>();
+  for (const exp of params.expenses) {
+    if (!exp.date) continue;
+    const key = exp.date.substring(0, 7); // "YYYY-MM"
+    const existing = expenseLookup.get(key) || { total: 0, hasMortgage: false };
+    existing.total += safeNum(exp.amount);
+    if ((exp.category || '').toLowerCase().includes('mortgage')) {
+      existing.hasMortgage = true;
+    }
+    expenseLookup.set(key, existing);
+  }
+
+  // Determine the most recent month that has actual expense records
+  const actualKeys = Array.from(expenseLookup.keys()).sort();
+  const lastActualKey = actualKeys.length > 0 ? actualKeys[actualKeys.length - 1] : '';
+
+  // Investment properties: exclude PPOR type
+  const investmentProps = params.properties.filter(p => p.type !== 'ppor');
+
+  const results: CashFlowMonth[] = [];
+  let cumulativeBalance = safeNum(s.cash);
+  let monthIndex = 0; // months since Jan 2025
+
+  for (let year = START_YEAR; year <= END_YEAR; year++) {
+    for (let month = (year === START_YEAR ? START_MONTH : 1);
+         month <= (year === END_YEAR ? END_MONTH : 12);
+         month++) {
+      const keyMM = String(month).padStart(2, '0');
+      const key = `${year}-${keyMM}`;
+      const isActual = expenseLookup.has(key);
+      const yearsFromStart = monthIndex / 12;
+
+      // ── Income ──
+      const income = snap_income * Math.pow(1 + incomeGrowthRate, yearsFromStart);
+
+      // ── Expenses ──
+      let actualExpenses = 0;
+      let hasMortgageInActuals = false;
+      if (isActual) {
+        const rec = expenseLookup.get(key)!;
+        actualExpenses = rec.total;
+        hasMortgageInActuals = rec.hasMortgage;
+      }
+
+      // Forecast expenses grow with inflation from the base snapshot figure,
+      // but we only use forecast for months with no actuals
+      const forecastExpenses = snap_expenses * Math.pow(1 + inflationRate, yearsFromStart);
+      const totalExpenses = isActual ? actualExpenses : forecastExpenses;
+
+      // ── PPOR Mortgage ──
+      // Skip if actuals already include a 'Mortgage' category row for this month
+      const mortgageRepayment = hasMortgageInActuals ? 0 : pporMonthlyRepayment;
+
+      // ── Investment Properties ──
+      let rentalIncome = 0;
+      let investmentLoanRepayment = 0;
+      const monthDate = new Date(year, month - 1, 1);
+
+      for (const prop of investmentProps) {
+        // Only include from purchase date onward
+        let purchaseDate: Date;
+        if (prop.purchase_date) {
+          purchaseDate = new Date(prop.purchase_date);
+        } else {
+          purchaseDate = new Date(START_YEAR, 0, 1); // default Jan 2025
+        }
+        if (monthDate < purchaseDate) continue;
+
+        // Monthly rent (net of vacancy + management)
+        const monthsSincePurchase = (monthDate.getFullYear() - purchaseDate.getFullYear()) * 12
+          + (monthDate.getMonth() - purchaseDate.getMonth());
+        const yearsSincePurchase = monthsSincePurchase / 12;
+        const annualRent = prop.weekly_rent * 52
+          * (1 - prop.vacancy_rate / 100)
+          * (1 - prop.management_fee / 100)
+          * Math.pow(1 + (prop.rental_growth || 3) / 100, yearsSincePurchase);
+        rentalIncome += annualRent / 12;
+
+        // Investment loan repayment
+        const monthlyLoanPmt = calcMonthlyRepayment(prop.loan_amount, prop.interest_rate, prop.loan_term);
+        investmentLoanRepayment += monthlyLoanPmt;
+      }
+
+      // ── Net Cash Flow ──
+      // income + rental - expenses (actuals or forecast) - mortgage - invest loans
+      // Note: when actuals are used and they include mortgage, mortgageRepayment=0 so no double count
+      const netCashFlow = income + rentalIncome - totalExpenses - mortgageRepayment - investmentLoanRepayment;
+      cumulativeBalance += netCashFlow;
+
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      results.push({
+        key,
+        label: `${monthNames[month - 1]} ${year}`,
+        year,
+        month,
+        isActual,
+        income: Math.round(income),
+        actualExpenses: Math.round(actualExpenses),
+        forecastExpenses: Math.round(forecastExpenses),
+        totalExpenses: Math.round(totalExpenses),
+        rentalIncome: Math.round(rentalIncome),
+        mortgageRepayment: Math.round(mortgageRepayment),
+        investmentLoanRepayment: Math.round(investmentLoanRepayment),
+        netCashFlow: Math.round(netCashFlow),
+        cumulativeBalance: Math.round(cumulativeBalance),
+      });
+
+      monthIndex++;
+    }
+  }
+
+  return results;
+}
+
+// ─── Aggregate cash flow to annual totals ─────────────────────────────
+export interface CashFlowYear {
+  year: number;
+  income: number;
+  totalExpenses: number;
+  rentalIncome: number;
+  mortgageRepayment: number;
+  investmentLoanRepayment: number;
+  netCashFlow: number;
+  endingBalance: number;
+  hasActualMonths: number; // count of months with actual data
+}
+
+export function aggregateCashFlowToAnnual(monthly: CashFlowMonth[]): CashFlowYear[] {
+  const byYear = new Map<number, CashFlowYear>();
+  for (const m of monthly) {
+    if (!byYear.has(m.year)) {
+      byYear.set(m.year, {
+        year: m.year,
+        income: 0, totalExpenses: 0, rentalIncome: 0,
+        mortgageRepayment: 0, investmentLoanRepayment: 0,
+        netCashFlow: 0, endingBalance: 0, hasActualMonths: 0,
+      });
+    }
+    const yr = byYear.get(m.year)!;
+    yr.income += m.income;
+    yr.totalExpenses += m.totalExpenses;
+    yr.rentalIncome += m.rentalIncome;
+    yr.mortgageRepayment += m.mortgageRepayment;
+    yr.investmentLoanRepayment += m.investmentLoanRepayment;
+    yr.netCashFlow += m.netCashFlow;
+    yr.endingBalance = m.cumulativeBalance; // last month of year
+    if (m.isActual) yr.hasActualMonths++;
+  }
+  return Array.from(byYear.values()).sort((a, b) => a.year - b.year);
+}
