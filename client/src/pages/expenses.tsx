@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/finance";
@@ -865,6 +865,22 @@ export default function ExpensesPage() {
             title: `Import Complete`,
             description: `${added} added, ${skipped} skipped as duplicates.`,
           });
+          // Auto-clear filters and show newly imported data
+          const importedYears = toCreate
+            .map((r: any) => { const d = new Date(r.date); return isNaN(d.getTime()) ? null : d.getFullYear(); })
+            .filter((y: number | null): y is number => y !== null);
+          if (importedYears.length > 0) {
+            const latestImportedYear = Math.max(...importedYears);
+            setFilterYear(String(latestImportedYear));
+          } else {
+            setFilterYear('all');
+          }
+          setFilterMonth('all'); setFilterWeek('all');
+          setFilterCategory('all'); setFilterSourceCode('all');
+          setFilterSubcat(''); setFilterMember('all'); setFilterPayment('all');
+          setFilterDateFrom(''); setFilterDateTo(''); setSearch(''); setPage(1);
+          // Re-fetch to ensure latest data is displayed
+          qc.invalidateQueries({ queryKey: ['/api/expenses'] });
           // Log to import history in localStorage
           const history = JSON.parse(localStorage.getItem('sf_import_history') || '[]');
           history.unshift({
@@ -945,6 +961,29 @@ export default function ExpensesPage() {
     setFilterSubcat(''); setFilterMember('all'); setFilterPayment('all');
     setFilterDateFrom(''); setFilterDateTo(''); setSearch(''); setPage(1);
   };
+
+  // Detect if any filter is active
+  const hasActiveFilters = filterYear !== 'all' || filterMonth !== 'all' || filterWeek !== 'all'
+    || filterCategory !== 'all' || filterSourceCode !== 'all' || filterSubcat !== ''
+    || filterMember !== 'all' || filterPayment !== 'all'
+    || filterDateFrom !== '' || filterDateTo !== '' || search !== '';
+
+  // Auto-detect and apply latest year from expenses
+  useEffect(() => {
+    if (!rawExpenses || rawExpenses.length === 0) return;
+    // Only auto-detect when no filter is set yet (on first load)
+    if (filterYear !== 'all') return;
+    // Find the most recent year in the data
+    const years = rawExpenses
+      .map((e: any) => { const d = new Date(e.date); return isNaN(d.getTime()) ? null : d.getFullYear(); })
+      .filter((y: number | null): y is number => y !== null);
+    if (years.length === 0) return;
+    const latestYear = Math.max(...years);
+    // Only auto-select if it's not the current year (i.e. data is from a previous year)
+    // Always default to showing latest year's data
+    setFilterYear(String(latestYear));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -1381,7 +1420,16 @@ export default function ExpensesPage() {
             </thead>
             <tbody>
               {paginated.length === 0 ? (
-                <tr><td colSpan={11} className="py-10 text-center text-sm text-muted-foreground">No expenses found.</td></tr>
+                <tr><td colSpan={11} className="py-10 text-center text-sm text-muted-foreground">
+                    <div className="flex flex-col items-center gap-3">
+                      <span>No expenses found{hasActiveFilters ? ' matching your filters' : ''}.</span>
+                      {hasActiveFilters && (
+                        <Button size="sm" variant="outline" className="text-xs border-amber-500/50 text-amber-400 hover:bg-amber-500/10" onClick={resetFilters}>
+                          Clear Filters — Show All
+                        </Button>
+                      )}
+                    </div>
+                  </td></tr>
               ) : paginated.map((e: any) => {
                 if (editingId === e.id && editDraft) {
                   return (
@@ -1486,7 +1534,10 @@ export default function ExpensesPage() {
       />
 
       {/* ─── Auto Import Panel ─────────────────────────────── */}
-      <AutoImportPanel expenses={expenses} onImportComplete={() => qc.invalidateQueries({ queryKey: ['/api/expenses'] })} />
+      <AutoImportPanel expenses={expenses} onImportComplete={() => {
+        qc.invalidateQueries({ queryKey: ['/api/expenses'] });
+        resetFilters();
+      }} />
 
       {/* ─── AI Insights ─────────────────────────────────────────────────── */}
       <AIInsightsCard
