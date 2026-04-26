@@ -64,6 +64,7 @@ export interface Snapshot {
 }
 export interface Expense {
   id: number; date: string; amount: number; category: string;
+  source_code: string;                         // expense source/type code (e.g. D, T, M)
   subcategory: string | null; description: string | null;
   payment_method: string | null; family_member: string | null;
   recurring: boolean; notes: string | null; created_at: string;
