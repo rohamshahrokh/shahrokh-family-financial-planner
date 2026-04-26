@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard, Home, TrendingUp, Bitcoin, FileText,
   Settings, LogOut, Sun, Moon, Menu, X, Bell,
-  ChevronRight, DollarSign, Receipt, Clock
+  ChevronRight, DollarSign, Receipt, Clock,
+  Eye, EyeOff, Calculator, Activity,
 } from "lucide-react";
 
 const navItems = [
@@ -16,13 +17,16 @@ const navItems = [
   { href: "/stocks", label: "Stocks", icon: TrendingUp },
   { href: "/crypto", label: "Crypto", icon: Bitcoin },
   { href: "/reports", label: "Reports", icon: FileText },
+  { href: "/tax", label: "Tax Calculator", icon: Calculator },
+  { href: "/timeline", label: "Net Worth Timeline", icon: TrendingUp },
+  { href: "/data-health", label: "Data Health", icon: Activity },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const [, navigate] = useHashLocation();
-  const { theme, toggleTheme, logout, lastSaved } = useAppStore();
+  const { theme, toggleTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy } = useAppStore();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleLogout = () => {
@@ -34,6 +38,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     if (href === "/" || href === "/dashboard") return location === "/" || location === "/dashboard";
     return location.startsWith(href);
   };
+
+  // Avatar letter and label derived from currentUser
+  const avatarLetter = currentUser === "Fara" ? "F" : "R";
+  const avatarLabel = currentUser === "Fara" ? "Logged in as Fara" : "Logged in as Roham";
 
   const Logo = () => (
     <div className="flex items-center gap-2.5">
@@ -68,7 +76,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Family badge */}
         <div className="mx-3 mt-3 mb-1 px-3 py-2 rounded-lg" style={{ background: 'rgba(196,165,90,0.08)', border: '1px solid rgba(196,165,90,0.15)' }}>
-          <p className="text-xs font-semibold" style={{ color: 'hsl(43,85%,65%)' }}>Roham & Fara</p>
+          <p className="text-xs font-semibold" style={{ color: 'hsl(43,85%,65%)' }}>Roham &amp; Fara</p>
           <p className="text-xs text-muted-foreground">Yara · Jana · Brisbane</p>
         </div>
 
@@ -80,7 +88,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               href={href}
               onClick={() => setMobileOpen(false)}
               className={`sidebar-link ${isActive(href) ? 'active' : ''}`}
-              data-testid={`nav-${label.toLowerCase()}`}
+              data-testid={`nav-${label.toLowerCase().replace(/\s+/g, '-')}`}
             >
               <Icon className="w-4 h-4 shrink-0" />
               <span>{label}</span>
@@ -135,19 +143,41 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="ml-auto flex items-center gap-2">
             {/* Chart view toggle */}
             <ChartViewToggle />
-            
+
+            {/* Privacy Toggle — "Show Values" when hidden, "Hide Values" when visible */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={togglePrivacy}
+              className="h-8 text-xs gap-1.5 px-2 sm:px-3"
+              style={{ borderColor: 'rgba(196,165,90,0.35)', color: 'hsl(43,85%,65%)' }}
+              data-testid="button-privacy-toggle"
+              title={privacyMode ? 'Show Values' : 'Hide Values'}
+            >
+              {privacyMode ? <Eye className="w-3.5 h-3.5 shrink-0" /> : <EyeOff className="w-3.5 h-3.5 shrink-0" />}
+              <span className="hidden sm:inline">
+                {privacyMode ? 'Show Values' : 'Hide Values'}
+              </span>
+            </Button>
+
             <Button variant="ghost" size="icon" className="w-8 h-8 relative" data-testid="button-notifications">
               <Bell className="w-4 h-4" />
             </Button>
+
             <Button variant="ghost" size="icon" className="w-8 h-8" onClick={toggleTheme}>
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </Button>
+
+            {/* User avatar — letter + name reflect currentUser */}
             <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-secondary">
-              <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
-                style={{ background: 'hsl(43,85%,55%)', color: 'hsl(224,40%,8%)' }}>
-                R
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
+                style={{ background: 'hsl(43,85%,55%)', color: 'hsl(224,40%,8%)' }}
+                aria-label={avatarLabel}
+              >
+                {avatarLetter}
               </div>
-              <span className="text-xs font-medium hidden sm:block">Roham</span>
+              <span className="text-xs font-medium hidden sm:block">{avatarLabel}</span>
             </div>
           </div>
         </header>
