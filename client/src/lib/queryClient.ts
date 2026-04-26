@@ -7,9 +7,13 @@
  * real Express routes as before.
  *
  * On Vercel (static deployment, no Express) the same /api/* paths are
- * intercepted client-side and served directly from localStore (localStorage +
- * Supabase). This means zero code changes are needed in any page component —
- * they all call apiRequest("/api/snapshot") etc. exactly as before.
+ * intercepted client-side and served directly from localStore (Supabase-first,
+ * localStorage fallback). This means zero code changes are needed in any page
+ * component — they all call apiRequest("/api/snapshot") etc. exactly as before.
+ *
+ * KEY CHANGE: All GET handlers now await localStore async methods, which
+ * always read from Supabase first. staleTime is 0 so every navigation
+ * re-fetches fresh data from the cloud.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -31,21 +35,20 @@ const USE_LOCAL_STORE = isStaticDeployment();
 // ─── Local API handler ────────────────────────────────────────────────────────
 // Maps every API endpoint to a localStore call.
 // Returns the same shape the Express routes return.
-// All write methods in localStore are now async (Supabase-backed), so this
-// function is async too and awaits every write call.
+// All methods in localStore are now async (Supabase-first reads + writes).
 
 async function handleLocalRequest(method: string, path: string, body?: unknown): Promise<unknown> {
   const m = method.toUpperCase();
 
   // ── Snapshot ──────────────────────────────────────────────────────────────
   if (path === "/api/snapshot") {
-    if (m === "GET") return localStore.getSnapshot();
+    if (m === "GET") return await localStore.getSnapshot();
     if (m === "PUT") return await localStore.updateSnapshot(body as any);
   }
 
   // ── Expenses ──────────────────────────────────────────────────────────────
   if (path === "/api/expenses") {
-    if (m === "GET") return localStore.getExpenses();
+    if (m === "GET") return await localStore.getExpenses();
     if (m === "POST") return await localStore.createExpense(body as any);
   }
   if (path === "/api/expenses/bulk") {
@@ -64,7 +67,7 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
 
   // ── Properties ────────────────────────────────────────────────────────────
   if (path === "/api/properties") {
-    if (m === "GET")  return localStore.getProperties();
+    if (m === "GET")  return await localStore.getProperties();
     if (m === "POST") return await localStore.createProperty(body as any);
   }
   const propMatch = path.match(/^\/api\/properties\/(\d+)$/);
@@ -76,7 +79,7 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
 
   // ── Stocks ────────────────────────────────────────────────────────────────
   if (path === "/api/stocks") {
-    if (m === "GET")  return localStore.getStocks();
+    if (m === "GET")  return await localStore.getStocks();
     if (m === "POST") return await localStore.createStock(body as any);
   }
   const stockMatch = path.match(/^\/api\/stocks\/(\d+)$/);
@@ -88,7 +91,7 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
 
   // ── Crypto ────────────────────────────────────────────────────────────────
   if (path === "/api/crypto") {
-    if (m === "GET")  return localStore.getCryptos();
+    if (m === "GET")  return await localStore.getCryptos();
     if (m === "POST") return await localStore.createCrypto(body as any);
   }
   const cryptoMatch = path.match(/^\/api\/crypto\/(\d+)$/);
@@ -100,7 +103,7 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
 
   // ── Timeline ──────────────────────────────────────────────────────────────
   if (path === "/api/timeline") {
-    if (m === "GET")  return localStore.getTimelineEvents();
+    if (m === "GET")  return await localStore.getTimelineEvents();
     if (m === "POST") return await localStore.createTimelineEvent(body as any);
   }
   const timelineMatch = path.match(/^\/api\/timeline\/(\d+)$/);
@@ -120,7 +123,7 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
 
   // ── Scenarios ─────────────────────────────────────────────────────────────
   if (path === "/api/scenarios") {
-    if (m === "GET")  return localStore.getScenarios();
+    if (m === "GET")  return await localStore.getScenarios();
     if (m === "POST") return await localStore.createScenario(body as any);
   }
   const scenarioMatch = path.match(/^\/api\/scenarios\/(\d+)$/);
@@ -139,7 +142,7 @@ export async function apiRequest(
   path: string,
   body?: unknown
 ): Promise<Response> {
-  // On Vercel static: serve from localStore (Supabase-backed), return a fake Response
+  // On Vercel static: serve from localStore (Supabase-first), return a fake Response
   if (USE_LOCAL_STORE) {
     try {
       const result = await handleLocalRequest(method, path, body);
@@ -177,13 +180,18 @@ async function defaultQueryFn({ queryKey }: { queryKey: readonly unknown[] }) {
 }
 
 // ─── Query Client ─────────────────────────────────────────────────────────────
+// staleTime: 0  → every component mount / navigation triggers a Supabase fetch
+// gcTime: 60s   → keep unused data in memory briefly to avoid double-fetching
+//                 within the same page interaction
 
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: defaultQueryFn,
-      staleTime: 1000 * 60 * 5, // 5 minutes
+      staleTime: 0,          // Always re-fetch from Supabase on mount
+      gcTime: 1000 * 60,     // 1 minute garbage collection
       retry: 1,
+      refetchOnWindowFocus: true,  // Re-fetch when user tabs back in
     },
   },
 });
