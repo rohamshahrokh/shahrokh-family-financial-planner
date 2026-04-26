@@ -17,6 +17,7 @@ import {
 import {
   Plus, Trash2, Edit2, Upload, Download, Search,
   CheckSquare, Square, ChevronDown, Filter, TrendingDown, AlertTriangle, X,
+  RefreshCw, Zap,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -110,18 +111,34 @@ const LEGACY_CATEGORY_MAP: Record<string, string> = {
   'Investments': 'Investment Costs',
 };
 
+// ─── Shared code-to-category mapper (used everywhere) ────────────────────────
+export function mapExpenseCodeToCategory(code: string): string {
+  if (!code) return '';
+  const upper = code.trim().toUpperCase();
+  // Direct lookup
+  if (SOURCE_CODE_MAP[upper]) return SOURCE_CODE_MAP[upper];
+  // Check if it's actually a category name (reverse lookup)
+  const reverseEntry = Object.entries(SOURCE_CODE_MAP).find(
+    ([, cat]) => cat.toLowerCase() === upper.toLowerCase()
+  );
+  return reverseEntry ? reverseEntry[1] : '';
+}
+
 function migrateExpense(e: any): any {
   let category = e.category || 'Other';
-  // If expense has source_code, remap via SOURCE_CODE_MAP
-  if (e.source_code) {
-    const code = String(e.source_code).trim().toUpperCase();
-    if (['F', 'RN', 'MF'].includes(code)) {
-      console.warn(`[expenses] Legacy source_code '${code}' mapped to Other for expense id=${e.id}`);
+  // Check all possible code fields in priority order
+  const codeFields = [e.source_code, e.subcategory, e.sub_category, e.code, e.sourceCode];
+  for (const rawField of codeFields) {
+    if (!rawField) continue;
+    const mapped = mapExpenseCodeToCategory(String(rawField));
+    if (mapped) {
+      category = mapped;
+      break;
     }
-    const mapped = SOURCE_CODE_MAP[code];
-    if (mapped) category = mapped;
-  } else if (LEGACY_CATEGORY_MAP[category]) {
-    category = LEGACY_CATEGORY_MAP[category];
+  }
+  // If still 'Other', try legacy category name remapping
+  if (category === 'Other' || LEGACY_CATEGORY_MAP[category]) {
+    category = LEGACY_CATEGORY_MAP[category] || category;
   }
   return { ...e, category };
 }
@@ -444,6 +461,39 @@ export default function ExpensesPage() {
       toast({ title: `Imported ${res.created} expenses`, description: 'Excel import complete.' });
     },
   });
+  const fixCategoriesMut = useMutation({
+    mutationFn: async () => {
+      const allExpenses = await apiRequest('GET', '/api/expenses').then(r => r.json()) as any[];
+      let fixed = 0;
+      const toFix: any[] = [];
+      for (const e of allExpenses) {
+        const codeFields = [e.source_code, e.subcategory, e.sub_category, e.code];
+        let newCategory = e.category;
+        for (const rawField of codeFields) {
+          if (!rawField) continue;
+          const mapped = mapExpenseCodeToCategory(String(rawField));
+          if (mapped && mapped !== e.category) {
+            newCategory = mapped;
+            break;
+          }
+        }
+        if (newCategory !== e.category) {
+          toFix.push({ id: e.id, category: newCategory });
+          fixed++;
+        }
+      }
+      // Update each record
+      await Promise.all(toFix.map(item =>
+        apiRequest('PUT', `/api/expenses/${item.id}`, { category: item.category })
+      ));
+      return { fixed, total: allExpenses.length };
+    },
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['/api/expenses'] });
+      toast({ title: `Categories Fixed`, description: `${result.fixed} of ${result.total} records updated.` });
+    },
+    onError: () => toast({ title: 'Fix failed', variant: 'destructive' }),
+  });
 
   // ── Filter logic ────────────────────────────────────────────────────────────
   const filtered = useMemo(() => expenses.filter((e: any) => {
@@ -662,21 +712,32 @@ export default function ExpensesPage() {
       }
       // Detect header row — find column indices by name
       const headerRow = allRows[0].map((h: any) => String(h ?? '').trim().toLowerCase());
-      const col = (names: string[]) => {
+      const col = (names: string[], fallbackPosition?: number): number => {
+        // 1. Exact match (lowercased)
         for (const n of names) {
           const idx = headerRow.indexOf(n);
           if (idx >= 0) return idx;
         }
+        // 2. Partial match (header contains any of the names)
+        for (let i = 0; i < headerRow.length; i++) {
+          const h = headerRow[i];
+          if (names.some(n => h.includes(n) || n.includes(h))) return i;
+        }
+        // 3. Positional fallback (for standard template column order)
+        if (fallbackPosition !== undefined && headerRow.length > fallbackPosition) {
+          return fallbackPosition;
+        }
         return -1;
       };
-      const colDate    = col(['date']);
-      const colAmount  = col(['amount']);
-      const colCode    = col(['code', 'source code', 'source_code', 'sub-category', 'subcategory', 'subcat']);
-      const colDesc    = col(['description', 'desc', 'details', 'note']);
-      const colMember  = col(['member', 'family member', 'family_member', 'person', 'who']);
-      const colPayment = col(['payment method', 'payment_method', 'payment', 'method']);
-      const colNotes   = col(['notes', 'note', 'comment', 'comments']);
-      const colRecur   = col(['recurring', 'repeat', 'recur']);
+      const colDate    = col(['date'], 0);
+      const colAmount  = col(['amount'], 1);
+      // Code column: check many names, fallback to position 2
+      const colCode    = col(['code', 'source code', 'source_code', 'sub-category', 'subcategory', 'subcat', 'sub cat', 'sourcecode'], 2);
+      const colDesc    = col(['description', 'desc', 'details', 'note', 'merchant', 'narration', 'reference'], 3);
+      const colMember  = col(['member', 'family member', 'family_member', 'person', 'who'], 4);
+      const colPayment = col(['payment method', 'payment_method', 'payment', 'method'], 5);
+      const colNotes   = col(['notes', 'note', 'comment', 'comments'], 6);
+      const colRecur   = col(['recurring', 'repeat', 'recur'], 7);
 
       const dataRows = allRows.slice(1);
       const preview: ImportRow[] = [];
@@ -704,9 +765,18 @@ export default function ExpensesPage() {
 
         // Code + Category
         const rawCode = colCode >= 0 ? String(r[colCode] ?? '').trim().toUpperCase() : '';
-        const mapped  = SOURCE_CODE_MAP[rawCode];
+        // If rawCode looks like a full category name (contains space, longer than 4 chars), try reverse mapping
+        let resolvedCode = rawCode;
+        if (rawCode.length > 4 || rawCode.includes(' ')) {
+          // Try to find which code maps to this category
+          const reverseEntry = Object.entries(SOURCE_CODE_MAP).find(
+            ([, cat]) => cat.toLowerCase() === rawCode.toLowerCase()
+          );
+          resolvedCode = reverseEntry ? reverseEntry[0] : rawCode;
+        }
+        const mapped  = SOURCE_CODE_MAP[resolvedCode] || SOURCE_CODE_MAP[rawCode];
         const isLegacy  = ['F', 'RN', 'MF'].includes(rawCode);
-        const isUnknown = rawCode && !SOURCE_CODE_MAP[rawCode];
+        const isUnknown = rawCode && !SOURCE_CODE_MAP[rawCode] && !mapped;
 
         // Member
         const rawMember = colMember >= 0 ? String(r[colMember] ?? '') : '';
@@ -736,7 +806,7 @@ export default function ExpensesPage() {
         preview.push({
           date: dateResult.iso,
           amount,
-          source_code: rawCode,
+          source_code: resolvedCode,
           category: mapped || 'Other',
           description,
           member,
@@ -958,6 +1028,16 @@ export default function ExpensesPage() {
             <Upload className="w-3.5 h-3.5" /> Import Excel
           </Button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleExcelImport} />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => fixCategoriesMut.mutate()}
+            disabled={fixCategoriesMut.isPending}
+            className="gap-1.5 text-yellow-400 border-yellow-800/40 hover:border-yellow-600"
+          >
+            {fixCategoriesMut.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            Fix Categories
+          </Button>
           <Button
             size="sm"
             onClick={() => setShowAdd(true)}
