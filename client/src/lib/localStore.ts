@@ -7,8 +7,10 @@
  * CACHE:           localStorage (fallback + offline support)
  *
  * Strategy on every READ:
- *   1. Return localStorage cache immediately (fast, no flash)
- *   2. Fetch from Supabase in background and update cache
+ *   1. Fetch from Supabase first (always, no seeded gate)
+ *   2. On success → update localStorage cache, return Supabase data
+ *   3. On failure → fall back to localStorage cache
+ *   4. Log every outcome with [SF] prefix
  *
  * Strategy on every WRITE (Save button):
  *   1. Save to Supabase first
@@ -167,59 +169,41 @@ function normaliseSnapshot(raw: any): Snapshot {
   };
 }
 
-// ─── Seed on first load (localStorage only — Supabase already seeded via migration) ──
+// ─── Initial seed — ONLY seeds empty Supabase tables, no localStorage gate ───
+// This runs once on first load. It will NOT block reads — reads always go to
+// Supabase regardless. This only seeds Supabase if it is completely empty.
 
-async function seedIfNeeded() {
-  if (lsGet<boolean>(KEYS.seeded)) return;
+async function seedSupabaseIfEmpty() {
+  try {
+    const sbSnap = await sbSnapshot.get();
+    if (!sbSnap) {
+      console.log("[SF] Supabase snapshot empty — seeding defaults");
+      await sbSnapshot.upsert({ ...DEFAULT_SNAPSHOT });
+    }
 
-  // Try to pull from Supabase first
-  const sbSnap = await sbSnapshot.get();
-  if (sbSnap) {
-    // Supabase has data — populate local cache from cloud
-    lsSet(KEYS.snapshot, normaliseSnapshot(sbSnap));
-  } else {
-    // Nothing in Supabase either — seed both
-    const defaultSnap = { ...DEFAULT_SNAPSHOT };
-    lsSet(KEYS.snapshot, defaultSnap);
-    await sbSnapshot.upsert(defaultSnap);
+    const sbStocksData = await sbStocks.getAll();
+    if (sbStocksData.length === 0) {
+      console.log("[SF] Supabase stocks empty — seeding defaults");
+      for (const s of DEFAULT_STOCKS) await sbStocks.create(s);
+    }
+
+    const sbCryptoData = await sbCrypto.getAll();
+    if (sbCryptoData.length === 0) {
+      console.log("[SF] Supabase crypto empty — seeding defaults");
+      for (const c of DEFAULT_CRYPTOS) await sbCrypto.create(c);
+    }
+  } catch (err) {
+    console.warn("[SF] Seed check failed (non-fatal):", err);
   }
-
-  // Seed stocks cache from Supabase or defaults
-  const sbStocksData = await sbStocks.getAll();
-  if (sbStocksData.length > 0) {
-    lsSet(KEYS.stocks, sbStocksData);
-  } else {
-    const defaultStocks = DEFAULT_STOCKS.map((s, i) => ({ ...s, id: i + 1, created_at: new Date().toISOString() }));
-    lsSet(KEYS.stocks, defaultStocks);
-    for (const s of DEFAULT_STOCKS) await sbStocks.create(s);
-  }
-
-  // Seed cryptos cache from Supabase or defaults
-  const sbCryptoData = await sbCrypto.getAll();
-  if (sbCryptoData.length > 0) {
-    lsSet(KEYS.crypto, sbCryptoData);
-  } else {
-    const defaultCryptos = DEFAULT_CRYPTOS.map((c, i) => ({ ...c, id: i + 1, created_at: new Date().toISOString() }));
-    lsSet(KEYS.crypto, defaultCryptos);
-    for (const c of DEFAULT_CRYPTOS) await sbCrypto.create(c);
-  }
-
-  // Other collections default to empty
-  lsSet(KEYS.expenses,   []);
-  lsSet(KEYS.properties, []);
-  lsSet(KEYS.timeline,   []);
-  lsSet(KEYS.scenarios,  []);
-
-  lsSet(KEYS.seeded, true);
-  setLastSync();
 }
 
-// Kick off seed asynchronously — doesn't block first render
-seedIfNeeded().catch(() => {});
+// Kick off seed check asynchronously — doesn't block first render
+seedSupabaseIfEmpty().catch(() => {});
 
 // ─── Cloud sync — pull everything from Supabase into cache ───────────────────
 
 export async function syncFromCloud(): Promise<void> {
+  console.log("[SF] syncFromCloud: pulling all data from Supabase...");
   const [snap, expenses, props, stocks, cryptos, timeline, scenarios] = await Promise.all([
     sbSnapshot.get(),
     sbExpenses.getAll(),
@@ -230,7 +214,10 @@ export async function syncFromCloud(): Promise<void> {
     sbScenarios.getAll(),
   ]);
 
-  if (snap) lsSet(KEYS.snapshot,   normaliseSnapshot(snap));
+  if (snap) {
+    lsSet(KEYS.snapshot,   normaliseSnapshot(snap));
+    console.log("[SF] Loaded from Supabase: snapshot", snap);
+  }
   lsSet(KEYS.expenses,   expenses);
   lsSet(KEYS.properties, props);
   lsSet(KEYS.stocks,     stocks);
@@ -238,6 +225,14 @@ export async function syncFromCloud(): Promise<void> {
   lsSet(KEYS.timeline,   timeline);
   lsSet(KEYS.scenarios,  scenarios);
   setLastSync();
+  console.log("[SF] syncFromCloud complete. Rows:", {
+    expenses: expenses.length,
+    props: props.length,
+    stocks: stocks.length,
+    cryptos: cryptos.length,
+    timeline: timeline.length,
+    scenarios: scenarios.length,
+  });
 }
 
 // ─── Public data store ────────────────────────────────────────────────────────
@@ -246,14 +241,34 @@ export const localStore = {
 
   // ── Snapshot ───────────────────────────────────────────────────────────────
 
-  getSnapshot(): Snapshot {
-    const raw = lsGet<any>(KEYS.snapshot);
-    if (!raw) return { ...DEFAULT_SNAPSHOT };
-    return normaliseSnapshot(raw);
+  async getSnapshot(): Promise<Snapshot> {
+    try {
+      const sbSnap = await sbSnapshot.get();
+      if (sbSnap) {
+        const result = normaliseSnapshot(sbSnap);
+        lsSet(KEYS.snapshot, result);
+        console.log("[SF] Loaded from Supabase: snapshot", result);
+        return result;
+      }
+      // Supabase returned null — fall back to cache
+      const cached = lsGet<any>(KEYS.snapshot);
+      if (cached) {
+        console.log("[SF] Fallback to local cache: snapshot");
+        return normaliseSnapshot(cached);
+      }
+      console.log("[SF] No data anywhere — using defaults: snapshot");
+      return { ...DEFAULT_SNAPSHOT };
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: snapshot", err);
+      const cached = lsGet<any>(KEYS.snapshot);
+      return cached ? normaliseSnapshot(cached) : { ...DEFAULT_SNAPSHOT };
+    }
   },
 
   async updateSnapshot(data: Partial<Snapshot>): Promise<Snapshot> {
-    const current = this.getSnapshot();
+    // Read current from cache (avoids a second Supabase round-trip)
+    const cached = lsGet<any>(KEYS.snapshot);
+    const current = cached ? normaliseSnapshot(cached) : { ...DEFAULT_SNAPSHOT };
     const merged = normaliseSnapshot({ ...current, ...data, updated_at: new Date().toISOString() });
 
     // 1. Save to Supabase (source of truth)
@@ -263,46 +278,60 @@ export const localStore = {
     // 2. Update local cache
     lsSet(KEYS.snapshot, result);
     setLastSync();
+    console.log("[SF] Saved to Supabase: snapshot", result);
     return result;
   },
 
   // ── Expenses ───────────────────────────────────────────────────────────────
 
-  getExpenses(): Expense[] {
-    return lsGet<Expense[]>(KEYS.expenses) ?? [];
+  async getExpenses(): Promise<Expense[]> {
+    try {
+      const rows = await sbExpenses.getAll();
+      lsSet(KEYS.expenses, rows);
+      console.log("[SF] Loaded from Supabase: expenses", rows.length, "rows");
+      return rows;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: expenses", err);
+      return lsGet<Expense[]>(KEYS.expenses) ?? [];
+    }
   },
 
   async createExpense(data: Omit<Expense, "id" | "created_at">): Promise<Expense> {
     const saved = await sbExpenses.create(data);
     if (saved) {
-      const items = this.getExpenses();
+      const items = lsGet<Expense[]>(KEYS.expenses) ?? [];
       lsSet(KEYS.expenses, [saved, ...items]);
+      console.log("[SF] Saved to Supabase: expense created", saved.id);
       return saved;
     }
     // fallback: local only
-    const items = this.getExpenses();
+    const items = lsGet<Expense[]>(KEYS.expenses) ?? [];
     const item: Expense = { ...data, id: nextId(items), created_at: new Date().toISOString() } as Expense;
     lsSet(KEYS.expenses, [item, ...items]);
+    console.log("[SF] Fallback to local cache: expense created locally", item.id);
     return item;
   },
 
   async updateExpense(id: number, data: Partial<Expense>): Promise<Expense> {
     const saved = await sbExpenses.update(id, data);
-    const items = this.getExpenses().map((i) => (i.id === id ? { ...i, ...(saved ?? data) } : i));
+    const items = (lsGet<Expense[]>(KEYS.expenses) ?? []).map((i) => (i.id === id ? { ...i, ...(saved ?? data) } : i));
     lsSet(KEYS.expenses, items);
+    console.log("[SF] Saved to Supabase: expense updated", id);
     return items.find((i) => i.id === id)!;
   },
 
   async deleteExpense(id: number): Promise<void> {
     await sbExpenses.delete(id);
-    lsSet(KEYS.expenses, this.getExpenses().filter((i) => i.id !== id));
+    lsSet(KEYS.expenses, (lsGet<Expense[]>(KEYS.expenses) ?? []).filter((i) => i.id !== id));
+    console.log("[SF] Saved to Supabase: expense deleted", id);
   },
 
   async bulkCreateExpenses(rows: Omit<Expense, "id" | "created_at">[]): Promise<Expense[]> {
     const saved = await sbExpenses.bulkCreate(rows);
     if (saved.length > 0) {
-      const items = this.getExpenses();
+      const items = lsGet<Expense[]>(KEYS.expenses) ?? [];
       lsSet(KEYS.expenses, [...saved, ...items]);
+      console.log("[SF] Saved to Supabase: bulk expenses created", saved.length);
       return saved;
     }
     return Promise.all(rows.map((r) => this.createExpense(r)));
@@ -310,126 +339,174 @@ export const localStore = {
 
   // ── Properties ─────────────────────────────────────────────────────────────
 
-  getProperties(): Property[] {
-    return lsGet<Property[]>(KEYS.properties) ?? [];
+  async getProperties(): Promise<Property[]> {
+    try {
+      const rows = await sbProperties.getAll();
+      lsSet(KEYS.properties, rows);
+      console.log("[SF] Loaded from Supabase: properties", rows.length, "rows");
+      return rows;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: properties", err);
+      return lsGet<Property[]>(KEYS.properties) ?? [];
+    }
   },
 
   async createProperty(data: Omit<Property, "id" | "created_at">): Promise<Property> {
     const saved = await sbProperties.create(data);
     if (saved) {
-      const items = this.getProperties();
+      const items = lsGet<Property[]>(KEYS.properties) ?? [];
       lsSet(KEYS.properties, [...items, saved]);
+      console.log("[SF] Saved to Supabase: property created", saved.id);
       return saved;
     }
-    const items = this.getProperties();
+    const items = lsGet<Property[]>(KEYS.properties) ?? [];
     const item: Property = { ...data, id: nextId(items), created_at: new Date().toISOString() } as Property;
     lsSet(KEYS.properties, [...items, item]);
+    console.log("[SF] Fallback to local cache: property created locally", item.id);
     return item;
   },
 
   async updateProperty(id: number, data: Partial<Property>): Promise<Property> {
     const saved = await sbProperties.update(id, data);
-    const items = this.getProperties().map((i) => (i.id === id ? { ...i, ...(saved ?? data) } : i));
+    const items = (lsGet<Property[]>(KEYS.properties) ?? []).map((i) => (i.id === id ? { ...i, ...(saved ?? data) } : i));
     lsSet(KEYS.properties, items);
+    console.log("[SF] Saved to Supabase: property updated", id);
     return items.find((i) => i.id === id)!;
   },
 
   async deleteProperty(id: number): Promise<void> {
     await sbProperties.delete(id);
-    lsSet(KEYS.properties, this.getProperties().filter((i) => i.id !== id));
+    lsSet(KEYS.properties, (lsGet<Property[]>(KEYS.properties) ?? []).filter((i) => i.id !== id));
+    console.log("[SF] Saved to Supabase: property deleted", id);
   },
 
   // ── Stocks ─────────────────────────────────────────────────────────────────
 
-  getStocks(): Stock[] {
-    return lsGet<Stock[]>(KEYS.stocks) ?? [];
+  async getStocks(): Promise<Stock[]> {
+    try {
+      const rows = await sbStocks.getAll();
+      lsSet(KEYS.stocks, rows);
+      console.log("[SF] Loaded from Supabase: stocks", rows.length, "rows");
+      return rows;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: stocks", err);
+      return lsGet<Stock[]>(KEYS.stocks) ?? [];
+    }
   },
 
   async createStock(data: Omit<Stock, "id" | "created_at">): Promise<Stock> {
     const saved = await sbStocks.create(data);
     if (saved) {
-      const items = this.getStocks();
+      const items = lsGet<Stock[]>(KEYS.stocks) ?? [];
       lsSet(KEYS.stocks, [...items, saved]);
+      console.log("[SF] Saved to Supabase: stock created", saved.id);
       return saved;
     }
-    const items = this.getStocks();
+    const items = lsGet<Stock[]>(KEYS.stocks) ?? [];
     const item: Stock = { ...data, id: nextId(items), created_at: new Date().toISOString() } as Stock;
     lsSet(KEYS.stocks, [...items, item]);
+    console.log("[SF] Fallback to local cache: stock created locally", item.id);
     return item;
   },
 
   async updateStock(id: number, data: Partial<Stock>): Promise<Stock> {
     const saved = await sbStocks.update(id, data);
-    const items = this.getStocks().map((i) => (i.id === id ? { ...i, ...(saved ?? data) } : i));
+    const items = (lsGet<Stock[]>(KEYS.stocks) ?? []).map((i) => (i.id === id ? { ...i, ...(saved ?? data) } : i));
     lsSet(KEYS.stocks, items);
+    console.log("[SF] Saved to Supabase: stock updated", id);
     return items.find((i) => i.id === id)!;
   },
 
   async deleteStock(id: number): Promise<void> {
     await sbStocks.delete(id);
-    lsSet(KEYS.stocks, this.getStocks().filter((i) => i.id !== id));
+    lsSet(KEYS.stocks, (lsGet<Stock[]>(KEYS.stocks) ?? []).filter((i) => i.id !== id));
+    console.log("[SF] Saved to Supabase: stock deleted", id);
   },
 
   // ── Crypto ─────────────────────────────────────────────────────────────────
 
-  getCryptos(): Crypto[] {
-    return lsGet<Crypto[]>(KEYS.crypto) ?? [];
+  async getCryptos(): Promise<Crypto[]> {
+    try {
+      const rows = await sbCrypto.getAll();
+      lsSet(KEYS.crypto, rows);
+      console.log("[SF] Loaded from Supabase: crypto", rows.length, "rows");
+      return rows;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: crypto", err);
+      return lsGet<Crypto[]>(KEYS.crypto) ?? [];
+    }
   },
 
   async createCrypto(data: Omit<Crypto, "id" | "created_at">): Promise<Crypto> {
     const saved = await sbCrypto.create(data);
     if (saved) {
-      const items = this.getCryptos();
+      const items = lsGet<Crypto[]>(KEYS.crypto) ?? [];
       lsSet(KEYS.crypto, [...items, saved]);
+      console.log("[SF] Saved to Supabase: crypto created", saved.id);
       return saved;
     }
-    const items = this.getCryptos();
+    const items = lsGet<Crypto[]>(KEYS.crypto) ?? [];
     const item: Crypto = { ...data, id: nextId(items), created_at: new Date().toISOString() } as Crypto;
     lsSet(KEYS.crypto, [...items, item]);
+    console.log("[SF] Fallback to local cache: crypto created locally", item.id);
     return item;
   },
 
   async updateCrypto(id: number, data: Partial<Crypto>): Promise<Crypto> {
     const saved = await sbCrypto.update(id, data);
-    const items = this.getCryptos().map((i) => (i.id === id ? { ...i, ...(saved ?? data) } : i));
+    const items = (lsGet<Crypto[]>(KEYS.crypto) ?? []).map((i) => (i.id === id ? { ...i, ...(saved ?? data) } : i));
     lsSet(KEYS.crypto, items);
+    console.log("[SF] Saved to Supabase: crypto updated", id);
     return items.find((i) => i.id === id)!;
   },
 
   async deleteCrypto(id: number): Promise<void> {
     await sbCrypto.delete(id);
-    lsSet(KEYS.crypto, this.getCryptos().filter((i) => i.id !== id));
+    lsSet(KEYS.crypto, (lsGet<Crypto[]>(KEYS.crypto) ?? []).filter((i) => i.id !== id));
+    console.log("[SF] Saved to Supabase: crypto deleted", id);
   },
 
   // ── Timeline ───────────────────────────────────────────────────────────────
 
-  getTimelineEvents(): TimelineEvent[] {
-    return lsGet<TimelineEvent[]>(KEYS.timeline) ?? [];
+  async getTimelineEvents(): Promise<TimelineEvent[]> {
+    try {
+      const rows = await sbTimeline.getAll();
+      lsSet(KEYS.timeline, rows);
+      console.log("[SF] Loaded from Supabase: timeline", rows.length, "rows");
+      return rows;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: timeline", err);
+      return lsGet<TimelineEvent[]>(KEYS.timeline) ?? [];
+    }
   },
 
   async createTimelineEvent(data: Omit<TimelineEvent, "id" | "created_at">): Promise<TimelineEvent> {
     const saved = await sbTimeline.create(data);
     if (saved) {
-      const items = this.getTimelineEvents();
+      const items = lsGet<TimelineEvent[]>(KEYS.timeline) ?? [];
       lsSet(KEYS.timeline, [...items, saved]);
+      console.log("[SF] Saved to Supabase: timeline event created", saved.id);
       return saved;
     }
-    const items = this.getTimelineEvents();
+    const items = lsGet<TimelineEvent[]>(KEYS.timeline) ?? [];
     const item: TimelineEvent = { ...data, id: nextId(items), created_at: new Date().toISOString() } as TimelineEvent;
     lsSet(KEYS.timeline, [...items, item]);
+    console.log("[SF] Fallback to local cache: timeline event created locally", item.id);
     return item;
   },
 
   async updateTimelineEvent(id: number, data: Partial<TimelineEvent>): Promise<TimelineEvent> {
     const saved = await sbTimeline.update(id, data);
-    const items = this.getTimelineEvents().map((i) => (i.id === id ? { ...i, ...(saved ?? data) } : i));
+    const items = (lsGet<TimelineEvent[]>(KEYS.timeline) ?? []).map((i) => (i.id === id ? { ...i, ...(saved ?? data) } : i));
     lsSet(KEYS.timeline, items);
+    console.log("[SF] Saved to Supabase: timeline event updated", id);
     return items.find((i) => i.id === id)!;
   },
 
   async deleteTimelineEvent(id: number): Promise<void> {
     await sbTimeline.delete(id);
-    lsSet(KEYS.timeline, this.getTimelineEvents().filter((i) => i.id !== id));
+    lsSet(KEYS.timeline, (lsGet<TimelineEvent[]>(KEYS.timeline) ?? []).filter((i) => i.id !== id));
+    console.log("[SF] Saved to Supabase: timeline event deleted", id);
   },
 
   // ── Settings (localStorage only — not synced, device preference) ───────────
@@ -445,25 +522,36 @@ export const localStore = {
 
   // ── Scenarios ──────────────────────────────────────────────────────────────
 
-  getScenarios(): Scenario[] {
-    return lsGet<Scenario[]>(KEYS.scenarios) ?? [];
+  async getScenarios(): Promise<Scenario[]> {
+    try {
+      const rows = await sbScenarios.getAll();
+      lsSet(KEYS.scenarios, rows);
+      console.log("[SF] Loaded from Supabase: scenarios", rows.length, "rows");
+      return rows;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: scenarios", err);
+      return lsGet<Scenario[]>(KEYS.scenarios) ?? [];
+    }
   },
 
   async createScenario(data: Omit<Scenario, "id" | "created_at">): Promise<Scenario> {
     const saved = await sbScenarios.create(data);
     if (saved) {
-      const items = this.getScenarios();
+      const items = lsGet<Scenario[]>(KEYS.scenarios) ?? [];
       lsSet(KEYS.scenarios, [...items, saved]);
+      console.log("[SF] Saved to Supabase: scenario created", saved.id);
       return saved;
     }
-    const items = this.getScenarios();
+    const items = lsGet<Scenario[]>(KEYS.scenarios) ?? [];
     const item: Scenario = { ...data, id: nextId(items), created_at: new Date().toISOString() } as Scenario;
     lsSet(KEYS.scenarios, [...items, item]);
+    console.log("[SF] Fallback to local cache: scenario created locally", item.id);
     return item;
   },
 
   async deleteScenario(id: number): Promise<void> {
     await sbScenarios.delete(id);
-    lsSet(KEYS.scenarios, this.getScenarios().filter((i) => i.id !== id));
+    lsSet(KEYS.scenarios, (lsGet<Scenario[]>(KEYS.scenarios) ?? []).filter((i) => i.id !== id));
+    console.log("[SF] Saved to Supabase: scenario deleted", id);
   },
 };
