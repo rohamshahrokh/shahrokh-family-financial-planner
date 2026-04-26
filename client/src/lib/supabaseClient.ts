@@ -199,3 +199,49 @@ export const sbScenarios = {
     try { await sbDelete("sf_scenarios", id); } catch {}
   },
 };
+
+// ─── Stock Transactions ───────────────────────────────────────────────────────
+
+export const sbStockTx = {
+  async getAll(): Promise<any[]> {
+    try { return await sbGet("sf_stock_transactions", "order=transaction_date.desc"); } catch { return []; }
+  },
+  async create(data: object): Promise<any | null> {
+    try {
+      return await sbInsert("sf_stock_transactions", {
+        ...data,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    } catch { return null; }
+  },
+  async update(id: number, data: object): Promise<any | null> {
+    try { return await sbUpdate("sf_stock_transactions", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async delete(id: number): Promise<void> {
+    try { await sbDelete("sf_stock_transactions", id); } catch {}
+  },
+};
+
+// ─── Crypto Transactions ──────────────────────────────────────────────────────
+
+export const sbCryptoTx = {
+  async getAll(): Promise<any[]> {
+    try { return await sbGet("sf_crypto_transactions", "order=transaction_date.desc"); } catch { return []; }
+  },
+  async create(data: object): Promise<any | null> {
+    try {
+      return await sbInsert("sf_crypto_transactions", {
+        ...data,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    } catch { return null; }
+  },
+  async update(id: number, data: object): Promise<any | null> {
+    try { return await sbUpdate("sf_crypto_transactions", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async delete(id: number): Promise<void> {
+    try { await sbDelete("sf_crypto_transactions", id); } catch {}
+  },
+};
