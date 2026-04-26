@@ -5,6 +5,7 @@ import { formatCurrency } from "@/lib/finance";
 import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import AutoImportPanel from "@/components/AutoImportPanel";
+import AIInsightsCard from "@/components/AIInsightsCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -1406,6 +1407,24 @@ export default function ExpensesPage() {
 
       {/* ─── Auto Import Panel ─────────────────────────────── */}
       <AutoImportPanel expenses={expenses} onImportComplete={() => qc.invalidateQueries({ queryKey: ['/api/expenses'] })} />
+
+      {/* ─── AI Insights ─────────────────────────────────────────────────── */}
+      <AIInsightsCard
+        pageKey="expenses"
+        pageLabel="Spending Analysis"
+        getData={() => {
+          const byCategory: Record<string,number> = {};
+          let monthlyTotal = 0;
+          const now = new Date();
+          expenses.forEach((e: any) => {
+            byCategory[e.category] = (byCategory[e.category] || 0) + e.amount;
+            const d = new Date(e.date);
+            if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) monthlyTotal += e.amount;
+          });
+          const top = Object.entries(byCategory).sort((a,b) => b[1]-a[1]).slice(0,8).map(([cat,amt]) => ({ cat, amt: Math.round(amt) }));
+          return { count: expenses.length, monthlyTotal: Math.round(monthlyTotal), topCategories: top };
+        }}
+      />
     </div>
   );
 }
