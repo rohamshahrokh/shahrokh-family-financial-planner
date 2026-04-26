@@ -1,9 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, projectNetWorth, calcSavingsRate } from "@/lib/finance";
 import { Button } from "@/components/ui/button";
+import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { useToast } from "@/hooks/use-toast";
-import { Download, FileText, BarChart2, FileSpreadsheet } from "lucide-react";
+import { Download, FileText, BarChart2, FileSpreadsheet, Trash2, CheckSquare, Square } from "lucide-react";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -16,12 +18,18 @@ const COLORS = ['hsl(43,85%,55%)', 'hsl(188,60%,48%)', 'hsl(142,60%,45%)', 'hsl(
 
 export default function ReportsPage() {
   const { toast } = useToast();
+  const qc = useQueryClient();
 
   const { data: snapshot } = useQuery({ queryKey: ['/api/snapshot'], queryFn: () => apiRequest('GET', '/api/snapshot').then(r => r.json()) });
   const { data: properties = [] } = useQuery<any[]>({ queryKey: ['/api/properties'], queryFn: () => apiRequest('GET', '/api/properties').then(r => r.json()) });
   const { data: stocks = [] } = useQuery<any[]>({ queryKey: ['/api/stocks'], queryFn: () => apiRequest('GET', '/api/stocks').then(r => r.json()) });
   const { data: cryptos = [] } = useQuery<any[]>({ queryKey: ['/api/crypto'], queryFn: () => apiRequest('GET', '/api/crypto').then(r => r.json()) });
   const { data: expenses = [] } = useQuery<any[]>({ queryKey: ['/api/expenses'], queryFn: () => apiRequest('GET', '/api/expenses').then(r => r.json()) });
+  const { data: scenarios = [] } = useQuery<any[]>({ queryKey: ['/api/scenarios'], queryFn: () => apiRequest('GET', '/api/scenarios').then(r => r.json()).catch(() => []) });
+
+  // ─── Bulk delete state for scenarios ─────────────────────────────────────
+  const [selectedScenarios, setSelectedScenarios] = useState<Set<number>>(new Set());
+  const [showScenarioBulkModal, setShowScenarioBulkModal] = useState(false);
 
   const snap = snapshot || { ppor: 1510000, cash: 220000, super_balance: 85000, stocks: 0, crypto: 0, cars: 65000, iran_property: 150000, mortgage: 1200000, other_debts: 19000, monthly_income: 22000, monthly_expenses: 14540 };
 
@@ -44,6 +52,44 @@ export default function ReportsPage() {
   const expenseByCategory: Record<string, number> = {};
   expenses.forEach((e: any) => { expenseByCategory[e.category] = (expenseByCategory[e.category] || 0) + e.amount; });
   const expCatData = Object.entries(expenseByCategory).slice(0, 8).map(([name, value]) => ({ name, value: value as number }));
+
+  // ─── Scenario bulk select helpers ─────────────────────────────────────────
+  const toggleScenario = (id: number) => {
+    setSelectedScenarios(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllScenarios = () => {
+    if (selectedScenarios.size === scenarios.length) {
+      setSelectedScenarios(new Set());
+    } else {
+      setSelectedScenarios(new Set(scenarios.map((s: any) => s.id)));
+    }
+  };
+
+  const handleExportScenariosBackup = () => {
+    const wb = XLSX.utils.book_new();
+    const sel = scenarios.filter((s: any) => selectedScenarios.has(s.id));
+    const headers = ['ID', 'Name', 'Description', 'Created'];
+    const rows = sel.map((s: any) => [s.id, s.name || '', s.description || '', s.created_at || '']);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([headers, ...rows]), 'Scenarios Backup');
+    XLSX.writeFile(wb, `Scenarios_Backup_${new Date().toISOString().split('T')[0]}.xlsx`);
+    toast({ title: 'Backup exported', description: `${sel.length} scenarios saved.` });
+  };
+
+  const handleBulkDeleteScenarios = async () => {
+    const ids = Array.from(selectedScenarios);
+    for (const id of ids) {
+      await apiRequest('DELETE', `/api/scenarios/${id}`).catch(() => {});
+    }
+    await qc.invalidateQueries({ queryKey: ['/api/scenarios'] });
+    setSelectedScenarios(new Set());
+    setShowScenarioBulkModal(false);
+    toast({ title: `Deleted ${ids.length} scenarios`, description: 'Scenarios removed from Supabase and local cache.' });
+  };
 
   // ─── Excel Export ────────────────────────────────────────────────────
   const exportExcel = () => {
@@ -387,7 +433,7 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* Expense breakdown (if any) */}
+      {/* Expense breakdown */}
       {expCatData.length > 0 && (
         <div className="bg-card border border-border rounded-xl p-5">
           <h3 className="text-sm font-bold mb-4">Expense Analysis by Category</h3>
@@ -404,6 +450,91 @@ export default function ReportsPage() {
           </ResponsiveContainer>
         </div>
       )}
+
+      {/* ─── Scenarios / What-If Analysis ───────────────────────────────── */}
+      {scenarios.length > 0 && (
+        <div className="bg-card border border-border rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <h3 className="text-sm font-bold">Saved Scenarios / What-If Analysis</h3>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 text-xs h-7"
+                onClick={toggleAllScenarios}
+                data-testid="button-select-all-scenarios"
+              >
+                {selectedScenarios.size === scenarios.length
+                  ? <><CheckSquare className="w-3.5 h-3.5" /> Deselect All</>
+                  : <><Square className="w-3.5 h-3.5" /> Select All</>
+                }
+              </Button>
+              {selectedScenarios.size > 0 && (
+                <>
+                  <span className="text-xs text-muted-foreground">{selectedScenarios.size} selected</span>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="gap-1.5 text-xs h-7"
+                    onClick={() => setShowScenarioBulkModal(true)}
+                    data-testid="button-bulk-delete-scenarios"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete {selectedScenarios.size}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-xs h-7"
+                    onClick={() => setSelectedScenarios(new Set())}
+                  >
+                    Clear
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {scenarios.map((s: any) => (
+              <div
+                key={s.id}
+                className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-secondary/20 transition-colors"
+                style={{ borderColor: selectedScenarios.has(s.id) ? 'hsl(0,72%,51%)' : undefined }}
+              >
+                <button
+                  onClick={() => toggleScenario(s.id)}
+                  className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                  data-testid={`checkbox-scenario-${s.id}`}
+                >
+                  {selectedScenarios.has(s.id)
+                    ? <CheckSquare className="w-4 h-4 text-red-400" />
+                    : <Square className="w-4 h-4" />
+                  }
+                </button>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate">{s.name || `Scenario ${s.id}`}</p>
+                  {s.description && <p className="text-xs text-muted-foreground truncate">{s.description}</p>}
+                </div>
+                {s.created_at && (
+                  <p className="text-xs text-muted-foreground shrink-0">
+                    {new Date(s.created_at).toLocaleDateString('en-AU')}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Modal for Scenarios */}
+      <BulkDeleteModal
+        open={showScenarioBulkModal}
+        count={selectedScenarios.size}
+        label="scenarios"
+        onConfirm={handleBulkDeleteScenarios}
+        onCancel={() => setShowScenarioBulkModal(false)}
+        onExportBackup={handleExportScenariosBackup}
+      />
     </div>
   );
 }
