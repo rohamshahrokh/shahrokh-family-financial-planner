@@ -132,6 +132,30 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
     if (m === "DELETE") { await localStore.deleteScenario(id); return { success: true }; }
   }
 
+  // ── Stock transactions ─────────────────────────────────────────────────────
+  if (path === "/api/stock-transactions") {
+    if (m === "GET")  return await localStore.getStockTransactions();
+    if (m === "POST") return await localStore.createStockTransaction(body as any);
+  }
+  const stockTxMatch = path.match(/^\/api\/stock-transactions\/(\d+)$/);
+  if (stockTxMatch) {
+    const id = parseInt(stockTxMatch[1]);
+    if (m === "PUT")    return await localStore.updateStockTransaction(id, body as any);
+    if (m === "DELETE") { await localStore.deleteStockTransaction(id); return { success: true }; }
+  }
+
+  // ── Crypto transactions ────────────────────────────────────────────────────
+  if (path === "/api/crypto-transactions") {
+    if (m === "GET")  return await localStore.getCryptoTransactions();
+    if (m === "POST") return await localStore.createCryptoTransaction(body as any);
+  }
+  const cryptoTxMatch = path.match(/^\/api\/crypto-transactions\/(\d+)$/);
+  if (cryptoTxMatch) {
+    const id = parseInt(cryptoTxMatch[1]);
+    if (m === "PUT")    return await localStore.updateCryptoTransaction(id, body as any);
+    if (m === "DELETE") { await localStore.deleteCryptoTransaction(id); return { success: true }; }
+  }
+
   throw new Error(`[localStore] Unhandled: ${m} ${path}`);
 }
 
