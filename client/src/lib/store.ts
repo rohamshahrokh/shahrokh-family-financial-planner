@@ -1,20 +1,27 @@
 /**
  * store.ts — Zustand global store
- * Auth state is persisted to localStorage so login survives page refresh.
+ * Auth state + user + privacy mode are all persisted to localStorage
+ * so login and preferences survive page refresh.
  */
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+
+type CurrentUser = "Roham" | "Fara";
 
 interface AppState {
   isAuthenticated: boolean;
   theme: "dark" | "light";
   lastSaved: string | null;
   chartView: "monthly" | "annual";
+  privacyMode: boolean;       // true = numbers hidden (default for new users)
+  currentUser: CurrentUser;   // which family member is logged in
   login: () => void;
   logout: () => void;
   toggleTheme: () => void;
   setLastSaved: (time: string) => void;
   setChartView: (view: "monthly" | "annual") => void;
+  togglePrivacy: () => void;
+  setCurrentUser: (user: CurrentUser) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -24,10 +31,14 @@ export const useAppStore = create<AppState>()(
       theme: "dark",
       lastSaved: null,
       chartView: "annual",
+      privacyMode: true,       // hidden by default
+      currentUser: "Roham",    // default user
 
       login: () => set({ isAuthenticated: true }),
 
       logout: () => set({ isAuthenticated: false }),
+
+      togglePrivacy: () => set((state) => ({ privacyMode: !state.privacyMode })),
 
       toggleTheme: () =>
         set((state) => {
@@ -39,6 +50,8 @@ export const useAppStore = create<AppState>()(
       setLastSaved: (time: string) => set({ lastSaved: time }),
 
       setChartView: (view) => set({ chartView: view }),
+
+      setCurrentUser: (user: CurrentUser) => set({ currentUser: user }),
     }),
     {
       name: "shahrokh-app-state",           // localStorage key
@@ -47,6 +60,8 @@ export const useAppStore = create<AppState>()(
         isAuthenticated: state.isAuthenticated,
         theme: state.theme,
         chartView: state.chartView,
+        privacyMode: state.privacyMode,
+        currentUser: state.currentUser,
       }),
     }
   )
