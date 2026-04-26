@@ -4,6 +4,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/finance";
 import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
+import AutoImportPanel from "@/components/AutoImportPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -276,6 +277,68 @@ function normaliseDraft(d: ExpenseFormData) {
   };
 }
 
+// ─── Excel date serial → YYYY-MM-DD ──────────────────────────────────────────
+function excelSerialToDate(serial: number): string {
+  // Excel epoch: Dec 30, 1899. Correction for Lotus 1-2-3 bug (day 60 = Feb 29 1900)
+  const utc_days = Math.floor(serial - 25569);
+  const utc_value = utc_days * 86400;
+  const date = new Date(utc_value * 1000);
+  return date.toISOString().split('T')[0];
+}
+
+function parseExcelDate(raw: any): { iso: string; wasSerial: boolean } {
+  if (!raw && raw !== 0) return { iso: new Date().toISOString().split('T')[0], wasSerial: false };
+  // Already a JS Date (cellDates: true worked)
+  if (raw instanceof Date) return { iso: raw.toISOString().split('T')[0], wasSerial: false };
+  const s = String(raw).trim();
+  // Numeric serial
+  const num = Number(s);
+  if (!isNaN(num) && num > 40000 && num < 60000) {
+    return { iso: excelSerialToDate(num), wasSerial: true };
+  }
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return { iso: s.split('T')[0], wasSerial: false };
+  // DD/MM/YYYY
+  const dmatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dmatch) {
+    const [, d, m, y] = dmatch;
+    // Detect DD/MM vs MM/DD: if day > 12 it must be DD/MM
+    const day = parseInt(d, 10);
+    const mon = parseInt(m, 10);
+    if (day > 12) return { iso: `${y}-${mon.toString().padStart(2,'0')}-${day.toString().padStart(2,'0')}`, wasSerial: false };
+    // Assume DD/MM/YYYY as default (Australian)
+    return { iso: `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`, wasSerial: false };
+  }
+  // Fallback: try native Date parse
+  const dobj = new Date(s);
+  if (!isNaN(dobj.getTime())) return { iso: dobj.toISOString().split('T')[0], wasSerial: false };
+  return { iso: s, wasSerial: false };
+}
+
+// ─── Normalize member name ────────────────────────────────────────────────────
+function normalizeMember(raw: string): string {
+  if (!raw) return 'Family';
+  const s = raw.trim().toLowerCase();
+  if (s.includes('roham')) return 'Roham Shahrokh';
+  if (s.includes('fara')) return 'Fara Ghiyasi';
+  if (s.includes('yara') || s.includes('jana') || s.includes('kids') || s.includes('babies') || s.includes('baby')) return 'Yara Shahrokh';
+  if (s.includes('family') || s.includes('household')) return 'Family';
+  return 'Family';
+}
+
+// ─── Normalize payment method ─────────────────────────────────────────────────
+function normalizePaymentMethod(raw: string): string {
+  if (!raw) return 'Bank Transfer';
+  const s = raw.trim().toLowerCase();
+  if (s.includes('bp') || s.includes('bpay')) return 'Bank Transfer';
+  if (s.includes('credit')) return 'Credit Card';
+  if (s.includes('debit')) return 'Debit Card';
+  if (s.includes('offset')) return 'Offset Account';
+  if (s.includes('cash')) return 'Cash';
+  if (s.includes('transfer') || s.includes('bank')) return 'Bank Transfer';
+  return 'Bank Transfer';
+}
+
 // ─── Import preview row type ──────────────────────────────────────────────────
 interface ImportRow {
   date: string;
@@ -283,7 +346,12 @@ interface ImportRow {
   source_code: string;
   category: string;
   description: string;
+  member: string;
+  payment_method: string;
+  notes: string;
+  recurring: boolean;
   warning: string;
+  wasSerial?: boolean;
 }
 
 // ─── Chart tooltip ────────────────────────────────────────────────────────────
@@ -577,38 +645,108 @@ export default function ExpensesPage() {
     toast({ title: 'Backup exported', description: `${data.length} records saved to Excel.` });
   };
 
-  // ── Excel import (new 4-col format: Date | Amount | Code | Description) ──────
+  // ── Excel import ─────────────────────────────────────────────────
   const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
       const data = new Uint8Array(ev.target?.result as ArrayBuffer);
-      const wb = XLSX.read(data, { type: 'array' });
+      const wb = XLSX.read(data, { type: 'array', cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
-      const preview: ImportRow[] = rows.slice(1).filter(r => r[0] && r[1]).map(r => {
-        const rawDate = r[0] instanceof Date
-          ? r[0].toISOString().split('T')[0]
-          : String(r[0]).split('T')[0];
-        const amount = parseFloat(r[1]) || 0;
-        const code = r[2] ? String(r[2]).trim().toUpperCase() : '';
-        const description = r[3] ? String(r[3]) : '';
-        const mapped = SOURCE_CODE_MAP[code];
-        const isLegacy = ['F', 'RN', 'MF'].includes(code);
-        const isUnknown = code && !SOURCE_CODE_MAP[code];
+      const allRows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd' }) as any[][];
+      if (allRows.length < 2) {
+        toast({ title: 'Empty file', description: 'No data rows found.', variant: 'destructive' });
+        return;
+      }
+      // Detect header row — find column indices by name
+      const headerRow = allRows[0].map((h: any) => String(h ?? '').trim().toLowerCase());
+      const col = (names: string[]) => {
+        for (const n of names) {
+          const idx = headerRow.indexOf(n);
+          if (idx >= 0) return idx;
+        }
+        return -1;
+      };
+      const colDate    = col(['date']);
+      const colAmount  = col(['amount']);
+      const colCode    = col(['code', 'source code', 'source_code', 'sub-category', 'subcategory', 'subcat']);
+      const colDesc    = col(['description', 'desc', 'details', 'note']);
+      const colMember  = col(['member', 'family member', 'family_member', 'person', 'who']);
+      const colPayment = col(['payment method', 'payment_method', 'payment', 'method']);
+      const colNotes   = col(['notes', 'note', 'comment', 'comments']);
+      const colRecur   = col(['recurring', 'repeat', 'recur']);
+
+      const dataRows = allRows.slice(1);
+      const preview: ImportRow[] = [];
+
+      for (let rowIdx = 0; rowIdx < dataRows.length; rowIdx++) {
+        const r = dataRows[rowIdx];
+        // Skip truly empty rows
+        const hasDate   = colDate >= 0 && r[colDate] != null && r[colDate] !== '';
+        const hasAmount = colAmount >= 0 && r[colAmount] != null && r[colAmount] !== '';
+        if (!hasDate && !hasAmount) continue;
+
+        // Date — re-read raw numeric value for serial detection
+        const rawDateVal = colDate >= 0 ? r[colDate] : null;
+        const rawCell = colDate >= 0 ? ws[XLSX.utils.encode_cell({ r: rowIdx + 1, c: colDate })] : null;
+        const rawNumeric = rawCell?.t === 'n' ? rawCell.v : null;
+        let dateResult: { iso: string; wasSerial: boolean };
+        if (rawNumeric && rawNumeric > 40000) {
+          dateResult = { iso: excelSerialToDate(rawNumeric), wasSerial: true };
+        } else {
+          dateResult = parseExcelDate(rawDateVal);
+        }
+
+        // Amount
+        const amount = parseFloat(String(colAmount >= 0 ? r[colAmount] : 0).replace(/[^0-9.-]/g, '')) || 0;
+
+        // Code + Category
+        const rawCode = colCode >= 0 ? String(r[colCode] ?? '').trim().toUpperCase() : '';
+        const mapped  = SOURCE_CODE_MAP[rawCode];
+        const isLegacy  = ['F', 'RN', 'MF'].includes(rawCode);
+        const isUnknown = rawCode && !SOURCE_CODE_MAP[rawCode];
+
+        // Member
+        const rawMember = colMember >= 0 ? String(r[colMember] ?? '') : '';
+        const member = normalizeMember(rawMember);
+
+        // Payment Method
+        const rawPayment = colPayment >= 0 ? String(r[colPayment] ?? '') : '';
+        const payment_method = normalizePaymentMethod(rawPayment);
+
+        // Notes
+        const notes = colNotes >= 0 ? String(r[colNotes] ?? '') : '';
+
+        // Recurring
+        const recurRaw = colRecur >= 0 ? String(r[colRecur] ?? '').toLowerCase() : '';
+        const recurring = recurRaw === 'yes' || recurRaw === 'true' || recurRaw === '1';
+
+        // Description
+        const description = colDesc >= 0 ? String(r[colDesc] ?? '') : '';
+
+        // Warning
         let warning = '';
-        if (isUnknown) warning = `Unknown code "${code}" — mapped to Other`;
-        if (isLegacy) warning = `Legacy code "${code}" — mapped to Other`;
-        return {
-          date: rawDate,
+        if (dateResult.wasSerial) warning += `Date converted from serial (${rawNumeric}). `;
+        if (isUnknown) warning += `Unknown code "${rawCode}" → Other. `;
+        if (isLegacy)  warning += `Legacy code "${rawCode}" → Other. `;
+        if (amount <= 0) warning += `Invalid amount. `;
+
+        preview.push({
+          date: dateResult.iso,
           amount,
-          source_code: code,
+          source_code: rawCode,
           category: mapped || 'Other',
           description,
-          warning,
-        };
-      });
+          member,
+          payment_method,
+          notes,
+          recurring,
+          warning: warning.trim(),
+          wasSerial: dateResult.wasSerial,
+        });
+      }
+
       setImportRows(preview);
       setShowImportModal(true);
     };
@@ -617,19 +755,78 @@ export default function ExpensesPage() {
   };
 
   const handleConfirmImport = () => {
-    const toCreate = importRows.map(r => ({
-      date: r.date,
-      amount: r.amount,
-      source_code: r.source_code,
-      category: r.category,
-      subcategory: '',
-      description: r.description,
-      payment_method: '',
-      family_member: 'Roham Shahrokh',
-      recurring: false,
-      notes: '',
-    }));
-    bulkMut.mutate(toCreate);
+    // Build a set of existing fingerprints for duplicate detection
+    const existingFingerprints = new Set(
+      (expenses as any[]).map(e =>
+        `${e.date}|${Number(e.amount).toFixed(2)}|${(e.source_code || '').toUpperCase()}|${(e.description || '').trim().toLowerCase()}`
+      )
+    );
+
+    let skipped = 0;
+    let added = 0;
+    const toCreate: any[] = [];
+
+    for (const r of importRows) {
+      const fp = `${r.date}|${Number(r.amount).toFixed(2)}|${r.source_code.toUpperCase()}|${r.description.trim().toLowerCase()}`;
+      if (existingFingerprints.has(fp)) {
+        skipped++;
+        continue;
+      }
+      added++;
+      toCreate.push({
+        date: r.date,
+        amount: r.amount,
+        source_code: r.source_code,
+        category: r.category,
+        subcategory: '',
+        description: r.description,
+        payment_method: r.payment_method || 'Bank Transfer',
+        family_member: r.member || 'Family',
+        recurring: r.recurring || false,
+        notes: r.notes || '',
+      });
+    }
+
+    if (toCreate.length > 0) {
+      bulkMut.mutate(toCreate, {
+        onSuccess: () => {
+          toast({
+            title: `Import Complete`,
+            description: `${added} added, ${skipped} skipped as duplicates.`,
+          });
+          // Log to import history in localStorage
+          const history = JSON.parse(localStorage.getItem('sf_import_history') || '[]');
+          history.unshift({
+            id: Date.now(),
+            timestamp: new Date().toISOString(),
+            trigger: 'Manual',
+            checked: importRows.length,
+            added,
+            skipped,
+            status: 'Success',
+            error: '',
+            source: 'manual-upload',
+          });
+          localStorage.setItem('sf_import_history', JSON.stringify(history.slice(0, 100)));
+        },
+      });
+    } else {
+      toast({ title: 'No new records', description: `All ${skipped} rows already exist.` });
+      const history = JSON.parse(localStorage.getItem('sf_import_history') || '[]');
+      history.unshift({
+        id: Date.now(),
+        timestamp: new Date().toISOString(),
+        trigger: 'Manual',
+        checked: importRows.length,
+        added: 0,
+        skipped,
+        status: 'Success',
+        error: '',
+        source: 'manual-upload',
+      });
+      localStorage.setItem('sf_import_history', JSON.stringify(history.slice(0, 100)));
+    }
+
     setShowImportModal(false);
     setImportRows([]);
   };
@@ -655,13 +852,15 @@ export default function ExpensesPage() {
     toast({ title: 'Exported', description: 'Expenses exported to Excel.' });
   };
 
-  // ── Download template (new format: Date | Amount | Code | Description) ───────
+  // ── Download template ───────────────────────────────────────────────────
   const handleDownloadTemplate = () => {
-    const headers = [['Date', 'Amount', 'Code', 'Description']];
+    const headers = [['Date', 'Amount', 'Code', 'Description', 'Member', 'Payment Method', 'Notes', 'Recurring']];
     const sample = [
-      ['2026-04-01', '150.00', 'D', 'Weekly groceries — Coles'],
-      ['2026-04-05', '2500.00', 'R', 'Monthly mortgage payment'],
-      ['2026-04-10', '80.00', 'T', 'Petrol — BP Station'],
+      ['2026-04-01', '150.00', 'D', 'Weekly groceries — Coles', 'Family', 'Debit Card', '', 'No'],
+      ['2026-04-05', '2500.00', 'R', 'Monthly mortgage payment', 'Roham', 'Bank Transfer', 'Fixed mortgage', 'Yes'],
+      ['2026-04-10', '80.00', 'T', 'Petrol — BP Station', 'Roham', 'Credit Card', '', 'No'],
+      ['2026-04-12', '45.00', 'CC', 'Childcare — Little Learners', 'Kids', 'Bank Transfer', '', 'No'],
+      ['2026-04-15', '320.00', 'PI', 'Car insurance renewal', 'Family', 'Bank Transfer', 'Annual policy', 'No'],
     ];
     const ws = XLSX.utils.aoa_to_sheet([...headers, ...sample]);
     const wb = XLSX.utils.book_new();
@@ -687,7 +886,7 @@ export default function ExpensesPage() {
             <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
               <div>
                 <h2 className="text-base font-bold">Import Preview</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">{importRows.length} records ready to import</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{importRows.length} records ready to import{importRows.filter(r => r.wasSerial).length > 0 ? ` · Date serial numbers converted: ${importRows.filter(r => r.wasSerial).length}` : ''}</p>
               </div>
               <button onClick={() => setShowImportModal(false)} className="text-muted-foreground hover:text-foreground">
                 <X className="w-4 h-4" />
@@ -697,7 +896,7 @@ export default function ExpensesPage() {
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-secondary/80 backdrop-blur-sm">
                   <tr>
-                    {['Date', 'Amount', 'Source Code', 'Auto Category', 'Description', 'Warning'].map(h => (
+                    {['Date', 'Amount', 'Source Code', 'Auto Category', 'Description', 'Member', 'Payment Method', 'Warning'].map(h => (
                       <th key={h} className="text-left px-3 py-2.5 font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -711,7 +910,9 @@ export default function ExpensesPage() {
                         <span className="px-1.5 py-0.5 rounded bg-secondary font-mono">{r.source_code || '—'}</span>
                       </td>
                       <td className="px-3 py-1.5">{r.category}</td>
-                      <td className="px-3 py-1.5 max-w-[200px] truncate">{r.description}</td>
+                      <td className="px-3 py-1.5 max-w-[180px] truncate">{r.description}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap">{r.member || '—'}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap">{r.payment_method || '—'}</td>
                       <td className="px-3 py-1.5">
                         {r.warning && (
                           <span className="flex items-center gap-1 text-yellow-400">
@@ -1202,6 +1403,9 @@ export default function ExpensesPage() {
         onCancel={() => setShowBulkModal(false)}
         onExportBackup={handleExportBackup}
       />
+
+      {/* ─── Auto Import Panel ─────────────────────────────── */}
+      <AutoImportPanel expenses={expenses} onImportComplete={() => qc.invalidateQueries({ queryKey: ['/api/expenses'] })} />
     </div>
   );
 }
