@@ -33,6 +33,7 @@ import TaxPage        from "./pages/tax";
 import TimelinePage   from "./pages/timeline";
 import DataHealthPage from "./pages/data-health";
 import HelpPage       from "./pages/help";
+import AIInsightsPage from "./pages/ai-insights";
 import Layout         from "./components/Layout";
 import NotFound       from "./pages/not-found";
 
@@ -140,6 +141,13 @@ function AppRouter() {
         <Route path="/help">
           {isAuthenticated ? (
             <Layout><HelpPage /></Layout>
+          ) : (
+            <Redirect to="/login" />
+          )}
+        </Route>
+        <Route path="/ai-insights">
+          {isAuthenticated ? (
+            <Layout><AIInsightsPage /></Layout>
           ) : (
             <Redirect to="/login" />
           )}
