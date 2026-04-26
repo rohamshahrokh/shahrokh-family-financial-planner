@@ -32,6 +32,7 @@ import SettingsPage   from "./pages/settings";
 import TaxPage        from "./pages/tax";
 import TimelinePage   from "./pages/timeline";
 import DataHealthPage from "./pages/data-health";
+import HelpPage       from "./pages/help";
 import Layout         from "./components/Layout";
 import NotFound       from "./pages/not-found";
 
@@ -132,6 +133,13 @@ function AppRouter() {
         <Route path="/data-health">
           {isAuthenticated ? (
             <Layout><DataHealthPage /></Layout>
+          ) : (
+            <Redirect to="/login" />
+          )}
+        </Route>
+        <Route path="/help">
+          {isAuthenticated ? (
+            <Layout><HelpPage /></Layout>
           ) : (
             <Redirect to="/login" />
           )}
