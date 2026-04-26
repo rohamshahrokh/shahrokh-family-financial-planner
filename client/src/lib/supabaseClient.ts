@@ -105,16 +105,17 @@ export const sbExpenses = {
     try { await sbDelete("sf_expenses", id); } catch {}
   },
   async bulkCreate(rows: object[]): Promise<any[]> {
-    try {
-      const stamped = rows.map(r => ({ ...r, created_at: new Date().toISOString() }));
-      const res = await fetch(`${BASE}/sf_expenses`, {
-        method: "POST",
-        headers: HEADERS,
-        body: JSON.stringify(stamped),
-      });
-      if (!res.ok) return [];
-      return res.json();
-    } catch { return []; }
+    const stamped = rows.map(r => ({ ...r, created_at: new Date().toISOString() }));
+    const res = await fetch(`${BASE}/sf_expenses`, {
+      method: "POST",
+      headers: HEADERS,
+      body: JSON.stringify(stamped),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Supabase bulk insert sf_expenses failed (${res.status}): ${errText}`);
+    }
+    return res.json();
   },
 };
 
