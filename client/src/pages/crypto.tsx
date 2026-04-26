@@ -7,6 +7,7 @@ import { useAppStore } from "@/lib/store";
 import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
+import AIInsightsCard from "@/components/AIInsightsCard";
 import { Input } from "@/components/ui/input";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -733,6 +734,16 @@ export default function CryptoPage() {
           </div>
         </div>
       )}
+
+      {/* ─── AI Insights ───────────────────────────────────────────────────── */}
+      <AIInsightsCard
+        pageKey="crypto"
+        pageLabel="Crypto Portfolio"
+        getData={() => {
+        if (!cryptos?.length) return { count: 0 };
+        return { crypto: cryptos.map((c: any) => ({ symbol: c.symbol, qty: c.quantity, avgBuy: c.avg_buy_price, current: c.current_price, pnl: ((c.current_price - c.avg_buy_price) * c.quantity).toFixed(2) })) };
+      }}
+      />
     </div>
   );
 }
