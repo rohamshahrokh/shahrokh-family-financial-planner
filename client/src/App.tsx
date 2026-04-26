@@ -21,33 +21,68 @@ import { Toaster } from "@/components/ui/toaster";
 import { useAppStore } from "./lib/store";
 import { useEffect } from "react";
 
-import LoginPage      from "./pages/login";
-import DashboardPage  from "./pages/dashboard";
-import PropertyPage   from "./pages/property";
-import StocksPage     from "./pages/stocks";
-import CryptoPage     from "./pages/crypto";
-import ExpensesPage   from "./pages/expenses";
-import ReportsPage    from "./pages/reports";
-import SettingsPage   from "./pages/settings";
-import TaxPage        from "./pages/tax";
-import TimelinePage   from "./pages/timeline";
-import DataHealthPage from "./pages/data-health";
-import HelpPage       from "./pages/help";
-import AIInsightsPage from "./pages/ai-insights";
+import LoginPage          from "./pages/login";
+import DashboardPage      from "./pages/dashboard";
+import PropertyPage       from "./pages/property";
+import StocksPage         from "./pages/stocks";
+import CryptoPage         from "./pages/crypto";
+import ExpensesPage       from "./pages/expenses";
+import ReportsPage        from "./pages/reports";
+import SettingsPage       from "./pages/settings";
+import TaxPage            from "./pages/tax";
+import TimelinePage       from "./pages/timeline";
+import DataHealthPage     from "./pages/data-health";
+import HelpPage           from "./pages/help";
+import AIInsightsPage     from "./pages/ai-insights";
 import WealthStrategyPage from "./pages/wealth-strategy";
-import Layout         from "./components/Layout";
-import NotFound       from "./pages/not-found";
+import Layout             from "./components/Layout";
+import NotFound           from "./pages/not-found";
+
+// ─── Page title hook ──────────────────────────────────────────────────────────
+
+function usePageTitle(title: string) {
+  useEffect(() => {
+    document.title = title ? `${title} | Family Wealth Lab` : "Family Wealth Lab";
+  }, [title]);
+}
+
+// ─── Titled page wrapper ──────────────────────────────────────────────────────
+
+function TitledPage({
+  title,
+  component: Component,
+}: {
+  title: string;
+  component: React.ComponentType;
+}) {
+  usePageTitle(title);
+  return <Component />;
+}
 
 // ─── Protected route wrapper ──────────────────────────────────────────────────
 
 function ProtectedRoute({
   component: Component,
+  title,
 }: {
   component: React.ComponentType;
+  title: string;
 }) {
   const { isAuthenticated } = useAppStore();
   if (!isAuthenticated) return <Redirect to="/login" />;
-  return <Component />;
+  return (
+    <Layout>
+      <TitledPage title={title} component={Component} />
+    </Layout>
+  );
+}
+
+// ─── Login wrapper ────────────────────────────────────────────────────────────
+
+function LoginWrapper() {
+  const { isAuthenticated } = useAppStore();
+  usePageTitle("Login");
+  return isAuthenticated ? <Redirect to="/dashboard" /> : <LoginPage />;
 }
 
 // ─── App router ───────────────────────────────────────────────────────────────
@@ -58,107 +93,53 @@ function AppRouter() {
   return (
     <Router hook={useHashLocation}>
       <Switch>
-        {/* Login — redirect to dashboard if already authenticated */}
-        <Route path="/login">
-          {isAuthenticated ? <Redirect to="/dashboard" /> : <LoginPage />}
-        </Route>
+        {/* Login */}
+        <Route path="/login" component={LoginWrapper} />
 
-        {/* Root — redirect to dashboard or login */}
+        {/* Root redirect */}
         <Route path="/">
           <Redirect to={isAuthenticated ? "/dashboard" : "/login"} />
         </Route>
 
-        {/* Protected routes — all wrapped in the shared Layout */}
+        {/* Protected routes */}
         <Route path="/dashboard">
-          {isAuthenticated ? (
-            <Layout><DashboardPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
-        </Route>
-        <Route path="/property">
-          {isAuthenticated ? (
-            <Layout><PropertyPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
-        </Route>
-        <Route path="/stocks">
-          {isAuthenticated ? (
-            <Layout><StocksPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
-        </Route>
-        <Route path="/crypto">
-          {isAuthenticated ? (
-            <Layout><CryptoPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
+          <ProtectedRoute component={DashboardPage} title="Dashboard" />
         </Route>
         <Route path="/expenses">
-          {isAuthenticated ? (
-            <Layout><ExpensesPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
+          <ProtectedRoute component={ExpensesPage} title="Expenses" />
+        </Route>
+        <Route path="/property">
+          <ProtectedRoute component={PropertyPage} title="Property" />
+        </Route>
+        <Route path="/stocks">
+          <ProtectedRoute component={StocksPage} title="Stocks" />
+        </Route>
+        <Route path="/crypto">
+          <ProtectedRoute component={CryptoPage} title="Crypto" />
         </Route>
         <Route path="/reports">
-          {isAuthenticated ? (
-            <Layout><ReportsPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
+          <ProtectedRoute component={ReportsPage} title="Reports" />
         </Route>
         <Route path="/settings">
-          {isAuthenticated ? (
-            <Layout><SettingsPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
+          <ProtectedRoute component={SettingsPage} title="Settings" />
         </Route>
         <Route path="/tax">
-          {isAuthenticated ? (
-            <Layout><TaxPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
+          <ProtectedRoute component={TaxPage} title="Tax Calculator" />
         </Route>
         <Route path="/timeline">
-          {isAuthenticated ? (
-            <Layout><TimelinePage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
+          <ProtectedRoute component={TimelinePage} title="Net Worth Timeline" />
         </Route>
         <Route path="/data-health">
-          {isAuthenticated ? (
-            <Layout><DataHealthPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
+          <ProtectedRoute component={DataHealthPage} title="Data Health" />
         </Route>
         <Route path="/help">
-          {isAuthenticated ? (
-            <Layout><HelpPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
+          <ProtectedRoute component={HelpPage} title="Help" />
         </Route>
         <Route path="/ai-insights">
-          {isAuthenticated ? (
-            <Layout><AIInsightsPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
+          <ProtectedRoute component={AIInsightsPage} title="AI Insights" />
         </Route>
         <Route path="/wealth-strategy">
-          {isAuthenticated ? (
-            <Layout><WealthStrategyPage /></Layout>
-          ) : (
-            <Redirect to="/login" />
-          )}
+          <ProtectedRoute component={WealthStrategyPage} title="Wealth Strategy" />
         </Route>
 
         {/* 404 */}
