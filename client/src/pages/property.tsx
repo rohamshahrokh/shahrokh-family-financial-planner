@@ -9,6 +9,7 @@ import { useAppStore } from "@/lib/store";
 import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
+import AIInsightsCard from "@/components/AIInsightsCard";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -1022,6 +1023,16 @@ export default function PropertyPage() {
         onConfirm={handleBulkDelete}
         onCancel={() => setShowBulkModal(false)}
         onExportBackup={handleExportBackup}
+      />
+
+      {/* ─── AI Insights ───────────────────────────────────────────────────── */}
+      <AIInsightsCard
+        pageKey="property"
+        pageLabel="Property Portfolio"
+        getData={() => {
+        if (!properties?.length) return { count: 0 };
+        return { properties: properties.map((p: any) => ({ name: p.name, value: p.value, loan: p.loan_balance, lvr: p.lvr, rentalYield: p.rental_yield, weeklyRent: p.weekly_rent })) };
+      }}
       />
     </div>
   );
