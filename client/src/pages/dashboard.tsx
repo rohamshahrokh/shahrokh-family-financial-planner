@@ -49,6 +49,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import familyImg from "@assets/family.jpeg";
+import AIInsightsCard from "@/components/AIInsightsCard";
 
 // ─── Chart colours ────────────────────────────────────────────────────────────
 const COLORS = [
@@ -953,6 +954,22 @@ export default function DashboardPage() {
           </table>
         </div>
       </div>
+
+      {/* ─── AI Insights ─────────────────────────────────────────────────── */}
+      <AIInsightsCard
+        pageKey="dashboard"
+        pageLabel="Overall Financial Health"
+        getData={() => ({
+          netWorth: snapshot?.net_worth,
+          monthlyIncome: snapshot?.monthly_income,
+          monthlyExpenses: snapshot?.monthly_expenses,
+          monthlySurplus: snapshot?.monthly_surplus,
+          savingsRate: snapshot?.savings_rate,
+          totalDebt: snapshot?.total_debt,
+          totalAssets: snapshot?.total_assets,
+          cashFlow: snapshot?.cash_flow,
+        })}
+      />
     </div>
   );
 }
