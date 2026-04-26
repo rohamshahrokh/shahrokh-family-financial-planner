@@ -11,6 +11,7 @@ import {
   Trash2, Cloud, FileSpreadsheet, FileDown, Search,
   ChevronDown, ChevronRight, Info, AlertTriangle, CheckCircle,
   HelpCircle, BookOpen, Zap, Database, Globe, Languages,
+  Flame, Sword, BarChart3, TrendingDown, Building2, Clock, Brain,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -1481,6 +1482,518 @@ const SECTIONS: SectionDef[] = [
               </div>
             ))}
           </div>
+        </div>
+      ),
+    },
+  },
+
+  // 17. FIRE Tracker
+  {
+    id: "fire-tracker",
+    icon: <Flame className="w-4 h-4" />,
+    color: "hsl(16,90%,55%)",
+    title: { en: "FIRE Tracker — Financial Freedom", fa: "ردیاب فایر — آزادی مالی" },
+    keywords: {
+      en: "fire financial independence retire early passive income withdrawal rate capital freedom semi",
+      fa: "فایر استقلال مالی بازنشستگی زودهنگام درآمد غیرفعال نرخ برداشت سرمایه",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The FIRE (Financial Independence, Retire Early) Tracker calculates how far you are
+            from financial freedom. Enter your desired monthly passive income, expected investment
+            return, and safe withdrawal rate. The tracker shows required capital, current investable
+            assets, progress percentage, and estimated years remaining.
+          </PTag>
+          <H3>Key Inputs</H3>
+          <UL items={[
+            <><strong className="text-foreground">Desired Monthly Passive Income</strong> — Target income from investments to cover your lifestyle.</>,
+            <><strong className="text-foreground">Expected Return</strong> — Default 7% annual investment return.</>,
+            <><strong className="text-foreground">Safe Withdrawal Rate</strong> — Default 4% — percentage of portfolio drawn per year.</>,
+            <><strong className="text-foreground">Monthly Savings</strong> — How much you invest each month towards FIRE.</>,
+          ]} />
+          <H3>Formulas</H3>
+          <Formula>Required FIRE Capital = (Desired Monthly Passive Income × 12) / Safe Withdrawal Rate</Formula>
+          <Formula>FIRE Progress = Current Investable Assets / Required FIRE Capital × 100</Formula>
+          <Formula>{"Years to FIRE: month-by-month compound simulation\nAccumulation = PV × (1+r)^n + PMT × ((1+r)^n − 1) / r"}</Formula>
+          <H3>Scenarios</H3>
+          <UL items={[
+            "Adding $2,000/month extra accelerates FIRE date significantly.",
+            "Adding investment property income reduces the capital shortfall.",
+          ]} />
+          <Callout type="info">
+            Semi-FIRE: 50% of the required capital target — represents partial financial freedom.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            ردیاب فایر (استقلال مالی، بازنشستگی زودهنگام) محاسبه می‌کند که تا چه اندازه به آزادی مالی نزدیک هستید.
+            درآمد غیرفعال ماهانه مورد نظر، بازده سرمایه‌گذاری مورد انتظار و نرخ برداشت ایمن را وارد کنید.
+          </PTag>
+          <H3>فرمول‌ها</H3>
+          <Formula>سرمایه لازم برای فایر = (درآمد غیرفعال ماهانه × ۱۲) / نرخ برداشت ایمن</Formula>
+          <Formula>پیشرفت فایر = دارایی‌های سرمایه‌گذاری‌شده فعلی / سرمایه لازم × ۱۰۰</Formula>
+          <Formula>سال‌های باقیمانده: شبیه‌سازی ماه به ماه با رشد مرکب</Formula>
+          <Callout type="info">
+            نیمه فایر: ۵۰٪ هدف سرمایه — نشان‌دهنده آزادی مالی جزئی است.
+          </Callout>
+        </div>
+      ),
+    },
+  },
+
+  // 18. Debt Killer Engine
+  {
+    id: "debt-killer",
+    icon: <Sword className="w-4 h-4" />,
+    color: "hsl(0,72%,51%)",
+    title: { en: "Debt Killer Engine", fa: "موتور حذف بدهی" },
+    keywords: {
+      en: "debt killer avalanche snowball hybrid repayment interest mortgage loan extra payment free",
+      fa: "حذف بدهی بهمن گلوله برفی ترکیبی بازپرداخت بهره وام مسکن",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Debt Killer Engine compares three debt repayment strategies and shows you the
+            fastest, cheapest path to becoming debt-free.
+          </PTag>
+          <H3>Three Methods</H3>
+          <UL items={[
+            <><strong className="text-foreground">Avalanche</strong> — Pay highest interest rate debt first. Minimises total interest paid.</>,
+            <><strong className="text-foreground">Snowball</strong> — Pay smallest balance first. Provides psychological wins.</>,
+            <><strong className="text-foreground">Hybrid</strong> — Weighted combination of both methods.</>,
+          ]} />
+          <H3>Data Sources</H3>
+          <PTag>
+            The engine uses your mortgage, car loan, and other debts from the Dashboard snapshot,
+            and allows you to add additional debts manually.
+          </PTag>
+          <H3>Calculation Method</H3>
+          <Formula>{"Month-by-month simulation:\n1. Interest accrues on each balance\n2. Minimum payment applied to all debts\n3. Extra payment directed to priority debt\n4. Repeat until all balances reach zero"}</Formula>
+          <Callout type="tip">
+            Adding $1,000/month extra dramatically reduces total interest paid and time to debt freedom.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            موتور حذف بدهی سه استراتژی بازپرداخت بدهی را مقایسه می‌کند تا سریع‌ترین و ارزان‌ترین مسیر برای خروج از بدهی را نشان دهد.
+          </PTag>
+          <H3>سه روش</H3>
+          <UL items={[
+            <><strong className="text-foreground">بهمن (Avalanche)</strong> — پرداخت بدهی با بالاترین نرخ بهره اول. کمترین بهره کل را دارد.</>,
+            <><strong className="text-foreground">گلوله برفی (Snowball)</strong> — پرداخت کمترین مانده اول. انگیزه روانی ایجاد می‌کند.</>,
+            <><strong className="text-foreground">ترکیبی (Hybrid)</strong> — ترکیب وزن‌دار هر دو روش.</>,
+          ]} />
+        </div>
+      ),
+    },
+  },
+
+  // 19. Net Worth Simulator
+  {
+    id: "net-worth-simulator",
+    icon: <BarChart3 className="w-4 h-4" />,
+    color: "hsl(142,60%,45%)",
+    title: { en: "Future Net Worth Simulator", fa: "شبیه‌ساز ارزش خالص آینده" },
+    keywords: {
+      en: "net worth simulator future scenarios property stocks investment growth projection 5 year 10 year",
+      fa: "ارزش خالص شبیه‌ساز آینده سناریو ملک سهام سرمایه‌گذاری رشد پیش‌بینی",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Net Worth Simulator projects your financial position across 4 scenarios over 5 and 10 years.
+          </PTag>
+          <H3>Four Scenarios</H3>
+          <UL items={[
+            <><strong className="text-foreground">A. Current Path</strong> — Continue current income, expenses, and investment patterns.</>,
+            <><strong className="text-foreground">B. Investment Property</strong> — Add one IP at your specified price with capital growth.</>,
+            <><strong className="text-foreground">C. Extra Stock Investment</strong> — Invest $3,000/month additional into stocks.</>,
+            <><strong className="text-foreground">D. Combined</strong> — Property + extra stocks.</>,
+          ]} />
+          <H3>Editable Assumptions</H3>
+          <UL items={[
+            "Property growth rate, stock return, crypto return",
+            "Inflation, income growth, expense growth",
+            "Interest rate, rent growth",
+          ]} />
+          <Formula>Net Worth = Total Assets − Total Liabilities (calculated per year per scenario)</Formula>
+          <Callout type="tip">
+            The simulator shows which path creates the most wealth over time — use it to compare strategies before committing.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            شبیه‌ساز ارزش خالص وضعیت مالی شما را در ۴ سناریو طی ۵ و ۱۰ سال آینده پیش‌بینی می‌کند.
+          </PTag>
+          <UL items={[
+            "مسیر فعلی: ادامه درآمد، هزینه و سرمایه‌گذاری فعلی",
+            "خرید ملک سرمایه‌گذاری با رشد سرمایه مشخص",
+            "سرمایه‌گذاری اضافه $3,000 ماهانه در سهام",
+            "ترکیب ملک + سهام",
+          ]} />
+        </div>
+      ),
+    },
+  },
+
+  // 20. Lifestyle Inflation Detector
+  {
+    id: "lifestyle-inflation",
+    icon: <TrendingDown className="w-4 h-4" />,
+    color: "hsl(43,85%,55%)",
+    title: { en: "Lifestyle Inflation Detector", fa: "ردیاب تورم سبک زندگی" },
+    keywords: {
+      en: "lifestyle inflation spending creep subscriptions dining savings rate leakage traffic light detector",
+      fa: "تورم سبک زندگی افزایش هزینه اشتراک رستوران نرخ پس‌انداز نشت ردیاب",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Lifestyle Inflation Detector analyses your expense history to identify spending
+            creep before it silently erodes your savings rate.
+          </PTag>
+          <H3>What It Detects</H3>
+          <UL items={[
+            "Month-over-month spending change",
+            "Same month vs last year comparison",
+            "3-month average vs prior 3 months",
+            "Category creep: which categories are growing fastest",
+            "Subscription creep: total recurring subscription spend",
+            "Dining/coffee creep",
+          ]} />
+          <H3>Formulas</H3>
+          <Formula>Lifestyle Ratio = Non-essential spend / Total spend × 100</Formula>
+          <Formula>Monthly Leakage = Current period average − Baseline 12-month average</Formula>
+          <Formula>Annual Leakage = Monthly Leakage × 12</Formula>
+          <H3>Traffic Light System</H3>
+          <UL items={[
+            <><strong className="text-foreground">Green</strong> — Stable spending</>,
+            <><strong className="text-foreground">Amber</strong> — Moderate growth detected</>,
+            <><strong className="text-foreground">Red</strong> — Significant creep detected</>,
+          ]} />
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            ردیاب تورم سبک زندگی تاریخچه هزینه‌های شما را تحلیل می‌کند تا افزایش هزینه‌های تدریجی را قبل از آسیب رساندن به نرخ پس‌انداز شناسایی کند.
+          </PTag>
+          <Formula>نسبت سبک زندگی = هزینه‌های غیرضروری / کل هزینه‌ها × ۱۰۰</Formula>
+          <Formula>نشت ماهانه = میانگین دوره فعلی − میانگین ۱۲ ماه پایه</Formula>
+          <Callout type="tip">
+            سیستم چراغ راهنما: سبز (ثابت)، زرد (رشد متوسط)، قرمز (افزایش قابل‌توجه).
+          </Callout>
+        </div>
+      ),
+    },
+  },
+
+  // 21. Emergency Score
+  {
+    id: "emergency-score",
+    icon: <Shield className="w-4 h-4" />,
+    color: "hsl(188,60%,48%)",
+    title: { en: "Emergency Score", fa: "امتیاز اضطراری" },
+    keywords: {
+      en: "emergency score fund buffer months cash liquid risk protection shock family",
+      fa: "امتیاز اضطراری صندوق بافر ماه نقدی ریسک محافظت شوک خانواده",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Emergency Score measures how well-protected your family is against financial shocks.
+            Score 0–100 based on months of expenses covered by liquid cash assets.
+          </PTag>
+          <H3>Recommended Buffer</H3>
+          <UL items={[
+            <><strong className="text-foreground">Family of 4+</strong> — 6 months of total monthly costs</>,
+            <><strong className="text-foreground">Family of 1–3</strong> — 3 months</>,
+          ]} />
+          <H3>Formulas</H3>
+          <Formula>Total Monthly Cost = Monthly Expenses + Monthly Debt Repayments</Formula>
+          <Formula>Months Covered = Cash / Total Monthly Cost</Formula>
+          <Formula>Score = Min(100, Months Covered / Recommended Months × 100)</Formula>
+          <Formula>Target Cash Reserve = Total Monthly Cost × Recommended Months</Formula>
+          <H3>Risk Levels</H3>
+          <Table rows={[
+            ["80 – 100", "Low Risk — fully covered"],
+            ["50 – 79", "Medium Risk — partially covered"],
+            ["0 – 49", "High Risk — urgent action needed"],
+          ]} />
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            امتیاز اضطراری اندازه‌گیری می‌کند که خانواده شما در برابر شوک‌های مالی چقدر محافظت شده است.
+            امتیاز ۰ تا ۱۰۰ بر اساس ماه‌های پوشش داده شده توسط دارایی‌های نقدی.
+          </PTag>
+          <Table rows={[
+            ["۸۰ – ۱۰۰", "ریسک کم — پوشش کامل"],
+            ["۵۰ – ۷۹", "ریسک متوسط — پوشش جزئی"],
+            ["۰ – ۴۹", "ریسک بالا — اقدام فوری لازم"],
+          ]} />
+        </div>
+      ),
+    },
+  },
+
+  // 22. Tax Optimizer
+  {
+    id: "tax-optimizer",
+    icon: <Calculator className="w-4 h-4" />,
+    color: "hsl(270,60%,60%)",
+    title: { en: "Tax Optimizer — Australia", fa: "بهینه‌ساز مالیات — استرالیا" },
+    keywords: {
+      en: "tax optimizer australia income bracket medicare levy LITO negative gearing super CGT capital gains",
+      fa: "بهینه‌ساز مالیات استرالیا درآمد اهرم منفی سوپر عایدی سرمایه",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Tax Optimizer calculates your Australian income tax position and identifies legal
+            strategies to reduce your tax liability.
+          </PTag>
+          <H3>FY2025-26 Tax Brackets</H3>
+          <Table rows={[
+            ["$0 – $18,200", "0%"],
+            ["$18,201 – $45,000", "19c per $1 over $18,200"],
+            ["$45,001 – $120,000", "$5,092 + 32.5c per $1 over $45,000"],
+            ["$120,001 – $180,000", "$29,467 + 37c per $1 over $120,000"],
+            ["$180,001+", "$51,667 + 45c per $1 over $180,000"],
+            ["Medicare Levy", "2% of taxable income"],
+            ["LITO", "Up to $700 offset (phases out above $37,500)"],
+          ]} />
+          <H3>Tax Strategies</H3>
+          <UL items={[
+            <><strong className="text-foreground">Negative Gearing</strong> — Rental losses offset income tax.</>,
+            <><strong className="text-foreground">Super Contributions</strong> — Taxed at 15% instead of marginal rate.</>,
+            <><strong className="text-foreground">CGT Discount</strong> — 50% discount for assets held 12+ months.</>,
+          ]} />
+          <Callout type="warning">
+            General information only, not tax advice. Consult a registered Australian tax adviser.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            بهینه‌ساز مالیات مالیات درآمد استرالیایی شما را محاسبه می‌کند و استراتژی‌های قانونی برای کاهش بدهی مالیاتی را شناسایی می‌کند.
+            این ابزار شامل نرخ‌های مالیاتی ۲۰۲۵-۲۶، اهرم منفی، سوپر و تخفیف مالیات عایدی سرمایه است.
+          </PTag>
+          <Callout type="warning">
+            اطلاعات عمومی فقط، مشاوره مالیاتی نیست. با یک مشاور مالیاتی ثبت‌شده استرالیا مشورت کنید.
+          </Callout>
+        </div>
+      ),
+    },
+  },
+
+  // 23. Property Expansion Engine
+  {
+    id: "property-expansion",
+    icon: <Building2 className="w-4 h-4" />,
+    color: "hsl(20,80%,55%)",
+    title: { en: "Property Expansion Engine", fa: "موتور توسعه ملک" },
+    keywords: {
+      en: "property expansion investment LVR stamp duty deposit readiness equity QLD loan serviceability LMI",
+      fa: "توسعه ملک سرمایه‌گذاری ال‌وی‌آر عوارض تمبر سپرده آمادگی سهام کوئینزلند",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Property Expansion Engine helps you assess your readiness to purchase your next
+            investment property. It analyses your PPOR equity, available cash deposit, and monthly
+            surplus for loan serviceability.
+          </PTag>
+          <H3>LVR Scenarios Compared</H3>
+          <Table rows={[
+            ["80% LVR", "Full deposit required, no LMI"],
+            ["85% LVR", "Smaller deposit, some LMI"],
+            ["90% LVR", "Minimum deposit, higher LMI cost"],
+          ]} />
+          <H3>QLD Stamp Duty (Investment Property)</H3>
+          <Table rows={[
+            ["$0 – $5,000", "$0"],
+            ["$5,001 – $75,000", "1.5%"],
+            ["$75,001 – $540,000", "3.5%"],
+            ["$540,001 – $1,000,000", "4.5%"],
+            ["$1,000,001+", "5.75%"],
+          ]} />
+          <Formula>Deposit Readiness Score = Available Deposit / Required Deposit × 100</Formula>
+          <Callout type="warning">
+            Cash Buffer Warning: If cash remaining after purchase is less than $30,000, a risk warning is displayed.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            موتور توسعه ملک آمادگی شما برای خرید ملک سرمایه‌گذاری بعدی را ارزیابی می‌کند.
+            سه سناریو ال‌وی‌آر (۸۰، ۸۵، ۹۰ درصد) مقایسه می‌شود.
+            عوارض تمبر کوئینزلند، حق بیمه وام مسکن، و تاثیر بر جریان نقدی ماهانه محاسبه می‌شود.
+          </PTag>
+          <Formula>امتیاز آمادگی سپرده = سپرده موجود / سپرده لازم × ۱۰۰</Formula>
+        </div>
+      ),
+    },
+  },
+
+  // 24. Retirement Age Predictor
+  {
+    id: "retirement-predictor",
+    icon: <Clock className="w-4 h-4" />,
+    color: "hsl(142,60%,45%)",
+    title: { en: "Retirement Age Predictor", fa: "پیش‌بین سن بازنشستگی" },
+    keywords: {
+      en: "retirement age predictor financial independence path strategy portfolio passive income simulation",
+      fa: "سن بازنشستگی پیش‌بین استقلال مالی مسیر استراتژی پورتفولیو درآمد غیرفعال",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Retirement Age Predictor estimates when you could achieve financial independence
+            across 5 investment strategies.
+          </PTag>
+          <H3>Five Paths</H3>
+          <UL items={[
+            <><strong className="text-foreground">A. Current Path</strong> — Current savings rate at 7% return</>,
+            <><strong className="text-foreground">B. Aggressive</strong> — Extra $2,000/month at 8% return</>,
+            <><strong className="text-foreground">C. Property Path</strong> — Add 1 IP at age 40, 6% capital growth</>,
+            <><strong className="text-foreground">D. Stocks Focus</strong> — All surplus into stocks at 9%</>,
+            <><strong className="text-foreground">E. Combined</strong> — Aggressive + Property</>,
+          ]} />
+          <H3>Key Formulas</H3>
+          <Formula>Projected Portfolio at age N = PV × (1+r)^years + PMT × ((1+r)^years − 1) / r</Formula>
+          <Formula>Passive Income = Portfolio × 0.04 / 12</Formula>
+          <Formula>Target reached when: Passive Income ≥ Target Monthly Income</Formula>
+          <Callout type="info">
+            Target ages 45, 50, 55, and 60 are shown as milestone scenarios for each path.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            پیش‌بین سن بازنشستگی تخمین می‌زند که چه زمانی می‌توانید در ۵ استراتژی مختلف به استقلال مالی برسید.
+            هر مسیر: شبیه‌سازی سال به سال رشد پورتفولیو تا زمانی که درآمد غیرفعال به هدف ماهانه برسد.
+          </PTag>
+          <Formula>پورتفولیو پیش‌بینی‌شده = PV × (1+r)^n + PMT × ((1+r)^n − ۱) / r</Formula>
+          <Formula>درآمد غیرفعال = پورتفولیو × ۰.۰۴ / ۱۲</Formula>
+        </div>
+      ),
+    },
+  },
+
+  // 25. Hidden Money Detector
+  {
+    id: "hidden-money",
+    icon: <Search className="w-4 h-4" />,
+    color: "hsl(43,85%,55%)",
+    title: { en: "Hidden Money Detector", fa: "ردیاب پول پنهان" },
+    keywords: {
+      en: "hidden money detector leakage subscriptions dining interest dead cash insurance duplicate savings health score",
+      fa: "پول پنهان نشت اشتراک رستوران بهره پول راکد بیمه تکراری پس‌انداز",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The Hidden Money Detector scans your expenses, debts, and cash holdings to identify
+            avoidable financial leakage.
+          </PTag>
+          <H3>What It Detects</H3>
+          <UL items={[
+            <><strong className="text-foreground">Subscription Creep</strong> — Total subscriptions &gt; $200/month flagged</>,
+            <><strong className="text-foreground">Dining Creep</strong> — Dining Out / Coffee &gt; $600/month flagged</>,
+            <><strong className="text-foreground">High-Interest Debt</strong> — Monthly interest on other debts (~15% rate)</>,
+            <><strong className="text-foreground">Dead Cash</strong> — Cash above 6-month buffer not earning investment returns</>,
+            <><strong className="text-foreground">Large Unusual Transactions</strong> — Single expenses &gt; $2,000 in non-housing categories</>,
+            <><strong className="text-foreground">Excessive Insurance</strong> — &gt; $600/month in insurance category</>,
+            <><strong className="text-foreground">Duplicate Expenses</strong> — Same description + amount within 7 days</>,
+          ]} />
+          <Formula>Money Health Score = 100 − (Monthly Leakage / Monthly Expenses × 100)</Formula>
+          <Callout type="tip">
+            Output includes: total monthly savings potential, annual savings potential, and a prioritised action list.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            ردیاب پول پنهان هزینه‌ها، بدهی‌ها و موجودی نقدی شما را برای شناسایی نشت مالی قابل اجتناب اسکن می‌کند.
+            اشتراک‌ها، رستوران‌ها، بدهی‌های پرسود، پول راکد، و هزینه‌های غیرعادی را شناسایی می‌کند.
+          </PTag>
+          <Formula>امتیاز سلامت مالی = ۱۰۰ − (نشت ماهانه / هزینه‌های ماهانه × ۱۰۰)</Formula>
+        </div>
+      ),
+    },
+  },
+
+  // 26. AI Financial Coach
+  {
+    id: "ai-coach",
+    icon: <Brain className="w-4 h-4" />,
+    color: "hsl(270,60%,60%)",
+    title: { en: "AI Financial Coach", fa: "مربی مالی هوش مصنوعی" },
+    keywords: {
+      en: "AI financial coach GPT report weekly monthly insights cashflow savings investment advice coach",
+      fa: "مربی مالی هوش مصنوعی گزارش هفتگی ماهانه بینش جریان نقدی پس‌انداز سرمایه‌گذاری",
+    },
+    content: {
+      en: (
+        <div>
+          <PTag>
+            The AI Financial Coach generates personalised weekly and monthly financial reports
+            using GPT-4o mini.
+          </PTag>
+          <H3>Report Types</H3>
+          <UL items={[
+            <><strong className="text-foreground">Weekly Report</strong> — Summarises spending movement, cashflow status, savings rate, and top 3 actions for the week.</>,
+            <><strong className="text-foreground">Monthly Report</strong> — Deeper analysis including investment progress, debt movement, property readiness, risk warnings, and recommended actions for next month.</>,
+          ]} />
+          <H3>Example Insight</H3>
+          <Callout type="info">
+            "This month spending rose 14%. Cashflow is healthy at $7,460 surplus. Consider directing the extra $1,200 to your emergency fund."
+          </Callout>
+          <H3>Cost &amp; Caching</H3>
+          <UL items={[
+            "~$0.001 per report",
+            "Results cached for 24 hours",
+          ]} />
+          <Callout type="warning">
+            AI insights are general information only and not financial advice.
+          </Callout>
+        </div>
+      ),
+      fa: (
+        <div>
+          <PTag>
+            مربی مالی هوش مصنوعی با استفاده از GPT-4o mini گزارش‌های مالی هفتگی و ماهانه شخصی‌سازی‌شده تولید می‌کند.
+          </PTag>
+          <UL items={[
+            "گزارش هفتگی: خلاصه تغییرات هزینه، وضعیت جریان نقدی، نرخ پس‌انداز و ۳ اقدام برتر هفته",
+            "گزارش ماهانه: تحلیل عمیق‌تر پیشرفت سرمایه‌گذاری، بدهی، آمادگی ملک، هشدارهای ریسک",
+          ]} />
+          <Callout type="warning">
+            بینش‌های هوش مصنوعی اطلاعات عمومی است و مشاوره مالی نیست.
+          </Callout>
         </div>
       ),
     },
