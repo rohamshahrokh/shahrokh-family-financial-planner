@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/finance";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
-import { Plus, Trash2, Edit2, Upload, Download, Search, Filter } from "lucide-react";
+import { Plus, Trash2, Edit2, Upload, Download, Search } from "lucide-react";
 import * as XLSX from "xlsx";
 
 const CATEGORIES = [
@@ -26,23 +26,109 @@ const COLORS = ['hsl(43,85%,55%)', 'hsl(188,60%,48%)', 'hsl(142,60%,45%)', 'hsl(
 
 const EMPTY_EXPENSE = {
   date: new Date().toISOString().split('T')[0],
-  amount: 0, category: 'Other', subcategory: '', description: '',
+  amount: '' as any,
+  category: 'Other', subcategory: '', description: '',
   payment_method: '', family_member: '', recurring: false, notes: '',
 };
+
+// ─── ExpenseForm is defined OUTSIDE the parent so React never remounts it ──────
+// This is the root cause fix for focus-loss: inline sub-components cause React
+// to treat them as new component types on every parent render → unmount/remount.
+interface ExpenseFormData {
+  date: string; amount: any; category: string; subcategory: string;
+  description: string; payment_method: string; family_member: string;
+  recurring: boolean; notes: string;
+}
+interface ExpenseFormProps { data: ExpenseFormData; onChange: (d: ExpenseFormData) => void; }
+
+function ExpenseForm({ data, onChange }: ExpenseFormProps) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <div>
+        <label className="text-xs text-muted-foreground">Date</label>
+        <Input type="date" value={data.date} onChange={e => onChange({ ...data, date: e.target.value })} className="h-8 text-sm" />
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">Amount (AUD)</label>
+        <Input
+          type="number"
+          value={data.amount}
+          onChange={e => onChange({ ...data, amount: e.target.value })}
+          className="h-8 text-sm num-display"
+          step="0.01"
+        />
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">Category</label>
+        <Select value={data.category} onValueChange={v => onChange({ ...data, category: v })}>
+          <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">Sub-category</label>
+        <Input value={data.subcategory} onChange={e => onChange({ ...data, subcategory: e.target.value })} className="h-8 text-sm" />
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">Description</label>
+        <Input value={data.description} onChange={e => onChange({ ...data, description: e.target.value })} className="h-8 text-sm" />
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">Payment Method</label>
+        <Select value={data.payment_method} onValueChange={v => onChange({ ...data, payment_method: v })}>
+          <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select..." /></SelectTrigger>
+          <SelectContent>
+            {PAYMENT_METHODS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">Family Member</label>
+        <Select value={data.family_member} onValueChange={v => onChange({ ...data, family_member: v })}>
+          <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select..." /></SelectTrigger>
+          <SelectContent>
+            {FAMILY_MEMBERS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">Notes</label>
+        <Input value={data.notes} onChange={e => onChange({ ...data, notes: e.target.value })} className="h-8 text-sm" />
+      </div>
+      <div className="flex items-end gap-2">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+          <input type="checkbox" checked={data.recurring} onChange={e => onChange({ ...data, recurring: e.target.checked })} className="rounded" />
+          Recurring
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// Normalise a draft to ensure amount is a proper number before saving
+function normaliseDraft(d: ExpenseFormData) {
+  return { ...d, amount: parseFloat(String(d.amount)) || 0 };
+}
 
 export default function ExpensesPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [draft, setDraft] = useState({ ...EMPTY_EXPENSE });
+  const [draft, setDraft] = useState<ExpenseFormData>({ ...EMPTY_EXPENSE });
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editDraft, setEditDraft] = useState<any>(null);
+  const [editDraft, setEditDraft] = useState<ExpenseFormData | null>(null);
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterMember, setFilterMember] = useState('all');
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
+
+  // Stable onChange callbacks — never recreated → no remount
+  const handleDraftChange = useCallback((d: ExpenseFormData) => setDraft(d), []);
+  const handleEditDraftChange = useCallback((d: ExpenseFormData) => setEditDraft(d), []);
 
   const { data: expenses = [] } = useQuery<any[]>({
     queryKey: ['/api/expenses'],
@@ -114,7 +200,6 @@ export default function ExpensesPage() {
       const wb = XLSX.read(data, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
-      // Assume first row is header
       const expenses = rows.slice(1).filter(r => r[0] && r[1]).map(r => ({
         date: r[0] instanceof Date ? r[0].toISOString().split('T')[0] : String(r[0]).split('T')[0] || new Date().toISOString().split('T')[0],
         amount: parseFloat(r[1]) || 0,
@@ -154,64 +239,6 @@ export default function ExpensesPage() {
     XLSX.utils.book_append_sheet(wb, ws, 'Template');
     XLSX.writeFile(wb, 'Shahrokh_Expense_Template.xlsx');
   };
-
-  const ExpenseForm = ({ data, onChange }: any) => (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-      <div>
-        <label className="text-xs text-muted-foreground">Date</label>
-        <Input type="date" value={data.date} onChange={e => onChange({ ...data, date: e.target.value })} className="h-8 text-sm" />
-      </div>
-      <div>
-        <label className="text-xs text-muted-foreground">Amount (AUD)</label>
-        <Input type="number" value={data.amount} onChange={e => onChange({ ...data, amount: parseFloat(e.target.value) || 0 })} className="h-8 text-sm num-display" step="0.01" />
-      </div>
-      <div>
-        <label className="text-xs text-muted-foreground">Category</label>
-        <Select value={data.category} onValueChange={v => onChange({ ...data, category: v })}>
-          <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <div>
-        <label className="text-xs text-muted-foreground">Sub-category</label>
-        <Input value={data.subcategory} onChange={e => onChange({ ...data, subcategory: e.target.value })} className="h-8 text-sm" />
-      </div>
-      <div>
-        <label className="text-xs text-muted-foreground">Description</label>
-        <Input value={data.description} onChange={e => onChange({ ...data, description: e.target.value })} className="h-8 text-sm" />
-      </div>
-      <div>
-        <label className="text-xs text-muted-foreground">Payment Method</label>
-        <Select value={data.payment_method} onValueChange={v => onChange({ ...data, payment_method: v })}>
-          <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select..." /></SelectTrigger>
-          <SelectContent>
-            {PAYMENT_METHODS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <div>
-        <label className="text-xs text-muted-foreground">Family Member</label>
-        <Select value={data.family_member} onValueChange={v => onChange({ ...data, family_member: v })}>
-          <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select..." /></SelectTrigger>
-          <SelectContent>
-            {FAMILY_MEMBERS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <div>
-        <label className="text-xs text-muted-foreground">Notes</label>
-        <Input value={data.notes} onChange={e => onChange({ ...data, notes: e.target.value })} className="h-8 text-sm" />
-      </div>
-      <div className="flex items-end gap-2">
-        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-          <input type="checkbox" checked={data.recurring} onChange={e => onChange({ ...data, recurring: e.target.checked })} className="rounded" />
-          Recurring
-        </label>
-      </div>
-    </div>
-  );
 
   return (
     <div className="space-y-5 pb-8">
@@ -303,13 +330,13 @@ export default function ExpensesPage() {
         </div>
       )}
 
-      {/* Add Form */}
+      {/* Add Form — ExpenseForm is a stable top-level component, no remount */}
       {showAdd && (
         <div className="rounded-xl border border-primary/30 bg-card p-5">
           <h3 className="text-sm font-bold mb-4">Add Expense</h3>
-          <ExpenseForm data={draft} onChange={setDraft} />
+          <ExpenseForm data={draft} onChange={handleDraftChange} />
           <div className="flex gap-2 mt-4">
-            <SaveButton label="Save Expense Entry" onSave={() => createMut.mutateAsync(draft)} />
+            <SaveButton label="Save Expense Entry" onSave={() => createMut.mutateAsync(normaliseDraft(draft))} />
             <Button size="sm" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
           </div>
         </div>
@@ -361,9 +388,9 @@ export default function ExpensesPage() {
                   return (
                     <tr key={e.id} className="border-b border-border bg-secondary/20">
                       <td colSpan={9} className="p-3">
-                        <ExpenseForm data={editDraft} onChange={setEditDraft} />
+                        <ExpenseForm data={editDraft} onChange={handleEditDraftChange} />
                         <div className="flex gap-2 mt-3">
-                          <SaveButton label="Save Expense Entry" onSave={() => updateMut.mutateAsync({ id: e.id, data: editDraft })} />
+                          <SaveButton label="Save Expense Entry" onSave={() => updateMut.mutateAsync({ id: e.id, data: normaliseDraft(editDraft) })} />
                           <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
                         </div>
                       </td>
