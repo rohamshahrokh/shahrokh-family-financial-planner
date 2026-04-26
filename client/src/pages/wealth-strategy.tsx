@@ -5,6 +5,7 @@
  */
 
 import { useState, useMemo, useCallback } from "react";
+import html2canvas from 'html2canvas';
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/finance";
@@ -40,6 +41,8 @@ import {
   ArrowDownRight,
   Minus,
   Eye,
+  FileDown,
+  Bookmark,
 } from "lucide-react";
 import {
   LineChart,
@@ -204,6 +207,7 @@ const TABS = [
   { id: "retirement", label: "Retirement", icon: Clock },
   { id: "hidden", label: "Hidden Money", icon: Search },
   { id: "coach", label: "AI Coach", icon: Brain },
+  { id: "action-plan", label: "Action Plan", icon: Zap },
 ];
 
 // ─── Month simulation helper ──────────────────────────────────────────────────
@@ -729,6 +733,45 @@ function NetWorthSimulator({ snap }: { snap: Record<string, number> }) {
   const [interestRate, setInterestRate] = useState(6);
   const [rentGrowth, setRentGrowth] = useState(3);
 
+  const [savedScenarios, setSavedScenarios] = useState<Array<{id: string; name: string; assumptions: any; savedAt: string}>>(() => {
+    try { return JSON.parse(localStorage.getItem('sf_wealth_scenarios') || '[]'); } catch { return []; }
+  });
+  const [newScenarioName, setNewScenarioName] = useState('');
+
+  const currentAssumptions = { propGrowth, stockReturn, cryptoReturn, inflationRate, incomeGrowth, expenseGrowth, interestRate, rentGrowth };
+
+  const saveScenario = (assumptions: any, name: string) => {
+    if (!name.trim()) return;
+    const scenario = {
+      id: Date.now().toString(),
+      name: name.trim(),
+      assumptions,
+      savedAt: new Date().toISOString(),
+    };
+    const updated = [...savedScenarios, scenario].slice(-10);
+    setSavedScenarios(updated);
+    localStorage.setItem('sf_wealth_scenarios', JSON.stringify(updated));
+    setNewScenarioName('');
+  };
+
+  const deleteScenario = (id: string) => {
+    const updated = savedScenarios.filter(s => s.id !== id);
+    setSavedScenarios(updated);
+    localStorage.setItem('sf_wealth_scenarios', JSON.stringify(updated));
+  };
+
+  const loadScenario = (scenario: {id: string; name: string; assumptions: any; savedAt: string}) => {
+    const a = scenario.assumptions;
+    if (a.propGrowth !== undefined) setPropGrowth(a.propGrowth);
+    if (a.stockReturn !== undefined) setStockReturn(a.stockReturn);
+    if (a.cryptoReturn !== undefined) setCryptoReturn(a.cryptoReturn);
+    if (a.inflationRate !== undefined) setInflationRate(a.inflationRate);
+    if (a.incomeGrowth !== undefined) setIncomeGrowth(a.incomeGrowth);
+    if (a.expenseGrowth !== undefined) setExpenseGrowth(a.expenseGrowth);
+    if (a.interestRate !== undefined) setInterestRate(a.interestRate);
+    if (a.rentGrowth !== undefined) setRentGrowth(a.rentGrowth);
+  };
+
   const baseNW =
     safeNum(snap.ppor) +
     safeNum(snap.cash) +
@@ -829,6 +872,41 @@ function NetWorthSimulator({ snap }: { snap: Record<string, number> }) {
           <InputRow label="Interest rate" value={interestRate} onChange={setInterestRate} suffix="%" step={0.5} />
           <InputRow label="Rent growth" value={rentGrowth} onChange={setRentGrowth} suffix="%" step={0.5} />
         </div>
+      </div>
+
+      {/* Save Scenario section */}
+      <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+        <h4 className="text-sm font-semibold flex items-center gap-2">
+          <Bookmark className="w-4 h-4 text-primary" />
+          Saved Scenarios
+        </h4>
+        <div className="flex gap-2">
+          <Input
+            value={newScenarioName}
+            onChange={e => setNewScenarioName(e.target.value)}
+            placeholder="Scenario name (e.g. Buy IP in 2026)"
+            className="h-8 text-sm flex-1"
+          />
+          <Button size="sm" onClick={() => saveScenario(currentAssumptions, newScenarioName)} className="h-8">
+            Save
+          </Button>
+        </div>
+        {savedScenarios.length > 0 && (
+          <div className="space-y-2 mt-2">
+            {savedScenarios.map(s => (
+              <div key={s.id} className="flex items-center justify-between bg-secondary/30 rounded-lg px-3 py-2 text-xs">
+                <div>
+                  <span className="font-semibold">{s.name}</span>
+                  <span className="text-muted-foreground ml-2">{new Date(s.savedAt).toLocaleDateString('en-AU')}</span>
+                </div>
+                <div className="flex gap-1">
+                  <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => loadScenario(s)}>Load</Button>
+                  <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-destructive" onClick={() => deleteScenario(s.id)}>Delete</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Current NW */}
@@ -2114,6 +2192,175 @@ function AICoach({
   );
 }
 
+// ─── Action Plan Engine ───────────────────────────────────────────────────
+function generateActionPlan(snap: any, properties: any[], expenses: any[]): Array<{
+  rank: number;
+  title: string;
+  description: string;
+  priority: 'High' | 'Medium' | 'Low';
+  impact: string;
+  suggestedDate: string;
+  category: string;
+}> {
+  const actions: any[] = [];
+  const now = new Date();
+  const monthName = (offset: number) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    return d.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
+  };
+
+  const income = safeNum(snap?.monthly_income);
+  const expenses_total = safeNum(snap?.monthly_expenses);
+  const surplus = income - expenses_total;
+  const cash = safeNum(snap?.cash);
+  const mortgage = safeNum(snap?.mortgage);
+  const other_debts = safeNum(snap?.other_debts);
+  const super_balance = safeNum(snap?.super_balance);
+  const ppor = safeNum(snap?.ppor);
+  const stocksVal = safeNum(snap?.stocks);
+  const cryptoVal = safeNum(snap?.crypto);
+
+  const investable = cash + super_balance + stocksVal + cryptoVal;
+  const requiredFIRE = (10000 * 12) / 0.04;
+  const fireProgress = investable / requiredFIRE;
+  const emergencyMonths = cash / (expenses_total + mortgage / 12);
+  const savingsRate = income > 0 ? surplus / income : 0;
+
+  // Expense analysis
+  const subscriptions = expenses.filter((e: any) => e.category === 'Subscriptions').reduce((s: number, e: any) => s + e.amount, 0);
+  const monthlySubscriptions = subscriptions / Math.max(1, (() => {
+    const months = new Set(expenses.map((e: any) => e.date?.slice(0, 7)));
+    return months.size || 1;
+  })());
+  const dining = expenses.filter((e: any) => e.category === 'Dining Out / Coffee').reduce((s: number, e: any) => s + e.amount, 0);
+  const monthlyDining = dining / Math.max(1, (() => {
+    const months = new Set(expenses.map((e: any) => e.date?.slice(0, 7)));
+    return months.size || 1;
+  })());
+
+  // HIGH PRIORITY RULES
+  if (emergencyMonths < 3) {
+    const target = expenses_total * 6;
+    const shortfall = Math.max(0, target - cash);
+    actions.push({
+      title: 'Build Emergency Fund Urgently',
+      description: `Your cash covers only ${emergencyMonths.toFixed(1)} months of expenses. Target: ${Math.ceil(target / 1000) * 1000 > 0 ? '$' + Math.ceil(target / 1000) * 1000 : '$0'}. Set aside $${Math.round(shortfall / 6)} extra/month.`,
+      priority: 'High',
+      impact: `Protect against ${Math.round(shortfall / Math.max(1, surplus))} months of job loss`,
+      suggestedDate: monthName(1),
+      category: 'Emergency',
+    });
+  }
+
+  if (other_debts > 10000) {
+    const monthlyInterest = Math.round(other_debts * 0.15 / 12);
+    actions.push({
+      title: 'Pay Off High-Interest Debt',
+      description: `You have $${other_debts.toLocaleString()} in other debts costing ~$${monthlyInterest}/month in interest at 15%. Use avalanche method.`,
+      priority: 'High',
+      impact: `Save ~$${monthlyInterest * 12} per year in interest`,
+      suggestedDate: monthName(0),
+      category: 'Debt',
+    });
+  }
+
+  if (savingsRate < 0.20) {
+    actions.push({
+      title: 'Increase Savings Rate to 20%+',
+      description: `Current savings rate is ${Math.round(savingsRate * 100)}%. Target at least 20%. Review dining ($${Math.round(monthlyDining)}/mo) and subscriptions ($${Math.round(monthlySubscriptions)}/mo).`,
+      priority: 'High',
+      impact: `Extra $${Math.round(income * 0.20 - surplus)}/month invested = significant FIRE acceleration`,
+      suggestedDate: monthName(1),
+      category: 'Savings',
+    });
+  }
+
+  // MEDIUM PRIORITY RULES
+  if (monthlySubscriptions > 200) {
+    actions.push({
+      title: 'Audit Monthly Subscriptions',
+      description: `Subscriptions total ~$${Math.round(monthlySubscriptions)}/month. Review and cancel unused services. Target: reduce by $50-100/month.`,
+      priority: 'Medium',
+      impact: `Save $${Math.round(monthlySubscriptions * 0.4 * 12)} per year`,
+      suggestedDate: monthName(0),
+      category: 'Expenses',
+    });
+  }
+
+  if (cash > expenses_total * 9) {
+    const excess = cash - expenses_total * 6;
+    actions.push({
+      title: 'Invest Excess Cash',
+      description: `You have $${Math.round(excess)} above your 6-month emergency buffer sitting idle. Consider ETF DCA or offset account to earn 5-7% return.`,
+      priority: 'Medium',
+      impact: `$${Math.round(excess * 0.06 / 12)}/month extra return at 6%`,
+      suggestedDate: monthName(1),
+      category: 'Investment',
+    });
+  }
+
+  if (fireProgress < 0.5 && surplus > 2000) {
+    const extraDCA = Math.round(surplus * 0.3);
+    actions.push({
+      title: 'Increase ETF DCA Contributions',
+      description: `FIRE progress is ${Math.round(fireProgress * 100)}%. Redirect $${extraDCA}/month (30% of surplus) into diversified index ETFs to accelerate financial freedom.`,
+      priority: 'Medium',
+      impact: `Reduces FIRE timeline by ~${Math.round(extraDCA / 500)} years`,
+      suggestedDate: monthName(2),
+      category: 'Investment',
+    });
+  }
+
+  const equity = ppor - mortgage;
+  const depositFor750k = 750000 * 0.2 + 750000 * 0.035;
+  if (equity > 200000 && cash > depositFor750k * 0.8) {
+    actions.push({
+      title: 'Consider Investment Property Purchase',
+      description: `PPOR equity is $${Math.round(equity).toLocaleString()} and cash covers ~${Math.round(cash / depositFor750k * 100)}% of a $750k IP deposit+costs. Assess borrowing capacity with a broker.`,
+      priority: 'Medium',
+      impact: 'Adds property growth + rental income to wealth building',
+      suggestedDate: monthName(3),
+      category: 'Property',
+    });
+  }
+
+  if (super_balance < income * 12 * 5) {
+    actions.push({
+      title: 'Review Super Contribution Strategy',
+      description: `Super balance of $${super_balance.toLocaleString()} may be below optimal for your income. Consider salary sacrifice to reduce tax and boost retirement savings.`,
+      priority: 'Medium',
+      impact: `Tax saving at marginal rate vs 15% super tax`,
+      suggestedDate: monthName(2),
+      category: 'Super',
+    });
+  }
+
+  // LOW PRIORITY RULES
+  if (monthlyDining > 600) {
+    actions.push({
+      title: 'Reduce Dining & Coffee Spend',
+      description: `Dining Out / Coffee is $${Math.round(monthlyDining)}/month. Reducing by 25% saves $${Math.round(monthlyDining * 0.25 * 12)} annually. Meal prep 2 days/week can achieve this.`,
+      priority: 'Low',
+      impact: `Save $${Math.round(monthlyDining * 0.25)}/month`,
+      suggestedDate: monthName(1),
+      category: 'Lifestyle',
+    });
+  }
+
+  if (properties.length === 0 && income > 15000) {
+    actions.push({
+      title: 'Research Investment Property Markets',
+      description: 'No investment properties recorded. High income bracket makes negative gearing advantageous. Research Brisbane, Ipswich, or Logan growth corridors.',
+      priority: 'Low',
+      impact: 'Position for future IP purchase in 6-12 months',
+      suggestedDate: monthName(4),
+      category: 'Property',
+    });
+  }
+
+  return actions.map((a, i) => ({ ...a, rank: i + 1 }));
+}
+
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
 export default function WealthStrategyPage() {
@@ -2147,6 +2394,108 @@ export default function WealthStrategyPage() {
   const stocks: any[] = Array.isArray(stocksRaw) ? stocksRaw : [];
   const crypto: any[] = Array.isArray(cryptoRaw) ? cryptoRaw : [];
 
+  const handleExportPDF = useCallback(async () => {
+    const s = snapRaw as any || {};
+    const inv = safeNum(s.cash) + safeNum(s.super_balance) + safeNum(s.stocks) + safeNum(s.crypto);
+    const requiredFIRE = (10000 * 12) / 0.04;
+    const fireProgress = Math.min(100, Math.round((inv / requiredFIRE) * 100));
+    const totalDebt = safeNum(s.mortgage) + safeNum(s.other_debts);
+    const netWorth = (safeNum(s.ppor) + safeNum(s.cash) + safeNum(s.super_balance) + safeNum(s.stocks) + safeNum(s.crypto) + safeNum(s.cars) + safeNum(s.iran_property)) - totalDebt;
+    const surplus = safeNum(s.monthly_income) - safeNum(s.monthly_expenses);
+    const savingsRate = safeNum(s.monthly_income) > 0 ? Math.round((surplus / safeNum(s.monthly_income)) * 100) : 0;
+
+    const fmt = (v: number) => new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(v);
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Wealth Report — ${new Date().toLocaleDateString('en-AU')}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #1a1a2e; padding: 40px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #C4A55A; padding-bottom: 20px; margin-bottom: 30px; }
+    .header h1 { font-size: 28px; font-weight: 800; color: #1a1a2e; }
+    .header .date { font-size: 13px; color: #666; margin-top: 4px; }
+    .gold { color: #C4A55A; }
+    .section { margin-bottom: 28px; }
+    .section h2 { font-size: 16px; font-weight: 700; color: #C4A55A; border-left: 4px solid #C4A55A; padding-left: 10px; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .card { background: #f7f7f9; border-radius: 10px; padding: 14px 16px; border: 1px solid #e0e0e8; }
+    .card .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+    .card .value { font-size: 20px; font-weight: 800; color: #1a1a2e; }
+    .card .sub { font-size: 11px; color: #aaa; margin-top: 2px; }
+    .progress-bar { height: 10px; background: #e0e0e8; border-radius: 5px; overflow: hidden; margin-top: 8px; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, #C4A55A, #a07a30); border-radius: 5px; }
+    .disclaimer { margin-top: 30px; padding: 14px; background: #f7f7f9; border-radius: 8px; font-size: 11px; color: #888; border: 1px solid #e0e0e8; }
+    @media print { body { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>Shahrokh Family <span class="gold">Wealth Report</span></h1>
+      <div class="date">Generated: ${new Date().toLocaleDateString('en-AU', { dateStyle: 'long' })}</div>
+    </div>
+    <div style="text-align:right; font-size:12px; color:#888;">
+      <div>Powered by Family Wealth Planner</div>
+      <div style="margin-top:4px; color:#C4A55A; font-weight:600;">Personal CFO Platform</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Net Worth Overview</h2>
+    <div class="grid">
+      <div class="card"><div class="label">Net Worth</div><div class="value">${fmt(netWorth)}</div></div>
+      <div class="card"><div class="label">Monthly Income</div><div class="value">${fmt(safeNum(s.monthly_income))}</div></div>
+      <div class="card"><div class="label">Monthly Surplus</div><div class="value">${fmt(surplus)}</div></div>
+      <div class="card"><div class="label">Savings Rate</div><div class="value">${savingsRate}%</div><div class="sub">${savingsRate >= 20 ? 'On track' : 'Below target'}</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>FIRE Progress</h2>
+    <div class="grid-3">
+      <div class="card"><div class="label">Current Investable</div><div class="value">${fmt(inv)}</div></div>
+      <div class="card"><div class="label">Required FIRE Capital</div><div class="value">${fmt(requiredFIRE)}</div></div>
+      <div class="card"><div class="label">FIRE Progress</div><div class="value">${fireProgress}%</div><div class="progress-bar"><div class="progress-fill" style="width:${fireProgress}%"></div></div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Debt Summary</h2>
+    <div class="grid-3">
+      <div class="card"><div class="label">PPOR Mortgage</div><div class="value">${fmt(safeNum(s.mortgage))}</div></div>
+      <div class="card"><div class="label">Other Debts</div><div class="value">${fmt(safeNum(s.other_debts))}</div></div>
+      <div class="card"><div class="label">Total Debt</div><div class="value">${fmt(totalDebt)}</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Assets</h2>
+    <div class="grid">
+      <div class="card"><div class="label">PPOR</div><div class="value">${fmt(safeNum(s.ppor))}</div></div>
+      <div class="card"><div class="label">Cash</div><div class="value">${fmt(safeNum(s.cash))}</div></div>
+      <div class="card"><div class="label">Super</div><div class="value">${fmt(safeNum(s.super_balance))}</div></div>
+      <div class="card"><div class="label">Stocks + Crypto</div><div class="value">${fmt(safeNum(s.stocks) + safeNum(s.crypto))}</div></div>
+    </div>
+  </div>
+
+  <div class="disclaimer">
+    <strong>Disclaimer:</strong> This report is generated from data entered by the user and is for general information purposes only. It does not constitute financial, tax, or legal advice. Past performance is not indicative of future results. Consult a licensed financial adviser before making investment decisions.
+  </div>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+      setTimeout(() => win.print(), 500);
+    }
+  }, [snapRaw]);
+
   const renderTab = () => {
     switch (activeTab) {
       case "fire":
@@ -2169,6 +2518,67 @@ export default function WealthStrategyPage() {
         return <HiddenMoney snap={snap} expenses={expenses} />;
       case "coach":
         return <AICoach snap={snap} expenses={expenses} properties={properties} stocks={stocks} crypto={crypto} />;
+      case "action-plan": {
+        const actionPlan = generateActionPlan(snap, properties, expenses);
+        return (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-lg font-bold">Personalised Action Plan</h2>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {actionPlan.length} actions ranked by impact · Based on your live financial data
+              </p>
+            </div>
+
+            {actionPlan.length === 0 && (
+              <div className="text-center py-12 text-muted-foreground">
+                <Zap className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p>No actions needed — your finances look healthy!</p>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {actionPlan.map(action => (
+                <div key={action.rank} className={`bg-card border rounded-2xl p-5 ${
+                  action.priority === 'High' ? 'border-red-800/40' :
+                  action.priority === 'Medium' ? 'border-yellow-800/40' : 'border-border'
+                }`}>
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl font-black text-muted-foreground/30 w-8 shrink-0">#{action.rank}</span>
+                      <div>
+                        <h3 className="text-sm font-bold">{action.title}</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{action.description}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                        action.priority === 'High' ? 'bg-red-900/30 text-red-400' :
+                        action.priority === 'Medium' ? 'bg-yellow-900/30 text-yellow-400' :
+                        'bg-green-900/30 text-green-400'
+                      }`}>{action.priority}</span>
+                      <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded">{action.category}</span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-border/50">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Estimated Impact</p>
+                      <p className="text-xs font-semibold text-primary mt-0.5">{action.impact}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Suggested Start</p>
+                      <p className="text-xs font-semibold mt-0.5">{action.suggestedDate}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="text-xs text-muted-foreground/60 text-center pt-2">
+              General information only — not financial, tax, or legal advice. Actions are generated from your data using deterministic rules.
+            </div>
+          </div>
+        );
+      }
       default:
         return null;
     }
@@ -2179,14 +2589,25 @@ export default function WealthStrategyPage() {
   return (
     <div className="min-h-screen bg-background px-4 py-6 max-w-7xl mx-auto">
       {/* Page header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Target className="w-6 h-6 text-yellow-400" />
-          Wealth Strategy Hub
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          10 deterministic calculation modules for the Shahrokh Family Financial Plan
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Target className="w-6 h-6 text-yellow-400" />
+            Wealth Strategy Hub
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            11 deterministic calculation modules for the Shahrokh Family Financial Plan
+          </p>
+        </div>
+        <Button
+          onClick={handleExportPDF}
+          variant="outline"
+          size="sm"
+          className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
+        >
+          <FileDown className="w-3.5 h-3.5" />
+          Export PDF Report
+        </Button>
       </div>
 
       {/* Tab bar */}
