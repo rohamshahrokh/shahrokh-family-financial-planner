@@ -1,16 +1,15 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, projectInvestment, calcCAGR } from "@/lib/finance";
 import SaveButton from "@/components/SaveButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useToast } from "@/hooks/use-toast";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, BarChart, Bar
+  PieChart, Pie, Cell
 } from "recharts";
-import { Plus, Trash2, Edit2, TrendingUp, Save } from "lucide-react";
+import { Plus, Trash2, Edit2, TrendingUp } from "lucide-react";
 
 const COLORS = ['hsl(43,85%,55%)', 'hsl(188,60%,48%)', 'hsl(142,60%,45%)', 'hsl(20,80%,55%)', 'hsl(270,60%,60%)', 'hsl(0,72%,51%)', 'hsl(60,80%,50%)', 'hsl(300,60%,55%)', 'hsl(200,70%,55%)'];
 
@@ -28,17 +27,58 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
+const STOCK_FIELDS = [
+  { label: 'Ticker', key: 'ticker', type: 'text' },
+  { label: 'Name', key: 'name', type: 'text' },
+  { label: 'Price ($)', key: 'current_price', type: 'number' },
+  { label: 'Holding (shares)', key: 'current_holding', type: 'number' },
+  { label: 'Expected Return %', key: 'expected_return', type: 'number' },
+  { label: 'Monthly DCA ($)', key: 'monthly_dca', type: 'number' },
+  { label: 'Annual Lump Sum ($)', key: 'annual_lump_sum', type: 'number' },
+  { label: 'Projection Years', key: 'projection_years', type: 'number' },
+] as const;
+
+// ─── StockEditForm defined OUTSIDE parent — no remount on keystroke ────────────
+interface StockEditFormProps { data: any; onChange: (d: any) => void; }
+function StockEditForm({ data, onChange }: StockEditFormProps) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {STOCK_FIELDS.map(f => (
+        <div key={f.key}>
+          <label className="text-xs text-muted-foreground">{f.label}</label>
+          <Input
+            type={f.type}
+            value={data[f.key] ?? ''}
+            onChange={e => onChange({ ...data, [f.key]: e.target.value })}
+            className="h-7 text-xs"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function normaliseStock(d: any) {
+  const out = { ...d };
+  for (const f of STOCK_FIELDS) {
+    if (f.type === 'number') out[f.key] = parseFloat(String(out[f.key])) || 0;
+  }
+  return out;
+}
+
 export default function StocksPage() {
   const qc = useQueryClient();
-  const { toast } = useToast();
   const [showAdd, setShowAdd] = useState(false);
-  const [draft, setDraft] = useState({
-    ticker: '', name: '', current_price: 0, current_holding: 0,
+  const [draft, setDraft] = useState<any>({
+    ticker: '', name: '', current_price: '', current_holding: '',
     allocation_pct: 0, expected_return: 12, monthly_dca: 0,
     annual_lump_sum: 0, projection_years: 10,
   });
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<any>(null);
+
+  const handleDraftChange = useCallback((d: any) => setDraft(d), []);
+  const handleEditDraftChange = useCallback((d: any) => setEditDraft(d), []);
 
   const { data: stocks = [] } = useQuery<any[]>({
     queryKey: ['/api/stocks'],
@@ -59,9 +99,7 @@ export default function StocksPage() {
   });
 
   const totalValue = stocks.reduce((s: number, st: any) => s + (st.current_holding * st.current_price), 0);
-  const totalHolding = stocks.reduce((s: number, st: any) => s + st.current_holding, 0);
 
-  // Portfolio 10-year projection (combined)
   const combinedProjection = useMemo(() => {
     const years = 10;
     const result = [];
@@ -87,84 +125,6 @@ export default function StocksPage() {
 
   const year10Val = combinedProjection[9]?.value || 0;
   const cagr = calcCAGR(totalValue || 1, year10Val || 1, 10);
-
-  const StockRow = ({ stock, idx }: { stock: any; idx: number }) => {
-    const val = stock.current_holding * stock.current_price;
-    const isEditing = editingId === stock.id;
-    const proj = projectInvestment(val, stock.expected_return, stock.monthly_dca || 0, 10);
-    const proj10 = proj[9]?.value || val;
-    const gain = proj10 - (proj[9]?.totalInvested || val);
-
-    if (isEditing && editDraft) {
-      return (
-        <tr className="border-b border-border bg-secondary/20">
-          <td className="p-2" colSpan={8}>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {[
-                { label: 'Ticker', key: 'ticker', type: 'text' },
-                { label: 'Name', key: 'name', type: 'text' },
-                { label: 'Price ($)', key: 'current_price', type: 'number' },
-                { label: 'Holding (shares)', key: 'current_holding', type: 'number' },
-                { label: 'Expected Return %', key: 'expected_return', type: 'number' },
-                { label: 'Monthly DCA ($)', key: 'monthly_dca', type: 'number' },
-                { label: 'Annual Lump Sum ($)', key: 'annual_lump_sum', type: 'number' },
-                { label: 'Projection Years', key: 'projection_years', type: 'number' },
-              ].map(f => (
-                <div key={f.key}>
-                  <label className="text-xs text-muted-foreground">{f.label}</label>
-                  <Input
-                    type={f.type}
-                    value={editDraft[f.key]}
-                    onChange={e => setEditDraft({ ...editDraft, [f.key]: f.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value })}
-                    className="h-7 text-xs"
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-2 mt-2">
-              <SaveButton label="Save Stock Scenario" onSave={() => updateMut.mutateAsync({ id: stock.id, data: editDraft })} />
-              <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
-            </div>
-          </td>
-        </tr>
-      );
-    }
-
-    return (
-      <tr className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
-        <td className="px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold"
-              style={{ background: COLORS[idx % COLORS.length] + '20', color: COLORS[idx % COLORS.length] }}>
-              {stock.ticker?.charAt(0)}
-            </div>
-            <div>
-              <p className="text-xs font-bold">{stock.ticker}</p>
-              <p className="text-xs text-muted-foreground truncate max-w-[100px]">{stock.name}</p>
-            </div>
-          </div>
-        </td>
-        <td className="px-3 py-2.5 text-xs num-display">{stock.current_holding || 0} shares</td>
-        <td className="px-3 py-2.5 text-xs num-display">{formatCurrency(stock.current_price || 0)}</td>
-        <td className="px-3 py-2.5 text-xs num-display font-semibold">{formatCurrency(val, true)}</td>
-        <td className="px-3 py-2.5 text-xs">{stock.expected_return}%</td>
-        <td className="px-3 py-2.5 text-xs num-display text-emerald-400">{formatCurrency(proj10, true)}</td>
-        <td className="px-3 py-2.5 text-xs num-display text-primary">{formatCurrency(stock.monthly_dca || 0)}</td>
-        <td className="px-3 py-2.5">
-          <div className="flex gap-1">
-            <Button size="icon" variant="ghost" className="w-6 h-6"
-              onClick={() => { setEditingId(stock.id); setEditDraft({ ...stock }); }}>
-              <Edit2 className="w-3 h-3" />
-            </Button>
-            <Button size="icon" variant="ghost" className="w-6 h-6 text-red-400"
-              onClick={() => { if (confirm('Delete?')) deleteMut.mutate(stock.id); }}>
-              <Trash2 className="w-3 h-3" />
-            </Button>
-          </div>
-        </td>
-      </tr>
-    );
-  };
 
   return (
     <div className="space-y-5 pb-8">
@@ -257,30 +217,9 @@ export default function StocksPage() {
       {showAdd && (
         <div className="rounded-xl border border-primary/30 bg-card p-5">
           <h3 className="text-sm font-bold mb-4">Add Stock</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: 'Ticker', key: 'ticker', type: 'text' },
-              { label: 'Company Name', key: 'name', type: 'text' },
-              { label: 'Current Price ($)', key: 'current_price', type: 'number' },
-              { label: 'Shares Held', key: 'current_holding', type: 'number' },
-              { label: 'Expected Return %', key: 'expected_return', type: 'number' },
-              { label: 'Monthly DCA ($)', key: 'monthly_dca', type: 'number' },
-              { label: 'Annual Lump Sum ($)', key: 'annual_lump_sum', type: 'number' },
-              { label: 'Projection Years', key: 'projection_years', type: 'number' },
-            ].map(f => (
-              <div key={f.key}>
-                <label className="text-xs text-muted-foreground">{f.label}</label>
-                <Input
-                  type={f.type}
-                  value={(draft as any)[f.key]}
-                  onChange={e => setDraft({ ...draft, [f.key]: f.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value })}
-                  className="h-8 text-sm"
-                />
-              </div>
-            ))}
-          </div>
+          <StockEditForm data={draft} onChange={handleDraftChange} />
           <div className="flex gap-2 mt-4">
-            <SaveButton label="Save Stock Scenario" onSave={() => createMut.mutateAsync(draft)} />
+            <SaveButton label="Save Stock Scenario" onSave={() => createMut.mutateAsync(normaliseStock(draft))} />
             <Button size="sm" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
           </div>
         </div>
@@ -301,7 +240,61 @@ export default function StocksPage() {
               </tr>
             </thead>
             <tbody>
-              {stocks.map((s: any, i: number) => <StockRow key={s.id} stock={s} idx={i} />)}
+              {stocks.map((stock: any, idx: number) => {
+                const val = stock.current_holding * stock.current_price;
+                const isEditing = editingId === stock.id;
+                const proj = projectInvestment(val, stock.expected_return, stock.monthly_dca || 0, 10);
+                const proj10 = proj[9]?.value || val;
+
+                if (isEditing && editDraft) {
+                  return (
+                    <tr key={stock.id} className="border-b border-border bg-secondary/20">
+                      <td className="p-2" colSpan={8}>
+                        <StockEditForm data={editDraft} onChange={handleEditDraftChange} />
+                        <div className="flex gap-2 mt-2">
+                          <SaveButton label="Save Stock Scenario" onSave={() => updateMut.mutateAsync({ id: stock.id, data: normaliseStock(editDraft) })} />
+                          <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                return (
+                  <tr key={stock.id} className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold"
+                          style={{ background: COLORS[idx % COLORS.length] + '20', color: COLORS[idx % COLORS.length] }}>
+                          {stock.ticker?.charAt(0)}
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold">{stock.ticker}</p>
+                          <p className="text-xs text-muted-foreground truncate max-w-[100px]">{stock.name}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-xs num-display">{stock.current_holding || 0} shares</td>
+                    <td className="px-3 py-2.5 text-xs num-display">{formatCurrency(stock.current_price || 0)}</td>
+                    <td className="px-3 py-2.5 text-xs num-display font-semibold">{formatCurrency(val, true)}</td>
+                    <td className="px-3 py-2.5 text-xs">{stock.expected_return}%</td>
+                    <td className="px-3 py-2.5 text-xs num-display text-emerald-400">{formatCurrency(proj10, true)}</td>
+                    <td className="px-3 py-2.5 text-xs num-display text-primary">{formatCurrency(stock.monthly_dca || 0)}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex gap-1">
+                        <Button size="icon" variant="ghost" className="w-6 h-6"
+                          onClick={() => { setEditingId(stock.id); setEditDraft({ ...stock }); }}>
+                          <Edit2 className="w-3 h-3" />
+                        </Button>
+                        <Button size="icon" variant="ghost" className="w-6 h-6 text-red-400"
+                          onClick={() => { if (confirm('Delete?')) deleteMut.mutate(stock.id); }}>
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
             {stocks.length > 0 && (
               <tfoot>
