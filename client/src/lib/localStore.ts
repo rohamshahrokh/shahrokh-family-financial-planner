@@ -23,6 +23,7 @@
 
 import {
   sbSnapshot, sbExpenses, sbProperties, sbStocks, sbCrypto, sbTimeline, sbScenarios,
+  sbStockTx, sbCryptoTx,
 } from "./supabaseClient";
 
 // ─── Safe number helper ───────────────────────────────────────────────────────
@@ -96,6 +97,40 @@ export interface Scenario {
   id: number; name: string; data: string; created_at: string;
 }
 
+export interface StockTransaction {
+  id: number;
+  created_at: string;
+  updated_at: string;
+  transaction_type: 'buy' | 'sell';
+  status: 'actual' | 'planned';
+  transaction_date: string; // YYYY-MM-DD
+  ticker: string;
+  asset_name: string;
+  units: number;
+  price_per_unit: number;
+  total_amount: number;
+  brokerage_fee: number;
+  notes: string;
+  created_by: string;
+}
+
+export interface CryptoTransaction {
+  id: number;
+  created_at: string;
+  updated_at: string;
+  transaction_type: 'buy' | 'sell';
+  status: 'actual' | 'planned';
+  transaction_date: string; // YYYY-MM-DD
+  symbol: string;
+  asset_name: string;
+  units: number;
+  price_per_unit: number;
+  total_amount: number;
+  fee: number;
+  notes: string;
+  created_by: string;
+}
+
 // ─── Default seed values ──────────────────────────────────────────────────────
 
 const DEFAULT_SNAPSHOT: Snapshot = {
@@ -136,6 +171,8 @@ const KEYS = {
   scenarios:  "sf_scenarios_v3",
   seeded:     "sf_seeded_v3",
   lastSync:   "sf_last_sync",
+  stockTx:    "sf_stock_tx_v1",
+  cryptoTx:   "sf_crypto_tx_v1",
 };
 
 // ─── Last sync timestamp (shown in UI) ───────────────────────────────────────
@@ -204,7 +241,7 @@ seedSupabaseIfEmpty().catch(() => {});
 
 export async function syncFromCloud(): Promise<void> {
   console.log("[SF] syncFromCloud: pulling all data from Supabase...");
-  const [snap, expenses, props, stocks, cryptos, timeline, scenarios] = await Promise.all([
+  const [snap, expenses, props, stocks, cryptos, timeline, scenarios, stockTxs, cryptoTxs] = await Promise.all([
     sbSnapshot.get(),
     sbExpenses.getAll(),
     sbProperties.getAll(),
@@ -212,6 +249,8 @@ export async function syncFromCloud(): Promise<void> {
     sbCrypto.getAll(),
     sbTimeline.getAll(),
     sbScenarios.getAll(),
+    sbStockTx.getAll(),
+    sbCryptoTx.getAll(),
   ]);
 
   if (snap) {
@@ -224,6 +263,8 @@ export async function syncFromCloud(): Promise<void> {
   lsSet(KEYS.crypto,     cryptos);
   lsSet(KEYS.timeline,   timeline);
   lsSet(KEYS.scenarios,  scenarios);
+  lsSet(KEYS.stockTx,    stockTxs);
+  lsSet(KEYS.cryptoTx,   cryptoTxs);
   setLastSync();
   console.log("[SF] syncFromCloud complete. Rows:", {
     expenses: expenses.length,
@@ -232,6 +273,8 @@ export async function syncFromCloud(): Promise<void> {
     cryptos: cryptos.length,
     timeline: timeline.length,
     scenarios: scenarios.length,
+    stockTxs: stockTxs.length,
+    cryptoTxs: cryptoTxs.length,
   });
 }
 
@@ -553,5 +596,107 @@ export const localStore = {
     await sbScenarios.delete(id);
     lsSet(KEYS.scenarios, (lsGet<Scenario[]>(KEYS.scenarios) ?? []).filter((i) => i.id !== id));
     console.log("[SF] Saved to Supabase: scenario deleted", id);
+  },
+
+  // ── Stock Transactions ─────────────────────────────────────────────────────
+
+  async getStockTransactions(): Promise<StockTransaction[]> {
+    try {
+      const rows = await sbStockTx.getAll();
+      lsSet(KEYS.stockTx, rows);
+      console.log("[SF] Loaded from Supabase: stock transactions", rows.length, "rows");
+      return rows;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: stock transactions", err);
+      return lsGet<StockTransaction[]>(KEYS.stockTx) ?? [];
+    }
+  },
+
+  async createStockTransaction(data: Omit<StockTransaction, "id" | "created_at" | "updated_at">): Promise<StockTransaction> {
+    const saved = await sbStockTx.create(data);
+    if (saved) {
+      const items = lsGet<StockTransaction[]>(KEYS.stockTx) ?? [];
+      lsSet(KEYS.stockTx, [saved, ...items]);
+      console.log("[SF] Saved to Supabase: stock transaction created", saved.id);
+      return saved;
+    }
+    const items = lsGet<StockTransaction[]>(KEYS.stockTx) ?? [];
+    const now = new Date().toISOString();
+    const item: StockTransaction = {
+      ...data,
+      id: nextId(items),
+      created_at: now,
+      updated_at: now,
+    } as StockTransaction;
+    lsSet(KEYS.stockTx, [item, ...items]);
+    console.log("[SF] Fallback to local cache: stock transaction created locally", item.id);
+    return item;
+  },
+
+  async updateStockTransaction(id: number, data: Partial<StockTransaction>): Promise<StockTransaction> {
+    const saved = await sbStockTx.update(id, data);
+    const items = (lsGet<StockTransaction[]>(KEYS.stockTx) ?? []).map(
+      (i) => (i.id === id ? { ...i, ...(saved ?? data) } : i)
+    );
+    lsSet(KEYS.stockTx, items);
+    console.log("[SF] Saved to Supabase: stock transaction updated", id);
+    return items.find((i) => i.id === id)!;
+  },
+
+  async deleteStockTransaction(id: number): Promise<void> {
+    await sbStockTx.delete(id);
+    lsSet(KEYS.stockTx, (lsGet<StockTransaction[]>(KEYS.stockTx) ?? []).filter((i) => i.id !== id));
+    console.log("[SF] Saved to Supabase: stock transaction deleted", id);
+  },
+
+  // ── Crypto Transactions ────────────────────────────────────────────────────
+
+  async getCryptoTransactions(): Promise<CryptoTransaction[]> {
+    try {
+      const rows = await sbCryptoTx.getAll();
+      lsSet(KEYS.cryptoTx, rows);
+      console.log("[SF] Loaded from Supabase: crypto transactions", rows.length, "rows");
+      return rows;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: crypto transactions", err);
+      return lsGet<CryptoTransaction[]>(KEYS.cryptoTx) ?? [];
+    }
+  },
+
+  async createCryptoTransaction(data: Omit<CryptoTransaction, "id" | "created_at" | "updated_at">): Promise<CryptoTransaction> {
+    const saved = await sbCryptoTx.create(data);
+    if (saved) {
+      const items = lsGet<CryptoTransaction[]>(KEYS.cryptoTx) ?? [];
+      lsSet(KEYS.cryptoTx, [saved, ...items]);
+      console.log("[SF] Saved to Supabase: crypto transaction created", saved.id);
+      return saved;
+    }
+    const items = lsGet<CryptoTransaction[]>(KEYS.cryptoTx) ?? [];
+    const now = new Date().toISOString();
+    const item: CryptoTransaction = {
+      ...data,
+      id: nextId(items),
+      created_at: now,
+      updated_at: now,
+    } as CryptoTransaction;
+    lsSet(KEYS.cryptoTx, [item, ...items]);
+    console.log("[SF] Fallback to local cache: crypto transaction created locally", item.id);
+    return item;
+  },
+
+  async updateCryptoTransaction(id: number, data: Partial<CryptoTransaction>): Promise<CryptoTransaction> {
+    const saved = await sbCryptoTx.update(id, data);
+    const items = (lsGet<CryptoTransaction[]>(KEYS.cryptoTx) ?? []).map(
+      (i) => (i.id === id ? { ...i, ...(saved ?? data) } : i)
+    );
+    lsSet(KEYS.cryptoTx, items);
+    console.log("[SF] Saved to Supabase: crypto transaction updated", id);
+    return items.find((i) => i.id === id)!;
+  },
+
+  async deleteCryptoTransaction(id: number): Promise<void> {
+    await sbCryptoTx.delete(id);
+    lsSet(KEYS.cryptoTx, (lsGet<CryptoTransaction[]>(KEYS.cryptoTx) ?? []).filter((i) => i.id !== id));
+    console.log("[SF] Saved to Supabase: crypto transaction deleted", id);
   },
 };
