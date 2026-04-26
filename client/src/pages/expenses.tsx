@@ -425,6 +425,12 @@ export default function ExpensesPage() {
   const handleDraftChange = useCallback((d: ExpenseFormData) => setDraft(d), []);
   const handleEditDraftChange = useCallback((d: ExpenseFormData) => setEditDraft(d), []);
 
+  // ── Import refs (declared early so they can be referenced inside bulkMut) ────
+  // Holds the target year to apply after a successful bulk import
+  const pendingImportYearRef = useRef<string>('all');
+  // Prevents useEffect auto-detect from clobbering the filter set by an import
+  const importJustSetFilterRef = useRef(false);
+
   // ── Data fetching ───────────────────────────────────────────────────────────
   const { data: rawExpenses = [] } = useQuery<any[]>({
     queryKey: ['/api/expenses'],
@@ -456,9 +462,25 @@ export default function ExpensesPage() {
   });
   const bulkMut = useMutation({
     mutationFn: (data: any[]) => apiRequest('POST', '/api/expenses/bulk', { expenses: data }).then(r => r.json()),
-    onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ['/api/expenses'] });
-      toast({ title: `Imported ${res.created} expenses`, description: 'Excel import complete.' });
+    // Single unified onSuccess — no call-level handler needed
+    onSuccess: async (res) => {
+      // 1. Force-refetch immediately (not lazy invalidate)
+      await qc.refetchQueries({ queryKey: ['/api/expenses'] });
+      // 2. Apply the year filter — mark flag so useEffect auto-detect doesn't clobber it
+      importJustSetFilterRef.current = true;
+      setFilterYear(pendingImportYearRef.current);
+      setFilterMonth('all');
+      setFilterWeek('all');
+      setFilterCategory('all');
+      setFilterSourceCode('all');
+      setFilterSubcat('');
+      setFilterMember('all');
+      setFilterPayment('all');
+      setFilterDateFrom('');
+      setFilterDateTo('');
+      setSearch('');
+      setPage(1);
+      toast({ title: `Import Complete`, description: `${res.created} expense(s) imported successfully.` });
     },
   });
   const fixCategoriesMut = useMutation({
@@ -859,44 +881,29 @@ export default function ExpensesPage() {
     }
 
     if (toCreate.length > 0) {
-      bulkMut.mutate(toCreate, {
-        onSuccess: () => {
-          toast({
-            title: `Import Complete`,
-            description: `${added} added, ${skipped} skipped as duplicates.`,
-          });
-          // Auto-clear filters and show newly imported data
-          const importedYears = toCreate
-            .map((r: any) => { const d = new Date(r.date); return isNaN(d.getTime()) ? null : d.getFullYear(); })
-            .filter((y: number | null): y is number => y !== null);
-          if (importedYears.length > 0) {
-            const latestImportedYear = Math.max(...importedYears);
-            setFilterYear(String(latestImportedYear));
-          } else {
-            setFilterYear('all');
-          }
-          setFilterMonth('all'); setFilterWeek('all');
-          setFilterCategory('all'); setFilterSourceCode('all');
-          setFilterSubcat(''); setFilterMember('all'); setFilterPayment('all');
-          setFilterDateFrom(''); setFilterDateTo(''); setSearch(''); setPage(1);
-          // Re-fetch to ensure latest data is displayed
-          qc.invalidateQueries({ queryKey: ['/api/expenses'] });
-          // Log to import history in localStorage
-          const history = JSON.parse(localStorage.getItem('sf_import_history') || '[]');
-          history.unshift({
-            id: Date.now(),
-            timestamp: new Date().toISOString(),
-            trigger: 'Manual',
-            checked: importRows.length,
-            added,
-            skipped,
-            status: 'Success',
-            error: '',
-            source: 'manual-upload',
-          });
-          localStorage.setItem('sf_import_history', JSON.stringify(history.slice(0, 100)));
-        },
+      // Compute the target year BEFORE mutating so the ref closure is correct
+      const importedYears = toCreate
+        .map((r: any) => { const d = new Date(r.date); return isNaN(d.getTime()) ? null : d.getFullYear(); })
+        .filter((y: number | null): y is number => y !== null);
+      pendingImportYearRef.current = importedYears.length > 0
+        ? String(Math.max(...importedYears))
+        : 'all';
+      // Log to import history in localStorage
+      const history = JSON.parse(localStorage.getItem('sf_import_history') || '[]');
+      history.unshift({
+        id: Date.now(),
+        timestamp: new Date().toISOString(),
+        trigger: 'Manual',
+        checked: importRows.length,
+        added,
+        skipped,
+        status: 'Success',
+        error: '',
+        source: 'manual-upload',
       });
+      localStorage.setItem('sf_import_history', JSON.stringify(history.slice(0, 100)));
+      // Fire bulk mutation — all state updates happen in the unified onSuccess above
+      bulkMut.mutate(toCreate);
     } else {
       toast({ title: 'No new records', description: `All ${skipped} rows already exist.` });
       const history = JSON.parse(localStorage.getItem('sf_import_history') || '[]');
@@ -968,22 +975,29 @@ export default function ExpensesPage() {
     || filterMember !== 'all' || filterPayment !== 'all'
     || filterDateFrom !== '' || filterDateTo !== '' || search !== '';
 
-  // Auto-detect and apply latest year from expenses
+  // Auto-detect and apply latest year from expenses on first load only.
+  // Runs whenever rawExpenses changes but only applies when:
+  //   1. filterYear is still 'all' (user hasn't touched it)
+  //   2. An import hasn't just set the filter (importJustSetFilterRef)
   useEffect(() => {
     if (!rawExpenses || rawExpenses.length === 0) return;
-    // Only auto-detect when no filter is set yet (on first load)
+    // Don't clobber a year that was just set by the import flow
+    if (importJustSetFilterRef.current) {
+      importJustSetFilterRef.current = false;
+      return;
+    }
+    // Only auto-detect on initial mount / when user hasn't manually filtered
     if (filterYear !== 'all') return;
-    // Find the most recent year in the data
+    // Find the most recent valid year in the data
     const years = rawExpenses
       .map((e: any) => { const d = new Date(e.date); return isNaN(d.getTime()) ? null : d.getFullYear(); })
-      .filter((y: number | null): y is number => y !== null);
+      .filter((y: number | null): y is number => y !== null && y > 2000 && y < 2100);
     if (years.length === 0) return;
     const latestYear = Math.max(...years);
-    // Only auto-select if it's not the current year (i.e. data is from a previous year)
-    // Always default to showing latest year's data
     setFilterYear(String(latestYear));
+  // We intentionally only depend on rawExpenses — filterYear is a read for the guard only
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [rawExpenses]);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -1396,6 +1410,25 @@ export default function ExpensesPage() {
             className="gap-1.5 bg-red-600 hover:bg-red-700 text-white border-0 h-7 text-xs"
           >
             <Trash2 className="w-3 h-3" /> Delete {selected.size} records
+          </Button>
+        </div>
+      )}
+
+      {/* ─── Hidden-by-filter warning banner ───────────────────────────── */}
+      {filtered.length === 0 && expenses.length > 0 && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-sm">
+          <span className="text-lg">⚠️</span>
+          <div className="flex-1">
+            <span className="font-semibold">Your database has {expenses.length} expense record{expenses.length === 1 ? '' : 's'}</span>, but all are hidden by the current filters.
+            {filterYear !== 'all' && <span className="ml-1">(Year filter: <strong>{filterYear}</strong>)</span>}
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0 border-amber-500/50 text-amber-300 hover:bg-amber-500/15 text-xs"
+            onClick={resetFilters}
+          >
+            Clear All Filters
           </Button>
         </div>
       )}
