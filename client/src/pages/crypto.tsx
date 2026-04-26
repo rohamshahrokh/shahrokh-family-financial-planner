@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, projectInvestment, calcCAGR } from "@/lib/finance";
@@ -27,15 +27,55 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
+const CRYPTO_FIELDS = [
+  { label: 'Name', key: 'name', type: 'text' },
+  { label: 'Symbol', key: 'symbol', type: 'text' },
+  { label: 'Price ($)', key: 'current_price', type: 'number' },
+  { label: 'Holdings', key: 'current_holding', type: 'number' },
+  { label: 'Expected Return %', key: 'expected_return', type: 'number' },
+  { label: 'Monthly DCA ($)', key: 'monthly_dca', type: 'number' },
+] as const;
+
+// ─── CryptoEditForm defined OUTSIDE parent — prevents remount on keystroke ─────
+interface CryptoEditFormProps { data: any; onChange: (d: any) => void; }
+function CryptoEditForm({ data, onChange }: CryptoEditFormProps) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {CRYPTO_FIELDS.map(f => (
+        <div key={f.key}>
+          <label className="text-xs text-muted-foreground">{f.label}</label>
+          <Input
+            type={f.type}
+            value={data[f.key] ?? ''}
+            onChange={e => onChange({ ...data, [f.key]: e.target.value })}
+            className="h-7 text-xs"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function normaliseCrypto(d: any) {
+  const out = { ...d };
+  for (const f of CRYPTO_FIELDS) {
+    if (f.type === 'number') out[f.key] = parseFloat(String(out[f.key])) || 0;
+  }
+  return out;
+}
+
 export default function CryptoPage() {
   const qc = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
-  const [draft, setDraft] = useState({
-    name: '', symbol: '', current_price: 0, current_holding: 0,
+  const [draft, setDraft] = useState<any>({
+    name: '', symbol: '', current_price: '', current_holding: '',
     expected_return: 25, monthly_dca: 0, lump_sum_amount: 0, projection_years: 10,
   });
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<any>(null);
+
+  const handleDraftChange = useCallback((d: any) => setDraft(d), []);
+  const handleEditDraftChange = useCallback((d: any) => setEditDraft(d), []);
 
   const { data: cryptos = [] } = useQuery<any[]>({
     queryKey: ['/api/crypto'],
@@ -73,7 +113,6 @@ export default function CryptoPage() {
     return result;
   }, [cryptos]);
 
-  // Per-asset comparison for chart
   const assetProjections = useMemo(() => {
     const years = 10;
     const result: any[] = [];
@@ -219,31 +258,9 @@ export default function CryptoPage() {
       {showAdd && (
         <div className="rounded-xl border border-primary/30 bg-card p-5">
           <h3 className="text-sm font-bold mb-4">Add Crypto Asset</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: 'Name', key: 'name', type: 'text', placeholder: 'Bitcoin' },
-              { label: 'Symbol', key: 'symbol', type: 'text', placeholder: 'BTC' },
-              { label: 'Current Price (AUD)', key: 'current_price', type: 'number', placeholder: '95000' },
-              { label: 'Holding (coins)', key: 'current_holding', type: 'number', placeholder: '0' },
-              { label: 'Expected Return %', key: 'expected_return', type: 'number', placeholder: '25' },
-              { label: 'Monthly DCA ($)', key: 'monthly_dca', type: 'number', placeholder: '0' },
-              { label: 'Lump Sum Amount ($)', key: 'lump_sum_amount', type: 'number', placeholder: '0' },
-              { label: 'Projection Years', key: 'projection_years', type: 'number', placeholder: '10' },
-            ].map(f => (
-              <div key={f.key}>
-                <label className="text-xs text-muted-foreground">{f.label}</label>
-                <Input
-                  type={f.type}
-                  placeholder={f.placeholder}
-                  value={(draft as any)[f.key]}
-                  onChange={e => setDraft({ ...draft, [f.key]: f.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value })}
-                  className="h-8 text-sm"
-                />
-              </div>
-            ))}
-          </div>
+          <CryptoEditForm data={draft} onChange={handleDraftChange} />
           <div className="flex gap-2 mt-4">
-            <SaveButton label="Save Crypto Scenario" onSave={() => createMut.mutateAsync(draft)} />
+            <SaveButton label="Save Crypto Scenario" onSave={() => createMut.mutateAsync(normaliseCrypto(draft))} />
             <Button size="sm" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
           </div>
         </div>
@@ -272,28 +289,9 @@ export default function CryptoPage() {
                   return (
                     <tr key={c.id} className="border-b border-border bg-secondary/20">
                       <td className="p-2" colSpan={8}>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                          {[
-                            { label: 'Name', key: 'name', type: 'text' },
-                            { label: 'Symbol', key: 'symbol', type: 'text' },
-                            { label: 'Price ($)', key: 'current_price', type: 'number' },
-                            { label: 'Holdings', key: 'current_holding', type: 'number' },
-                            { label: 'Expected Return %', key: 'expected_return', type: 'number' },
-                            { label: 'Monthly DCA ($)', key: 'monthly_dca', type: 'number' },
-                          ].map(f => (
-                            <div key={f.key}>
-                              <label className="text-xs text-muted-foreground">{f.label}</label>
-                              <Input
-                                type={f.type}
-                                value={editDraft[f.key]}
-                                onChange={e => setEditDraft({ ...editDraft, [f.key]: f.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value })}
-                                className="h-7 text-xs"
-                              />
-                            </div>
-                          ))}
-                        </div>
+                        <CryptoEditForm data={editDraft} onChange={handleEditDraftChange} />
                         <div className="flex gap-2 mt-2">
-                          <SaveButton label="Save Crypto Scenario" onSave={() => updateMut.mutateAsync({ id: c.id, data: editDraft })} />
+                          <SaveButton label="Save Crypto Scenario" onSave={() => updateMut.mutateAsync({ id: c.id, data: normaliseCrypto(editDraft) })} />
                           <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
                         </div>
                       </td>
