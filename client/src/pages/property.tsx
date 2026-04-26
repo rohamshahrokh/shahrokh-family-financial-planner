@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, calcMonthlyRepayment, projectProperty } from "@/lib/finance";
 import SaveButton from "@/components/SaveButton";
+import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,7 +12,8 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Line
 } from "recharts";
-import { Plus, Trash2, Edit2, Home, Building, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, Edit2, Home, Building, ChevronDown, ChevronUp, CheckSquare, Square } from "lucide-react";
+import * as XLSX from "xlsx";
 
 const EMPTY_PROPERTY = {
   name: 'New Investment Property',
@@ -85,7 +87,6 @@ function Field({ label, value, onChange, type = 'number', step = '1000', prefix 
 interface PropertyFormProps { data: any; onChange: (d: any) => void; }
 
 function PropertyForm({ data, onChange }: PropertyFormProps) {
-  // num helper: coerce string → number only on blur/save, keep raw string during typing
   const num = (key: string, v: string) => onChange({ ...data, [key]: v });
 
   return (
@@ -154,7 +155,15 @@ function normalisePropertyDraft(d: any) {
   return out;
 }
 
-function PropertyCard({ prop, onEdit, onDelete }: { prop: any; onEdit: (p: any) => void; onDelete: (id: number) => void }) {
+interface PropertyCardProps {
+  prop: any;
+  onEdit: (p: any) => void;
+  onDelete: (id: number) => void;
+  selected: boolean;
+  onToggleSelect: (id: number) => void;
+}
+
+function PropertyCard({ prop, onEdit, onDelete, selected, onToggleSelect }: PropertyCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState<any>(null);
@@ -179,9 +188,24 @@ function PropertyCard({ prop, onEdit, onDelete }: { prop: any; onEdit: (p: any) 
   }));
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
+    <div
+      className="rounded-xl border bg-card overflow-hidden transition-colors"
+      style={{ borderColor: selected ? 'hsl(0,72%,51%)' : undefined }}
+    >
       {/* Header */}
       <div className="p-4 flex items-center gap-3">
+        {/* Checkbox for bulk select */}
+        <button
+          onClick={() => onToggleSelect(prop.id)}
+          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+          data-testid={`checkbox-property-${prop.id}`}
+        >
+          {selected
+            ? <CheckSquare className="w-4 h-4 text-red-400" />
+            : <Square className="w-4 h-4" />
+          }
+        </button>
+
         <div className="w-8 h-8 rounded-lg flex items-center justify-center"
           style={{ background: prop.type === 'ppor' ? 'rgba(142,200,100,0.1)' : 'rgba(196,165,90,0.1)' }}>
           {prop.type === 'ppor' ? <Home className="w-4 h-4 text-emerald-400" /> : <Building className="w-4 h-4 text-primary" />}
@@ -315,8 +339,9 @@ export default function PropertyPage() {
   const { toast } = useToast();
   const [showAdd, setShowAdd] = useState(false);
   const [draft, setDraft] = useState<any>({ ...EMPTY_PROPERTY });
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [showBulkModal, setShowBulkModal] = useState(false);
 
-  // stable onChange — won't cause PropertyForm to remount
   const handleDraftChange = useCallback((d: any) => setDraft(d), []);
 
   const { data: properties = [] } = useQuery<any[]>({
@@ -336,6 +361,43 @@ export default function PropertyPage() {
   const portfolioValue = properties.reduce((s: number, p: any) => s + p.current_value, 0);
   const portfolioLoans = properties.reduce((s: number, p: any) => s + p.loan_amount, 0);
   const portfolioEquity = portfolioValue - portfolioLoans;
+
+  const toggleSelect = (id: number) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selected.size === properties.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(properties.map((p: any) => p.id)));
+    }
+  };
+
+  const handleExportBackup = () => {
+    const wb = XLSX.utils.book_new();
+    const selectedProps = properties.filter((p: any) => selected.has(p.id));
+    const headers = ['Name', 'Type', 'Value', 'Loan', 'Interest Rate', 'Capital Growth', 'Weekly Rent', 'Purchase Date'];
+    const rows = selectedProps.map((p: any) => [p.name, p.type, p.current_value, p.loan_amount, p.interest_rate, p.capital_growth, p.weekly_rent, p.purchase_date || '']);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([headers, ...rows]), 'Properties Backup');
+    XLSX.writeFile(wb, `Properties_Backup_${new Date().toISOString().split('T')[0]}.xlsx`);
+    toast({ title: 'Backup exported', description: `${selectedProps.length} properties saved to Excel.` });
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selected);
+    for (const id of ids) {
+      await apiRequest('DELETE', `/api/properties/${id}`);
+    }
+    await qc.invalidateQueries({ queryKey: ['/api/properties'] });
+    setSelected(new Set());
+    setShowBulkModal(false);
+    toast({ title: `Deleted ${ids.length} properties`, description: 'Records removed from Supabase and local cache.' });
+  };
 
   return (
     <div className="space-y-5 pb-8">
@@ -384,6 +446,46 @@ export default function PropertyPage() {
         </div>
       )}
 
+      {/* Bulk selection toolbar */}
+      {properties.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 text-xs h-7"
+            onClick={toggleSelectAll}
+            data-testid="button-select-all-properties"
+          >
+            {selected.size === properties.length && properties.length > 0
+              ? <><CheckSquare className="w-3.5 h-3.5" /> Deselect All</>
+              : <><Square className="w-3.5 h-3.5" /> Select All ({properties.length})</>
+            }
+          </Button>
+          {selected.size > 0 && (
+            <>
+              <span className="text-xs text-muted-foreground">{selected.size} selected</span>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="gap-1.5 text-xs h-7"
+                onClick={() => setShowBulkModal(true)}
+                data-testid="button-bulk-delete-properties"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Delete {selected.size} Properties
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-xs h-7"
+                onClick={() => setSelected(new Set())}
+              >
+                Clear
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Property List */}
       {properties.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center">
@@ -399,6 +501,8 @@ export default function PropertyPage() {
               prop={p}
               onEdit={() => {}}
               onDelete={(id) => deleteMut.mutate(id)}
+              selected={selected.has(p.id)}
+              onToggleSelect={toggleSelect}
             />
           ))}
         </div>
@@ -424,6 +528,16 @@ export default function PropertyPage() {
           Edit PPOR values in the Dashboard Financial Snapshot section. No CGT or GST applies to primary residences.
         </p>
       </div>
+
+      {/* Bulk Delete Modal */}
+      <BulkDeleteModal
+        open={showBulkModal}
+        count={selected.size}
+        label="properties"
+        onConfirm={handleBulkDelete}
+        onCancel={() => setShowBulkModal(false)}
+        onExportBackup={handleExportBackup}
+      />
     </div>
   );
 }
