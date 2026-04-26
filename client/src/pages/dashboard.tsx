@@ -1,17 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum, calcSavingsRate, projectNetWorth } from "@/lib/finance";
+import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import KpiCard from "@/components/KpiCard";
 import SaveButton from "@/components/SaveButton";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line
 } from "recharts";
 import {
   TrendingUp, DollarSign, Home, CreditCard,
-  PiggyBank, Calendar, Layers, Target, Edit2, Check, X
+  PiggyBank, Calendar, Layers, Target, Edit2, Check, X, RefreshCw
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,19 @@ export default function DashboardPage() {
   const { chartView } = useAppStore();
   const [editSnap, setEditSnap] = useState(false);
   const [snapDraft, setSnapDraft] = useState<any>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(getLastSync);
+
+  const handleSyncFromCloud = useCallback(async () => {
+    setSyncing(true);
+    try {
+      await syncFromCloud();
+      await qc.invalidateQueries();
+      setLastSync(getLastSync());
+    } finally {
+      setSyncing(false);
+    }
+  }, [qc]);
 
   const { data: snapshot } = useQuery({ queryKey: ['/api/snapshot'], queryFn: () => apiRequest('GET', '/api/snapshot').then(r => r.json()) });
   const { data: properties = [] } = useQuery({ queryKey: ['/api/properties'], queryFn: () => apiRequest('GET', '/api/properties').then(r => r.json()) });
@@ -155,6 +169,22 @@ export default function DashboardPage() {
               {formatCurrency(netWorth)}
             </div>
             <p className="text-xs text-muted-foreground">Brisbane, QLD · AUD</p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleSyncFromCloud}
+              disabled={syncing}
+              className="mt-2 h-7 text-xs gap-1.5"
+              style={{ borderColor: 'rgba(196,165,90,0.3)', color: 'hsl(43,85%,65%)' }}
+            >
+              <RefreshCw className={`w-3 h-3 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Syncing...' : 'Sync From Cloud'}
+            </Button>
+            {lastSync && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Last synced: {new Date(lastSync).toLocaleString('en-AU', { dateStyle: 'short', timeStyle: 'short' })}
+              </p>
+            )}
           </div>
         </div>
       </div>
