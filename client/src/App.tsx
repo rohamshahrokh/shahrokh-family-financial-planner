@@ -34,6 +34,7 @@ import TimelinePage   from "./pages/timeline";
 import DataHealthPage from "./pages/data-health";
 import HelpPage       from "./pages/help";
 import AIInsightsPage from "./pages/ai-insights";
+import WealthStrategyPage from "./pages/wealth-strategy";
 import Layout         from "./components/Layout";
 import NotFound       from "./pages/not-found";
 
@@ -148,6 +149,13 @@ function AppRouter() {
         <Route path="/ai-insights">
           {isAuthenticated ? (
             <Layout><AIInsightsPage /></Layout>
+          ) : (
+            <Redirect to="/login" />
+          )}
+        </Route>
+        <Route path="/wealth-strategy">
+          {isAuthenticated ? (
+            <Layout><WealthStrategyPage /></Layout>
           ) : (
             <Redirect to="/login" />
           )}
