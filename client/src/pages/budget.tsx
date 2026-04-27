@@ -154,7 +154,7 @@ function EditRow({ row, onCancel, onSaved }: EditRowProps) {
   const [notes, setNotes] = useState(row.notes ?? "");
 
   const mutation = useMutation({
-    mutationFn: async (data: any) => { const r = await apiRequest("PUT", `/api/budgets/${row.id}`, data); return r.json(); },
+    mutationFn: async (data: any) => { const r = await apiRequest("PUT", `/api/budgets/id/${row.id}`, data); return r.json(); },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/budgets"] });
       toast({ title: "Budget updated" });
@@ -455,7 +455,7 @@ export default function BudgetPage() {
   // ---------------------------------------------------------------------------
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: number) => { const r = await apiRequest("DELETE", `/api/budgets/${id}`); return r.json().catch(() => null); },
+    mutationFn: async (id: number) => { const r = await apiRequest("DELETE", `/api/budgets/id/${id}`); return r.json().catch(() => null); },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/budgets"] });
       toast({ title: "Budget row deleted" });
