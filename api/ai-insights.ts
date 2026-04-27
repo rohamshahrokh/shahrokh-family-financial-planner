@@ -29,13 +29,15 @@ DATA:
 ${JSON.stringify(data, null, 2)}`;
 
   const pageContext: Record<string, string> = {
-    dashboard: `Focus on: overall financial health, net worth trajectory, savings rate adequacy, debt management, cash flow sustainability, and 10-year forecast risks.`,
+    dashboard: `Focus on: overall financial health, net worth trajectory, savings rate adequacy, debt management, cash flow sustainability, and 10-year forecast risks. If incomeSource is 'Income Tracker', comment on income tracking quality. If 'Snapshot fallback', recommend setting up the income tracker.`,
     expenses: `Focus on: overspending categories, unusual spikes, savings opportunities, spending trends, and a practical action plan to reduce costs.`,
+    income: `Focus on: income stability across sources, salary vs passive income ratio, recurring vs one-off income mix, whether income is growing, diversification opportunities, and family member income balance. If income records are sparse, highlight the risk.`,
+    cashflow: `Focus on: monthly net cash flow trend, whether savings rate is sustainable, months with negative cash flow (daily spikes), income vs expense trajectory, and specific months where spending exceeded income. Provide concrete recommendations to improve cash flow.`,
     property: `Focus on: LVR risk, cash flow pressure from loans, rental yield adequacy, equity opportunities, and whether future purchases look affordable.`,
     stocks: `Focus on: portfolio concentration risk, sector imbalance, underweight/overweight positions, DCA effectiveness, and unrealised gain/loss implications.`,
     crypto: `Focus on: volatility exposure, concentration in BTC/ETH vs altcoins, DCA strategy effectiveness, allocation as % of net worth, and long-term risk.`,
     timeline: `Focus on: net worth milestone projections, weak years in the forecast, years of strong growth, recommended adjustments to reach goals faster.`,
-    "ai-insights": `Provide a holistic view across all financial areas. Identify the single biggest risk and the single best opportunity across the entire financial picture.`,
+    "ai-insights": `Provide a holistic view across all financial areas. Identify the single biggest risk and the single best opportunity across the entire financial picture. If income tracking data is available, comment on cashflow sustainability.`,
   };
 
   return `${pageContext[page] || pageContext.dashboard}\n\n${base}`;
@@ -121,4 +123,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: "Internal server error" });
   }
 }
-
