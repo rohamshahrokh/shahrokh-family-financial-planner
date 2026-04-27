@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { useAppStore } from "@/lib/store";
