@@ -63,12 +63,33 @@ export default function SettingsPage() {
   const qc = useQueryClient();
 
   // ── General settings ──────────────────────────────────────────────────────
-  const [assumptions, setAssumptions] = useState({
+  // ── App-wide settings: loaded from Supabase on mount ───────────────────────
+  const DEFAULT_ASSUMPTIONS = {
     inflation: 3, ppor_growth: 6, super_return: 8, safe_withdrawal_rate: 4, risk_profile: 'moderate',
-  });
-  const [userSettings, setUserSettings] = useState({
+  };
+  const DEFAULT_USER = {
     display_name: 'Roham Shahrokh', currency: 'AUD', timezone: 'Australia/Brisbane', notifications: true,
+  };
+
+  // Fetch all app settings from Supabase (sf_app_settings id='default')
+  const { data: appSettings } = useQuery({
+    queryKey: ['/api/app-settings'],
+    queryFn: () => apiRequest('GET', '/api/app-settings').then(r => r.json()),
+    staleTime: 0,
   });
+
+  // Local edit state — null = "not yet modified by user this session"
+  const [assumptionsEdit, setAssumptionsEdit] = useState<any>(null);
+  const [userSettingsEdit, setUserSettingsEdit] = useState<any>(null);
+
+  // Effective values: local edit > Supabase > hardcoded defaults
+  const assumptions = assumptionsEdit ??
+    (appSettings?.assumptions ? { ...DEFAULT_ASSUMPTIONS, ...appSettings.assumptions } : DEFAULT_ASSUMPTIONS);
+  const userSettings = userSettingsEdit ??
+    (appSettings?.user_settings ? { ...DEFAULT_USER, ...appSettings.user_settings } : DEFAULT_USER);
+
+  function setAssumptions(val: any) { setAssumptionsEdit(val); }
+  function setUserSettings(val: any) { setUserSettingsEdit(val); }
 
   // ── Telegram / notification settings ─────────────────────────────────────
   const { data: tgData, isLoading: tgLoading } = useQuery({
@@ -240,7 +261,15 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-        <SaveButton label="Save Settings" onSave={async () => { await apiRequest('PUT', '/api/settings/user_settings', { value: JSON.stringify(userSettings) }); }} />
+        <SaveButton label="Save Settings" onSave={async () => {
+          try {
+            await apiRequest('PATCH', '/api/app-settings', { user_settings: userSettings });
+            setUserSettingsEdit(null);
+            qc.invalidateQueries({ queryKey: ['/api/app-settings'] });
+          } catch (err: any) {
+            throw new Error(err?.message ?? 'Failed to save user settings to Supabase');
+          }
+        }} />
       </SectionCard>
 
       {/* ── Telegram Bot Configuration ───────────────────────────────────── */}
@@ -430,7 +459,15 @@ export default function SettingsPage() {
             </button>
           ))}
         </div>
-        <SaveButton label="Save Assumptions" onSave={async () => { await apiRequest('PUT', '/api/settings/assumptions', { value: JSON.stringify(assumptions) }); }} />
+        <SaveButton label="Save Assumptions" onSave={async () => {
+          try {
+            await apiRequest('PATCH', '/api/app-settings', { assumptions });
+            setAssumptionsEdit(null); // reset so Supabase data is re-read on next load
+            qc.invalidateQueries({ queryKey: ['/api/app-settings'] });
+          } catch (err: any) {
+            throw new Error(err?.message ?? 'Failed to save assumptions to Supabase');
+          }
+        }} />
       </SectionCard>
 
       {/* ── Security ─────────────────────────────────────────────────────── */}
