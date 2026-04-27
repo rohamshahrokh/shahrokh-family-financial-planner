@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useAppStore } from "@/lib/store";
 import { formatCurrency } from "@/lib/finance";
 import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
@@ -562,7 +563,16 @@ export default function ExpensesPage() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
-  const [chartView, setChartView] = useState<'monthly' | 'annual' | 'daily'>('monthly');
+  // Use global chartView from store (set by Monthly/Annual toggle in header)
+  // Extended with 'daily' option available only within this page
+  const { chartView: globalChartView, setChartView: setGlobalChartView } = useAppStore();
+  const [localChartView, setLocalChartView] = useState<'daily' | null>(null);
+  // dailyView overrides globalChartView when active; otherwise use global
+  const chartView = localChartView ?? globalChartView;
+  const setChartView = (v: 'monthly' | 'annual' | 'daily') => {
+    if (v === 'daily') { setLocalChartView('daily'); }
+    else { setLocalChartView(null); setGlobalChartView(v); }
+  };
 
   // ── Income filter state ──────────────────────────────────────────────────────
   const [incomeSearch, setIncomeSearch] = useState('');
