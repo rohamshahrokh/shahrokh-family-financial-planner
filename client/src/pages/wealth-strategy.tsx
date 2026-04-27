@@ -4,6 +4,7 @@
  * 10 fully-functional calculation modules in a tabbed interface.
  */
 
+import SaveButton from "@/components/SaveButton";
 import { useState, useMemo, useCallback } from "react";
 import html2canvas from 'html2canvas';
 import { useQuery } from "@tanstack/react-query";
@@ -724,14 +725,34 @@ function DebtKiller({ snap }: { snap: Record<string, number> }) {
 // ─── TAB 3: NET WORTH SIMULATOR ───────────────────────────────────────────────
 
 function NetWorthSimulator({ snap }: { snap: Record<string, number> }) {
-  const [propGrowth, setPropGrowth] = useState(6);
-  const [stockReturn, setStockReturn] = useState(8);
-  const [cryptoReturn, setCryptoReturn] = useState(10);
-  const [inflationRate, setInflationRate] = useState(3);
-  const [incomeGrowth, setIncomeGrowth] = useState(3);
-  const [expenseGrowth, setExpenseGrowth] = useState(2);
-  const [interestRate, setInterestRate] = useState(6);
-  const [rentGrowth, setRentGrowth] = useState(3);
+  // ── Wealth assumptions — Supabase-backed via sf_app_settings ───────────────
+  const WA_DEFAULTS = { propGrowth:6, stockReturn:8, cryptoReturn:10, inflationRate:3, incomeGrowth:3, expenseGrowth:2, interestRate:6, rentGrowth:3 };
+  const { data: appSettings } = useQuery({
+    queryKey: ['/api/app-settings'],
+    queryFn: () => apiRequest('GET', '/api/app-settings').then(r => r.json()),
+    staleTime: 0,
+  });
+  const [wealthAssumptionsEdit, setWealthAssumptionsEdit] = useState<any>(null);
+  const wealthAssumptions = wealthAssumptionsEdit ??
+    (appSettings?.wealth_assumptions ? { ...WA_DEFAULTS, ...appSettings.wealth_assumptions } : WA_DEFAULTS);
+
+  const propGrowth    = wealthAssumptions.propGrowth;
+  const stockReturn   = wealthAssumptions.stockReturn;
+  const cryptoReturn  = wealthAssumptions.cryptoReturn;
+  const inflationRate = wealthAssumptions.inflationRate;
+  const incomeGrowth  = wealthAssumptions.incomeGrowth;
+  const expenseGrowth = wealthAssumptions.expenseGrowth;
+  const interestRate  = wealthAssumptions.interestRate;
+  const rentGrowth    = wealthAssumptions.rentGrowth;
+
+  function setPropGrowth(v: number)    { setWealthAssumptionsEdit((p:any) => ({ ...(p ?? wealthAssumptions), propGrowth: v })); }
+  function setStockReturn(v: number)   { setWealthAssumptionsEdit((p:any) => ({ ...(p ?? wealthAssumptions), stockReturn: v })); }
+  function setCryptoReturn(v: number)  { setWealthAssumptionsEdit((p:any) => ({ ...(p ?? wealthAssumptions), cryptoReturn: v })); }
+  function setInflationRate(v: number) { setWealthAssumptionsEdit((p:any) => ({ ...(p ?? wealthAssumptions), inflationRate: v })); }
+  function setIncomeGrowth(v: number)  { setWealthAssumptionsEdit((p:any) => ({ ...(p ?? wealthAssumptions), incomeGrowth: v })); }
+  function setExpenseGrowth(v: number) { setWealthAssumptionsEdit((p:any) => ({ ...(p ?? wealthAssumptions), expenseGrowth: v })); }
+  function setInterestRate(v: number)  { setWealthAssumptionsEdit((p:any) => ({ ...(p ?? wealthAssumptions), interestRate: v })); }
+  function setRentGrowth(v: number)    { setWealthAssumptionsEdit((p:any) => ({ ...(p ?? wealthAssumptions), rentGrowth: v })); }
 
   const [savedScenarios, setSavedScenarios] = useState<Array<{id: string; name: string; assumptions: any; savedAt: string}>>(() => {
     try { return JSON.parse(localStorage.getItem('sf_wealth_scenarios') || '[]'); } catch { return []; }
@@ -739,6 +760,15 @@ function NetWorthSimulator({ snap }: { snap: Record<string, number> }) {
   const [newScenarioName, setNewScenarioName] = useState('');
 
   const currentAssumptions = { propGrowth, stockReturn, cryptoReturn, inflationRate, incomeGrowth, expenseGrowth, interestRate, rentGrowth };
+
+  const saveWealthAssumptions = async () => {
+    try {
+      await apiRequest('PATCH', '/api/app-settings', { wealth_assumptions: wealthAssumptions });
+      setWealthAssumptionsEdit(null);
+    } catch (err: any) {
+      throw new Error(err?.message ?? 'Failed to save to Supabase');
+    }
+  };
 
   const saveScenario = (assumptions: any, name: string) => {
     if (!name.trim()) return;
@@ -871,6 +901,12 @@ function NetWorthSimulator({ snap }: { snap: Record<string, number> }) {
           <InputRow label="Expense growth" value={expenseGrowth} onChange={setExpenseGrowth} suffix="%" step={0.5} />
           <InputRow label="Interest rate" value={interestRate} onChange={setInterestRate} suffix="%" step={0.5} />
           <InputRow label="Rent growth" value={rentGrowth} onChange={setRentGrowth} suffix="%" step={0.5} />
+        </div>
+        <div className="mt-3 flex items-center gap-3">
+          <SaveButton label="Save Assumptions" onSave={saveWealthAssumptions} />
+          {wealthAssumptionsEdit && (
+            <span className="text-xs text-amber-400">Unsaved changes — click Save to persist</span>
+          )}
         </div>
       </div>
 
@@ -1819,6 +1855,135 @@ interface Leak {
   annual: number;
   action: string;
   priority: "High" | "Medium" | "Low";
+  rows?: any[];       // raw expense rows for drilldown
+  why?: string;       // explanation of why this was flagged
+  fix?: string;       // specific fix action
+}
+
+// ─── Leak Drilldown Modal ─────────────────────────────────────────────────────
+function LeakDrilldownModal({ leak, onClose, onNavigate }: {
+  leak: Leak;
+  onClose: () => void;
+  onNavigate?: () => void;
+}) {
+  const priorityColor: Record<string, string> = {
+    High: "hsl(0,72%,51%)",
+    Medium: "hsl(43,85%,55%)",
+    Low: "hsl(210,80%,60%)",
+  };
+  const color = priorityColor[leak.priority];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl">
+        {/* Header */}
+        <div className="flex items-start justify-between p-5 border-b border-border">
+          <div className="flex items-start gap-3">
+            <span
+              className="text-xs px-2 py-0.5 rounded-full shrink-0 mt-0.5"
+              style={{ background: color + "22", color }}
+            >{leak.priority}</span>
+            <div>
+              <h3 className="font-bold text-sm">{leak.title}</h3>
+              <p className="text-xs text-muted-foreground mt-1">
+                Costing you <span className="font-bold" style={{ color }}>${leak.monthly.toFixed(0)}/mo</span> · ${leak.annual.toFixed(0)}/yr
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground shrink-0 ml-4">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {/* Why flagged */}
+          <div className="bg-secondary/40 rounded-xl p-4">
+            <p className="text-xs font-semibold mb-1 text-muted-foreground uppercase tracking-wide">Why flagged</p>
+            <p className="text-sm">{leak.why ?? leak.action}</p>
+          </div>
+
+          {/* Recommendation */}
+          <div className="rounded-xl p-4" style={{ background: color + "11", border: `1px solid ${color}33` }}>
+            <p className="text-xs font-semibold mb-1 uppercase tracking-wide" style={{ color }}>Recommended Action</p>
+            <p className="text-sm">{leak.fix ?? leak.action}</p>
+          </div>
+
+          {/* Savings projection */}
+          <div className="bg-secondary/40 rounded-xl p-4">
+            <p className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Savings Impact</p>
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: "Monthly Saving", value: `$${leak.monthly.toFixed(0)}` },
+                { label: "Annual Saving", value: `$${leak.annual.toFixed(0)}` },
+                { label: "5-Year (invested @ 8%)", value: `$${(leak.monthly * 12 * ((Math.pow(1.08, 5) - 1) / 0.08)).toFixed(0)}` },
+              ].map(k => (
+                <div key={k.label} className="text-center">
+                  <p className="text-xs text-muted-foreground">{k.label}</p>
+                  <p className="text-base font-bold num-display text-emerald-400">{k.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Raw rows drilldown */}
+          {leak.rows && leak.rows.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wide">
+                Flagged Transactions ({leak.rows.length})
+              </p>
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/30">
+                      {["Date","Description","Category","Amount"].map(h => (
+                        <th key={h} className="text-left px-3 py-2 text-muted-foreground font-semibold">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leak.rows.slice(0, 30).map((row: any, i: number) => (
+                      <tr key={i} className="border-b border-border/40 hover:bg-secondary/20">
+                        <td className="px-3 py-1.5 text-muted-foreground">{row.date ?? "—"}</td>
+                        <td className="px-3 py-1.5 max-w-[180px] truncate">{row.description ?? row.notes ?? "—"}</td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{row.category ?? "—"}</td>
+                        <td className="px-3 py-1.5 num-display font-semibold" style={{ color }}>${parseFloat(row.amount || 0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                    {leak.rows.length > 30 && (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-2 text-center text-xs text-muted-foreground">
+                          ...and {leak.rows.length - 30} more rows
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex gap-2 p-5 border-t border-border">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2 text-xs font-semibold rounded-xl border border-border text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Close
+          </button>
+          {onNavigate && (
+            <button
+              onClick={() => { onNavigate(); onClose(); }}
+              className="flex-1 py-2 text-xs font-semibold rounded-xl text-black"
+              style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))" }}
+            >
+              Go to Expenses →
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expenses: any[] }) {
@@ -1837,12 +2002,16 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
       .filter((e) => (e.category || "").toLowerCase().includes("subscription"))
       .reduce((s: number, e: any) => s + safeNum(e.amount), 0) / 3;
     if (subTotal > 200) {
+      const subRows = recentExp.filter((e) => (e.category || "").toLowerCase().includes("subscription"));
       result.push({
         title: "Subscription Creep",
         monthly: subTotal,
         annual: subTotal * 12,
         action: "Audit all subscriptions — cancel unused. Target: under $200/month.",
         priority: "High",
+        rows: subRows,
+        why: `You are spending $${subTotal.toFixed(0)}/mo on subscriptions over the last 3 months — above the $200/mo threshold. Many households accumulate subscriptions that are rarely used.`,
+        fix: "List all active subscriptions, identify unused ones, and cancel immediately. Consider annual billing for services you keep — typically saves 15-20%.",
       });
     }
 
@@ -1854,12 +2023,16 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
       })
       .reduce((s: number, e: any) => s + safeNum(e.amount), 0) / 3;
     if (diningTotal > 600) {
+      const diningRows = recentExp.filter((e) => { const cat = (e.category || "").toLowerCase(); return cat.includes("dining") || cat.includes("coffee") || cat.includes("restaurant"); });
       result.push({
         title: "Dining Out / Coffee Overspend",
         monthly: diningTotal - 600,
         annual: (diningTotal - 600) * 12,
         action: "Meal prep 3 days/week and limit café visits to 2x per week.",
         priority: "Medium",
+        rows: diningRows,
+        why: `Dining/café spending averaged $${diningTotal.toFixed(0)}/mo — $${(diningTotal - 600).toFixed(0)} above the $600/mo benchmark for a family of your size.`,
+        fix: "Set a weekly dining budget. Meal prep Sunday evening for the week ahead. Limit café visits to 2 per week per adult. This alone can save $${((diningTotal - 600) * 12).toFixed(0)}/year.",
       });
     }
 
@@ -1873,6 +2046,8 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
         annual: monthlyInterest * 12,
         action: "Prioritise paying off high-interest debt. Consider balance transfer.",
         priority: "High",
+        why: `You have $${otherDebt.toLocaleString()} in non-mortgage debt at an estimated 15% rate, costing ~$${monthlyInterest.toFixed(0)}/mo in interest alone.`,
+        fix: "Pay more than minimum each month. Consider a 0% balance transfer card for credit card debt. Use the Debt Killer tab to model an accelerated payoff strategy.",
       });
     }
 
@@ -1887,6 +2062,8 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
         annual: lostMonthly * 12,
         action: `Move ${formatCurrency(deadCash)} above your buffer into investments or HISA.`,
         priority: "Medium",
+        why: `You have $${deadCash.toLocaleString()} sitting above your 6-month emergency buffer earning near-zero return. At 4% (HISA/ETFs), that dead cash costs ~$${lostMonthly.toFixed(0)}/mo in opportunity cost.`,
+        fix: `Move $${deadCash.toLocaleString()} into a high-yield savings account (4-5% p.a.) or diversified ETF portfolio. Keep 6 months expenses ($${buffer6Month.toLocaleString()}) as your emergency buffer only.`,
       });
     }
 
@@ -1904,6 +2081,9 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
         annual: avgMonthly * 12,
         action: "Review each large transaction — are these one-offs or recurring?",
         priority: "Low",
+        rows: nonHousingLarge,
+        why: `Found ${nonHousingLarge.length} non-housing transactions above $2,000 in the last 3 months. These may be genuine one-offs or a sign of recurring overspend.`,
+        fix: "Review each transaction. For one-offs, no action needed. For recurring large expenses, evaluate if they deliver adequate value and negotiate or eliminate where possible.",
       });
     }
 
@@ -1912,12 +2092,16 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
       .filter((e) => (e.category || "").toLowerCase().includes("insurance"))
       .reduce((s: number, e: any) => s + safeNum(e.amount), 0) / 3;
     if (insTotal > 600) {
+      const insRows = recentExp.filter((e) => (e.category || "").toLowerCase().includes("insurance"));
       result.push({
         title: "High Insurance Costs",
         monthly: insTotal - 600,
         annual: (insTotal - 600) * 12,
         action: "Shop around for insurance quotes. Bundling policies may save 10-20%.",
         priority: "Low",
+        rows: insRows,
+        why: `Insurance costs averaged $${insTotal.toFixed(0)}/mo — $${(insTotal - 600).toFixed(0)} above the $600/mo benchmark. This may indicate duplicate coverage or uncompetitive policies.`,
+        fix: "Get 3 competitive quotes for each policy. Bundle home + contents + car with one insurer for 10-20% discount. Review annual excesses — higher excess = lower premium.",
       });
     }
 
@@ -1943,11 +2127,16 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
         annual: dupeMonthly * 12,
         action: "Review duplicate transactions — may indicate double-billing or error.",
         priority: "High",
+        rows: dupes,
+        why: `Found ${dupes.length} transactions with identical amounts and descriptions within 7 days of each other. These may be double-billing errors or accidental duplicate payments.`,
+        fix: "Review each pair carefully. If confirmed duplicates, contact your bank or merchant immediately to dispute and request a refund. Set up transaction alerts to catch these faster.",
       });
     }
 
     return result.sort((a, b) => b.monthly - a.monthly);
   }, [snap, expenses]);
+
+  const [selectedLeak, setSelectedLeak] = useState<Leak | null>(null);
 
   const totalMonthly = leaks.reduce((s, l) => s + l.monthly, 0);
   const totalAnnual = leaks.reduce((s, l) => s + l.annual, 0);
@@ -1959,6 +2148,14 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
 
   return (
     <div className="space-y-6">
+      {/* Drilldown modal */}
+      {selectedLeak && (
+        <LeakDrilldownModal
+          leak={selectedLeak}
+          onClose={() => setSelectedLeak(null)}
+        />
+      )}
+
       {/* Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-card border border-border rounded-2xl p-5 flex items-center gap-4 md:col-span-1">
@@ -1984,14 +2181,21 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
           <SectionTitle>Quick Wins (Top {top3.length} High-Priority)</SectionTitle>
           <div className="space-y-3">
             {top3.map((l, i) => (
-              <div key={i} className="bg-secondary/40 rounded-xl p-4 flex items-start gap-3">
+              <div
+                key={i}
+                className="bg-secondary/40 rounded-xl p-4 flex items-start gap-3 cursor-pointer hover:bg-secondary/60 transition-colors"
+                onClick={() => setSelectedLeak(l)}
+              >
                 <div className="w-7 h-7 rounded-full bg-red-500/20 flex items-center justify-center shrink-0">
                   <Zap className="w-3.5 h-3.5 text-red-400" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-medium">{l.title}</p>
-                    <span className="text-sm font-bold text-red-400 shrink-0">{formatCurrency(l.monthly)}/mo</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-sm font-bold text-red-400">{formatCurrency(l.monthly)}/mo</span>
+                      <span className="text-xs text-primary opacity-70">View →</span>
+                    </div>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">{l.action}</p>
                 </div>
@@ -2012,7 +2216,11 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
         ) : (
           <div className="space-y-2">
             {leaks.map((l, i) => (
-              <div key={i} className="border border-border/50 rounded-xl p-4">
+              <div
+                key={i}
+                className="border border-border/50 rounded-xl p-4 cursor-pointer hover:border-primary/40 hover:bg-secondary/20 transition-all"
+                onClick={() => setSelectedLeak(l)}
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-2 flex-1 min-w-0">
                     <span
@@ -2034,6 +2242,7 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
                       {formatCurrency(l.monthly)}/mo
                     </p>
                     <p className="text-xs text-muted-foreground">{formatCurrency(l.annual)}/yr</p>
+                    <p className="text-xs text-primary opacity-70 mt-0.5">View details →</p>
                   </div>
                 </div>
               </div>
