@@ -26,7 +26,13 @@ import {
 
 const CACHE_KEY = "sf_market_news_cache";
 const CACHE_TTL_MS = 45 * 60 * 1000; // 45 minutes
-const ALLORIGINS = "https://api.allorigins.win/get?url=";
+
+// Multiple CORS proxies — tried in order until one works
+const CORS_PROXIES = [
+  (url: string) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+  (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -220,13 +226,29 @@ function parseRSS(
   }
 }
 
-// ─── Fetch via allorigins proxy ───────────────────────────────────────────────
+// ─── Fetch via CORS proxy with automatic fallback ───────────────────────────
+// Tries each proxy in order; returns raw text content on success.
 
 async function fetchProxied(url: string): Promise<string> {
-  const proxyUrl = ALLORIGINS + encodeURIComponent(url);
-  const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(12000) });
-  const json = await res.json();
-  return json.contents as string;
+  let lastError: Error | null = null;
+
+  for (const makeProxy of CORS_PROXIES) {
+    try {
+      const proxyUrl = makeProxy(url);
+      const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) continue;
+      const text = await res.text();
+      // allorigins wraps in JSON {contents:...}; others return raw text
+      try {
+        const json = JSON.parse(text);
+        if (json?.contents) return json.contents as string;
+      } catch { /* not JSON — return raw */ }
+      if (text && text.length > 50) return text;
+    } catch (e: any) {
+      lastError = e;
+    }
+  }
+  throw lastError ?? new Error(`All proxies failed for: ${url}`);
 }
 
 // ─── Fetch market price for a single ticker ───────────────────────────────────
@@ -424,28 +446,47 @@ async function fetchAllMarketData(): Promise<NewsCache> {
     fetched_at: new Date().toISOString(),
   };
 
-  // 2. Fetch RSS feeds in parallel
+  // 2. Fetch CoinGecko crypto news directly (no proxy needed — open CORS)
+  const cryptoItemsPromise: Promise<NewsItem[]> = fetch(
+    "https://api.coingecko.com/api/v3/news?per_page=8",
+    { signal: AbortSignal.timeout(8000) }
+  )
+    .then((r) => r.json())
+    .then((data: any) => {
+      const items: any[] = data?.data ?? data?.results ?? [];
+      return items.slice(0, 8).map((n: any, i: number) => {
+        const title = n.title ?? n.name ?? "Crypto News";
+        const url   = n.url ?? n.news_url ?? "#";
+        const desc  = n.description ?? n.text ?? title;
+        return {
+          id: btoa(url + i).slice(0, 16).replace(/[^a-zA-Z0-9]/g, "_"),
+          title,
+          title_fa: approximatePersian(title),
+          summary: desc.slice(0, 200),
+          summary_fa: approximatePersian(desc.slice(0, 200)),
+          source: n.source?.name ?? n.source ?? "CoinGecko",
+          url,
+          published: n.updated_at ? new Date(n.updated_at * 1000).toISOString() : new Date().toISOString(),
+          section: "crypto" as const,
+          sentiment: detectSentiment(title + " " + desc),
+          impact: detectImpact(title + " " + desc),
+          imageUrl: n.thumb_2x ?? n.large ?? undefined,
+        } satisfies NewsItem;
+      });
+    })
+    .catch(() => [] as NewsItem[]);
+
+  // 3. Fetch RSS feeds in parallel — multiple sources per section for resilience
   const RSS_FEEDS: { url: string; section: NewsItem["section"]; source: string }[] = [
-    {
-      url: "https://finance.yahoo.com/rss/topstories",
-      section: "stocks",
-      source: "Yahoo Finance",
-    },
-    {
-      url: "https://finance.yahoo.com/rss/crypto",
-      section: "crypto",
-      source: "Yahoo Finance Crypto",
-    },
-    {
-      url: "https://hnrss.org/frontpage",
-      section: "ai-tech",
-      source: "Hacker News",
-    },
-    {
-      url: "https://www.rba.gov.au/rss/rss-cb-speeches.xml",
-      section: "macro",
-      source: "RBA",
-    },
+    // Stocks — try MarketWatch first (reliable), Yahoo Finance as fallback
+    { url: "https://feeds.content.dowjones.io/public/rss/mw_topstories",       section: "stocks",  source: "MarketWatch" },
+    { url: "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",      section: "stocks",  source: "MarketWatch" },
+    // AI / Tech — Hacker News + TechCrunch
+    { url: "https://hnrss.org/frontpage",                                        section: "ai-tech", source: "Hacker News" },
+    { url: "https://techcrunch.com/feed/",                                       section: "ai-tech", source: "TechCrunch" },
+    // Macro — RBA + Reuters economy
+    { url: "https://www.rba.gov.au/rss/rss-cb-speeches.xml",                   section: "macro",   source: "RBA" },
+    { url: "https://feeds.reuters.com/reuters/businessNews",                    section: "macro",   source: "Reuters" },
   ];
 
   const feedResults = await Promise.allSettled(
@@ -456,10 +497,11 @@ async function fetchAllMarketData(): Promise<NewsCache> {
     )
   );
 
-  // 3. Combine all items
+  // 4. Combine all items (RSS feeds + CoinGecko crypto)
   const allItems: NewsItem[] = [];
   const seenUrls = new Set<string>();
 
+  // Add RSS feed items
   feedResults.forEach((result) => {
     if (result.status === "fulfilled") {
       for (const item of result.value) {
@@ -471,14 +513,23 @@ async function fetchAllMarketData(): Promise<NewsCache> {
     }
   });
 
+  // Add CoinGecko crypto items (deduplicated)
+  const cryptoItems = await cryptoItemsPromise;
+  for (const item of cryptoItems) {
+    if (!seenUrls.has(item.url)) {
+      seenUrls.add(item.url);
+      allItems.push(item);
+    }
+  }
+
   // Fallback: if feeds mostly failed, add placeholder items so page is never empty
   if (allItems.length < 3) {
     const fallbackItems: NewsItem[] = [
       {
         id: "fallback_1",
-        title: "Markets Update: Live data temporarily unavailable",
+        title: "Markets Update: News feeds loading — click Refresh to retry",
         title_fa: "بروزرسانی بازار: داده‌های زنده موقتاً در دسترس نیست",
-        summary: "Unable to fetch the latest market news. Please refresh in a few minutes.",
+        summary: "News feeds could not be reached (CORS proxy may be rate-limited). Crypto data from CoinGecko should still load. Click Refresh to try again.",
         summary_fa: "دریافت اخبار بازار ممکن نشد. لطفاً چند دقیقه دیگر دوباره تلاش کنید.",
         source: "System",
         url: "#",
