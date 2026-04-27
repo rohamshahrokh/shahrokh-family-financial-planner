@@ -23,7 +23,7 @@
 
 import {
   sbSnapshot, sbExpenses, sbProperties, sbStocks, sbCrypto, sbTimeline, sbScenarios,
-  sbStockTx, sbCryptoTx,
+  sbStockTx, sbCryptoTx, sbIncome,
 } from "./supabaseClient";
 
 // ─── Safe number helper ───────────────────────────────────────────────────────
@@ -115,6 +115,20 @@ export interface StockTransaction {
   created_by: string;
 }
 
+export interface IncomeRecord {
+  id: number;
+  date: string;          // YYYY-MM-DD
+  amount: number;
+  source: string;        // Salary | Bonus | Rental Income | Dividends | Interest | Tax Refund | Side Income | Other
+  description: string;
+  member: string;        // family member
+  frequency: string;    // Weekly | Fortnightly | Monthly | Quarterly | Annual | One-off
+  recurring: boolean;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CryptoTransaction {
   id: number;
   created_at: string;
@@ -174,6 +188,7 @@ const KEYS = {
   lastSync:   "sf_last_sync",
   stockTx:    "sf_stock_tx_v1",
   cryptoTx:   "sf_crypto_tx_v1",
+  income:     "sf_income_v1",
 };
 
 // ─── Last sync timestamp (shown in UI) ───────────────────────────────────────
@@ -242,7 +257,7 @@ seedSupabaseIfEmpty().catch(() => {});
 
 export async function syncFromCloud(): Promise<void> {
   console.log("[SF] syncFromCloud: pulling all data from Supabase...");
-  const [snap, expenses, props, stocks, cryptos, timeline, scenarios, stockTxs, cryptoTxs] = await Promise.all([
+  const [snap, expenses, props, stocks, cryptos, timeline, scenarios, stockTxs, cryptoTxs, incomeRecords] = await Promise.all([
     sbSnapshot.get(),
     sbExpenses.getAll(),
     sbProperties.getAll(),
@@ -252,6 +267,7 @@ export async function syncFromCloud(): Promise<void> {
     sbScenarios.getAll(),
     sbStockTx.getAll(),
     sbCryptoTx.getAll(),
+    sbIncome.getAll(),
   ]);
 
   if (snap) {
@@ -266,6 +282,7 @@ export async function syncFromCloud(): Promise<void> {
   lsSet(KEYS.scenarios,  scenarios);
   lsSet(KEYS.stockTx,    stockTxs);
   lsSet(KEYS.cryptoTx,   cryptoTxs);
+  lsSet(KEYS.income,     incomeRecords);
   setLastSync();
   console.log("[SF] syncFromCloud complete. Rows:", {
     expenses: expenses.length,
@@ -276,6 +293,7 @@ export async function syncFromCloud(): Promise<void> {
     scenarios: scenarios.length,
     stockTxs: stockTxs.length,
     cryptoTxs: cryptoTxs.length,
+    incomeRecords: incomeRecords.length,
   });
 }
 
@@ -699,5 +717,62 @@ export const localStore = {
     await sbCryptoTx.delete(id);
     lsSet(KEYS.cryptoTx, (lsGet<CryptoTransaction[]>(KEYS.cryptoTx) ?? []).filter((i) => i.id !== id));
     console.log("[SF] Saved to Supabase: crypto transaction deleted", id);
+  },
+
+  // ── Income ────────────────────────────────────────────────────────────────
+
+  async getIncomeRecords(): Promise<IncomeRecord[]> {
+    try {
+      const rows = await sbIncome.getAll();
+      lsSet(KEYS.income, rows);
+      console.log("[SF] Loaded from Supabase: income", rows.length, "rows");
+      return rows;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: income", err);
+      return lsGet<IncomeRecord[]>(KEYS.income) ?? [];
+    }
+  },
+
+  async createIncomeRecord(data: Omit<IncomeRecord, "id" | "created_at" | "updated_at">): Promise<IncomeRecord> {
+    const saved = await sbIncome.create(data);
+    if (saved) {
+      const items = lsGet<IncomeRecord[]>(KEYS.income) ?? [];
+      lsSet(KEYS.income, [saved, ...items]);
+      console.log("[SF] Saved to Supabase: income record created", saved.id);
+      return saved;
+    }
+    const items = lsGet<IncomeRecord[]>(KEYS.income) ?? [];
+    const now = new Date().toISOString();
+    const item: IncomeRecord = { ...data, id: nextId(items), created_at: now, updated_at: now } as IncomeRecord;
+    lsSet(KEYS.income, [item, ...items]);
+    console.log("[SF] Fallback to local cache: income record created locally", item.id);
+    return item;
+  },
+
+  async updateIncomeRecord(id: number, data: Partial<IncomeRecord>): Promise<IncomeRecord> {
+    const saved = await sbIncome.update(id, data);
+    const items = (lsGet<IncomeRecord[]>(KEYS.income) ?? []).map(
+      (i) => (i.id === id ? { ...i, ...(saved ?? data) } : i)
+    );
+    lsSet(KEYS.income, items);
+    console.log("[SF] Saved to Supabase: income record updated", id);
+    return items.find((i) => i.id === id)!;
+  },
+
+  async deleteIncomeRecord(id: number): Promise<void> {
+    await sbIncome.delete(id);
+    lsSet(KEYS.income, (lsGet<IncomeRecord[]>(KEYS.income) ?? []).filter((i) => i.id !== id));
+    console.log("[SF] Saved to Supabase: income record deleted", id);
+  },
+
+  async bulkCreateIncomeRecords(rows: Omit<IncomeRecord, "id" | "created_at" | "updated_at">[]): Promise<IncomeRecord[]> {
+    const saved = await sbIncome.bulkCreate(rows);
+    if (saved.length > 0) {
+      const items = lsGet<IncomeRecord[]>(KEYS.income) ?? [];
+      lsSet(KEYS.income, [...saved, ...items]);
+      console.log("[SF] Saved to Supabase: bulk income records created", saved.length);
+      return saved;
+    }
+    return Promise.all(rows.map((r) => this.createIncomeRecord(r)));
   },
 };
