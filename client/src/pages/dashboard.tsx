@@ -51,6 +51,7 @@ import {
   Building2,
   Clock,
   AlertTriangle,
+  Receipt,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -152,6 +153,22 @@ export default function DashboardPage() {
     queryKey: ["/api/income"],
     queryFn: () => apiRequest("GET", "/api/income").then((r) => r.json()),
   });
+  // ─── CFO: bills, budgets, alert-logs ───────────────────────────────────
+  const { data: billsRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/bills"],
+    queryFn: () => apiRequest("GET", "/api/bills").then((r) => r.json()),
+    staleTime: 0,
+  });
+  const { data: budgetsRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/budgets"],
+    queryFn: () => apiRequest("GET", "/api/budgets").then((r) => r.json()),
+    staleTime: 0,
+  });
+  const { data: alertLogsRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/alert-logs"],
+    queryFn: () => apiRequest("GET", "/api/alert-logs").then((r) => r.json()),
+    staleTime: 0,
+  });
 
   const updateSnap = useMutation({
     mutationFn: (data: any) => apiRequest("PUT", "/api/snapshot", data).then((r) => r.json()),
@@ -220,6 +237,94 @@ export default function DashboardPage() {
 
   const year10NW      = projection[9]?.endNetWorth || netWorth;
   const passiveIncome = projection[0]?.passiveIncome || 0;
+
+  // ─── CFO card computed values ─────────────────────────────────────────
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Bills: active bills only, sorted by next_due_date ascending
+  const activeBills = useMemo(() => {
+    return (billsRaw as any[])
+      .filter((b: any) => b.active !== false)
+      .sort((a: any, b: any) => {
+        const da = a.next_due_date ? new Date(a.next_due_date).getTime() : Infinity;
+        const db = b.next_due_date ? new Date(b.next_due_date).getTime() : Infinity;
+        return da - db;
+      });
+  }, [billsRaw]);
+
+  const billsDueCount = activeBills.filter((b: any) => {
+    if (!b.next_due_date) return false;
+    const due = new Date(b.next_due_date);
+    due.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+    return diffDays >= 0 && diffDays <= 30;
+  }).length;
+
+  const nextBill = activeBills.find((b: any) => {
+    if (!b.next_due_date) return false;
+    const due = new Date(b.next_due_date);
+    due.setHours(0, 0, 0, 0);
+    return due.getTime() >= today.getTime();
+  });
+
+  const nextBillLabel = nextBill
+    ? (() => {
+        const due = new Date(nextBill.next_due_date);
+        due.setHours(0, 0, 0, 0);
+        const diffDays = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+        if (diffDays === 0) return `${nextBill.bill_name} today`;
+        if (diffDays === 1) return `${nextBill.bill_name} tomorrow`;
+        return `${nextBill.bill_name} in ${diffDays}d`;
+      })()
+    : activeBills.length > 0 ? `${activeBills.length} bills tracked` : "No bills";
+
+  // Monthly fixed costs from active bills (converted to monthly)
+  const billMonthlyTotal = useMemo(() => {
+    const FREQ: Record<string, number> = {
+      Weekly: 52 / 12, Fortnightly: 26 / 12, Monthly: 1,
+      Quarterly: 4 / 12, "Semi-Annual": 2 / 12, Annual: 1 / 12,
+    };
+    return activeBills.reduce((sum: number, b: any) => {
+      const mult = FREQ[b.frequency] ?? 1;
+      return sum + safeNum(b.amount) * mult;
+    }, 0);
+  }, [activeBills]);
+
+  const cashAfterBills = snap.monthly_income - billMonthlyTotal;
+
+  // Budgets: categories over budget this month
+  const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const budgetsThisMonth = useMemo(() => {
+    return (budgetsRaw as any[]).filter((b: any) =>
+      String(b.year) === String(today.getFullYear()) &&
+      String(b.month).padStart(2, "0") === String(today.getMonth() + 1).padStart(2, "0")
+    );
+  }, [budgetsRaw]);
+
+  const expensesThisMonth = useMemo(() => {
+    return (expenses as any[]).filter((e: any) =>
+      (e.date || e.expense_date || "").startsWith(thisMonth)
+    );
+  }, [expenses, thisMonth]);
+
+  const categoriesOverBudget = useMemo(() => {
+    return budgetsThisMonth.filter((b: any) => {
+      const actual = expensesThisMonth
+        .filter((e: any) => e.category === b.category)
+        .reduce((s: number, e: any) => s + safeNum(e.amount), 0);
+      return actual > safeNum(b.budget_amount);
+    }).length;
+  }, [budgetsThisMonth, expensesThisMonth]);
+
+  // Alert logs: unresolved from last 24 hours
+  const recentAlerts = useMemo(() => {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    return (alertLogsRaw as any[]).filter((a: any) => {
+      const ts = a.sent_at ? new Date(a.sent_at).getTime() : 0;
+      return ts > cutoff;
+    }).length;
+  }, [alertLogsRaw]);
 
   // ─── Chart data ───────────────────────────────────────────────────────────
   const assetData = [
@@ -538,6 +643,90 @@ export default function DashboardPage() {
           icon={<Target />}
           accent="hsl(20,80%,55%)"
         />
+      </div>
+
+
+      {/* ─── Smart CFO Cards ──────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* Upcoming Bills */}
+        <Link href="/recurring-bills">
+          <div className="bg-card border border-border rounded-xl p-4 cursor-pointer hover:border-primary/50 transition-colors group">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(196,165,90,0.12)' }}>
+                <Receipt className="w-3.5 h-3.5" style={{ color: 'hsl(43,85%,65%)' }} />
+              </div>
+              <span className="text-xs text-muted-foreground font-medium">Upcoming Bills</span>
+            </div>
+            <p className="text-2xl font-bold num-display" style={{ color: billsDueCount > 0 ? 'hsl(43,85%,65%)' : undefined }}>
+              {billsDueCount}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{nextBillLabel}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">due in 30 days</p>
+          </div>
+        </Link>
+
+        {/* Budget Status */}
+        <Link href="/budget">
+          <div className={`bg-card border rounded-xl p-4 cursor-pointer hover:border-primary/50 transition-colors group ${
+            categoriesOverBudget > 0 ? 'border-red-800/50' : 'border-border'
+          }`}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: categoriesOverBudget > 0 ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.10)' }}>
+                <Target className="w-3.5 h-3.5" style={{ color: categoriesOverBudget > 0 ? 'hsl(0,72%,60%)' : 'hsl(142,60%,50%)' }} />
+              </div>
+              <span className="text-xs text-muted-foreground font-medium">Budget Status</span>
+            </div>
+            <p className="text-2xl font-bold num-display" style={{ color: categoriesOverBudget > 0 ? 'hsl(0,72%,60%)' : 'hsl(142,60%,50%)' }}>
+              {categoriesOverBudget}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {categoriesOverBudget === 0
+                ? (budgetsThisMonth.length > 0 ? 'All categories on track' : 'No budgets set')
+                : `categor${categoriesOverBudget === 1 ? 'y' : 'ies'} over budget`}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">this month</p>
+          </div>
+        </Link>
+
+        {/* Alerts Sent */}
+        <Link href="/settings">
+          <div className={`bg-card border rounded-xl p-4 cursor-pointer hover:border-primary/50 transition-colors group ${
+            recentAlerts > 0 ? 'border-amber-800/40' : 'border-border'
+          }`}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: recentAlerts > 0 ? 'rgba(245,158,11,0.12)' : 'rgba(96,165,250,0.10)' }}>
+                <AlertTriangle className="w-3.5 h-3.5" style={{ color: recentAlerts > 0 ? 'hsl(38,92%,60%)' : 'hsl(188,60%,48%)' }} />
+              </div>
+              <span className="text-xs text-muted-foreground font-medium">Alerts Sent</span>
+            </div>
+            <p className="text-2xl font-bold num-display" style={{ color: recentAlerts > 0 ? 'hsl(38,92%,60%)' : undefined }}>
+              {recentAlerts}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">in last 24 hours</p>
+            <p className="text-xs text-muted-foreground mt-0.5">via Telegram / Push</p>
+          </div>
+        </Link>
+
+        {/* Cash After Bills */}
+        <Link href="/recurring-bills">
+          <div className={`bg-card border rounded-xl p-4 cursor-pointer hover:border-primary/50 transition-colors group ${
+            cashAfterBills < 0 ? 'border-red-800/50' : 'border-border'
+          }`}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: cashAfterBills >= 0 ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.12)' }}>
+                <DollarSign className="w-3.5 h-3.5" style={{ color: cashAfterBills >= 0 ? 'hsl(142,60%,50%)' : 'hsl(0,72%,60%)' }} />
+              </div>
+              <span className="text-xs text-muted-foreground font-medium">Cash After Bills</span>
+            </div>
+            <p className="text-2xl font-bold num-display" style={{ color: cashAfterBills >= 0 ? 'hsl(142,60%,50%)' : 'hsl(0,72%,60%)' }}>
+              {maskValue(formatCurrency(cashAfterBills), privacyMode, "currency")}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {maskValue(formatCurrency(billMonthlyTotal), privacyMode, "currency")} fixed/mo
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">from recurring bills</p>
+          </div>
+        </Link>
       </div>
 
       {/* ─── Wealth Strategy Summary Cards ─────────────────────────────────── */}
