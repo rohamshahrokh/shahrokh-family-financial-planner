@@ -97,17 +97,33 @@ export default function SettingsPage() {
   const [tg, setTg] = useState<any>(null);
   const [testStatus, setTestStatus] = useState<'idle' | 'sending' | 'ok' | 'fail'>('idle');
 
-  // Merge server data into local state once loaded
-  const tgSettings = tg ?? (tgData ? { ...defaultTg, ...tgData } : defaultTg);
+  // Merge server data into local state once loaded.
+  // Coerce null DB values to empty strings so controlled inputs don't flip uncontrolled.
+  const tgFromServer = tgData
+    ? {
+        ...defaultTg,
+        ...tgData,
+        bot_token:      tgData.bot_token      ?? '',
+        roham_chat_id:  tgData.roham_chat_id  ?? '',
+        fara_chat_id:   tgData.fara_chat_id   ?? '',
+      }
+    : defaultTg;
+  const tgSettings = tg ?? tgFromServer;
 
   const saveTg = useMutation({
     mutationFn: (data: any) => apiRequest('PUT', '/api/telegram-settings', data).then(r => r.json()),
     onSuccess: () => {
       invalidateSettingsCache();
       qc.invalidateQueries({ queryKey: ['/api/telegram-settings'] });
-      toast({ title: 'Saved Successfully', description: 'Notification settings updated.' });
+      // Reset local tg state so next read comes from fresh Supabase tgData
+      setTg(null);
+      toast({ title: 'Saved Successfully', description: 'Notification settings saved to Supabase.' });
     },
-    onError: () => toast({ title: 'Save Failed', variant: 'destructive' }),
+    onError: (err: any) => toast({
+      title: 'Save Failed — Settings NOT saved',
+      description: err?.message ?? 'Supabase returned an error. Check console.',
+      variant: 'destructive',
+    }),
   });
 
   const handleTgChange = (key: string, value: any) => {
@@ -228,7 +244,7 @@ export default function SettingsPage() {
       </SectionCard>
 
       {/* ── Telegram Bot Configuration ───────────────────────────────────── */}
-      <SectionCard title="Telegram Bot" icon={Send}>
+      <SectionCard title={`Telegram Bot${tgLoading ? ' — Loading…' : ''}`} icon={Send}>
         <div className="rounded-lg bg-secondary/30 p-3 text-xs text-muted-foreground space-y-1 border border-border/50">
           <p className="font-semibold text-foreground">Setup Guide</p>
           <p>1. Open Telegram → search <strong>@BotFather</strong> → send <code>/newbot</code> → copy the token below</p>
