@@ -34,8 +34,9 @@ import TimelinePage       from "./pages/timeline";
 import DataHealthPage     from "./pages/data-health";
 import HelpPage           from "./pages/help";
 import AIInsightsPage     from "./pages/ai-insights";
-import WealthStrategyPage from "./pages/wealth-strategy";
-import Layout             from "./components/Layout";
+import WealthStrategyPage  from "./pages/wealth-strategy";
+import DebtStrategyPage    from "./pages/debt-strategy";
+import Layout              from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
 // ─── Page title hook ──────────────────────────────────────────────────────────
@@ -140,6 +141,9 @@ function AppRouter() {
         </Route>
         <Route path="/wealth-strategy">
           <ProtectedRoute component={WealthStrategyPage} title="Wealth Strategy" />
+        </Route>
+        <Route path="/debt-strategy">
+          <ProtectedRoute component={DebtStrategyPage} title="Debt Strategy" />
         </Route>
 
         {/* 404 */}
