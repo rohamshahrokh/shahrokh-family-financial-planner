@@ -100,6 +100,22 @@ export default function TimelinePage() {
     queryKey: ['/api/crypto-transactions'],
     queryFn: () => apiRequest('GET', '/api/crypto-transactions').then(r => r.json()),
   });
+  const { data: stockDCASchedules = [] } = useQuery<any[]>({
+    queryKey: ['/api/stock-dca'],
+    queryFn: () => apiRequest('GET', '/api/stock-dca').then(r => r.json()),
+  });
+  const { data: cryptoDCASchedules = [] } = useQuery<any[]>({
+    queryKey: ['/api/crypto-dca'],
+    queryFn: () => apiRequest('GET', '/api/crypto-dca').then(r => r.json()),
+  });
+  const { data: plannedStockOrders = [] } = useQuery<any[]>({
+    queryKey: ['/api/planned-investments', 'stock'],
+    queryFn: () => apiRequest('GET', '/api/planned-investments?module=stock').then(r => r.json()),
+  });
+  const { data: plannedCryptoOrders = [] } = useQuery<any[]>({
+    queryKey: ['/api/planned-investments', 'crypto'],
+    queryFn: () => apiRequest('GET', '/api/planned-investments?module=crypto').then(r => r.json()),
+  });
 
   // ── Snapshot with safe defaults ────────────────────────────────────────────
   const snap = useMemo(() => ({
@@ -122,8 +138,8 @@ export default function TimelinePage() {
   const plannedCryptoTx = useMemo(() => cryptoTransactions.filter((t: any) => t.status === 'planned'), [cryptoTransactions]);
 
   const projection: YearlyProjection[] = useMemo(() =>
-    projectNetWorth({ snapshot: snap, properties, stocks: stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, years: 10 }),
-    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx]
+    projectNetWorth({ snapshot: snap, properties, stocks: stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, years: 10 }),
+    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders]
   );
 
   // ── Monthly cash flow series ───────────────────────────────────────────────
@@ -134,8 +150,12 @@ export default function TimelinePage() {
       properties,
       stockTransactions: plannedStockTx,
       cryptoTransactions: plannedCryptoTx,
+      stockDCASchedules,
+      cryptoDCASchedules,
+      plannedStockOrders,
+      plannedCryptoOrders,
     }),
-    [snap, expenses, properties, plannedStockTx, plannedCryptoTx]
+    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders]
   );
 
   const annualSeries = useMemo(() =>
