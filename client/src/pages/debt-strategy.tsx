@@ -13,6 +13,7 @@
  *  - Debt inputs: name, balance, rate, minimum payment — editable, add/remove
  */
 
+import SaveButton from "@/components/SaveButton";
 import { useState, useMemo, useId } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -300,8 +301,26 @@ export default function DebtStrategyPage() {
   }, [snapMortgage, snapOtherDebts]);
 
   const [debts, setDebts] = useState<DebtItem[]>([]);
-  const [extraPayment, setExtraPayment] = useState(500);
-  const [activeStrategy, setActiveStrategy] = useState<'avalanche' | 'snowball' | 'hybrid'>('avalanche');
+  // ── Debt prefs — loaded from Supabase (sf_app_settings) ─────────────────
+  const { data: appSettings } = useQuery({
+    queryKey: ['/api/app-settings'],
+    queryFn: () => apiRequest('GET', '/api/app-settings').then(r => r.json()),
+    staleTime: 0,
+  });
+  const [debtPrefsEdit, setDebtPrefsEdit] = useState<any>(null);
+  const debtPrefs = debtPrefsEdit ??
+    (appSettings?.debt_prefs ? { extraPayment: 500, activeStrategy: 'avalanche', ...appSettings.debt_prefs }
+     : { extraPayment: 500, activeStrategy: 'avalanche' });
+
+  const extraPayment    = debtPrefs.extraPayment;
+  const activeStrategy  = debtPrefs.activeStrategy as 'avalanche' | 'snowball' | 'hybrid';
+  function setExtraPayment(v: number)             { setDebtPrefsEdit((p:any) => ({ ...(p ?? debtPrefs), extraPayment: v })); }
+  function setActiveStrategy(v: 'avalanche' | 'snowball' | 'hybrid') { setDebtPrefsEdit((p:any) => ({ ...(p ?? debtPrefs), activeStrategy: v })); }
+
+  const saveDebtPrefs = async () => {
+    await apiRequest('PATCH', '/api/app-settings', { debt_prefs: debtPrefs });
+    setDebtPrefsEdit(null);
+  };
   const [showActionPlan, setShowActionPlan] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
@@ -565,6 +584,12 @@ export default function DebtStrategyPage() {
             <span>$1,000</span>
             <span>$2,500</span>
             <span>$5,000</span>
+          </div>
+          <div className="mt-3 flex items-center gap-3">
+            <SaveButton label="Save Preferences" onSave={saveDebtPrefs} />
+            {debtPrefsEdit && (
+              <span className="text-xs text-amber-400">Unsaved — click Save to persist</span>
+            )}
           </div>
         </div>
       </div>
