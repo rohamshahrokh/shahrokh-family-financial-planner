@@ -26,6 +26,7 @@ export default function ReportsPage() {
   const { data: cryptos = [] } = useQuery<any[]>({ queryKey: ['/api/crypto'], queryFn: () => apiRequest('GET', '/api/crypto').then(r => r.json()) });
   const { data: expenses = [] } = useQuery<any[]>({ queryKey: ['/api/expenses'], queryFn: () => apiRequest('GET', '/api/expenses').then(r => r.json()) });
   const { data: scenarios = [] } = useQuery<any[]>({ queryKey: ['/api/scenarios'], queryFn: () => apiRequest('GET', '/api/scenarios').then(r => r.json()).catch(() => []) });
+  const { data: incomeRecords = [] } = useQuery<any[]>({ queryKey: ['/api/income'], queryFn: () => apiRequest('GET', '/api/income').then(r => r.json()).catch(() => []) });
 
   // ─── Bulk delete state for scenarios ─────────────────────────────────────
   const [selectedScenarios, setSelectedScenarios] = useState<Set<number>>(new Set());
@@ -127,6 +128,13 @@ export default function ReportsPage() {
     const fcHeaders = ['Year', 'Start NW', 'Income', 'Expenses', 'Property Value', 'Property Loans', 'Property Equity', 'Stocks', 'Crypto', 'Cash', 'Total Assets', 'Liabilities', 'End NW', 'Growth', 'Passive Income', 'Monthly CF'];
     const fcRows = projection.map(p => [p.year, p.startNetWorth, p.income, p.expenses, p.propertyValue, p.propertyLoans, p.propertyEquity, p.stockValue, p.cryptoValue, p.cash, p.totalAssets, p.totalLiabilities, p.endNetWorth, p.growth, p.passiveIncome, p.monthlyCashFlow]);
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([fcHeaders, ...fcRows]), '10-Year Forecast');
+
+    // Income
+    if (incomeRecords.length > 0) {
+      const incHeaders = ['Date', 'Amount', 'Source', 'Description', 'Member', 'Frequency', 'Recurring', 'Notes'];
+      const incRows = incomeRecords.map((r: any) => [r.date, r.amount, r.source, r.description, r.member, r.frequency, r.recurring ? 'Yes' : 'No', r.notes]);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([incHeaders, ...incRows]), 'Income');
+    }
 
     // Expenses
     if (expenses.length > 0) {
@@ -274,6 +282,67 @@ export default function ReportsPage() {
         head: [['Ticker', 'Name', 'Price', 'Shares', 'Value', 'Exp. Return']],
         body: stocks.map((s: any) => [s.ticker, s.name, formatCurrency(s.current_price), s.current_holding || 0, formatCurrency(s.current_holding * s.current_price, true), `${s.expected_return}%`]),
         startY: 25,
+        theme: 'striped',
+        headStyles: { fillColor: gold, textColor: [15, 18, 30], fontStyle: 'bold' },
+        styles: { fontSize: 9 },
+      });
+    }
+
+    // ── Income Summary ──
+    if (incomeRecords.length > 0) {
+      doc.addPage();
+      doc.setFillColor(...dark);
+      doc.rect(0, 0, 210, 20, 'F');
+      doc.setTextColor(...gold);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Income Summary', 14, 13);
+
+      // aggregate by source
+      const bySource: Record<string, number> = {};
+      const FREQ_MULT_PDF: Record<string, number> = {
+        Weekly: 52 / 12, Fortnightly: 26 / 12, Monthly: 1,
+        Quarterly: 4 / 12, Annual: 1 / 12, 'One-off': 0,
+      };
+      let totalMonthly = 0;
+      for (const r of incomeRecords) {
+        bySource[r.source || 'Other'] = (bySource[r.source || 'Other'] || 0) + (r.amount || 0);
+        totalMonthly += (r.amount || 0) * (FREQ_MULT_PDF[r.frequency] ?? 1);
+      }
+
+      // Summary stats table
+      autoTable(doc, {
+        head: [['Metric', 'Value']],
+        body: [
+          ['Total Income Records', incomeRecords.length.toString()],
+          ['Estimated Monthly Income', formatCurrency(totalMonthly)],
+          ['Estimated Annual Income', formatCurrency(totalMonthly * 12)],
+          ['Unique Income Sources', Object.keys(bySource).length.toString()],
+        ],
+        startY: 25,
+        theme: 'striped',
+        headStyles: { fillColor: gold, textColor: [15, 18, 30], fontStyle: 'bold' },
+        styles: { fontSize: 10, cellPadding: 4 },
+      });
+
+      // By source breakdown
+      const sourceBody = Object.entries(bySource).map(([src, amt]) => [src, formatCurrency(amt)]);
+      autoTable(doc, {
+        head: [['Income Source', 'Total Amount']],
+        body: sourceBody,
+        startY: (doc as any).lastAutoTable.finalY + 8,
+        theme: 'striped',
+        headStyles: { fillColor: gold, textColor: [15, 18, 30], fontStyle: 'bold' },
+        styles: { fontSize: 9 },
+      });
+
+      // Recent records (up to 30)
+      autoTable(doc, {
+        head: [['Date', 'Source', 'Amount', 'Member', 'Frequency']],
+        body: incomeRecords.slice(0, 30).map((r: any) => [
+          r.date || '', r.source || '', formatCurrency(r.amount), r.member || '', r.frequency || ''
+        ]),
+        startY: (doc as any).lastAutoTable.finalY + 8,
         theme: 'striped',
         headStyles: { fillColor: gold, textColor: [15, 18, 30], fontStyle: 'bold' },
         styles: { fontSize: 9 },
