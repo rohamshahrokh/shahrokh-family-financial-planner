@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum, projectInvestment, calcCAGR } from "@/lib/finance";
@@ -9,7 +9,7 @@ import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import { Input } from "@/components/ui/input";
-import type { CryptoTransaction } from "@/lib/localStore";
+import type { CryptoTransaction, CryptoDCASchedule } from "@/lib/localStore";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, Legend,
@@ -17,6 +17,7 @@ import {
 import {
   Plus, Trash2, Edit2, Bitcoin, CheckSquare, Square,
   ArrowUpRight, ArrowDownRight, X, Calendar, Filter,
+  Upload, RefreshCw, Download, ToggleLeft, ToggleRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx";
@@ -112,6 +113,211 @@ function emptyTxForm(): Partial<CryptoTransaction> {
     notes: "",
     created_by: "user",
   };
+}
+
+// ─── Crypto Live Price Cache ─────────────────────────────────────────────────
+const CRYPTO_PRICE_CACHE_KEY = "sf_crypto_prices_cache";
+const CRYPTO_TTL_MS = 15 * 60 * 1000;
+
+interface CryptoPriceCacheEntry { price: number; change24h: number; fetchedAt: number; }
+type CryptoPriceCache = Record<string, CryptoPriceCacheEntry>;
+
+function getCryptoLivePriceCache(): CryptoPriceCache {
+  try { return JSON.parse(localStorage.getItem(CRYPTO_PRICE_CACHE_KEY) ?? "{}"); } catch { return {}; }
+}
+function saveCryptoLivePriceCache(cache: CryptoPriceCache) {
+  try { localStorage.setItem(CRYPTO_PRICE_CACHE_KEY, JSON.stringify(cache)); } catch {}
+}
+
+// Maps common crypto symbols to CoinGecko IDs
+const COINGECKO_ID_MAP: Record<string, string> = {
+  BTC: "bitcoin", ETH: "ethereum", SOL: "solana", BNB: "binancecoin",
+  ADA: "cardano", XRP: "ripple", DOGE: "dogecoin", AVAX: "avalanche-2",
+  DOT: "polkadot", MATIC: "matic-network", LINK: "chainlink", LTC: "litecoin",
+  UNI: "uniswap", ATOM: "cosmos", FIL: "filecoin", NEAR: "near", APT: "aptos",
+  ARB: "arbitrum", OP: "optimism", INJ: "injective-protocol",
+};
+
+async function fetchLiveCryptoPrice(symbol: string): Promise<{ price: number; change24h: number } | null> {
+  const cache = getCryptoLivePriceCache();
+  const cached = cache[symbol.toUpperCase()];
+  if (cached && Date.now() - cached.fetchedAt < CRYPTO_TTL_MS) {
+    return { price: cached.price, change24h: cached.change24h };
+  }
+  const id = COINGECKO_ID_MAP[symbol.toUpperCase()] ?? symbol.toLowerCase();
+  try {
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error("coingecko failed");
+    const data = await res.json();
+    const entry = data[id];
+    if (!entry) throw new Error("no data");
+    const price = entry.usd ?? 0;
+    const change24h = entry.usd_24h_change ?? 0;
+    const cacheEntry: CryptoPriceCacheEntry = { price, change24h, fetchedAt: Date.now() };
+    saveCryptoLivePriceCache({ ...getCryptoLivePriceCache(), [symbol.toUpperCase()]: cacheEntry });
+    return { price, change24h };
+  } catch (err) {
+    console.warn(`[CryptoLivePrice] Failed for ${symbol}:`, err);
+    return null;
+  }
+}
+
+// ─── Crypto Bulk Import ───────────────────────────────────────────────────────
+interface CryptoImportRow {
+  symbol: string; name: string; units: number; avgBuyPrice: number;
+  currentPrice: number; expectedReturn: number; monthlyDCA: number;
+}
+
+const CRYPTO_IMPORT_HEADERS = [
+  "Symbol", "Coin Name", "Units Held", "Avg Buy Price (USD)",
+  "Current Price (USD)", "Expected Return %", "Monthly DCA (AUD)",
+];
+
+function downloadCryptoImportTemplate() {
+  const wb = XLSX.utils.book_new();
+  const sample: any[] = [
+    CRYPTO_IMPORT_HEADERS,
+    ["BTC", "Bitcoin", 0.5, 42000, 95000, 40, 500],
+    ["ETH", "Ethereum", 3, 2000, 3200, 35, 300],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sample), "Crypto Import");
+  XLSX.writeFile(wb, "Crypto_Import_Template.xlsx");
+}
+
+function parseCryptoImportFile(file: File): Promise<CryptoImportRow[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target?.result, { type: "binary" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json<any>(ws, { header: 1 });
+        const rows: CryptoImportRow[] = [];
+        for (let i = 1; i < raw.length; i++) {
+          const r = raw[i];
+          if (!r[0]) continue;
+          rows.push({
+            symbol: String(r[0] ?? "").trim().toUpperCase(),
+            name: String(r[1] ?? r[0]).trim(),
+            units: parseFloat(r[2]) || 0,
+            avgBuyPrice: parseFloat(r[3]) || 0,
+            currentPrice: parseFloat(r[4]) || 0,
+            expectedReturn: parseFloat(r[5]) || 25,
+            monthlyDCA: parseFloat(r[6]) || 0,
+          });
+        }
+        resolve(rows);
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsBinaryString(file);
+  });
+}
+
+function CryptoBulkImportModal({ onImport, onClose }: { onImport: (rows: CryptoImportRow[]) => void; onClose: () => void }) {
+  const [preview, setPreview] = useState<CryptoImportRow[] | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = async (file: File) => {
+    setError(""); setLoading(true);
+    try {
+      const rows = await parseCryptoImportFile(file);
+      if (rows.length === 0) { setError("No data rows found. Use the template."); setLoading(false); return; }
+      setPreview(rows);
+    } catch { setError("Could not parse file."); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl">
+        <div className="flex items-center justify-between p-5 border-b border-border">
+          <div>
+            <h3 className="font-bold text-sm">Bulk Import Crypto Holdings</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Upload an Excel file — each row is one crypto holding</p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          <div className="bg-secondary/40 rounded-xl p-4">
+            <p className="text-xs font-semibold mb-2">Step 1 — Download template</p>
+            <Button size="sm" variant="outline" onClick={downloadCryptoImportTemplate} className="gap-2 text-xs h-7">
+              <Download className="w-3 h-3" /> Download Template
+            </Button>
+            <p className="text-xs text-muted-foreground mt-2">Columns: {CRYPTO_IMPORT_HEADERS.join(" | ")}</p>
+          </div>
+          <div className="bg-secondary/40 rounded-xl p-4">
+            <p className="text-xs font-semibold mb-2">Step 2 — Upload file</p>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={loading} className="gap-2 text-xs h-7">
+              <Upload className="w-3 h-3" /> {loading ? "Parsing..." : "Choose File"}
+            </Button>
+            {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+          </div>
+          {preview && (
+            <div>
+              <p className="text-xs font-semibold mb-2">Step 3 — Review {preview.length} rows</p>
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/30">
+                      {["Symbol","Name","Units","Avg Buy","Current Price","Exp Return %","Monthly DCA"].map(h => (
+                        <th key={h} className="text-left px-3 py-2 text-muted-foreground font-semibold whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.map((r, i) => (
+                      <tr key={i} className="border-b border-border/40 hover:bg-secondary/20">
+                        <td className="px-3 py-1.5 font-bold text-primary">{r.symbol}</td>
+                        <td className="px-3 py-1.5">{r.name}</td>
+                        <td className="px-3 py-1.5 num-display">{r.units}</td>
+                        <td className="px-3 py-1.5 num-display">{formatCurrency(r.avgBuyPrice)}</td>
+                        <td className="px-3 py-1.5 num-display">{formatCurrency(r.currentPrice)}</td>
+                        <td className="px-3 py-1.5 num-display">{r.expectedReturn}%</td>
+                        <td className="px-3 py-1.5 num-display">{formatCurrency(r.monthlyDCA)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="flex gap-2 p-5 border-t border-border">
+          {preview && (
+            <Button onClick={() => { onImport(preview); onClose(); }}
+              style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+              className="text-xs h-8 gap-1">
+              <Upload className="w-3 h-3" /> Import {preview.length} Holdings
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={onClose} className="text-xs h-8">Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Crypto DCA helpers ───────────────────────────────────────────────────────
+function emptyCryptoDCAForm(symbols: string[]): Omit<CryptoDCASchedule, 'id'|'created_at'|'updated_at'> {
+  return {
+    symbol: symbols[0] ?? "",
+    asset_name: "",
+    amount: 0,
+    frequency: "monthly",
+    start_date: new Date().toISOString().split("T")[0],
+    end_date: null,
+    enabled: true,
+    notes: "",
+  };
+}
+function cryptoDcaMonthlyEquiv(amount: number, freq: string): number {
+  const map: Record<string, number> = { weekly: 52/12, fortnightly: 26/12, monthly: 1, quarterly: 1/3 };
+  return amount * (map[freq] ?? 1);
 }
 
 // ─── CryptoEditForm ───────────────────────────────────────────────────────────
@@ -408,6 +614,21 @@ export default function CryptoPage() {
   const handleDraftChange = useCallback((d: any) => setDraft(d), []);
   const handleEditDraftChange = useCallback((d: any) => setEditDraft(d), []);
 
+  // Live price state
+  const [liveCryptoPrices, setLiveCryptoPrices] = useState<Record<string, { price: number; change24h: number }>>(() => {
+    const cache = getCryptoLivePriceCache();
+    return Object.fromEntries(Object.entries(cache).map(([k, v]: any) => [k, { price: v.price, change24h: v.change24h }]));
+  });
+  const [fetchingCryptoPrices, setFetchingCryptoPrices] = useState(false);
+  const [lastCryptoPriceFetch, setLastCryptoPriceFetch] = useState<Date | null>(null);
+
+  // Import / DCA state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<'portfolio' | 'dca'>('portfolio');
+  const [showDCAForm, setShowDCAForm] = useState(false);
+  const [dcaDraft, setDcaDraft] = useState<any>(null);
+  const [editingDCAId, setEditingDCAId] = useState<number | null>(null);
+
   // ── Queries ────────────────────────────────────────────────────────────────
 
   const { data: cryptos = [] } = useQuery<any[]>({
@@ -418,6 +639,64 @@ export default function CryptoPage() {
   const { data: transactions = [] } = useQuery<CryptoTransaction[]>({
     queryKey: ["/api/crypto-transactions"],
     queryFn: () => apiRequest("GET", "/api/crypto-transactions").then(r => r.json()),
+  });
+
+  const { data: dcaSchedules = [] } = useQuery<CryptoDCASchedule[]>({
+    queryKey: ["/api/crypto-dca"],
+    queryFn: () => apiRequest("GET", "/api/crypto-dca").then(r => r.json()),
+  });
+
+  // ── Live price + import handlers ────────────────────────────────────────────
+  const handleFetchLivePrices = useCallback(async () => {
+    if (cryptos.length === 0 || fetchingCryptoPrices) return;
+    setFetchingCryptoPrices(true);
+    const results: Record<string, { price: number; change24h: number }> = {};
+    await Promise.allSettled(
+      cryptos.map(async (c: any) => {
+        if (!c.symbol) return;
+        const r = await fetchLiveCryptoPrice(c.symbol);
+        if (r) results[c.symbol.toUpperCase()] = r;
+      })
+    );
+    setLiveCryptoPrices(prev => ({ ...prev, ...results }));
+    setLastCryptoPriceFetch(new Date());
+    setFetchingCryptoPrices(false);
+    toast({ title: "Live crypto prices updated", description: `Fetched for ${Object.keys(results).length} tokens.` });
+  }, [cryptos, fetchingCryptoPrices, toast]);
+
+  const handleBulkImport = useCallback(async (rows: CryptoImportRow[]) => {
+    let imported = 0;
+    for (const r of rows) {
+      const cols: Record<string, any> = {
+        symbol: r.symbol, name: r.name, current_holding: r.units,
+        lump_sum_amount: r.avgBuyPrice, current_price: r.currentPrice,
+        expected_return: r.expectedReturn, monthly_dca: r.monthlyDCA, projection_years: 10,
+      };
+      // whitelist
+      const CRYPTO_COLS = new Set(['symbol','name','current_price','current_holding','expected_return','monthly_dca','lump_sum_amount','projection_years']);
+      const safe: Record<string, any> = {};
+      for (const k of CRYPTO_COLS) { if (k in cols) safe[k] = cols[k]; }
+      const numKeys = ["current_price","current_holding","expected_return","monthly_dca","lump_sum_amount","projection_years"];
+      for (const k of numKeys) { if (k in safe) safe[k] = parseFloat(String(safe[k])) || 0; }
+      await apiRequest("POST", "/api/crypto", safe);
+      imported++;
+    }
+    await qc.invalidateQueries({ queryKey: ["/api/crypto"] });
+    toast({ title: "Import complete", description: `${imported} crypto assets imported.` });
+  }, [qc, toast]);
+
+  // ── DCA mutations ──────────────────────────────────────────────────────────
+  const createDCAMut = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/crypto-dca", data).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/crypto-dca"] }); setShowDCAForm(false); setDcaDraft(null); toast({ title: "DCA schedule saved" }); },
+  });
+  const updateDCAMut = useMutation({
+    mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/crypto-dca/${id}`, data).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/crypto-dca"] }); setShowDCAForm(false); setEditingDCAId(null); setDcaDraft(null); toast({ title: "DCA updated" }); },
+  });
+  const deleteDCAMut = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/crypto-dca/${id}`).then(r => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/crypto-dca"] }),
   });
 
   // ── Holdings mutations ─────────────────────────────────────────────────────
@@ -649,6 +928,14 @@ export default function CryptoPage() {
     <div className="space-y-5 pb-8">
 
       {/* ─── Transaction Form Modal ─────────────────────────────────────────── */}
+      {/* ─── Bulk Import Modal ─────────────────────────────────────────────── */}
+      {showImportModal && (
+        <CryptoBulkImportModal
+          onImport={handleBulkImport}
+          onClose={() => setShowImportModal(false)}
+        />
+      )}
+
       {showTxForm && (
         <CryptoTxForm
           initial={txDraft}
@@ -667,6 +954,24 @@ export default function CryptoPage() {
         </div>
         <div className="flex gap-2">
           <Button
+            onClick={handleFetchLivePrices}
+            variant="outline"
+            size="sm"
+            disabled={fetchingCryptoPrices}
+            className="gap-2 text-xs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${fetchingCryptoPrices ? 'animate-spin' : ''}`} />
+            {fetchingCryptoPrices ? "Fetching..." : "Live Prices"}
+          </Button>
+          <Button
+            onClick={() => setShowImportModal(true)}
+            variant="outline"
+            size="sm"
+            className="gap-2 text-xs"
+          >
+            <Upload className="w-3.5 h-3.5" /> Import
+          </Button>
+          <Button
             onClick={() => setShowAdd(true)}
             variant="outline"
             size="sm"
@@ -684,6 +989,138 @@ export default function CryptoPage() {
         </div>
       </div>
 
+      {/* ─── Tab Bar ───────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-1 bg-secondary/50 rounded-xl p-1 w-fit">
+        {([['portfolio', 'Portfolio & Transactions'], ['dca', 'DCA Schedules']] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setActiveTab(id)}
+            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${activeTab === id ? 'bg-card shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ─── DCA Schedules Tab ─────────────────────────────────────────────── */}
+      {activeTab === 'dca' && (
+        <div className="space-y-4">
+          {showDCAForm && dcaDraft && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+              <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg shadow-2xl">
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="font-bold text-sm">{editingDCAId ? 'Edit DCA Schedule' : 'New DCA Schedule'}</h3>
+                  <button onClick={() => { setShowDCAForm(false); setDcaDraft(null); setEditingDCAId(null); }} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Coin Symbol</label>
+                    <select value={dcaDraft.symbol} onChange={e => setDcaDraft((p: any) => ({ ...p, symbol: e.target.value }))}
+                      className="w-full h-8 text-xs bg-secondary border border-border rounded px-2 text-foreground">
+                      {cryptos.map((c: any) => <option key={c.symbol} value={c.symbol}>{c.symbol} — {c.name}</option>)}
+                      <option value="">Custom...</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Amount (AUD)</label>
+                    <Input type="number" step="50" value={dcaDraft.amount} onChange={e => setDcaDraft((p: any) => ({ ...p, amount: parseFloat(e.target.value) || 0 }))} className="h-8 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Frequency</label>
+                    <select value={dcaDraft.frequency} onChange={e => setDcaDraft((p: any) => ({ ...p, frequency: e.target.value }))}
+                      className="w-full h-8 text-xs bg-secondary border border-border rounded px-2 text-foreground">
+                      {['weekly','fortnightly','monthly','quarterly'].map(f => <option key={f} value={f}>{f.charAt(0).toUpperCase() + f.slice(1)}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Start Date</label>
+                    <Input type="date" value={dcaDraft.start_date} onChange={e => setDcaDraft((p: any) => ({ ...p, start_date: e.target.value }))} className="h-8 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">End Date (optional)</label>
+                    <Input type="date" value={dcaDraft.end_date ?? ''} onChange={e => setDcaDraft((p: any) => ({ ...p, end_date: e.target.value || null }))} className="h-8 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+                    <Input type="text" value={dcaDraft.notes} onChange={e => setDcaDraft((p: any) => ({ ...p, notes: e.target.value }))} className="h-8 text-xs" placeholder="Optional..." />
+                  </div>
+                  <div className="col-span-2 flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground">Enabled</label>
+                    <button onClick={() => setDcaDraft((p: any) => ({ ...p, enabled: !p.enabled }))}>
+                      {dcaDraft.enabled ? <ToggleRight className="w-5 h-5 text-emerald-400" /> : <ToggleLeft className="w-5 h-5 text-muted-foreground" />}
+                    </button>
+                    <span className="text-xs ml-2 text-muted-foreground">Monthly equiv: {formatCurrency(cryptoDcaMonthlyEquiv(dcaDraft.amount, dcaDraft.frequency))}/mo</span>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-5">
+                  <Button onClick={() => editingDCAId ? updateDCAMut.mutate({ id: editingDCAId, data: dcaDraft }) : createDCAMut.mutate(dcaDraft)}
+                    disabled={createDCAMut.isPending || updateDCAMut.isPending}
+                    style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+                    className="text-xs h-8">
+                    {createDCAMut.isPending || updateDCAMut.isPending ? 'Saving...' : 'Save Schedule'}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => { setShowDCAForm(false); setDcaDraft(null); setEditingDCAId(null); }} className="text-xs h-8">Cancel</Button>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: 'Active Schedules', value: String(dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).length) },
+              { label: 'Total Monthly DCA', value: formatCurrency(dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).reduce((s: number, d: CryptoDCASchedule) => s + cryptoDcaMonthlyEquiv(d.amount, d.frequency), 0)) },
+              { label: 'Annual DCA Budget', value: formatCurrency(dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).reduce((s: number, d: CryptoDCASchedule) => s + cryptoDcaMonthlyEquiv(d.amount, d.frequency), 0) * 12) },
+              { label: 'Coins Scheduled', value: String(new Set(dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).map((d: CryptoDCASchedule) => d.symbol)).size) },
+            ].map(k => (
+              <div key={k.label} className="bg-card border border-border rounded-xl p-4">
+                <p className="text-xs text-muted-foreground">{k.label}</p>
+                <p className="text-base font-bold num-display mt-1">{mv(k.value)}</p>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="text-sm font-bold">DCA Schedules</h3>
+              <Button size="sm" onClick={() => { setDcaDraft(emptyCryptoDCAForm(cryptos.map((c: any) => c.symbol))); setEditingDCAId(null); setShowDCAForm(true); }}
+                style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+                className="gap-2 text-xs h-7"><Plus className="w-3 h-3" /> Add Schedule</Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/30">
+                    {['Symbol','Amount','Frequency','Monthly Equiv','Start Date','End Date','Status','Notes','Actions'].map(h => (
+                      <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {dcaSchedules.length === 0 && <tr><td colSpan={9} className="px-3 py-8 text-center text-xs text-muted-foreground">No DCA schedules yet.</td></tr>}
+                  {dcaSchedules.map((d: CryptoDCASchedule) => (
+                    <tr key={d.id} className="border-b border-border/50 hover:bg-secondary/20">
+                      <td className="px-3 py-2.5 text-xs font-bold text-primary">{d.symbol || d.asset_name}</td>
+                      <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(d.amount))}</td>
+                      <td className="px-3 py-2.5 text-xs capitalize">{d.frequency}</td>
+                      <td className="px-3 py-2.5 text-xs num-display text-primary">{mv(formatCurrency(cryptoDcaMonthlyEquiv(d.amount, d.frequency)))}/mo</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.start_date}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.end_date ?? 'Ongoing'}</td>
+                      <td className="px-3 py-2.5 text-xs">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${d.enabled ? 'bg-emerald-500/15 text-emerald-400' : 'bg-secondary text-muted-foreground'}`}>{d.enabled ? 'Active' : 'Paused'}</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[120px] truncate">{d.notes}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex gap-1">
+                          <Button size="icon" variant="ghost" className="w-6 h-6" onClick={() => { setDcaDraft({ ...d }); setEditingDCAId(d.id); setShowDCAForm(true); }}><Edit2 className="w-3 h-3" /></Button>
+                          <Button size="icon" variant="ghost" className="w-6 h-6 text-red-400" onClick={() => { if (confirm('Delete?')) deleteDCAMut.mutate(d.id); }}><Trash2 className="w-3 h-3" /></Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'portfolio' && (
+        <>
       {/* ─── 7 KPI Cards ───────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
         {[
@@ -1317,6 +1754,9 @@ export default function CryptoPage() {
             </table>
           </div>
         </div>
+      )}
+
+              </>
       )}
 
       {/* ─── AI Insights ───────────────────────────────────────────────────── */}
