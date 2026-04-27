@@ -156,6 +156,25 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
     if (m === "DELETE") { await localStore.deleteCryptoTransaction(id); return { success: true }; }
   }
 
+  // ── Income ────────────────────────────────────────────────────────────────
+  if (path === "/api/income") {
+    if (m === "GET")  return await localStore.getIncomeRecords();
+    if (m === "POST") return await localStore.createIncomeRecord(body as any);
+  }
+  if (path === "/api/income/bulk") {
+    if (m === "POST") {
+      const { records } = body as any;
+      const created = await localStore.bulkCreateIncomeRecords(records);
+      return { created: created.length, records: created };
+    }
+  }
+  const incomeTxMatch = path.match(/^\/api\/income\/(\d+)$/);
+  if (incomeTxMatch) {
+    const id = parseInt(incomeTxMatch[1]);
+    if (m === "PUT")    return await localStore.updateIncomeRecord(id, body as any);
+    if (m === "DELETE") { await localStore.deleteIncomeRecord(id); return { success: true }; }
+  }
+
   throw new Error(`[localStore] Unhandled: ${m} ${path}`);
 }
 
