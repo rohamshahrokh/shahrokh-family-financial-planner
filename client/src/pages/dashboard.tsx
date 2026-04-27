@@ -179,6 +179,26 @@ export default function DashboardPage() {
     queryFn: () => apiRequest("GET", "/api/crypto-transactions").then((r) => r.json()),
     staleTime: 0,
   });
+  const { data: stockDCASchedules = [] } = useQuery<any[]>({
+    queryKey: ["/api/stock-dca"],
+    queryFn: () => apiRequest("GET", "/api/stock-dca").then((r) => r.json()),
+    staleTime: 0,
+  });
+  const { data: cryptoDCASchedules = [] } = useQuery<any[]>({
+    queryKey: ["/api/crypto-dca"],
+    queryFn: () => apiRequest("GET", "/api/crypto-dca").then((r) => r.json()),
+    staleTime: 0,
+  });
+  const { data: plannedStockOrders = [] } = useQuery<any[]>({
+    queryKey: ["/api/planned-investments", "stock"],
+    queryFn: () => apiRequest("GET", "/api/planned-investments?module=stock").then((r) => r.json()),
+    staleTime: 0,
+  });
+  const { data: plannedCryptoOrders = [] } = useQuery<any[]>({
+    queryKey: ["/api/planned-investments", "crypto"],
+    queryFn: () => apiRequest("GET", "/api/planned-investments?module=crypto").then((r) => r.json()),
+    staleTime: 0,
+  });
 
   const updateSnap = useMutation({
     mutationFn: (data: any) => apiRequest("PUT", "/api/snapshot", data).then((r) => r.json()),
@@ -271,9 +291,9 @@ export default function DashboardPage() {
 
   // ─── 10-year projection ───────────────────────────────────────────────────
   const projection = useMemo(
-    () => projectNetWorth({ snapshot: snap, properties, stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, years: 10 }),
+    () => projectNetWorth({ snapshot: snap, properties, stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, years: 10 }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx]
+    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders]
   );
 
   const year10NW      = projection[9]?.endNetWorth || netWorth;
@@ -386,9 +406,9 @@ export default function DashboardPage() {
 
   // ─── Master Cash Flow Series (2025 → 2035) ────────────────────────────────
   const cashFlowSeries = useMemo(
-    () => buildCashFlowSeries({ snapshot: snap, expenses: expenses as any[], properties: properties as any[], stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx }),
+    () => buildCashFlowSeries({ snapshot: snap, expenses: expenses as any[], properties: properties as any[], stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, expenses, properties, plannedStockTx, plannedCryptoTx]
+    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders]
   );
 
   const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
