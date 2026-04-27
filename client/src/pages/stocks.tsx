@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum, projectInvestment, calcCAGR } from "@/lib/finance";
@@ -9,14 +9,15 @@ import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import { Input } from "@/components/ui/input";
-import type { StockTransaction } from "@/lib/localStore";
+import type { StockTransaction, StockDCASchedule } from "@/lib/localStore";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell,
+  PieChart, Pie, Cell, BarChart, Bar,
 } from "recharts";
 import {
   Plus, Trash2, Edit2, TrendingUp, CheckSquare, Square,
   ArrowUpRight, ArrowDownRight, X, Calendar, Filter,
+  Upload, RefreshCw, Clock, ToggleLeft, ToggleRight, Download,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx";
@@ -117,6 +118,237 @@ function emptyTxForm(): Partial<StockTransaction> {
     notes: "",
     created_by: "user",
   };
+}
+
+// ─── Live Price Cache (15-min TTL) ─────────────────────────────────────────
+const PRICE_CACHE_KEY = "sf_live_prices_cache";
+const PRICE_TTL_MS = 15 * 60 * 1000;
+
+interface PriceCacheEntry { price: number; change24h: number; fetchedAt: number; }
+type PriceCache = Record<string, PriceCacheEntry>;
+
+function getLivePriceCache(): PriceCache {
+  try { return JSON.parse(localStorage.getItem(PRICE_CACHE_KEY) ?? "{}" ); } catch { return {}; }
+}
+function saveLivePriceCache(cache: PriceCache) {
+  try { localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(cache)); } catch {}
+}
+
+async function fetchLiveStockPrice(ticker: string): Promise<{ price: number; change24h: number } | null> {
+  const cache = getLivePriceCache();
+  const cached = cache[ticker];
+  if (cached && Date.now() - cached.fetchedAt < PRICE_TTL_MS) {
+    return { price: cached.price, change24h: cached.change24h };
+  }
+  // Try Yahoo Finance via allorigins proxy
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`;
+    const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const res = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error("allorigins failed");
+    const outer = await res.json();
+    const data = JSON.parse(outer.contents);
+    const meta = data?.chart?.result?.[0]?.meta;
+    if (!meta) throw new Error("no meta");
+    const price = meta.regularMarketPrice ?? meta.chartPreviousClose ?? 0;
+    const prev = meta.chartPreviousClose ?? price;
+    const change24h = prev > 0 ? ((price - prev) / prev) * 100 : 0;
+    const entry: PriceCacheEntry = { price, change24h, fetchedAt: Date.now() };
+    const updated = { ...getLivePriceCache(), [ticker]: entry };
+    saveLivePriceCache(updated);
+    return { price, change24h };
+  } catch (err) {
+    console.warn(`[LivePrice] Failed for ${ticker}:`, err);
+    return null;
+  }
+}
+
+// ─── Bulk Import Modal ───────────────────────────────────────────────────────
+interface ImportRow {
+  ticker: string; name: string; units: number; avgBuyPrice: number;
+  currentPrice: number; expectedReturn: number; monthlyDCA: number; allocationPct: number;
+}
+
+const IMPORT_TEMPLATE_HEADERS = [
+  "Ticker", "Company Name", "Units Owned", "Avg Buy Price (AUD)",
+  "Current Price (AUD)", "Expected Return %", "Monthly DCA (AUD)", "Target Allocation %",
+];
+
+function downloadImportTemplate() {
+  const wb = XLSX.utils.book_new();
+  const sample: any[] = [
+    IMPORT_TEMPLATE_HEADERS,
+    ["AAPL", "Apple Inc.", 10, 150.00, 175.00, 14, 200, 15],
+    ["NVDA", "NVIDIA Corporation", 5, 400.00, 950.00, 20, 500, 25],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sample), "Stocks Import");
+  XLSX.writeFile(wb, "Stocks_Import_Template.xlsx");
+}
+
+function parseImportFile(file: File): Promise<ImportRow[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target?.result, { type: "binary" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json<any>(ws, { header: 1 });
+        const rows: ImportRow[] = [];
+        for (let i = 1; i < raw.length; i++) {
+          const r = raw[i];
+          if (!r[0]) continue;
+          rows.push({
+            ticker: String(r[0] ?? "").trim().toUpperCase(),
+            name: String(r[1] ?? r[0]).trim(),
+            units: parseFloat(r[2]) || 0,
+            avgBuyPrice: parseFloat(r[3]) || 0,
+            currentPrice: parseFloat(r[4]) || 0,
+            expectedReturn: parseFloat(r[5]) || 12,
+            monthlyDCA: parseFloat(r[6]) || 0,
+            allocationPct: parseFloat(r[7]) || 0,
+          });
+        }
+        resolve(rows);
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsBinaryString(file);
+  });
+}
+
+interface BulkImportModalProps {
+  onImport: (rows: ImportRow[]) => void;
+  onClose: () => void;
+}
+
+function BulkImportModal({ onImport, onClose }: BulkImportModalProps) {
+  const [preview, setPreview] = useState<ImportRow[] | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = async (file: File) => {
+    setError("");
+    setLoading(true);
+    try {
+      const rows = await parseImportFile(file);
+      if (rows.length === 0) { setError("No data rows found. Check your file format."); setLoading(false); return; }
+      setPreview(rows);
+    } catch { setError("Could not parse file. Use the template for correct formatting."); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
+        <div className="flex items-center justify-between p-5 border-b border-border">
+          <div>
+            <h3 className="font-bold text-sm">Bulk Import Stock Holdings</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Upload an Excel file — each row is one stock holding</p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {/* Step 1 — Download template */}
+          <div className="bg-secondary/40 rounded-xl p-4">
+            <p className="text-xs font-semibold mb-2">Step 1 — Download the import template</p>
+            <Button size="sm" variant="outline" onClick={downloadImportTemplate} className="gap-2 text-xs h-7">
+              <Download className="w-3 h-3" /> Download Template (.xlsx)
+            </Button>
+            <p className="text-xs text-muted-foreground mt-2">
+              Columns: {IMPORT_TEMPLATE_HEADERS.join(" | ")}
+            </p>
+          </div>
+
+          {/* Step 2 — Upload */}
+          <div className="bg-secondary/40 rounded-xl p-4">
+            <p className="text-xs font-semibold mb-2">Step 2 — Upload your filled file</p>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+            />
+            <Button
+              size="sm" variant="outline"
+              onClick={() => fileRef.current?.click()}
+              disabled={loading}
+              className="gap-2 text-xs h-7"
+            >
+              <Upload className="w-3 h-3" /> {loading ? "Parsing..." : "Choose File"}
+            </Button>
+            {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+          </div>
+
+          {/* Step 3 — Preview */}
+          {preview && (
+            <div>
+              <p className="text-xs font-semibold mb-2">Step 3 — Review {preview.length} rows before importing</p>
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/30">
+                      {["Ticker","Name","Units","Avg Buy","Current Price","Exp Return %","Monthly DCA","Alloc %"].map(h => (
+                        <th key={h} className="text-left px-3 py-2 text-muted-foreground font-semibold whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.map((r, i) => (
+                      <tr key={i} className="border-b border-border/40 hover:bg-secondary/20">
+                        <td className="px-3 py-1.5 font-bold text-primary">{r.ticker}</td>
+                        <td className="px-3 py-1.5 max-w-[120px] truncate">{r.name}</td>
+                        <td className="px-3 py-1.5 num-display">{r.units.toLocaleString()}</td>
+                        <td className="px-3 py-1.5 num-display">{formatCurrency(r.avgBuyPrice)}</td>
+                        <td className="px-3 py-1.5 num-display">{formatCurrency(r.currentPrice)}</td>
+                        <td className="px-3 py-1.5 num-display">{r.expectedReturn}%</td>
+                        <td className="px-3 py-1.5 num-display">{formatCurrency(r.monthlyDCA)}</td>
+                        <td className="px-3 py-1.5 num-display">{r.allocationPct}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-2 p-5 border-t border-border">
+          {preview && (
+            <Button
+              onClick={() => { onImport(preview); onClose(); }}
+              style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+              className="text-xs h-8 gap-1"
+            >
+              <Upload className="w-3 h-3" /> Import {preview.length} Holdings
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={onClose} className="text-xs h-8">Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── DCA Schedule Form ────────────────────────────────────────────────────────
+function emptyDCAForm(tickers: string[]): Omit<StockDCASchedule, 'id'|'created_at'|'updated_at'> {
+  return {
+    ticker: tickers[0] ?? "",
+    asset_name: "",
+    amount: 0,
+    frequency: "monthly",
+    start_date: new Date().toISOString().split("T")[0],
+    end_date: null,
+    enabled: true,
+    notes: "",
+  };
+}
+
+function dcaMonthlyEquiv(amount: number, freq: string): number {
+  const map: Record<string, number> = { weekly: 52/12, fortnightly: 26/12, monthly: 1, quarterly: 1/3 };
+  return amount * (map[freq] ?? 1);
 }
 
 // ─── StockEditForm ────────────────────────────────────────────────────────────
@@ -415,6 +647,21 @@ export default function StocksPage() {
   const handleDraftChange = useCallback((d: any) => setDraft(d), []);
   const handleEditDraftChange = useCallback((d: any) => setEditDraft(d), []);
 
+  // Live price state
+  const [livePrices, setLivePrices] = useState<Record<string, { price: number; change24h: number }>>(() => {
+    const cache = getLivePriceCache();
+    return Object.fromEntries(Object.entries(cache).map(([k, v]: any) => [k, { price: v.price, change24h: v.change24h }]));
+  });
+  const [fetchingPrices, setFetchingPrices] = useState(false);
+  const [lastPriceFetch, setLastPriceFetch] = useState<Date | null>(null);
+
+  // Import / DCA state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<'portfolio' | 'dca'>('portfolio');
+  const [showDCAForm, setShowDCAForm] = useState(false);
+  const [dcaDraft, setDcaDraft] = useState<any>(null);
+  const [editingDCAId, setEditingDCAId] = useState<number | null>(null);
+
   // ── Queries ────────────────────────────────────────────────────────────────
 
   const { data: stocks = [] } = useQuery<any[]>({
@@ -425,6 +672,68 @@ export default function StocksPage() {
   const { data: transactions = [] } = useQuery<StockTransaction[]>({
     queryKey: ["/api/stock-transactions"],
     queryFn: () => apiRequest("GET", "/api/stock-transactions").then(r => r.json()),
+  });
+
+  const { data: dcaSchedules = [] } = useQuery<StockDCASchedule[]>({
+    queryKey: ["/api/stock-dca"],
+    queryFn: () => apiRequest("GET", "/api/stock-dca").then(r => r.json()),
+  });
+
+  // ── Live price fetch handler ───────────────────────────────────────────────
+  const handleFetchLivePrices = useCallback(async () => {
+    if (stocks.length === 0 || fetchingPrices) return;
+    setFetchingPrices(true);
+    const results: Record<string, { price: number; change24h: number }> = {};
+    await Promise.allSettled(
+      stocks.map(async (s: any) => {
+        if (!s.ticker) return;
+        const r = await fetchLiveStockPrice(s.ticker);
+        if (r) results[s.ticker] = r;
+      })
+    );
+    setLivePrices(prev => ({ ...prev, ...results }));
+    setLastPriceFetch(new Date());
+    setFetchingPrices(false);
+    toast({ title: "Live prices updated", description: `Fetched prices for ${Object.keys(results).length} tickers.` });
+  }, [stocks, fetchingPrices, toast]);
+
+  // ── Bulk import handler ────────────────────────────────────────────────────
+  const handleBulkImport = useCallback(async (rows: ImportRow[]) => {
+    let imported = 0;
+    for (const r of rows) {
+      await apiRequest("POST", "/api/stocks", normaliseStock({
+        ticker: r.ticker, name: r.name,
+        current_holding: r.units, annual_lump_sum: r.avgBuyPrice,
+        current_price: r.currentPrice, expected_return: r.expectedReturn,
+        monthly_dca: r.monthlyDCA, allocation_pct: r.allocationPct,
+        projection_years: 10,
+      }));
+      imported++;
+    }
+    await qc.invalidateQueries({ queryKey: ["/api/stocks"] });
+    toast({ title: "Import complete", description: `${imported} stocks imported successfully.` });
+  }, [qc, toast]);
+
+  // ── DCA mutations ─────────────────────────────────────────────────────────
+  const createDCAMut = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/stock-dca", data).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/stock-dca"] });
+      setShowDCAForm(false); setDcaDraft(null);
+      toast({ title: "DCA schedule saved" });
+    },
+  });
+  const updateDCAMut = useMutation({
+    mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/stock-dca/${id}`, data).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/stock-dca"] });
+      setShowDCAForm(false); setEditingDCAId(null); setDcaDraft(null);
+      toast({ title: "DCA schedule updated" });
+    },
+  });
+  const deleteDCAMut = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/stock-dca/${id}`).then(r => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/stock-dca"] }),
   });
 
   // ── Holdings mutations ─────────────────────────────────────────────────────
@@ -635,6 +944,14 @@ export default function StocksPage() {
   return (
     <div className="space-y-5 pb-8">
 
+      {/* ─── Bulk Import Modal ─────────────────────────────────────────────── */}
+      {showImportModal && (
+        <BulkImportModal
+          onImport={handleBulkImport}
+          onClose={() => setShowImportModal(false)}
+        />
+      )}
+
       {/* ─── Transaction Form Modal ─────────────────────────────────────────── */}
       {showTxForm && (
         <StockTxForm
@@ -654,6 +971,25 @@ export default function StocksPage() {
         </div>
         <div className="flex gap-2">
           <Button
+            onClick={handleFetchLivePrices}
+            variant="outline"
+            size="sm"
+            disabled={fetchingPrices}
+            className="gap-2 text-xs"
+            title={lastPriceFetch ? `Last updated: ${lastPriceFetch.toLocaleTimeString()}` : "Fetch live market prices"}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${fetchingPrices ? 'animate-spin' : ''}`} />
+            {fetchingPrices ? "Fetching..." : "Live Prices"}
+          </Button>
+          <Button
+            onClick={() => setShowImportModal(true)}
+            variant="outline"
+            size="sm"
+            className="gap-2 text-xs"
+          >
+            <Upload className="w-3.5 h-3.5" /> Import
+          </Button>
+          <Button
             onClick={() => setShowAdd(true)}
             variant="outline"
             size="sm"
@@ -671,6 +1007,178 @@ export default function StocksPage() {
         </div>
       </div>
 
+      {/* ─── Tab Bar ───────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-1 bg-secondary/50 rounded-xl p-1 w-fit">
+        {([['portfolio', 'Portfolio & Transactions'], ['dca', 'DCA Schedules']] as const).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${activeTab === id ? 'bg-card shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ─── DCA Schedules Tab ─────────────────────────────────────────────── */}
+      {activeTab === 'dca' && (
+        <div className="space-y-4">
+          {/* DCA form modal */}
+          {showDCAForm && dcaDraft && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+              <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg shadow-2xl">
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="font-bold text-sm">{editingDCAId ? 'Edit DCA Schedule' : 'New DCA Schedule'}</h3>
+                  <button onClick={() => { setShowDCAForm(false); setDcaDraft(null); setEditingDCAId(null); }} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Ticker</label>
+                    <select
+                      value={dcaDraft.ticker}
+                      onChange={e => setDcaDraft((p: any) => ({ ...p, ticker: e.target.value }))}
+                      className="w-full h-8 text-xs bg-secondary border border-border rounded px-2 text-foreground"
+                    >
+                      {stocks.map((s: any) => <option key={s.ticker} value={s.ticker}>{s.ticker} — {s.name}</option>)}
+                      <option value="">Custom...</option>
+                    </select>
+                  </div>
+                  {dcaDraft.ticker === '' && (
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Custom Ticker</label>
+                      <Input type="text" value={dcaDraft.asset_name} onChange={e => setDcaDraft((p: any) => ({ ...p, asset_name: e.target.value }))} className="h-8 text-xs" placeholder="TICKER" />
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Amount (AUD)</label>
+                    <Input type="number" step="50" value={dcaDraft.amount} onChange={e => setDcaDraft((p: any) => ({ ...p, amount: parseFloat(e.target.value) || 0 }))} className="h-8 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Frequency</label>
+                    <select value={dcaDraft.frequency} onChange={e => setDcaDraft((p: any) => ({ ...p, frequency: e.target.value }))} className="w-full h-8 text-xs bg-secondary border border-border rounded px-2 text-foreground">
+                      {['weekly','fortnightly','monthly','quarterly'].map(f => <option key={f} value={f}>{f.charAt(0).toUpperCase() + f.slice(1)}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Start Date</label>
+                    <Input type="date" value={dcaDraft.start_date} onChange={e => setDcaDraft((p: any) => ({ ...p, start_date: e.target.value }))} className="h-8 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">End Date (optional)</label>
+                    <Input type="date" value={dcaDraft.end_date ?? ''} onChange={e => setDcaDraft((p: any) => ({ ...p, end_date: e.target.value || null }))} className="h-8 text-xs" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+                    <Input type="text" value={dcaDraft.notes} onChange={e => setDcaDraft((p: any) => ({ ...p, notes: e.target.value }))} className="h-8 text-xs" placeholder="Optional..." />
+                  </div>
+                  <div className="col-span-2 flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground">Enabled</label>
+                    <button onClick={() => setDcaDraft((p: any) => ({ ...p, enabled: !p.enabled }))}>
+                      {dcaDraft.enabled ? <ToggleRight className="w-5 h-5 text-emerald-400" /> : <ToggleLeft className="w-5 h-5 text-muted-foreground" />}
+                    </button>
+                    <span className="text-xs ml-2 text-muted-foreground">
+                      Monthly equiv: {formatCurrency(dcaMonthlyEquiv(dcaDraft.amount, dcaDraft.frequency))}/mo
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-5">
+                  <Button
+                    onClick={() => editingDCAId ? updateDCAMut.mutate({ id: editingDCAId, data: dcaDraft }) : createDCAMut.mutate(dcaDraft)}
+                    disabled={createDCAMut.isPending || updateDCAMut.isPending}
+                    style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+                    className="text-xs h-8"
+                  >
+                    {createDCAMut.isPending || updateDCAMut.isPending ? 'Saving...' : 'Save Schedule'}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => { setShowDCAForm(false); setDcaDraft(null); setEditingDCAId(null); }} className="text-xs h-8">Cancel</Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* DCA summary KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: 'Active Schedules', value: String(dcaSchedules.filter(d => d.enabled).length) },
+              { label: 'Total Monthly DCA', value: formatCurrency(dcaSchedules.filter(d => d.enabled).reduce((s, d) => s + dcaMonthlyEquiv(d.amount, d.frequency), 0)) },
+              { label: 'Annual DCA Budget', value: formatCurrency(dcaSchedules.filter(d => d.enabled).reduce((s, d) => s + dcaMonthlyEquiv(d.amount, d.frequency), 0) * 12) },
+              { label: 'Tickers Scheduled', value: String(new Set(dcaSchedules.filter(d => d.enabled).map(d => d.ticker)).size) },
+            ].map(k => (
+              <div key={k.label} className="bg-card border border-border rounded-xl p-4">
+                <p className="text-xs text-muted-foreground">{k.label}</p>
+                <p className="text-base font-bold num-display mt-1">{mv(k.value)}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Add button + table */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="text-sm font-bold">DCA Schedules</h3>
+              <Button
+                size="sm"
+                onClick={() => { setDcaDraft(emptyDCAForm(stocks.map((s: any) => s.ticker))); setEditingDCAId(null); setShowDCAForm(true); }}
+                style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+                className="gap-2 text-xs h-7"
+              >
+                <Plus className="w-3 h-3" /> Add Schedule
+              </Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/30">
+                    {['Ticker','Amount','Frequency','Monthly Equiv','Start Date','End Date','Status','Notes','Actions'].map(h => (
+                      <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {dcaSchedules.length === 0 && (
+                    <tr><td colSpan={9} className="px-3 py-8 text-center text-xs text-muted-foreground">No DCA schedules. Click "Add Schedule" to set up automated investing.</td></tr>
+                  )}
+                  {dcaSchedules.map(d => (
+                    <tr key={d.id} className="border-b border-border/50 hover:bg-secondary/20">
+                      <td className="px-3 py-2.5 text-xs font-bold text-primary">{d.ticker || d.asset_name}</td>
+                      <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(d.amount))}</td>
+                      <td className="px-3 py-2.5 text-xs capitalize">{d.frequency}</td>
+                      <td className="px-3 py-2.5 text-xs num-display text-primary">{mv(formatCurrency(dcaMonthlyEquiv(d.amount, d.frequency)))}/mo</td>
+                      <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">{d.start_date}</td>
+                      <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">{d.end_date ?? 'Ongoing'}</td>
+                      <td className="px-3 py-2.5 text-xs">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${d.enabled ? 'bg-emerald-500/15 text-emerald-400' : 'bg-secondary text-muted-foreground'}`}>
+                          {d.enabled ? 'Active' : 'Paused'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[120px] truncate">{d.notes}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex gap-1">
+                          <Button size="icon" variant="ghost" className="w-6 h-6" onClick={() => { setDcaDraft({ ...d }); setEditingDCAId(d.id); setShowDCAForm(true); }}><Edit2 className="w-3 h-3" /></Button>
+                          <Button size="icon" variant="ghost" className="w-6 h-6 text-red-400" onClick={() => { if (confirm('Delete this DCA schedule?')) deleteDCAMut.mutate(d.id); }}><Trash2 className="w-3 h-3" /></Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                {dcaSchedules.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t border-border bg-secondary/20">
+                      <td className="px-3 py-2.5 text-xs font-bold" colSpan={3}>TOTAL (active)</td>
+                      <td className="px-3 py-2.5 text-xs font-bold num-display text-primary">
+                        {mv(formatCurrency(dcaSchedules.filter(d => d.enabled).reduce((s, d) => s + dcaMonthlyEquiv(d.amount, d.frequency), 0)))}/mo
+                      </td>
+                      <td colSpan={5}></td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'portfolio' && (
+        <>
       {/* ─── 7 KPI Cards ───────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
         {[
@@ -858,7 +1366,7 @@ export default function StocksPage() {
               <tr className="border-b border-border bg-secondary/30">
                 <th className="px-3 py-2.5 w-8"></th>
                 {[
-                  "Stock", "Units", "Avg Buy", "Price", "Value",
+                  "Stock", "Units", "Avg Buy", "Stored Price", "Live Price", "Daily Δ", "Value",
                   "Invested", "Gain/Loss", "G/L %", "Alloc (Act/Tgt)", "10Y Value", "DCA", "Actions",
                 ].map(h => (
                   <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
@@ -947,6 +1455,22 @@ export default function StocksPage() {
                     <td className="px-3 py-2.5 text-xs num-display">{c.units.toLocaleString()}</td>
                     <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(c.avgBuyPrice))}</td>
                     <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(c.currentPrice))}</td>
+                    <td className="px-3 py-2.5 text-xs">
+                      {livePrices[stock.ticker] ? (
+                        <span className="num-display font-semibold">{mv(formatCurrency(livePrices[stock.ticker].price))}</span>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs">
+                      {livePrices[stock.ticker] ? (
+                        <span className={`num-display font-semibold ${livePrices[stock.ticker].change24h >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {livePrices[stock.ticker].change24h >= 0 ? '+' : ''}{livePrices[stock.ticker].change24h.toFixed(2)}%
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2.5 text-xs num-display font-semibold">{mv(formatCurrency(c.currentValue, true))}</td>
                     <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(c.totalInvested, true))}</td>
 
@@ -1289,7 +1813,10 @@ export default function StocksPage() {
         </div>
       )}
 
-      {/* ─── AI Insights ───────────────────────────────────────────────────── */}
+        </>
+      )}
+
+            {/* ─── AI Insights ───────────────────────────────────────────────────── */}
       <AIInsightsCard
         pageKey="stocks"
         pageLabel="Stocks Portfolio"
