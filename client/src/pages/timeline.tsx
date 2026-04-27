@@ -16,6 +16,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useAppStore } from "@/lib/store";
 import {
   formatCurrency, safeNum,
   projectNetWorth, buildCashFlowSeries, aggregateCashFlowToAnnual,
@@ -26,10 +27,11 @@ import {
   ResponsiveContainer, Legend, LineChart, Line,
 } from "recharts";
 import {
-  TrendingUp, Download, Calendar, BarChart2,
+  TrendingUp, Download, BarChart2,
   Home, DollarSign, Layers, Target, Info
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import AIInsightsCard from "@/components/AIInsightsCard";
 import * as XLSX from "xlsx";
 import { useToast } from "@/hooks/use-toast";
 
@@ -65,7 +67,8 @@ function StatCard({ label, value, sub, color = 'text-foreground' }: { label: str
 // ─── Page ──────────────────────────────────────────────────────────────────────
 export default function TimelinePage() {
   const { toast } = useToast();
-  const [view, setView] = useState<'annual' | 'monthly'>('annual');
+  // Use global chartView from store (controlled by the header toggle)
+  const { chartView: view } = useAppStore();
   const [activeChart, setActiveChart] = useState<'networth' | 'assets' | 'cashflow' | 'equity'>('networth');
 
   // ── Data fetching ──────────────────────────────────────────────────────────
@@ -223,18 +226,7 @@ export default function TimelinePage() {
           <p className="text-xs text-muted-foreground mt-0.5">10-year projection 2025–2035 · Based on current assets, growth rates & expenses</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Monthly/Annual toggle */}
-          <div className="flex items-center gap-0.5 bg-secondary rounded-lg p-0.5">
-            {(['annual', 'monthly'] as const).map(v => (
-              <button
-                key={v}
-                className={`px-3 py-1.5 text-xs rounded font-medium transition-all capitalize ${view === v ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                onClick={() => setView(v)}
-              >
-                {v}
-              </button>
-            ))}
-          </div>
+          <span className="text-xs text-muted-foreground px-2 py-1 rounded-lg bg-secondary capitalize">{view} view</span>
           <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs" onClick={handleExportExcel}>
             <Download className="w-3.5 h-3.5" />
             Export Excel
@@ -508,6 +500,15 @@ export default function TimelinePage() {
           </div>
         </div>
       </div>
+
+      {/* ─── AI Insights ───────────────────────────────────────────────────── */}
+      <AIInsightsCard
+        pageKey="timeline"
+        pageLabel="Net Worth Timeline"
+        getData={() => ({
+        milestones: projection.slice(0, 10).map((p: any) => ({ year: p.year, netWorth: p.endNetWorth, growth: p.growthPct }))
+      })}
+      />
     </div>
   );
 }
