@@ -769,7 +769,7 @@ export default function ExpensesPage() {
   // ── Filtered income totals (react instantly to filters) ─────────────────────
   const filteredIncomeTotals = useMemo(() => {
     const totalAmount = filteredIncome.reduce((s: number, r: any) => s + (r.amount || 0), 0);
-    // Monthly equiv for filtered set — deduplicate by member+source+description+frequency
+    // Monthly equiv for filtered set — deduplicate by member+source+description (no frequency)
     const streamMapF = new Map<string, any>();
     const sortedF = [...filteredIncome]
       .filter((r: any) => r.frequency !== 'One-off')
@@ -779,7 +779,6 @@ export default function ExpensesPage() {
         (r.member      || '').toLowerCase().trim(),
         (r.source      || '').toLowerCase().trim(),
         (r.description || '').toLowerCase().trim(),
-        (r.frequency   || '').toLowerCase().trim(),
       ].join('|');
       if (!streamMapF.has(key)) streamMapF.set(key, r);
     }
@@ -905,9 +904,9 @@ export default function ExpensesPage() {
     const totalIncome = filteredIncome.reduce((s: number, r: any) => s + r.amount, 0);
 
     // Monthly equivalent total — deduplicated per income stream.
-    // Unique key: member + source + description + frequency.
-    // One-off and non-recurring rows excluded.
-    // Only the most-recent record for each stream is counted.
+    // Key: member + source + description (NO frequency — same stream can
+    // change frequency over time; most-recent record wins).
+    // One-off rows excluded.
     const streamMap = new Map<string, any>();
     const sortedByDateDesc = [...(incomeRecords as any[])]
       .filter((r: any) => r.frequency !== 'One-off')
@@ -917,7 +916,6 @@ export default function ExpensesPage() {
         (r.member      || '').toLowerCase().trim(),
         (r.source      || '').toLowerCase().trim(),
         (r.description || '').toLowerCase().trim(),
-        (r.frequency   || '').toLowerCase().trim(),
       ].join('|');
       if (!streamMap.has(key)) streamMap.set(key, r);
     }
