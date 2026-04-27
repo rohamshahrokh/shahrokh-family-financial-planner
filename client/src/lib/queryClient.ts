@@ -19,6 +19,7 @@
 
 import { QueryClient } from "@tanstack/react-query";
 import { localStore } from "./localStore";
+import { sbBills, sbBudgets, sbTelegramSettings, sbAlertLogs, sbFamilyMsgLog } from "./supabaseClient";
 
 // ─── Detect deployment mode ───────────────────────────────────────────────────
 
@@ -156,6 +157,30 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
     if (m === "DELETE") { await localStore.deleteCryptoTransaction(id); return { success: true }; }
   }
 
+  // ── Stock DCA ──────────────────────────────────────────────────────────
+  if (path === "/api/stock-dca") {
+    if (m === "GET")  return await localStore.getStockDCASchedules();
+    if (m === "POST") return await localStore.createStockDCASchedule(body as any);
+  }
+  const stockDCAMatch = path.match(/^\/api\/stock-dca\/(\d+)$/);
+  if (stockDCAMatch) {
+    const id = parseInt(stockDCAMatch[1]);
+    if (m === "PUT")    return await localStore.updateStockDCASchedule(id, body as any);
+    if (m === "DELETE") { await localStore.deleteStockDCASchedule(id); return { success: true }; }
+  }
+
+  // ── Crypto DCA ──────────────────────────────────────────────────────────
+  if (path === "/api/crypto-dca") {
+    if (m === "GET")  return await localStore.getCryptoDCASchedules();
+    if (m === "POST") return await localStore.createCryptoDCASchedule(body as any);
+  }
+  const cryptoDCAMatch = path.match(/^\/api\/crypto-dca\/(\d+)$/);
+  if (cryptoDCAMatch) {
+    const id = parseInt(cryptoDCAMatch[1]);
+    if (m === "PUT")    return await localStore.updateCryptoDCASchedule(id, body as any);
+    if (m === "DELETE") { await localStore.deleteCryptoDCASchedule(id); return { success: true }; }
+  }
+
   // ── Income ────────────────────────────────────────────────────────────────
   if (path === "/api/income") {
     if (m === "GET")  return await localStore.getIncomeRecords();
@@ -173,6 +198,59 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
     const id = parseInt(incomeTxMatch[1]);
     if (m === "PUT")    return await localStore.updateIncomeRecord(id, body as any);
     if (m === "DELETE") { await localStore.deleteIncomeRecord(id); return { success: true }; }
+  }
+
+  // ── Recurring Bills ───────────────────────────────────────────────────────
+  if (path === "/api/bills") {
+    if (m === "GET")  return await sbBills.getAll();
+    if (m === "POST") return await sbBills.create(body as any);
+  }
+  const billMatch = path.match(/^\/api\/bills\/(\d+)$/);
+  if (billMatch) {
+    const id = parseInt(billMatch[1]);
+    if (m === "PUT")    return await sbBills.update(id, body as any);
+    if (m === "DELETE") { await sbBills.delete(id); return { success: true }; }
+  }
+
+  // ── Monthly Budgets ───────────────────────────────────────────────────────
+  if (path === "/api/budgets") {
+    if (m === "GET")  return await sbBudgets.getAll();
+    if (m === "POST") return await sbBudgets.upsert(body as any);
+  }
+  if (path === "/api/budgets/bulk") {
+    if (m === "POST") {
+      const { budgets } = body as any;
+      const created = await sbBudgets.bulkCreate(budgets);
+      return { created: created.length, budgets: created };
+    }
+  }
+  const budgetMonthMatch = path.match(/^\/api\/budgets\/(\d+)\/(\d+)$/);
+  if (budgetMonthMatch) {
+    const year = parseInt(budgetMonthMatch[1]);
+    const month = parseInt(budgetMonthMatch[2]);
+    if (m === "GET") return await sbBudgets.getForMonth(year, month);
+  }
+  const budgetMatch = path.match(/^\/api\/budgets\/id\/(\d+)$/);
+  if (budgetMatch) {
+    const id = parseInt(budgetMatch[1]);
+    if (m === "PUT")    return await sbBudgets.update(id, body as any);
+    if (m === "DELETE") { await sbBudgets.delete(id); return { success: true }; }
+  }
+
+  // ── Telegram Settings ─────────────────────────────────────────────────────
+  if (path === "/api/telegram-settings") {
+    if (m === "GET")  return await sbTelegramSettings.get();
+    if (m === "PUT")  return await sbTelegramSettings.upsert(body as any);
+  }
+
+  // ── Alert Logs ────────────────────────────────────────────────────────────
+  if (path === "/api/alert-logs") {
+    if (m === "GET") return await sbAlertLogs.getRecent();
+  }
+
+  // ── Family Message Log ────────────────────────────────────────────────────
+  if (path === "/api/family-msg-log") {
+    if (m === "GET") return await sbFamilyMsgLog.getRecent();
   }
 
   throw new Error(`[localStore] Unhandled: ${m} ${path}`);
