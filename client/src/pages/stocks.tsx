@@ -56,8 +56,16 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 //   annual_lump_sum  → stores avg_buy_price
 
 // ─── Normalise stock ─────────────────────────────────────────────────────────
+const SF_STOCK_COLS = new Set([
+  'ticker','name','current_price','current_holding','allocation_pct',
+  'expected_return','monthly_dca','annual_lump_sum','projection_years',
+]);
+
 function normaliseStock(d: any) {
-  const out = { ...d };
+  const out: Record<string, any> = {};
+  for (const k of SF_STOCK_COLS) {
+    if (k in d) out[k] = d[k];
+  }
   const numKeys = [
     "current_price", "current_holding", "expected_return",
     "monthly_dca", "allocation_pct", "annual_lump_sum", "projection_years",
@@ -377,7 +385,7 @@ function StockTxForm({ initial, stocks, onSave, onCancel, isSaving }: TxFormProp
 export default function StocksPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const { privacyMode } = useAppStore();
+  const { privacyMode, chartView } = useAppStore();
 
   // Holdings state
   const [showAdd, setShowAdd] = useState(false);
