@@ -19,6 +19,7 @@
 
 import { QueryClient } from "@tanstack/react-query";
 import { localStore } from "./localStore";
+import { sbAppSettings } from "./supabaseClient";
 import { sbBills, sbBudgets, sbTelegramSettings, sbAlertLogs, sbFamilyMsgLog } from "./supabaseClient";
 
 // ─── Detect deployment mode ───────────────────────────────────────────────────
@@ -114,12 +115,33 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
     if (m === "DELETE") { await localStore.deleteTimelineEvent(id); return { success: true }; }
   }
 
-  // ── Settings ──────────────────────────────────────────────────────────────
+  // ── Settings — Supabase-backed (was localStorage only, now persisted) ────────
   const settingsMatch = path.match(/^\/api\/settings\/(.+)$/);
   if (settingsMatch) {
     const key = settingsMatch[1];
-    if (m === "GET") return { key, value: localStore.getSetting(key) };
-    if (m === "PUT") { localStore.setSetting(key, (body as any).value); return { success: true }; }
+    if (m === "GET") {
+      // Load from Supabase, fall back to localStorage cache
+      const all = await sbAppSettings.get();
+      const value = all[key] ?? localStore.getSetting(key);
+      return { key, value };
+    }
+    if (m === "PUT") {
+      // Write to Supabase (throws on failure — no silent catch)
+      const value = (body as any).value;
+      await sbAppSettings.saveKey(key, value);
+      // Mirror to localStorage as offline cache
+      localStore.setSetting(key, value);
+      return { success: true };
+    }
+  }
+
+  // ── App Settings — full JSONB blob GET/PATCH ──────────────────────────────
+  if (path === "/api/app-settings") {
+    if (m === "GET") return await sbAppSettings.get();
+    if (m === "PATCH") {
+      // Merge-upsert partial settings — throws on failure
+      return await sbAppSettings.merge(body as Record<string, any>);
+    }
   }
 
   // ── Scenarios ─────────────────────────────────────────────────────────────
