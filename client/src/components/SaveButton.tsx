@@ -33,8 +33,9 @@ export default function SaveButton({
       setSaved(true);
       toast({ title: "Saved Successfully", description: `${label} saved at ${now}` });
       setTimeout(() => setSaved(false), 3000);
-    } catch {
-      toast({ title: "Save Failed", description: "Please try again.", variant: "destructive" });
+    } catch (err: any) {
+      const msg = err?.message ?? "Please try again.";
+      toast({ title: "Save Failed — Not Saved to Supabase", description: msg, variant: "destructive" });
     }
     setSaving(false);
   };
