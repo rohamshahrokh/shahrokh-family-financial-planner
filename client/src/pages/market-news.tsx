@@ -1,1175 +1,725 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useAppStore } from "@/lib/store";
-import { formatCurrency } from "@/lib/finance";
-import { Button } from "@/components/ui/button";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+/**
+ * market-news.tsx — Wall Street Terminal
+ * Dark terminal aesthetic, dense data layout.
+ * Data fetched via /api/market-data (client-side, cached 45 min in localStorage)
+ */
+
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
-  RefreshCw,
   TrendingUp,
   TrendingDown,
-  Minus,
-  ExternalLink,
-  Newspaper,
-  Bitcoin,
-  BarChart2,
-  Cpu,
-  Globe,
-  AlertCircle,
-  Sparkles,
+  RefreshCw,
   Eye,
   EyeOff,
-  Clock,
+  ArrowUpRight,
+  ArrowDownRight,
+  Minus,
+  AlertTriangle,
+  Activity,
+  Newspaper,
+  BarChart2,
+  Zap,
+  Globe,
 } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
+import { useAppStore } from "@/lib/store";
+import { formatCurrency } from "@/lib/finance";
+import { useToast } from "@/hooks/use-toast";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_KEY = "sf_market_news_cache";
-const CACHE_TTL_MS = 45 * 60 * 1000; // 45 minutes
+interface PriceEntry {
+  price: number;
+  change: number;
+}
 
-// Multiple CORS proxies — tried in order until one works
-const CORS_PROXIES = [
-  (url: string) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-  (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-];
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type Section = "all" | "stocks" | "crypto" | "ai-tech" | "macro";
-type Language = "en" | "fa" | "both";
-type Sentiment = "positive" | "neutral" | "negative";
-
-interface NewsItem {
-  id: string;
+interface NewsArticle {
   title: string;
-  title_fa?: string;
-  summary: string;
-  summary_fa?: string;
-  source: string;
-  url: string;
-  published: string;
-  section: "stocks" | "crypto" | "ai-tech" | "macro";
-  sentiment: Sentiment;
-  impact: string[];
-  imageUrl?: string;
+  link: string;
+  pubDate: string;
+  description: string;
 }
 
-interface MarketPrices {
-  sp500: number;
-  sp500_chg: number;
-  nasdaq: number;
-  nasdaq_chg: number;
-  dow: number;
-  dow_chg: number;
-  btc_aud: number;
-  btc_chg: number;
-  eth_aud: number;
-  eth_chg: number;
-  fear_greed: number;
-  fear_greed_label: string;
-  fetched_at: string;
+interface MarketData {
+  prices: Record<string, PriceEntry>;
+  indices: Record<string, PriceEntry>;
+  news: Record<string, NewsArticle[]>;
+  fearGreed: number | null;
+  fearGreedLabel?: string;
+  lastUpdated: string;
 }
 
-interface NewsCache {
-  items: NewsItem[];
-  prices: MarketPrices;
-  ai_summary: string[];
-  fetched_at: string;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Cache Helpers ────────────────────────────────────────────────────────────
-
-function loadCache(): NewsCache | null {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as NewsCache;
-    if (Date.now() - new Date(parsed.fetched_at).getTime() > CACHE_TTL_MS) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function saveCache(data: NewsCache) {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-  } catch {}
-}
-
-// ─── Sentiment Detection ──────────────────────────────────────────────────────
-
-function detectSentiment(text: string): Sentiment {
-  const lower = text.toLowerCase();
-  const pos = [
-    "surge", "rally", "gain", "rise", "bull", "record", "high", "beat",
-    "growth", "strong", "profit", "boost", "jump", "soar", "climb", "up",
-    "breakthrough", "positive", "recover", "rebound", "outperform",
-  ];
-  const neg = [
-    "crash", "fall", "drop", "bear", "loss", "decline", "sell-off", "fear",
-    "risk", "recession", "weak", "cut", "plunge", "slump", "down", "warning",
-    "concern", "trouble", "crisis", "collapse", "worst", "miss",
-  ];
-  const posCount = pos.filter((w) => lower.includes(w)).length;
-  const negCount = neg.filter((w) => lower.includes(w)).length;
-  if (posCount > negCount) return "positive";
-  if (negCount > posCount) return "negative";
-  return "neutral";
-}
-
-// ─── Impact Tags ──────────────────────────────────────────────────────────────
-
-function detectImpact(text: string): string[] {
-  const lower = text.toLowerCase();
-  const impacts: string[] = [];
-  if (/stock|equity|s&p|nasdaq|dow|share|earnings|asx|dividend/.test(lower)) impacts.push("Stocks");
-  if (/bitcoin|btc|ethereum|eth|crypto|defi|nft|blockchain|altcoin/.test(lower)) impacts.push("Crypto");
-  if (/property|real estate|housing|mortgage|rba|rate|inflation|rent/.test(lower)) impacts.push("Property");
-  if (/ai|artificial intelligence|nvidia|openai|gpt|llm|chip|semiconductor|machine learning/.test(lower)) impacts.push("AI");
-  if (/economy|gdp|fed|reserve|macro|dollar|aud|usd|trade|tariff|bond|yield/.test(lower)) impacts.push("Economy");
-  return impacts.length > 0 ? impacts : ["General"];
-}
-
-// ─── Approximate Persian Translations (word-substitution only) ────────────────
-
-const FA_GLOSSARY: [RegExp, string][] = [
-  [/\bstocks?\b/gi, "سهام"],
-  [/\bmarkets?\b/gi, "بازار"],
-  [/\bcrypto(currency)?\b/gi, "رمزارز"],
-  [/\bbitcoin\b/gi, "بیتکوین"],
-  [/\bethereum\b/gi, "اتریوم"],
-  [/\binterest rates?\b/gi, "نرخ بهره"],
-  [/\binflation\b/gi, "تورم"],
-  [/\brecession\b/gi, "رکود"],
-  [/\bgrowth\b/gi, "رشد"],
-  [/\binvestors?\b/gi, "سرمایه‌گذار"],
-  [/\btech(nology)?\b/gi, "فناوری"],
-  [/\beconomy\b/gi, "اقتصاد"],
-  [/\bfed(eral reserve)?\b/gi, "فدرال رزرو"],
-  [/\bsurge\b/gi, "جهش"],
-  [/\bcrash\b/gi, "سقوط"],
-  [/\bdrop\b/gi, "افت"],
-  [/\bgains?\b/gi, "سود"],
-  [/\blosses?\b/gi, "زیان"],
-  [/\bAI\b/g, "هوش مصنوعی"],
-  [/\bproperty\b/gi, "ملک"],
-  [/\bhousing\b/gi, "مسکن"],
-  [/\bshares?\b/gi, "سهام"],
-  [/\bdividend\b/gi, "سود سهام"],
-  [/\bportfolio\b/gi, "سبد سرمایه‌گذاری"],
-  [/\bRBA\b/g, "بانک مرکزی استرالیا"],
-  [/\bASX\b/g, "بورس استرالیا"],
-  [/\bNasdaq\b/gi, "نزدک"],
-  [/\bS&P\b/gi, "اس‌اندپی"],
+const WATCHLIST_ASSETS = [
+  { symbol: "NVDA", name: "NVIDIA", sector: "AI Chips" },
+  { symbol: "GOOGL", name: "Alphabet", sector: "Mega-cap Tech" },
+  { symbol: "MSFT", name: "Microsoft", sector: "Mega-cap Tech" },
+  { symbol: "AVGO", name: "Broadcom", sector: "AI Chips" },
+  { symbol: "CEG", name: "Constellation Energy", sector: "Nuclear/Energy" },
+  { symbol: "CCJ", name: "Cameco", sector: "Uranium" },
+  { symbol: "WPM", name: "Wheaton Precious Metals", sector: "Precious Metals" },
+  { symbol: "BTC", name: "Bitcoin", sector: "Crypto" },
+  { symbol: "ETH", name: "Ethereum", sector: "Crypto" },
 ];
 
-function approximatePersian(text: string): string {
-  let out = text;
-  for (const [pattern, replacement] of FA_GLOSSARY) {
-    out = out.replace(pattern, replacement);
-  }
-  return out;
+const PULSE_CARDS = [
+  { label: "S&P 500", key: "SP500", source: "indices", decimals: 2 },
+  { label: "Nasdaq", key: "NASDAQ", source: "indices", decimals: 2 },
+  { label: "Dow", key: "DOW", source: "indices", decimals: 0 },
+  { label: "VIX", key: "VIX", source: "indices", decimals: 2 },
+  { label: "USD/AUD", key: "USDAUD", source: "indices", decimals: 4 },
+  { label: "Gold", key: "GOLD", source: "indices", decimals: 2 },
+  { label: "Oil", key: "OIL", source: "indices", decimals: 2 },
+  { label: "BTC", key: "BTC", source: "prices", decimals: 0 },
+  { label: "ETH", key: "ETH", source: "prices", decimals: 2 },
+] as const;
+
+const NEWS_TABS = [
+  { key: "stocks", label: "Stocks" },
+  { key: "crypto", label: "Crypto" },
+  { key: "tech", label: "AI & Tech" },
+  { key: "macro", label: "Macro" },
+  { key: "australia", label: "Australia" },
+] as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+function getSignal(change: number): { label: string; color: string; bg: string } {
+  if (change > 2) return { label: "Strong Buy", color: "text-emerald-400", bg: "bg-emerald-900/40 border-emerald-700" };
+  if (change > 0) return { label: "Buy", color: "text-green-400", bg: "bg-green-900/40 border-green-700" };
+  if (change > -2) return { label: "Hold", color: "text-amber-400", bg: "bg-amber-900/40 border-amber-700" };
+  if (change > -5) return { label: "Watch", color: "text-orange-400", bg: "bg-orange-900/40 border-orange-700" };
+  return { label: "Risk", color: "text-red-400", bg: "bg-red-900/40 border-red-700" };
 }
 
-// ─── RSS Parser ───────────────────────────────────────────────────────────────
-
-function parseRSS(
-  xmlText: string,
-  section: NewsItem["section"],
-  source: string,
-  maxItems = 8
-): NewsItem[] {
+function formatPubDate(dateStr: string): string {
+  if (!dateStr) return "";
   try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xmlText, "text/xml");
-    const items = Array.from(doc.querySelectorAll("item")).slice(0, maxItems);
-
-    return items.map((item, i) => {
-      const title = item.querySelector("title")?.textContent?.trim() ?? "Untitled";
-      const link = item.querySelector("link")?.textContent?.trim() ??
-        item.querySelector("guid")?.textContent?.trim() ?? "#";
-      const desc = item.querySelector("description")?.textContent?.trim() ?? "";
-      const pubDate = item.querySelector("pubDate")?.textContent?.trim() ?? new Date().toISOString();
-      const imgEl = item.querySelector("enclosure[type^='image']");
-      const imageUrl = imgEl?.getAttribute("url") ?? undefined;
-
-      // Strip HTML from description
-      const tempDiv = document.createElement("div");
-      tempDiv.innerHTML = desc;
-      const cleanDesc = (tempDiv.textContent ?? "").slice(0, 200).trim();
-      const summary = cleanDesc || title;
-
-      const sentiment = detectSentiment(title + " " + cleanDesc);
-      const impact = detectImpact(title + " " + cleanDesc);
-
-      const id = btoa(link + i).slice(0, 16).replace(/[^a-zA-Z0-9]/g, "_");
-
-      return {
-        id,
-        title,
-        title_fa: approximatePersian(title),
-        summary,
-        summary_fa: approximatePersian(summary),
-        source,
-        url: link,
-        published: new Date(pubDate).toISOString(),
-        section,
-        sentiment,
-        impact,
-        imageUrl,
-      } satisfies NewsItem;
-    });
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString("en-AU", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   } catch {
-    return [];
+    return dateStr;
   }
 }
 
-// ─── Fetch via CORS proxy with automatic fallback ───────────────────────────
-// Tries each proxy in order; returns raw text content on success.
-
-async function fetchProxied(url: string): Promise<string> {
-  let lastError: Error | null = null;
-
-  for (const makeProxy of CORS_PROXIES) {
-    try {
-      const proxyUrl = makeProxy(url);
-      const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
-      if (!res.ok) continue;
-      const text = await res.text();
-      // allorigins wraps in JSON {contents:...}; others return raw text
-      try {
-        const json = JSON.parse(text);
-        if (json?.contents) return json.contents as string;
-      } catch { /* not JSON — return raw */ }
-      if (text && text.length > 50) return text;
-    } catch (e: any) {
-      lastError = e;
-    }
-  }
-  throw lastError ?? new Error(`All proxies failed for: ${url}`);
+function fgColor(val: number): string {
+  if (val <= 25) return "text-red-500";
+  if (val <= 45) return "text-orange-400";
+  if (val <= 55) return "text-amber-400";
+  if (val <= 75) return "text-green-400";
+  return "text-emerald-400";
 }
 
-// ─── Fetch market price for a single ticker ───────────────────────────────────
-
-async function fetchYahooTicker(
-  ticker: string
-): Promise<{ price: number; change: number }> {
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`;
-    const text = await fetchProxied(url);
-    const json = JSON.parse(text);
-    const meta = json?.chart?.result?.[0]?.meta;
-    if (!meta) return { price: 0, change: 0 };
-    return {
-      price: meta.regularMarketPrice ?? 0,
-      change: meta.regularMarketChangePercent ?? 0,
-    };
-  } catch {
-    return { price: 0, change: 0 };
-  }
+function fgBg(val: number): string {
+  if (val <= 25) return "bg-red-500";
+  if (val <= 45) return "bg-orange-400";
+  if (val <= 55) return "bg-amber-400";
+  if (val <= 75) return "bg-green-400";
+  return "bg-emerald-400";
 }
 
-// ─── Generate AI-style summary bullets ───────────────────────────────────────
-
-function generateSummaryBullets(
-  items: NewsItem[],
-  prices: MarketPrices
-): string[] {
-  const bullets: string[] = [];
-
-  // Price summary
-  if (prices.sp500 > 0) {
-    const dir = prices.sp500_chg >= 0 ? "▲" : "▼";
-    bullets.push(
-      `S&P 500 ${dir} ${Math.abs(prices.sp500_chg).toFixed(2)}% — markets ${prices.sp500_chg >= 0 ? "opened higher amid optimism" : "under pressure as investors reassess risk"}.`
-    );
-  }
-  if (prices.btc_aud > 0) {
-    const dir = prices.btc_chg >= 0 ? "▲" : "▼";
-    bullets.push(
-      `Bitcoin ${dir} ${Math.abs(prices.btc_chg).toFixed(2)}% in AUD — crypto sentiment ${prices.btc_chg >= 0 ? "bullish" : "bearish"}, Fear & Greed index at ${prices.fear_greed} (${prices.fear_greed_label}).`
-    );
-  }
-
-  // Top news bullets by section
-  const bySection: Record<string, NewsItem[]> = {
-    stocks: [],
-    crypto: [],
-    "ai-tech": [],
-    macro: [],
-  };
-  for (const item of items) {
-    if (bySection[item.section]) bySection[item.section].push(item);
-  }
-
-  const topStocks = bySection.stocks[0];
-  if (topStocks) {
-    bullets.push(`📈 Stocks: "${topStocks.title.slice(0, 90)}" — ${topStocks.sentiment} signal.`);
-  }
-
-  const topCrypto = bySection.crypto[0];
-  if (topCrypto) {
-    bullets.push(`₿ Crypto: "${topCrypto.title.slice(0, 90)}" — watch for volatility.`);
-  }
-
-  const topAI = bySection["ai-tech"][0];
-  if (topAI) {
-    bullets.push(`🤖 AI/Tech: "${topAI.title.slice(0, 90)}" — relevant to tech holdings.`);
-  }
-
-  const topMacro = bySection.macro[0];
-  if (topMacro) {
-    bullets.push(`🌐 Macro: "${topMacro.title.slice(0, 90)}" — macro conditions shifting.`);
-  }
-
-  // Personalised note
-  if (prices.fear_greed < 30) {
-    bullets.push("Extreme fear in markets — historically a buying opportunity for long-term investors.");
-  } else if (prices.fear_greed > 70) {
-    bullets.push("Extreme greed detected — consider reviewing portfolio risk levels.");
-  }
-
-  return bullets.slice(0, 7);
+function fgLabel(val: number): string {
+  if (val <= 25) return "Extreme Fear";
+  if (val <= 45) return "Fear";
+  if (val <= 55) return "Neutral";
+  if (val <= 75) return "Greed";
+  return "Extreme Greed";
 }
 
-// ─── "Why It Matters To Me" Insights ─────────────────────────────────────────
-
-function generatePersonalInsights(
-  items: NewsItem[],
-  prices: MarketPrices
-): { icon: string; color: string; text: string }[] {
-  const insights: { icon: string; color: string; text: string }[] = [];
-
-  // AI/Tech holdings
-  const aiItems = items.filter((i) => i.impact.includes("AI") || i.section === "ai-tech");
-  if (aiItems.length > 0) {
-    insights.push({
-      icon: "🤖",
-      color: "text-purple-400",
-      text: `${aiItems.length} AI/tech stories today — monitor Nvidia, AI ETF positions for potential moves.`,
-    });
-  }
-
-  // Crypto
-  if (prices.btc_aud > 0) {
-    const sentiment = prices.btc_chg >= 0 ? "positive momentum" : "downward pressure";
-    insights.push({
-      icon: "₿",
-      color: "text-amber-400",
-      text: `BTC ${prices.btc_chg >= 0 ? "+" : ""}${prices.btc_chg.toFixed(1)}% — ${sentiment}. ETH ${prices.eth_aud > 0 ? (prices.eth_aud > 3000 ? "trading above" : "below") + " key levels" : "data unavailable"}.`,
-    });
-  }
-
-  // Property / RBA
-  const macroItems = items.filter((i) => i.section === "macro" || i.impact.includes("Property"));
-  if (macroItems.length > 0) {
-    insights.push({
-      icon: "🏠",
-      color: "text-blue-400",
-      text: `${macroItems.length} macro/property stories — RBA rate path and AUD moves affect your PPOR valuation.`,
-    });
-  }
-
-  // Stock market
-  if (prices.sp500 > 0) {
-    const dir = prices.sp500_chg >= 0 ? "up" : "down";
-    insights.push({
-      icon: "📊",
-      color: "text-emerald-400",
-      text: `S&P 500 ${dir} ${Math.abs(prices.sp500_chg).toFixed(1)}% — global equity sentiment affects ASX-listed positions and ETFs.`,
-    });
-  }
-
-  // Fear & Greed
-  if (prices.fear_greed > 0) {
-    const label = prices.fear_greed < 25
-      ? "Extreme fear — DCA opportunity for long-term positions"
-      : prices.fear_greed > 75
-      ? "Extreme greed — consider trimming overweight positions"
-      : `Neutral sentiment (${prices.fear_greed}/100) — no immediate action needed`;
-    insights.push({
-      icon: "⚖️",
-      color: "text-muted-foreground",
-      text: label,
-    });
-  }
-
-  return insights.slice(0, 5);
+function formatPrice(val: number, decimals: number): string {
+  if (!val && val !== 0) return "—";
+  if (decimals === 0) return val.toLocaleString("en-AU", { maximumFractionDigits: 0 });
+  return val.toLocaleString("en-AU", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
-// ─── Main data fetch ──────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Sub-components (module-level to prevent focus loss)
+// ─────────────────────────────────────────────────────────────────────────────
 
-async function fetchAllMarketData(): Promise<NewsCache> {
-  // 1. Fetch prices in parallel
-  const [sp500, nasdaq, dow, btcAud, ethAud, fearGreedRes] = await Promise.allSettled([
-    fetchYahooTicker("%5EGSPC"),
-    fetchYahooTicker("%5EIXIC"),
-    fetchYahooTicker("%5EDJI"),
-    fetchYahooTicker("BTC-AUD"),
-    fetchYahooTicker("ETH-AUD"),
-    fetch("https://api.alternative.me/fng/?limit=1", { signal: AbortSignal.timeout(8000) })
-      .then((r) => r.json())
-      .catch(() => null),
-  ]);
-
-  const sp500Data = sp500.status === "fulfilled" ? sp500.value : { price: 0, change: 0 };
-  const nasdaqData = nasdaq.status === "fulfilled" ? nasdaq.value : { price: 0, change: 0 };
-  const dowData = dow.status === "fulfilled" ? dow.value : { price: 0, change: 0 };
-  const btcData = btcAud.status === "fulfilled" ? btcAud.value : { price: 0, change: 0 };
-  const ethData = ethAud.status === "fulfilled" ? ethAud.value : { price: 0, change: 0 };
-
-  let fearGreedVal = 50;
-  let fearGreedLabel = "Neutral";
-  if (fearGreedRes.status === "fulfilled" && fearGreedRes.value) {
-    const fng = fearGreedRes.value?.data?.[0];
-    if (fng) {
-      fearGreedVal = parseInt(fng.value ?? "50", 10);
-      fearGreedLabel = fng.value_classification ?? "Neutral";
-    }
-  }
-
-  const prices: MarketPrices = {
-    sp500: sp500Data.price,
-    sp500_chg: sp500Data.change,
-    nasdaq: nasdaqData.price,
-    nasdaq_chg: nasdaqData.change,
-    dow: dowData.price,
-    dow_chg: dowData.change,
-    btc_aud: btcData.price,
-    btc_chg: btcData.change,
-    eth_aud: ethData.price,
-    eth_chg: ethData.change,
-    fear_greed: fearGreedVal,
-    fear_greed_label: fearGreedLabel,
-    fetched_at: new Date().toISOString(),
-  };
-
-  // 2. Fetch CoinGecko crypto news directly (no proxy needed — open CORS)
-  const cryptoItemsPromise: Promise<NewsItem[]> = fetch(
-    "https://api.coingecko.com/api/v3/news?per_page=8",
-    { signal: AbortSignal.timeout(8000) }
-  )
-    .then((r) => r.json())
-    .then((data: any) => {
-      const items: any[] = data?.data ?? data?.results ?? [];
-      return items.slice(0, 8).map((n: any, i: number) => {
-        const title = n.title ?? n.name ?? "Crypto News";
-        const url   = n.url ?? n.news_url ?? "#";
-        const desc  = n.description ?? n.text ?? title;
-        return {
-          id: btoa(url + i).slice(0, 16).replace(/[^a-zA-Z0-9]/g, "_"),
-          title,
-          title_fa: approximatePersian(title),
-          summary: desc.slice(0, 200),
-          summary_fa: approximatePersian(desc.slice(0, 200)),
-          source: n.source?.name ?? n.source ?? "CoinGecko",
-          url,
-          published: n.updated_at ? new Date(n.updated_at * 1000).toISOString() : new Date().toISOString(),
-          section: "crypto" as const,
-          sentiment: detectSentiment(title + " " + desc),
-          impact: detectImpact(title + " " + desc),
-          imageUrl: n.thumb_2x ?? n.large ?? undefined,
-        } satisfies NewsItem;
-      });
-    })
-    .catch(() => [] as NewsItem[]);
-
-  // 3. Fetch RSS feeds in parallel — multiple sources per section for resilience
-  const RSS_FEEDS: { url: string; section: NewsItem["section"]; source: string }[] = [
-    // Stocks — try MarketWatch first (reliable), Yahoo Finance as fallback
-    { url: "https://feeds.content.dowjones.io/public/rss/mw_topstories",       section: "stocks",  source: "MarketWatch" },
-    { url: "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",      section: "stocks",  source: "MarketWatch" },
-    // AI / Tech — Hacker News + TechCrunch
-    { url: "https://hnrss.org/frontpage",                                        section: "ai-tech", source: "Hacker News" },
-    { url: "https://techcrunch.com/feed/",                                       section: "ai-tech", source: "TechCrunch" },
-    // Macro — RBA + Reuters economy
-    { url: "https://www.rba.gov.au/rss/rss-cb-speeches.xml",                   section: "macro",   source: "RBA" },
-    { url: "https://feeds.reuters.com/reuters/businessNews",                    section: "macro",   source: "Reuters" },
-  ];
-
-  const feedResults = await Promise.allSettled(
-    RSS_FEEDS.map((feed) =>
-      fetchProxied(feed.url).then((xml) =>
-        parseRSS(xml, feed.section, feed.source, 10)
-      )
-    )
-  );
-
-  // 4. Combine all items (RSS feeds + CoinGecko crypto)
-  const allItems: NewsItem[] = [];
-  const seenUrls = new Set<string>();
-
-  // Add RSS feed items
-  feedResults.forEach((result) => {
-    if (result.status === "fulfilled") {
-      for (const item of result.value) {
-        if (!seenUrls.has(item.url)) {
-          seenUrls.add(item.url);
-          allItems.push(item);
-        }
-      }
-    }
-  });
-
-  // Add CoinGecko crypto items (deduplicated)
-  const cryptoItems = await cryptoItemsPromise;
-  for (const item of cryptoItems) {
-    if (!seenUrls.has(item.url)) {
-      seenUrls.add(item.url);
-      allItems.push(item);
-    }
-  }
-
-  // Fallback: if feeds mostly failed, add placeholder items so page is never empty
-  if (allItems.length < 3) {
-    const fallbackItems: NewsItem[] = [
-      {
-        id: "fallback_1",
-        title: "Markets Update: News feeds loading — click Refresh to retry",
-        title_fa: "بروزرسانی بازار: داده‌های زنده موقتاً در دسترس نیست",
-        summary: "News feeds could not be reached (CORS proxy may be rate-limited). Crypto data from CoinGecko should still load. Click Refresh to try again.",
-        summary_fa: "دریافت اخبار بازار ممکن نشد. لطفاً چند دقیقه دیگر دوباره تلاش کنید.",
-        source: "System",
-        url: "#",
-        published: new Date().toISOString(),
-        section: "stocks",
-        sentiment: "neutral",
-        impact: ["General"],
-      },
-    ];
-    allItems.push(...fallbackItems);
-  }
-
-  // 4. Sort by published date descending
-  allItems.sort(
-    (a, b) => new Date(b.published).getTime() - new Date(a.published).getTime()
-  );
-
-  // 5. Generate summary bullets
-  const ai_summary = generateSummaryBullets(allItems, prices);
-
-  const cache: NewsCache = {
-    items: allItems,
-    prices,
-    ai_summary,
-    fetched_at: new Date().toISOString(),
-  };
-
-  return cache;
-}
-
-// ─── Time Ago Formatter ───────────────────────────────────────────────────────
-
-function timeAgo(isoDate: string): string {
-  try {
-    const diff = Date.now() - new Date(isoDate).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    return `${Math.floor(hrs / 24)}d ago`;
-  } catch {
-    return "";
-  }
-}
-
-// ─── Minutes until next refresh ──────────────────────────────────────────────
-
-function minsUntilRefresh(fetchedAt: string): number {
-  try {
-    const elapsed = Date.now() - new Date(fetchedAt).getTime();
-    const remaining = CACHE_TTL_MS - elapsed;
-    return Math.max(0, Math.ceil(remaining / 60000));
-  } catch {
-    return 0;
-  }
-}
-
-// ─── Section Config ───────────────────────────────────────────────────────────
-
-const SECTION_CONFIG: Record<
-  string,
-  { label: string; icon: React.ReactNode; color: string; bgClass: string; textClass: string }
-> = {
-  stocks: {
-    label: "Stocks",
-    icon: <BarChart2 size={12} />,
-    color: "hsl(210,80%,60%)",
-    bgClass: "bg-blue-500/15 border-blue-500/30",
-    textClass: "text-blue-400",
-  },
-  crypto: {
-    label: "Crypto",
-    icon: <Bitcoin size={12} />,
-    color: "hsl(38,92%,60%)",
-    bgClass: "bg-amber-500/15 border-amber-500/30",
-    textClass: "text-amber-400",
-  },
-  "ai-tech": {
-    label: "AI & Tech",
-    icon: <Cpu size={12} />,
-    color: "hsl(280,60%,65%)",
-    bgClass: "bg-purple-500/15 border-purple-500/30",
-    textClass: "text-purple-400",
-  },
-  macro: {
-    label: "Macro",
-    icon: <Globe size={12} />,
-    color: "hsl(142,60%,50%)",
-    bgClass: "bg-emerald-500/15 border-emerald-500/30",
-    textClass: "text-emerald-400",
-  },
-};
-
-// ─── Skeleton Card ────────────────────────────────────────────────────────────
-
-function SkeletonCard() {
-  return (
-    <div className="bg-card border border-border rounded-xl p-4 animate-pulse">
-      <div className="flex items-center gap-2 mb-3">
-        <div className="h-5 w-16 bg-muted/50 rounded-full" />
-        <div className="h-2 w-2 bg-muted/50 rounded-full" />
-      </div>
-      <div className="h-4 bg-muted/50 rounded mb-2 w-full" />
-      <div className="h-4 bg-muted/50 rounded mb-3 w-3/4" />
-      <div className="h-3 bg-muted/30 rounded mb-1 w-full" />
-      <div className="h-3 bg-muted/30 rounded mb-4 w-5/6" />
-      <div className="flex items-center gap-2">
-        <div className="h-5 w-14 bg-muted/30 rounded-full" />
-        <div className="h-5 w-14 bg-muted/30 rounded-full" />
-        <div className="ml-auto h-3 w-16 bg-muted/20 rounded" />
-      </div>
-    </div>
-  );
-}
-
-// ─── Price Chip ───────────────────────────────────────────────────────────────
-
-interface PriceChipProps {
+function PulseCard({
+  label,
+  price,
+  change,
+  decimals,
+}: {
   label: string;
-  price: number | string;
-  change?: number;
-  isFearGreed?: boolean;
-  value?: number;
-  privacyMode: boolean;
-}
-
-function PriceChip({ label, price, change, isFearGreed, value, privacyMode }: PriceChipProps) {
-  const isPositive = (change ?? 0) >= 0;
-  const ChgIcon = isPositive ? TrendingUp : TrendingDown;
-  const chgColor = isPositive ? "text-emerald-400" : "text-red-400";
-
-  const fearGreedColor =
-    (value ?? 50) < 30
-      ? "text-red-400"
-      : (value ?? 50) > 70
-      ? "text-emerald-400"
-      : "text-amber-400";
-
-  const displayPrice = privacyMode
-    ? "••••"
-    : typeof price === "number"
-    ? formatCurrency(price)
-    : price;
-
+  price: number;
+  change: number;
+  decimals: number;
+}) {
+  const isPos = change >= 0;
+  const hasData = price > 0;
   return (
-    <div className="bg-card border border-border rounded-lg px-3 py-2 flex flex-col gap-0.5 min-w-[110px]">
-      <span className="text-[10px] text-muted-foreground font-medium tracking-wide uppercase">
-        {label}
-      </span>
-      <span className="text-sm font-semibold text-foreground">{displayPrice}</span>
-      {change !== undefined && !isFearGreed && (
-        <span className={`flex items-center gap-0.5 text-[11px] font-medium ${chgColor}`}>
-          <ChgIcon size={10} />
-          {isPositive ? "+" : ""}{change.toFixed(2)}%
-        </span>
-      )}
-      {isFearGreed && (
-        <span className={`text-[11px] font-medium ${fearGreedColor}`}>
-          {price}
-        </span>
+    <div className="flex-shrink-0 min-w-[120px] bg-zinc-900 border border-zinc-800 rounded-lg p-3 hover:border-zinc-600 transition-colors">
+      <div className="text-xs text-zinc-500 font-mono uppercase tracking-wider mb-1">{label}</div>
+      <div className="text-sm font-bold text-zinc-100 font-mono">
+        {hasData ? formatPrice(price, decimals) : <span className="text-zinc-600">—</span>}
+      </div>
+      {hasData ? (
+        <div className={`flex items-center gap-0.5 mt-1 text-xs font-mono ${isPos ? "text-emerald-400" : "text-red-400"}`}>
+          {isPos ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+          {isPos ? "+" : ""}{change.toFixed(2)}%
+        </div>
+      ) : (
+        <div className="text-xs text-zinc-600 mt-1 font-mono">loading…</div>
       )}
     </div>
   );
 }
 
-// ─── News Card ────────────────────────────────────────────────────────────────
+function WatchlistRow({
+  asset,
+  priceData,
+  privacyMode,
+}: {
+  asset: typeof WATCHLIST_ASSETS[number];
+  priceData: PriceEntry | undefined;
+  privacyMode: boolean;
+}) {
+  const price = priceData?.price ?? 0;
+  const change = priceData?.change ?? 0;
+  const hasData = price > 0;
+  const signal = getSignal(change);
+  const isPos = change >= 0;
 
-interface NewsCardProps {
-  item: NewsItem;
-  language: Language;
-}
-
-function NewsCard({ item, language }: NewsCardProps) {
-  const cfg = SECTION_CONFIG[item.section] ?? SECTION_CONFIG.stocks;
-  const sentimentDot =
-    item.sentiment === "positive"
-      ? "bg-emerald-400"
-      : item.sentiment === "negative"
-      ? "bg-red-400"
-      : "bg-yellow-400";
-
-  const showFa = language === "fa" || language === "both";
-  const showEn = language === "en" || language === "both";
-
-  const handleClick = () => {
-    if (item.url && item.url !== "#") {
-      window.open(item.url, "_blank", "noopener,noreferrer");
-    }
+  const formatAssetPrice = (sym: string, p: number) => {
+    if (!hasData) return "—";
+    if (sym === "BTC") return p.toLocaleString("en-AU", { maximumFractionDigits: 0 });
+    if (sym === "ETH") return p.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return p.toFixed(2);
   };
 
   return (
-    <div
-      onClick={handleClick}
-      className="bg-card border border-border rounded-xl p-4 cursor-pointer hover:border-foreground/20 transition-all duration-200 hover:shadow-lg group"
-    >
-      {/* Header row */}
+    <tr className="border-b border-zinc-800 hover:bg-zinc-900/60 transition-colors">
+      <td className="px-4 py-3">
+        <span className="font-mono font-bold text-zinc-100 text-sm">{asset.symbol}</span>
+      </td>
+      <td className="px-4 py-3">
+        <span className="text-zinc-400 text-sm">{asset.name}</span>
+      </td>
+      <td className="px-4 py-3">
+        <span className="font-mono text-zinc-100 text-sm">
+          {privacyMode ? "••••" : (hasData ? `$${formatAssetPrice(asset.symbol, price)}` : "—")}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        {hasData ? (
+          <div className={`flex items-center gap-1 font-mono text-sm ${isPos ? "text-emerald-400" : "text-red-400"}`}>
+            {isPos ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
+            {isPos ? "+" : ""}{change.toFixed(2)}%
+          </div>
+        ) : (
+          <span className="text-zinc-600 text-sm font-mono">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        <span className={`text-xs font-semibold px-2 py-1 rounded border ${signal.bg} ${signal.color}`}>
+          {signal.label}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-1 rounded">{asset.sector}</span>
+      </td>
+    </tr>
+  );
+}
+
+function ArticleCard({ article }: { article: NewsArticle }) {
+  return (
+    <div className="border-b border-zinc-800 py-3 hover:bg-zinc-900/40 transition-colors px-2 -mx-2 rounded">
+      <a
+        href={article.link || "#"}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-semibold text-zinc-100 text-sm hover:text-blue-400 transition-colors leading-snug block mb-1"
+      >
+        {article.title}
+      </a>
+      {article.description && (
+        <p className="text-xs text-zinc-400 leading-relaxed mb-1 line-clamp-2">{article.description}</p>
+      )}
+      {article.pubDate && (
+        <span className="text-xs text-zinc-600 font-mono">{formatPubDate(article.pubDate)}</span>
+      )}
+    </div>
+  );
+}
+
+function SectorTile({
+  name,
+  mood,
+}: {
+  name: string;
+  mood: "Bullish" | "Neutral" | "Bearish" | "Risk" | "High Risk" | "Elevated" | "Normal";
+}) {
+  const moodConfig = {
+    Bullish: { bg: "bg-emerald-900/40 border-emerald-700", badge: "bg-emerald-700 text-emerald-100", dot: "bg-emerald-400" },
+    Neutral: { bg: "bg-amber-900/30 border-amber-800", badge: "bg-amber-700 text-amber-100", dot: "bg-amber-400" },
+    Bearish: { bg: "bg-red-900/30 border-red-800", badge: "bg-red-800 text-red-100", dot: "bg-red-400" },
+    Risk: { bg: "bg-orange-900/30 border-orange-800", badge: "bg-orange-700 text-orange-100", dot: "bg-orange-400" },
+    "High Risk": { bg: "bg-red-900/50 border-red-700", badge: "bg-red-700 text-red-100", dot: "bg-red-400" },
+    Elevated: { bg: "bg-orange-900/40 border-orange-800", badge: "bg-orange-700 text-orange-100", dot: "bg-orange-400" },
+    Normal: { bg: "bg-green-900/30 border-green-800", badge: "bg-green-800 text-green-100", dot: "bg-green-400" },
+  };
+  const cfg = moodConfig[mood] ?? moodConfig.Neutral;
+
+  return (
+    <div className={`border rounded-lg p-4 ${cfg.bg}`}>
       <div className="flex items-center gap-2 mb-2">
-        <span
-          className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${cfg.bgClass} ${cfg.textClass}`}
-        >
-          {cfg.icon}
-          {cfg.label}
-        </span>
-        <span
-          className={`h-2 w-2 rounded-full ${sentimentDot}`}
-          title={`Sentiment: ${item.sentiment}`}
-        />
-        <ExternalLink
-          size={12}
-          className="ml-auto text-muted-foreground/40 group-hover:text-muted-foreground transition-colors"
-        />
+        <div className={`w-2 h-2 rounded-full ${cfg.dot}`} />
+        <span className="text-sm font-semibold text-zinc-200">{name}</span>
       </div>
+      <span className={`text-xs font-bold px-2 py-0.5 rounded ${cfg.badge}`}>{mood}</span>
+    </div>
+  );
+}
 
-      {/* Title */}
-      {showEn && (
-        <h3 className="text-sm font-semibold text-foreground line-clamp-2 leading-snug mb-1">
-          {item.title}
-        </h3>
-      )}
-      {showFa && item.title_fa && (
-        <h3
-          className="text-sm font-semibold text-foreground line-clamp-2 leading-snug mb-1"
-          dir="rtl"
-          lang="fa"
-        >
-          {item.title_fa}
-        </h3>
-      )}
+function SignalBadge({ type }: { type: "buy" | "alert" | "risk" | "breakout" | "info" }) {
+  const configs = {
+    buy: "bg-emerald-900/40 border-emerald-700 text-emerald-400",
+    alert: "bg-red-900/40 border-red-700 text-red-400",
+    risk: "bg-orange-900/40 border-orange-700 text-orange-400",
+    breakout: "bg-blue-900/40 border-blue-700 text-blue-400",
+    info: "bg-zinc-800 border-zinc-700 text-zinc-400",
+  };
+  const icons = {
+    buy: <TrendingUp size={14} />,
+    alert: <AlertTriangle size={14} />,
+    risk: <Activity size={14} />,
+    breakout: <Zap size={14} />,
+    info: <Minus size={14} />,
+  };
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs font-semibold ${configs[type]}`}>
+      {icons[type]}
+    </span>
+  );
+}
 
-      {/* Summary */}
-      {showEn && item.summary && (
-        <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-2">
-          {item.summary}
-        </p>
-      )}
-      {showFa && item.summary_fa && (
-        <p
-          className="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-2"
-          dir="rtl"
-          lang="fa"
-        >
-          {item.summary_fa}
-        </p>
-      )}
+// ─────────────────────────────────────────────────────────────────────────────
+// Loading skeleton
+// ─────────────────────────────────────────────────────────────────────────────
 
-      {/* Footer */}
-      <div className="flex items-center gap-1.5 flex-wrap mt-auto pt-1">
-        {item.impact.slice(0, 3).map((tag) => (
-          <span
-            key={tag}
-            className="text-[10px] px-1.5 py-0.5 bg-muted/40 rounded text-muted-foreground"
-          >
-            {tag}
-          </span>
+function LoadingSkeleton() {
+  return (
+    <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center gap-6 p-8">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        <span className="text-zinc-400 font-mono text-lg tracking-wide">Loading market data…</span>
+      </div>
+      <div className="w-full max-w-4xl space-y-3">
+        {[...Array(5)].map((_, i) => (
+          <div key={i} className="h-12 bg-zinc-800/60 rounded-lg animate-pulse" style={{ opacity: 1 - i * 0.15 }} />
         ))}
-        <span className="ml-auto text-[10px] text-muted-foreground/60">
-          {item.source} · {timeAgo(item.published)}
-        </span>
       </div>
     </div>
   );
 }
 
-// ─── Page Component ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Main page component
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function MarketNewsPage() {
-  const privacyMode = useAppStore((s) => s.privacyMode);
+  const { privacyMode, setPrivacyMode } = useAppStore();
   const { toast } = useToast();
+  const [activeNewsTab, setActiveNewsTab] = useState<string>("stocks");
 
-  const [activeSection, setActiveSection] = useState<Section>("all");
-  const [language, setLanguage] = useState<Language>("en");
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [newsCache, setNewsCache] = useState<NewsCache | null>(null);
-  const [loadingInitial, setLoadingInitial] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState<number>(45);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { data: marketData, isLoading, error, refetch } = useQuery<MarketData>({
+    queryKey: ["/api/market-data"],
+    queryFn: () => apiRequest("GET", "/api/market-data").then((r) => r.json()),
+    staleTime: 45 * 60 * 1000,
+    retry: 2,
+  });
 
-  // ─── Initial load ─────────────────────────────────────────────────────
-  useEffect(() => {
-    const cached = loadCache();
-    if (cached) {
-      setNewsCache(cached);
-      setLoadingInitial(false);
-      startCountdown(cached.fetched_at);
-    } else {
-      // No valid cache — fetch immediately
-      doFetch(true).finally(() => setLoadingInitial(false));
+  // ── Derived data ──────────────────────────────────────────────────────────
+
+  const prices = marketData?.prices ?? {};
+  const indices = marketData?.indices ?? {};
+  const news = marketData?.news ?? {};
+  const fearGreed = marketData?.fearGreed ?? null;
+  const fearGreedLabel = marketData?.fearGreedLabel ?? (fearGreed !== null ? fgLabel(fearGreed) : "");
+
+  // Signals
+  const signals = useMemo(() => {
+    const list: { type: "buy" | "alert" | "risk" | "breakout" | "info"; text: string }[] = [];
+    for (const asset of WATCHLIST_ASSETS) {
+      const p = prices[asset.symbol];
+      if (!p) continue;
+      if (p.change > 3) list.push({ type: "buy", text: `Buy Zone — ${asset.symbol} up +${p.change.toFixed(1)}%` });
+      if (p.change < -5) list.push({ type: "alert", text: `Portfolio Alert — ${asset.symbol} down ${p.change.toFixed(1)}%` });
     }
+    const vix = indices["VIX"];
+    if (vix && vix.price > 25) list.push({ type: "risk", text: `Macro Risk — VIX elevated at ${vix.price.toFixed(1)}` });
+    const btc = prices["BTC"];
+    if (btc && btc.change > 5) list.push({ type: "breakout", text: `Crypto Breakout — BTC up +${btc.change.toFixed(1)}%` });
+    if (list.length === 0) list.push({ type: "info", text: "No active signals" });
+    return list;
+  }, [prices, indices]);
 
-    return () => {
-      if (countdownRef.current) clearInterval(countdownRef.current);
+  // Sector moods
+  const sectorMoods = useMemo(() => {
+    const avgChange = (syms: string[]) => {
+      const vals = syms.map((s) => prices[s]?.change).filter((v) => v !== undefined) as number[];
+      if (vals.length === 0) return 0;
+      return vals.reduce((a, b) => a + b, 0) / vals.length;
     };
-  }, []);
+    const mood = (avg: number): "Bullish" | "Neutral" | "Bearish" => {
+      if (avg > 1) return "Bullish";
+      if (avg > -1) return "Neutral";
+      return "Bearish";
+    };
+    const vixPrice = indices["VIX"]?.price ?? 0;
+    const macroMood = vixPrice > 25 ? "High Risk" : vixPrice > 20 ? "Elevated" : "Normal";
 
-  function startCountdown(fetchedAt: string) {
-    if (countdownRef.current) clearInterval(countdownRef.current);
-    setCountdown(minsUntilRefresh(fetchedAt));
-    countdownRef.current = setInterval(() => {
-      const mins = minsUntilRefresh(fetchedAt);
-      setCountdown(mins);
-      if (mins <= 0) {
-        if (countdownRef.current) clearInterval(countdownRef.current);
-      }
-    }, 30000);
+    return [
+      { name: "AI Stocks", mood: mood(avgChange(["NVDA", "AVGO"])) },
+      { name: "Mega-cap Tech", mood: mood(avgChange(["GOOGL", "MSFT"])) },
+      { name: "Crypto", mood: mood(avgChange(["BTC", "ETH"])) },
+      { name: "Uranium / Energy", mood: mood(avgChange(["CEG", "CCJ"])) },
+      { name: "Precious Metals", mood: mood(avgChange(["WPM"])) },
+      { name: "Macro Risk", mood: macroMood },
+    ] as { name: string; mood: "Bullish" | "Neutral" | "Bearish" | "Risk" | "High Risk" | "Elevated" | "Normal" }[];
+  }, [prices, indices]);
+
+  // AI brief
+  const marketBrief = useMemo(() => {
+    if (!marketData) return null;
+    const sp = indices["SP500"];
+    const nas = indices["NASDAQ"];
+    const dow = indices["DOW"];
+    const spStr = sp ? `S&P 500 ${sp.change >= 0 ? "+" : ""}${sp.change.toFixed(2)}%` : null;
+    const nasStr = nas ? `Nasdaq ${nas.change >= 0 ? "+" : ""}${nas.change.toFixed(2)}%` : null;
+    const dowStr = dow ? `Dow ${dow.change >= 0 ? "+" : ""}${dow.change.toFixed(2)}%` : null;
+    const indexSummary = [spStr, nasStr, dowStr].filter(Boolean).join(", ") || "Index data unavailable";
+
+    const topMovers = WATCHLIST_ASSETS
+      .map((a) => ({ ...a, change: prices[a.symbol]?.change ?? 0 }))
+      .filter((a) => a.change !== 0)
+      .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
+      .slice(0, 3);
+
+    const topMoverStr = topMovers.length
+      ? topMovers.map((a) => `${a.symbol} ${a.change >= 0 ? "+" : ""}${a.change.toFixed(1)}%`).join(", ")
+      : "No significant movers";
+
+    const actionSignals = signals.filter((s) => s.type !== "info");
+    const actionStr = actionSignals.length
+      ? actionSignals.map((s) => s.text).join("; ")
+      : "Markets steady, no urgent action signals";
+
+    return { indexSummary, topMoverStr, actionStr };
+  }, [marketData, indices, prices, signals]);
+
+  // ── Handlers ─────────────────────────────────────────────────────────────
+
+  const handleRefresh = () => {
+    try {
+      localStorage.removeItem("sf_market_data_cache");
+    } catch {}
+    refetch();
+    toast({ title: "Refreshing market data…", description: "Cache cleared. Fetching fresh data." });
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  if (isLoading) return <LoadingSkeleton />;
+
+  if (error && !marketData) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-8">
+        <div className="text-center space-y-4 max-w-md">
+          <AlertTriangle className="w-12 h-12 text-red-400 mx-auto" />
+          <h2 className="text-xl font-bold text-zinc-100">Failed to load market data</h2>
+          <p className="text-zinc-400 text-sm">{String(error)}</p>
+          <button
+            onClick={handleRefresh}
+            className="flex items-center gap-2 mx-auto bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg transition-colors font-semibold"
+          >
+            <RefreshCw size={16} />
+            Retry
+          </button>
+        </div>
+      </div>
+    );
   }
 
-  // ─── Fetch handler ─────────────────────────────────────────────────────
-  const doFetch = useCallback(
-    async (silent = false) => {
-      if (isRefreshing) return;
-      setIsRefreshing(true);
-      setFetchError(null);
-      try {
-        const data = await fetchAllMarketData();
-        setNewsCache(data);
-        saveCache(data);
-        startCountdown(data.fetched_at);
-
-        // Optionally upsert to Supabase (fire-and-forget)
-        try {
-          apiRequest("POST", "/api/market-news-cache", {
-            fetched_at: data.fetched_at,
-            item_count: data.items.length,
-            prices: data.prices,
-          }).catch(() => {});
-        } catch {}
-
-        if (!silent) {
-          toast({
-            title: "Market data refreshed",
-            description: `${data.items.length} stories loaded.`,
-          });
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        setFetchError(msg);
-        if (!silent) {
-          toast({
-            title: "Refresh failed",
-            description: "Could not load market data. Showing cached data if available.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        setIsRefreshing(false);
-      }
-    },
-    [isRefreshing, toast]
-  );
-
-  const handleRefresh = useCallback(() => {
-    if (!isRefreshing) doFetch(false);
-  }, [isRefreshing, doFetch]);
-
-  // ─── Derived data ──────────────────────────────────────────────────────
-  const filteredItems =
-    newsCache?.items.filter((item) =>
-      activeSection === "all" ? true : item.section === activeSection
-    ) ?? [];
-
-  const personalInsights = newsCache
-    ? generatePersonalInsights(newsCache.items, newsCache.prices)
-    : [];
-
-  const prices = newsCache?.prices;
-
-  // ─── Section tabs config ───────────────────────────────────────────────
-  const sectionTabs: { key: Section; label: string }[] = [
-    { key: "all", label: "All" },
-    { key: "stocks", label: "Stocks" },
-    { key: "crypto", label: "Crypto" },
-    { key: "ai-tech", label: "AI & Tech" },
-    { key: "macro", label: "Macro" },
-  ];
-
-  // ─── Language labels ───────────────────────────────────────────────────
-  const langOptions: { key: Language; label: string }[] = [
-    { key: "en", label: "EN" },
-    { key: "fa", label: "فا" },
-    { key: "both", label: "EN+فا" },
-  ];
-
   return (
-    <div className="min-h-screen bg-background p-4 md:p-6 space-y-5">
-      {/* ── Page Header ─────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <Newspaper size={20} className="text-amber-400" />
-            Market News &amp; Daily Brief
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Live market signals and news for informed decisions
-          </p>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 pb-12">
+      {/* ── Header ── */}
+      <div className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="bg-emerald-900/40 border border-emerald-700 p-2 rounded-lg">
+              <TrendingUp className="text-emerald-400 w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-zinc-100 tracking-tight">Wall Street Terminal</h1>
+              {marketData?.lastUpdated && (
+                <p className="text-xs text-zinc-500 font-mono">
+                  Updated {new Date(marketData.lastUpdated).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPrivacyMode(!privacyMode)}
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors font-semibold ${
+                privacyMode
+                  ? "bg-amber-900/40 border-amber-700 text-amber-400"
+                  : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              {privacyMode ? <EyeOff size={13} /> : <Eye size={13} />}
+              {privacyMode ? "Private" : "Public"}
+            </button>
+            <button
+              onClick={handleRefresh}
+              className="flex items-center gap-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors font-semibold"
+            >
+              <RefreshCw size={13} />
+              Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 pt-6 space-y-8">
+
+        {/* ── Market Pulse ── */}
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <BarChart2 className="text-emerald-400 w-4 h-4" />
+            <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Market Pulse</h2>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
+            {PULSE_CARDS.map((card) => {
+              const src = card.source === "indices" ? indices : prices;
+              const entry = src[card.key as string];
+              return (
+                <PulseCard
+                  key={card.key}
+                  label={card.label}
+                  price={entry?.price ?? 0}
+                  change={entry?.change ?? 0}
+                  decimals={card.decimals}
+                />
+              );
+            })}
+          </div>
+        </section>
+
+        {/* ── Main grid: Watchlist + Fear&Greed ── */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+          {/* Watchlist — 2 columns wide */}
+          <section className="xl:col-span-2">
+            <div className="flex items-center gap-2 mb-3">
+              <Activity className="text-blue-400 w-4 h-4" />
+              <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Portfolio Watchlist</h2>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-zinc-800 bg-zinc-900/80">
+                    <th className="px-4 py-2.5 text-xs font-bold text-zinc-500 uppercase tracking-wider">Symbol</th>
+                    <th className="px-4 py-2.5 text-xs font-bold text-zinc-500 uppercase tracking-wider">Name</th>
+                    <th className="px-4 py-2.5 text-xs font-bold text-zinc-500 uppercase tracking-wider">Price</th>
+                    <th className="px-4 py-2.5 text-xs font-bold text-zinc-500 uppercase tracking-wider">24h</th>
+                    <th className="px-4 py-2.5 text-xs font-bold text-zinc-500 uppercase tracking-wider">Signal</th>
+                    <th className="px-4 py-2.5 text-xs font-bold text-zinc-500 uppercase tracking-wider hidden sm:table-cell">Sector</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {WATCHLIST_ASSETS.map((asset) => (
+                    <WatchlistRow
+                      key={asset.symbol}
+                      asset={asset}
+                      priceData={prices[asset.symbol]}
+                      privacyMode={privacyMode}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* Fear & Greed + Signals */}
+          <div className="space-y-6">
+            {/* Fear & Greed */}
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <Zap className="text-amber-400 w-4 h-4" />
+                <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Fear & Greed</h2>
+              </div>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
+                {fearGreed !== null ? (
+                  <>
+                    <div className={`text-6xl font-black font-mono mb-2 ${fgColor(fearGreed)}`}>
+                      {fearGreed}
+                    </div>
+                    <div className={`text-sm font-bold mb-4 ${fgColor(fearGreed)}`}>
+                      {fearGreedLabel || fgLabel(fearGreed)}
+                    </div>
+                    {/* Bar */}
+                    <div className="relative h-3 bg-zinc-800 rounded-full overflow-hidden mb-2">
+                      <div
+                        className={`h-full rounded-full transition-all ${fgBg(fearGreed)}`}
+                        style={{ width: `${fearGreed}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-xs text-zinc-600 font-mono">
+                      <span>0 Fear</span>
+                      <span>100 Greed</span>
+                    </div>
+                    {/* Scale labels */}
+                    <div className="grid grid-cols-5 gap-0.5 mt-3 text-xs">
+                      {["Ext. Fear", "Fear", "Neutral", "Greed", "Ext. Greed"].map((l, i) => (
+                        <div key={l} className={`text-center py-1 rounded text-xs font-mono ${
+                          fearGreed <= 25 && i === 0 ? "bg-red-700 text-red-100" :
+                          fearGreed > 25 && fearGreed <= 45 && i === 1 ? "bg-orange-700 text-orange-100" :
+                          fearGreed > 45 && fearGreed <= 55 && i === 2 ? "bg-amber-700 text-amber-100" :
+                          fearGreed > 55 && fearGreed <= 75 && i === 3 ? "bg-green-700 text-green-100" :
+                          fearGreed > 75 && i === 4 ? "bg-emerald-700 text-emerald-100" :
+                          "text-zinc-600"
+                        }`}>
+                          {l}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-zinc-600 font-mono py-8">Data unavailable</div>
+                )}
+              </div>
+            </section>
+
+            {/* Signals & Alerts */}
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <AlertTriangle className="text-orange-400 w-4 h-4" />
+                <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Signals & Alerts</h2>
+              </div>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-2">
+                {signals.map((sig, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <SignalBadge type={sig.type} />
+                    <div>
+                      <p className="text-sm text-zinc-200">{sig.text}</p>
+                      <p className="text-xs text-zinc-600 font-mono mt-0.5">
+                        {new Date().toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Language toggle */}
-          <div className="flex items-center bg-muted/30 border border-border rounded-lg p-0.5">
-            {langOptions.map((opt) => (
+        {/* ── Heat Map + AI Brief ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+          {/* Sector Heat Map */}
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <BarChart2 className="text-purple-400 w-4 h-4" />
+              <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Sector Mood</h2>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {sectorMoods.map((s) => (
+                <SectorTile key={s.name} name={s.name} mood={s.mood} />
+              ))}
+            </div>
+          </section>
+
+          {/* AI Market Brief */}
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Zap className="text-blue-400 w-4 h-4" />
+              <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Daily Market Brief</h2>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
+              {marketBrief ? (
+                <>
+                  <div>
+                    <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">What happened</p>
+                    <p className="text-sm text-zinc-300 leading-relaxed">{marketBrief.indexSummary}</p>
+                  </div>
+                  <div className="border-t border-zinc-800 pt-4">
+                    <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Portfolio focus</p>
+                    <p className="text-sm text-zinc-300 leading-relaxed">{marketBrief.topMoverStr}</p>
+                  </div>
+                  <div className="border-t border-zinc-800 pt-4">
+                    <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Action</p>
+                    <p className="text-sm text-zinc-300 leading-relaxed">{marketBrief.actionStr}</p>
+                  </div>
+                </>
+              ) : (
+                <p className="text-zinc-600 font-mono text-sm">Loading brief…</p>
+              )}
+            </div>
+          </section>
+        </div>
+
+        {/* ── News Intelligence ── */}
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <Newspaper className="text-zinc-400 w-4 h-4" />
+            <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">News Intelligence</h2>
+          </div>
+
+          {/* Tab bar */}
+          <div className="flex gap-1 mb-4 overflow-x-auto border-b border-zinc-800 pb-px">
+            {NEWS_TABS.map((tab) => (
               <button
-                key={opt.key}
-                onClick={() => setLanguage(opt.key)}
-                className={`px-2.5 py-1 text-xs rounded-md transition-colors font-medium ${
-                  language === opt.key
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
+                key={tab.key}
+                onClick={() => setActiveNewsTab(tab.key)}
+                className={`flex-shrink-0 px-4 py-2 text-sm font-semibold rounded-t-lg transition-colors border-b-2 ${
+                  activeNewsTab === tab.key
+                    ? "border-emerald-500 text-emerald-400 bg-emerald-900/20"
+                    : "border-transparent text-zinc-500 hover:text-zinc-300"
                 }`}
               >
-                {opt.label}
+                {tab.label}
               </button>
             ))}
           </div>
 
-          {/* Refresh button */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className="text-xs gap-1.5"
-          >
-            <RefreshCw
-              size={13}
-              className={isRefreshing ? "animate-spin" : ""}
-            />
-            {isRefreshing ? "Refreshing…" : "Refresh"}
-          </Button>
-        </div>
-      </div>
-
-      {/* Persian warning */}
-      {language !== "en" && (
-        <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2 text-xs text-amber-300">
-          <AlertCircle size={13} className="mt-0.5 shrink-0" />
-          Persian summaries are AI-translated approximations using keyword substitution — not professional translations.
-        </div>
-      )}
-
-      {/* ── AI Summary Card (Gold) ───────────────────────────────────── */}
-      <div
-        className="rounded-xl border p-4 md:p-5"
-        style={{
-          background:
-            "linear-gradient(135deg, hsl(43,85%,10%) 0%, hsl(43,60%,7%) 100%)",
-          borderColor: "hsl(43,85%,30%)",
-        }}
-      >
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold flex items-center gap-1.5 text-amber-300">
-            <Sparkles size={14} />
-            Today's Key Market Signals
-          </h2>
-          <div className="flex items-center gap-3 text-[10px] text-amber-400/60">
-            {newsCache && (
-              <>
-                <span className="flex items-center gap-1">
-                  <Clock size={10} />
-                  Updated {timeAgo(newsCache.fetched_at)}
-                </span>
-                {countdown > 0 && (
-                  <span>Next refresh in {countdown}m</span>
-                )}
-              </>
-            )}
+          {/* Article list */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+            {(() => {
+              const articles = news[activeNewsTab] ?? [];
+              if (articles.length === 0) {
+                return (
+                  <div className="text-center py-12 text-zinc-600">
+                    <Globe className="w-8 h-8 mx-auto mb-3 opacity-30" />
+                    <p className="font-mono text-sm">No articles loaded for this feed.</p>
+                    <p className="text-xs mt-1">RSS feeds may be blocked by CORS proxy. Try refreshing.</p>
+                  </div>
+                );
+              }
+              return (
+                <div className="space-y-0 divide-y divide-zinc-800">
+                  {articles.map((article, i) => (
+                    <ArticleCard key={`${activeNewsTab}-${i}`} article={article} />
+                  ))}
+                </div>
+              );
+            })()}
           </div>
-        </div>
+        </section>
 
-        {loadingInitial ? (
-          <div className="space-y-2">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="h-4 bg-amber-500/10 rounded animate-pulse" />
-            ))}
-          </div>
-        ) : newsCache?.ai_summary?.length ? (
-          <ul className="space-y-2">
-            {newsCache.ai_summary.map((bullet, i) => (
-              <li key={i} className="flex items-start gap-2 text-xs text-amber-100/80 leading-relaxed">
-                <span className="text-amber-400 mt-0.5 shrink-0">•</span>
-                {bullet}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-xs text-amber-400/60">No summary available. Try refreshing.</p>
-        )}
-      </div>
-
-      {/* ── Market Price Ticker Bar ──────────────────────────────────── */}
-      <div>
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-          Live Market Prices
-        </h2>
-        {loadingInitial ? (
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {[...Array(6)].map((_, i) => (
-              <div
-                key={i}
-                className="h-16 w-28 shrink-0 bg-card border border-border rounded-lg animate-pulse"
-              />
-            ))}
-          </div>
-        ) : prices ? (
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            <PriceChip
-              label="S&P 500"
-              price={prices.sp500}
-              change={prices.sp500_chg}
-              privacyMode={privacyMode}
-            />
-            <PriceChip
-              label="Nasdaq"
-              price={prices.nasdaq}
-              change={prices.nasdaq_chg}
-              privacyMode={privacyMode}
-            />
-            <PriceChip
-              label="Dow Jones"
-              price={prices.dow}
-              change={prices.dow_chg}
-              privacyMode={privacyMode}
-            />
-            <PriceChip
-              label="BTC / AUD"
-              price={prices.btc_aud}
-              change={prices.btc_chg}
-              privacyMode={privacyMode}
-            />
-            <PriceChip
-              label="ETH / AUD"
-              price={prices.eth_aud}
-              change={prices.eth_chg}
-              privacyMode={privacyMode}
-            />
-            <PriceChip
-              label="Fear & Greed"
-              price={`${prices.fear_greed} – ${prices.fear_greed_label}`}
-              isFearGreed
-              value={prices.fear_greed}
-              privacyMode={false}
-            />
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground bg-card border border-border rounded-lg px-3 py-3">
-            <AlertCircle size={13} />
-            Price data unavailable — check connection and refresh.
-          </div>
-        )}
-      </div>
-
-      {/* ── Why It Matters To Me ─────────────────────────────────────── */}
-      {personalInsights.length > 0 && (
-        <div className="bg-card border border-border rounded-xl p-4">
-          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Why It Matters To Me
-          </h2>
-          <ul className="space-y-2">
-            {personalInsights.map((insight, i) => (
-              <li key={i} className="flex items-start gap-2 text-xs leading-relaxed">
-                <span className="text-base leading-none shrink-0">{insight.icon}</span>
-                <span className={insight.color}>{insight.text}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* ── Section Filter Tabs ──────────────────────────────────────── */}
-      <div>
-        <div className="flex gap-1 overflow-x-auto pb-0.5">
-          {sectionTabs.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveSection(tab.key)}
-              className={`px-3 py-1.5 text-xs rounded-lg whitespace-nowrap font-medium transition-colors ${
-                activeSection === tab.key
-                  ? "bg-foreground/10 text-foreground border border-foreground/20"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
-              }`}
-            >
-              {tab.label}
-              {tab.key !== "all" && newsCache && (
-                <span className="ml-1 text-[10px] text-muted-foreground/50">
-                  ({newsCache.items.filter((i) => i.section === tab.key).length})
-                </span>
-              )}
-              {tab.key === "all" && newsCache && (
-                <span className="ml-1 text-[10px] text-muted-foreground/50">
-                  ({newsCache.items.length})
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ── News Cards Grid ──────────────────────────────────────────── */}
-      {loadingInitial ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {[...Array(6)].map((_, i) => (
-            <SkeletonCard key={i} />
-          ))}
-        </div>
-      ) : fetchError && !newsCache ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
-          <AlertCircle size={36} className="text-red-400/60" />
-          <div>
-            <p className="text-sm font-medium text-foreground">Failed to load market data</p>
-            <p className="text-xs text-muted-foreground mt-1 max-w-sm">{fetchError}</p>
-          </div>
-          <Button variant="outline" size="sm" onClick={handleRefresh} className="gap-1.5">
-            <RefreshCw size={13} />
-            Try Again
-          </Button>
-        </div>
-      ) : filteredItems.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-          <Newspaper size={32} className="text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">No news available. Try refreshing.</p>
-          <Button variant="outline" size="sm" onClick={handleRefresh} className="gap-1.5">
-            <RefreshCw size={13} />
-            Refresh
-          </Button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {filteredItems.map((item) => (
-            <NewsCard key={item.id} item={item} language={language} />
-          ))}
-        </div>
-      )}
-
-      {/* ── Footer ──────────────────────────────────────────────────── */}
-      <div className="pt-2 pb-4 text-center">
-        <p className="text-[10px] text-muted-foreground/40">
-          Market data for informational purposes only. Not financial advice.
-          Data sourced from Yahoo Finance, CoinGecko, and Alternative.me via public APIs.
-        </p>
       </div>
     </div>
   );
