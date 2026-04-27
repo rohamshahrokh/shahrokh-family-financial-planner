@@ -755,6 +755,23 @@ export default function ExpensesPage() {
 
   const paginatedIncome = filteredIncome.slice((incomePage - 1) * PAGE_SIZE, incomePage * PAGE_SIZE);
 
+  // ── Filtered income totals (react instantly to filters) ─────────────────────
+  const filteredIncomeTotals = useMemo(() => {
+    const totalAmount = filteredIncome.reduce((s: number, r: any) => s + (r.amount || 0), 0);
+    // Monthly equiv for filtered set — same deduplication as KPI card
+    const streamMapF = new Map<string, any>();
+    const sortedF = [...filteredIncome]
+      .filter((r: any) => r.recurring && r.frequency !== 'One-off')
+      .sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''));
+    for (const r of sortedF) {
+      const key = `${(r.member || '').toLowerCase()}|${(r.source || '').toLowerCase()}|${(r.frequency || '').toLowerCase()}`;
+      if (!streamMapF.has(key)) streamMapF.set(key, r);
+    }
+    const totalMonthlyEquiv = Array.from(streamMapF.values())
+      .reduce((s: number, r: any) => s + toMonthlyEquiv(r.amount, r.frequency), 0);
+    return { totalAmount, totalMonthlyEquiv, count: filteredIncome.length };
+  }, [filteredIncome]);
+
   // ── Expense analytics ─────────────────────────────────────────────────────────
   const analytics = useMemo(() => {
     const totalSpend = filtered.reduce((s: number, e: any) => s + e.amount, 0);
@@ -831,9 +848,19 @@ export default function ExpensesPage() {
   const incomeAnalytics = useMemo(() => {
     const totalIncome = filteredIncome.reduce((s: number, r: any) => s + r.amount, 0);
 
-    // Monthly equivalent total (for recurring projection)
-    const recurringMonthlyTotal = incomeRecords
+    // Monthly equivalent total — deduplicated per income stream.
+    // Each unique (member + source + frequency) counts ONCE — we take the
+    // most recent record for that stream. This prevents historical salary
+    // rows (Jan, Feb, Mar …) from stacking into an inflated total.
+    const streamMap = new Map<string, any>();
+    const sortedByDateDesc = [...incomeRecords]
       .filter((r: any) => r.recurring && r.frequency !== 'One-off')
+      .sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''));
+    for (const r of sortedByDateDesc) {
+      const key = `${(r.member || '').toLowerCase()}|${(r.source || '').toLowerCase()}|${(r.frequency || '').toLowerCase()}`;
+      if (!streamMap.has(key)) streamMap.set(key, r);
+    }
+    const recurringMonthlyTotal = Array.from(streamMap.values())
       .reduce((s: number, r: any) => s + toMonthlyEquiv(r.amount, r.frequency), 0);
 
     const now = new Date();
@@ -865,6 +892,12 @@ export default function ExpensesPage() {
 
     return { totalIncome, recurringMonthlyTotal, thisMonthIncome, sourceData, trendData, memberData };
   }, [filteredIncome, incomeRecords]);
+
+  // ── Filtered expense totals (react instantly to filters) ─────────────────
+  const filteredExpensesTotals = useMemo(() => {
+    const totalAmount = filtered.reduce((s: number, e: any) => s + (e.amount || 0), 0);
+    return { totalAmount, count: filtered.length };
+  }, [filtered]);
 
   // ── Cash Flow data ────────────────────────────────────────────────────────────
   const cashFlowData = useMemo(() => {
@@ -1683,6 +1716,22 @@ export default function ExpensesPage() {
                     );
                   })}
                 </tbody>
+                {filtered.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t-2 border-border bg-secondary/20">
+                      <td className="px-3 py-2.5 w-8" />
+                      <td className="px-3 py-2.5 text-xs font-bold text-muted-foreground whitespace-nowrap">
+                        {filtered.length} record{filtered.length !== 1 ? 's' : ''}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs font-bold num-display text-primary whitespace-nowrap">
+                        {formatCurrency(filteredExpensesTotals.totalAmount, true)}
+                      </td>
+                      <td colSpan={8} className="px-3 py-2.5 text-xs text-muted-foreground italic">
+                        Filtered total · {filtered.length < (expenses as any[]).length ? `${(expenses as any[]).length - filtered.length} records hidden by filters` : 'All records shown'}
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
             {filtered.length > PAGE_SIZE && (
@@ -1929,6 +1978,26 @@ export default function ExpensesPage() {
                     );
                   })}
                 </tbody>
+                {filteredIncome.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t-2 border-primary/30 bg-primary/5">
+                      <td className="px-3 py-2.5 text-xs font-bold text-muted-foreground whitespace-nowrap">
+                        {filteredIncome.length} record{filteredIncome.length !== 1 ? 's' : ''}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs font-bold num-display text-emerald-400 whitespace-nowrap">
+                        {formatCurrency(filteredIncomeTotals.totalAmount, true)}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs font-bold num-display text-primary whitespace-nowrap">
+                        {filteredIncomeTotals.totalMonthlyEquiv > 0
+                          ? <>{formatCurrency(filteredIncomeTotals.totalMonthlyEquiv, true)}<span className="text-muted-foreground font-normal">/mo</span></>
+                          : <span className="text-muted-foreground font-normal">—</span>}
+                      </td>
+                      <td colSpan={7} className="px-3 py-2.5 text-xs text-muted-foreground italic">
+                        Filtered totals · {filteredIncome.length < (incomeRecords as any[]).length ? `${(incomeRecords as any[]).length - filteredIncome.length} records hidden by filters` : 'All records shown'}
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
             {filteredIncome.length > PAGE_SIZE && (
