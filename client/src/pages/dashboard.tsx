@@ -94,7 +94,8 @@ export default function DashboardPage() {
   const [snapDraft, setSnapDraft] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(getLastSync);
-  const [cashFlowView, setCashFlowView] = useState<"monthly" | "annual">("annual");
+  // Wire cash flow chart to global chartView from the header toggle
+  const cashFlowView = chartView;
 
   // Debounce ref — prevents double saves triggered by fast Enter presses
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -850,28 +851,9 @@ export default function DashboardPage() {
               Actual expenses (tracked) + forecast (snapshot) · 2025 – 2035
             </p>
           </div>
-          <div className="flex items-center gap-1 rounded-lg border border-border p-0.5">
-            <button
-              onClick={() => setCashFlowView("monthly")}
-              className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                cashFlowView === "monthly"
-                  ? "bg-primary text-primary-foreground font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Monthly
-            </button>
-            <button
-              onClick={() => setCashFlowView("annual")}
-              className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                cashFlowView === "annual"
-                  ? "bg-primary text-primary-foreground font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Annual
-            </button>
-          </div>
+          <span className="text-xs text-muted-foreground px-2 py-1 rounded-lg bg-secondary capitalize">
+            {cashFlowView} view · toggle in header
+          </span>
         </div>
 
         {/* Legend */}
