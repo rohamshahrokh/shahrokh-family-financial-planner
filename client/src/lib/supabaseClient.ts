@@ -448,3 +448,39 @@ export const sbFamilyMsgLog = {
     try { return await sbGet("sf_family_messages_log", `order=sent_at.desc&limit=${limit}`); } catch { return []; }
   },
 };
+
+// ─── App Settings (singleton, id='default') ───────────────────────────────────
+// Persists all app-level settings: planning assumptions, user prefs, wealth
+// strategy assumptions — anything previously stored in localStorage only.
+
+export const sbAppSettings = {
+  /** Load the singleton settings row. Returns {} if no row yet. */
+  async get(): Promise<Record<string, any>> {
+    try {
+      const rows = await sbGet("sf_app_settings", "id=eq.default");
+      return (rows[0]?.settings as Record<string, any>) ?? {};
+    } catch {
+      return {};
+    }
+  },
+
+  /**
+   * Merge-upsert: loads existing settings, merges partialData on top, saves.
+   * Throws on failure (no silent catch) so onError fires correctly.
+   */
+  async merge(partialData: Record<string, any>): Promise<Record<string, any>> {
+    const existing = await this.get();
+    const merged = { ...existing, ...partialData };
+    await sbUpsert("sf_app_settings", {
+      id: "default",
+      settings: merged,
+      updated_at: new Date().toISOString(),
+    });
+    return merged;
+  },
+
+  /** Save a single named key inside the settings JSONB. */
+  async saveKey(key: string, value: any): Promise<void> {
+    await this.merge({ [key]: value });
+  },
+};
