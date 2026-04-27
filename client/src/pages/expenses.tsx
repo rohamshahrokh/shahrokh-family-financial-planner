@@ -562,6 +562,7 @@ export default function ExpensesPage() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
+  const [chartView, setChartView] = useState<'monthly' | 'annual' | 'daily'>('monthly');
 
   // ── Income filter state ──────────────────────────────────────────────────────
   const [incomeSearch, setIncomeSearch] = useState('');
@@ -786,23 +787,41 @@ export default function ExpensesPage() {
     const categoryData = Object.entries(byCategory).sort((a, b) => b[1] - a[1]).slice(0, 10)
       .map(([name, value]) => ({ name, value: value as number }));
 
-    const monthlyTrend: Record<string, number> = {};
-    filtered.forEach((e: any) => {
-      const key = new Date(e.date).toLocaleDateString('en-AU', { month: 'short', year: '2-digit' });
-      monthlyTrend[key] = (monthlyTrend[key] || 0) + e.amount;
-    });
-    const trendData = Object.entries(monthlyTrend).slice(-12)
-      .map(([month, amount]) => ({ month, amount: amount as number }));
-
-    const weeklyMap: Record<string, number> = {};
+    // Monthly trend — full history, sorted chronologically by ISO key
+    // Key is YYYY-MM for sorting; label is "May 2023" for display
+    const monthlyTrendMap: Record<string, { label: string; amount: number }> = {};
     filtered.forEach((e: any) => {
       const d = new Date(e.date);
+      if (isNaN(d.getTime())) return;
+      const isoKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label  = d.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' });
+      if (!monthlyTrendMap[isoKey]) monthlyTrendMap[isoKey] = { label, amount: 0 };
+      monthlyTrendMap[isoKey].amount += e.amount;
+    });
+    const trendData = Object.entries(monthlyTrendMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, v]) => ({ month: v.label, amount: v.amount }));
+
+    // Weekly trend — last 16 weeks of filtered data, sorted chronologically
+    const weeklyMap: Record<string, number> = {};
+
+    filtered.forEach((e: any) => {
+      const d = new Date(e.date);
+      if (isNaN(d.getTime())) return;
       const weekStart = new Date(d);
       weekStart.setDate(d.getDate() - d.getDay());
-      const key = weekStart.toLocaleDateString('en-AU', { day: '2-digit', month: 'short' });
-      weeklyMap[key] = (weeklyMap[key] || 0) + e.amount;
+      const isoWeek = weekStart.toISOString().slice(0, 10);
+      const key = weekStart.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+      if (!weeklyMap[isoWeek]) weeklyMap[isoWeek] = 0;
+      weeklyMap[isoWeek] += e.amount;
     });
-    const weeklyData = Object.entries(weeklyMap).slice(-8).map(([week, amount]) => ({ week, amount: amount as number }));
+    const weeklyData = Object.entries(weeklyMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-16)
+      .map(([iso, amount]) => {
+        const d = new Date(iso);
+        return { week: d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: '2-digit' }), amount };
+      });
 
     const months = Object.keys(monthlyTrend).length || 1;
     const weeks = Object.keys(weeklyMap).length || 1;
@@ -841,8 +860,30 @@ export default function ExpensesPage() {
       .filter(c => c.last > 0 || c.prior > 0)
       .sort((a, b) => b.pct - a.pct).slice(0, 5);
 
-    return { totalSpend, monthlySpend, categoryData, trendData, weeklyData, avgMonthlyByCategory, avgMonthly, avgWeekly, months, yearlyData, growingCategories };
-  }, [filtered, expenses]);
+    // Daily data — only computed when both year and month filter are active
+    let dailyData: { day: string; amount: number }[] = [];
+    if (filterYear !== 'all' && filterMonth !== 'all') {
+      const yr = parseInt(filterYear);
+      const mo = parseInt(filterMonth);
+      const daysInMonth = new Date(yr, mo + 1, 0).getDate();
+      const dailyMap: Record<number, number> = {};
+      filtered.forEach((e: any) => {
+        const d = new Date(e.date);
+        if (d.getFullYear() === yr && d.getMonth() === mo) {
+          dailyMap[d.getDate()] = (dailyMap[d.getDate()] || 0) + e.amount;
+        }
+      });
+      for (let day = 1; day <= daysInMonth; day++) {
+        const d = new Date(yr, mo, day);
+        dailyData.push({
+          day: d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }),
+          amount: dailyMap[day] || 0,
+        });
+      }
+    }
+
+    return { totalSpend, monthlySpend, categoryData, trendData, weeklyData, avgMonthlyByCategory, avgMonthly, avgWeekly, months, yearlyData, growingCategories, dailyData };
+  }, [filtered, expenses, filterYear, filterMonth]);
 
   // ── Income analytics ──────────────────────────────────────────────────────────
   const incomeAnalytics = useMemo(() => {
@@ -875,14 +916,19 @@ export default function ExpensesPage() {
     const sourceData = Object.entries(bySource).sort((a, b) => b[1] - a[1])
       .map(([name, value]) => ({ name, value: value as number }));
 
-    // Monthly trend
-    const monthlyTrend: Record<string, number> = {};
+    // Monthly trend — full history, ISO-key sorted
+    const incomeTrendMap: Record<string, { label: string; amount: number }> = {};
     filteredIncome.forEach((r: any) => {
-      const key = new Date(r.date).toLocaleDateString('en-AU', { month: 'short', year: '2-digit' });
-      monthlyTrend[key] = (monthlyTrend[key] || 0) + r.amount;
+      const d = new Date(r.date);
+      if (isNaN(d.getTime())) return;
+      const isoKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label  = d.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' });
+      if (!incomeTrendMap[isoKey]) incomeTrendMap[isoKey] = { label, amount: 0 };
+      incomeTrendMap[isoKey].amount += r.amount;
     });
-    const trendData = Object.entries(monthlyTrend).slice(-12)
-      .map(([month, amount]) => ({ month, amount: amount as number }));
+    const trendData = Object.entries(incomeTrendMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, v]) => ({ month: v.label, amount: v.amount }));
 
     // By member
     const byMember: Record<string, number> = {};
@@ -1400,6 +1446,26 @@ export default function ExpensesPage() {
             ))}
           </div>
 
+          {/* Chart view toggle */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {(['monthly', 'annual', 'daily'] as const).map(v => (
+              <button
+                key={v}
+                onClick={() => setChartView(v)}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  chartView === v
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-secondary text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {v === 'monthly' ? 'Monthly' : v === 'annual' ? 'Annual' : 'Daily'}
+              </button>
+            ))}
+            {chartView === 'daily' && filterYear === 'all' && (
+              <span className="text-xs text-amber-400 ml-2">Select a year and month above to view daily spending</span>
+            )}
+          </div>
+
           {/* Analytics charts */}
           {analytics.categoryData.length > 0 && (
             <div className="grid lg:grid-cols-2 gap-4">
@@ -1427,13 +1493,24 @@ export default function ExpensesPage() {
                   </div>
                 </div>
               </div>
-              {analytics.trendData.length > 1 && (
+              {/* ── Trend chart — controlled by chartView toggle ── */}
+              {chartView === 'monthly' && analytics.trendData.length > 1 && (
                 <div className="bg-card border border-border rounded-xl p-5">
-                  <h3 className="text-sm font-bold mb-4">Monthly Spend Trend</h3>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={analytics.trendData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <h3 className="text-sm font-bold mb-1">Monthly Spend Trend</h3>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    {analytics.trendData[0]?.month} → {analytics.trendData[analytics.trendData.length - 1]?.month}
+                    {' '}({analytics.trendData.length} months)
+                  </p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={analytics.trendData} margin={{ top: 5, right: 10, left: 0, bottom: analytics.trendData.length > 18 ? 50 : 20 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
-                      <XAxis dataKey="month" tick={{ fontSize: 10, fill: 'hsl(220,10%,55%)' }} />
+                      <XAxis
+                        dataKey="month"
+                        tick={{ fontSize: 9, fill: 'hsl(220,10%,55%)' }}
+                        angle={analytics.trendData.length > 12 ? -45 : 0}
+                        textAnchor={analytics.trendData.length > 12 ? 'end' : 'middle'}
+                        interval={analytics.trendData.length > 24 ? Math.floor(analytics.trendData.length / 24) : 0}
+                      />
                       <YAxis tick={{ fontSize: 10, fill: 'hsl(220,10%,55%)' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
                       <Tooltip content={<ChartTip />} />
                       <Bar dataKey="amount" name="Spend" fill="hsl(43,85%,55%)" radius={[4, 4, 0, 0]} />
@@ -1441,13 +1518,69 @@ export default function ExpensesPage() {
                   </ResponsiveContainer>
                 </div>
               )}
-              {analytics.weeklyData.length > 1 && (
+              {chartView === 'annual' && analytics.yearlyData.length > 0 && (
                 <div className="bg-card border border-border rounded-xl p-5">
-                  <h3 className="text-sm font-bold mb-4">Weekly Spend Trend</h3>
-                  <ResponsiveContainer width="100%" height={180}>
-                    <LineChart data={analytics.weeklyData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <h3 className="text-sm font-bold mb-1">Annual Spend by Year</h3>
+                  <p className="text-xs text-muted-foreground mb-3">{analytics.yearlyData.map(y => y.year).join(' · ')}</p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={analytics.yearlyData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
-                      <XAxis dataKey="week" tick={{ fontSize: 10, fill: 'hsl(220,10%,55%)' }} />
+                      <XAxis dataKey="year" tick={{ fontSize: 12, fill: 'hsl(220,10%,55%)' }} />
+                      <YAxis tick={{ fontSize: 10, fill: 'hsl(220,10%,55%)' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                      <Tooltip content={<ChartTip />} />
+                      <Bar dataKey="amount" name="Total Spend" fill="hsl(270,60%,60%)" radius={[4, 4, 0, 0]}>
+                        {analytics.yearlyData.map((_, i) => (
+                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {analytics.yearlyData.map(y => (
+                      <div key={y.year} className="text-xs flex justify-between px-2 py-1 rounded bg-secondary/30">
+                        <span className="font-semibold">{y.year}</span>
+                        <span className="num-display text-primary">{formatCurrency(y.amount, true)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {chartView === 'daily' && (
+                <div className="bg-card border border-border rounded-xl p-5">
+                  <h3 className="text-sm font-bold mb-1">Daily Spend</h3>
+                  {filterYear === 'all' || filterMonth === 'all' ? (
+                    <div className="flex items-center justify-center h-32 text-sm text-muted-foreground italic">
+                      Select a year and month from the filters above to view daily spending
+                    </div>
+                  ) : analytics.dailyData.length > 0 ? (
+                    <>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        {new Date(parseInt(filterYear), parseInt(filterMonth), 1).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })}
+                      </p>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <BarChart data={analytics.dailyData} margin={{ top: 5, right: 10, left: 0, bottom: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
+                          <XAxis dataKey="day" tick={{ fontSize: 9, fill: 'hsl(220,10%,55%)' }} angle={-45} textAnchor="end" interval={0} />
+                          <YAxis tick={{ fontSize: 10, fill: 'hsl(220,10%,55%)' }} tickFormatter={v => `$${(v / 1000).toFixed(1)}K`} />
+                          <Tooltip content={<ChartTip />} />
+                          <Bar dataKey="amount" name="Spend" fill="hsl(188,60%,48%)" radius={[3, 3, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-center h-32 text-sm text-muted-foreground italic">
+                      No expenses found for the selected period
+                    </div>
+                  )}
+                </div>
+              )}
+              {chartView === 'monthly' && analytics.weeklyData.length > 1 && (
+                <div className="bg-card border border-border rounded-xl p-5">
+                  <h3 className="text-sm font-bold mb-4">Weekly Spend (last 16 weeks)</h3>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <LineChart data={analytics.weeklyData} margin={{ top: 5, right: 10, left: 0, bottom: 30 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
+                      <XAxis dataKey="week" tick={{ fontSize: 9, fill: 'hsl(220,10%,55%)' }} angle={-30} textAnchor="end" />
                       <YAxis tick={{ fontSize: 10, fill: 'hsl(220,10%,55%)' }} tickFormatter={v => `$${(v / 1000).toFixed(1)}K`} />
                       <Tooltip content={<ChartTip />} />
                       <Line type="monotone" dataKey="amount" name="Spend" stroke="hsl(188,60%,48%)" strokeWidth={2} dot={false} />
@@ -1472,20 +1605,7 @@ export default function ExpensesPage() {
                   </div>
                 </div>
               )}
-              {analytics.yearlyData.length > 0 && (
-                <div className="bg-card border border-border rounded-xl p-5">
-                  <h3 className="text-sm font-bold mb-4">Yearly Totals</h3>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={analytics.yearlyData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
-                      <XAxis dataKey="year" tick={{ fontSize: 10, fill: 'hsl(220,10%,55%)' }} />
-                      <YAxis tick={{ fontSize: 10, fill: 'hsl(220,10%,55%)' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                      <Tooltip content={<ChartTip />} />
-                      <Bar dataKey="amount" name="Total" fill="hsl(270,60%,60%)" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
+
               {analytics.growingCategories.length > 0 && (
                 <div className="bg-card border border-border rounded-xl p-5">
                   <h3 className="text-sm font-bold mb-1">Top Growing Categories</h3>
