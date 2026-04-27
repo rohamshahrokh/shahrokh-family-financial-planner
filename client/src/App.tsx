@@ -175,11 +175,27 @@ export default function App() {
     document.documentElement.classList.toggle("light", theme === "light");
   }, [theme]);
 
-  // ─── Family message dispatcher — fire on app mount ───────────────────────
+  // ─── Family message dispatcher + bill reminders — fire on app mount ──────────
   useEffect(() => {
-    // Dynamically import to avoid blocking initial render
-    import("./lib/notifications").then(({ dispatchFamilyMessages }) => {
+    // Import is dynamic to avoid blocking initial render.
+    // checkUpcomingBills fetches bills from Supabase directly—no prop needed.
+    import("./lib/notifications").then(async ({ dispatchFamilyMessages, checkUpcomingBills }) => {
+      // 1. Family motivational messages
       dispatchFamilyMessages().catch(() => {/* silent */});
+
+      // 2. Bill due reminders — fetch bills from Supabase, then check
+      try {
+        const SB_URL  = 'https://uoraduyyxhtzixcsaidg.supabase.co';
+        const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVvcmFkdXl5eGh0eml4Y3NhaWRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTgsImV4cCI6MjA5MjY5NzAxOH0.qNrqDlG4j0lfGKDsmGyywP8DZeMurB02UWv4bdevW7c';
+        const res = await fetch(
+          `${SB_URL}/rest/v1/sf_recurring_bills?active=eq.true&select=bill_name,amount,next_due_date,reminder_days_before,active`,
+          { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
+        );
+        if (res.ok) {
+          const bills = await res.json();
+          checkUpcomingBills(bills).catch(() => {/* silent */});
+        }
+      } catch {/* silent */}
     }).catch(() => {/* silent */});
   }, []);
 
