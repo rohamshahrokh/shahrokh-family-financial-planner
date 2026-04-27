@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Home, TrendingUp, Bitcoin, FileText,
   Settings, LogOut, Sun, Moon, Menu, X, Bell,
   ChevronRight, DollarSign, Receipt, Clock,
-  Eye, EyeOff, Calculator, Activity, HelpCircle, Sparkles, Briefcase, CreditCard,
+  Eye, EyeOff, Calculator, Activity, HelpCircle, Sparkles, Briefcase, CreditCard, Target,
 } from "lucide-react";
 
 const navItems = [
@@ -22,6 +22,8 @@ const navItems = [
   { href: "/data-health", label: "Data Health", icon: Activity },
   { href: "/wealth-strategy", label: "Wealth Strategy", icon: Briefcase },
   { href: "/debt-strategy", label: "Debt Strategy", icon: CreditCard },
+  { href: "/recurring-bills", label: "Recurring Bills", icon: Receipt },
+  { href: "/budget", label: "Monthly Budget", icon: Target },
   { href: "/ai-insights", label: "AI Insights", icon: Sparkles },
   { href: "/help", label: "Help", icon: HelpCircle },
   { href: "/settings", label: "Settings", icon: Settings },
