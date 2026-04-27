@@ -298,6 +298,40 @@ export const sbIncome = {
   },
 };
 
+// ─── Stock DCA ───────────────────────────────────────────────────────────────
+
+export const sbStockDCA = {
+  async getAll(): Promise<any[]> {
+    try { return await sbGet("sf_stock_dca", "order=created_at.asc"); } catch { return []; }
+  },
+  async create(data: object): Promise<any | null> {
+    try { return await sbInsert("sf_stock_dca", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async update(id: number, data: object): Promise<any | null> {
+    try { return await sbUpdate("sf_stock_dca", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async delete(id: number): Promise<void> {
+    try { await sbDelete("sf_stock_dca", id); } catch {}
+  },
+};
+
+// ─── Crypto DCA ───────────────────────────────────────────────────────────────
+
+export const sbCryptoDCA = {
+  async getAll(): Promise<any[]> {
+    try { return await sbGet("sf_crypto_dca", "order=created_at.asc"); } catch { return []; }
+  },
+  async create(data: object): Promise<any | null> {
+    try { return await sbInsert("sf_crypto_dca", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async update(id: number, data: object): Promise<any | null> {
+    try { return await sbUpdate("sf_crypto_dca", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async delete(id: number): Promise<void> {
+    try { await sbDelete("sf_crypto_dca", id); } catch {}
+  },
+};
+
 // ─── Crypto Transactions ──────────────────────────────────────────────────────
 
 export const sbCryptoTx = {
@@ -318,5 +352,85 @@ export const sbCryptoTx = {
   },
   async delete(id: number): Promise<void> {
     try { await sbDelete("sf_crypto_transactions", id); } catch {}
+  },
+};
+
+// ─── Recurring Bills ──────────────────────────────────────────────────────────
+
+export const sbBills = {
+  async getAll(): Promise<any[]> {
+    try { return await sbGet("sf_recurring_bills", "order=next_due_date.asc"); } catch { return []; }
+  },
+  async create(data: object): Promise<any | null> {
+    try { return await sbInsert("sf_recurring_bills", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async update(id: number, data: object): Promise<any | null> {
+    try { return await sbUpdate("sf_recurring_bills", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async delete(id: number): Promise<void> {
+    try { await sbDelete("sf_recurring_bills", id); } catch {}
+  },
+};
+
+// ─── Monthly Budgets ──────────────────────────────────────────────────────────
+
+export const sbBudgets = {
+  async getAll(): Promise<any[]> {
+    try { return await sbGet("sf_monthly_budgets", "order=year.desc,month.desc,category.asc"); } catch { return []; }
+  },
+  async getForMonth(year: number, month: number): Promise<any[]> {
+    try { return await sbGet("sf_monthly_budgets", `year=eq.${year}&month=eq.${month}&order=category.asc`); } catch { return []; }
+  },
+  async create(data: object): Promise<any | null> {
+    try { return await sbInsert("sf_monthly_budgets", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async upsert(data: object): Promise<any | null> {
+    try { return await sbUpsert("sf_monthly_budgets", { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async update(id: number, data: object): Promise<any | null> {
+    try { return await sbUpdate("sf_monthly_budgets", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async delete(id: number): Promise<void> {
+    try { await sbDelete("sf_monthly_budgets", id); } catch {}
+  },
+  async bulkCreate(rows: object[]): Promise<any[]> {
+    const stamped = rows.map(r => ({ ...r, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }));
+    const res = await fetch(`${BASE}/sf_monthly_budgets`, {
+      method: "POST",
+      headers: { ...HEADERS, "Prefer": "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify(stamped),
+    });
+    if (!res.ok) throw new Error(`bulk upsert sf_monthly_budgets: ${res.status} ${await res.text()}`);
+    return res.json();
+  },
+};
+
+// ─── Telegram Settings ────────────────────────────────────────────────────────
+
+export const sbTelegramSettings = {
+  async get(): Promise<any | null> {
+    try {
+      const rows = await sbGet("sf_telegram_settings", "id=eq.shahrokh-family-main");
+      return rows[0] ?? null;
+    } catch { return null; }
+  },
+  async upsert(data: object): Promise<any | null> {
+    try { return await sbUpsert("sf_telegram_settings", { id: "shahrokh-family-main", ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+};
+
+// ─── Alert Logs ───────────────────────────────────────────────────────────────
+
+export const sbAlertLogs = {
+  async getRecent(limit = 50): Promise<any[]> {
+    try { return await sbGet("sf_alert_logs", `order=created_at.desc&limit=${limit}`); } catch { return []; }
+  },
+};
+
+// ─── Family Messages Log ──────────────────────────────────────────────────────
+
+export const sbFamilyMsgLog = {
+  async getRecent(limit = 30): Promise<any[]> {
+    try { return await sbGet("sf_family_messages_log", `order=sent_at.desc&limit=${limit}`); } catch { return []; }
   },
 };
