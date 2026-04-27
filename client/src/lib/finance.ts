@@ -30,6 +30,18 @@ export const formatCurrency = (amount: number, compact = false): string => {
 export const formatPct = (value: number, decimals = 1) =>
   `${value >= 0 ? '+' : ''}${value.toFixed(decimals)}%`;
 
+// ─── DCA monthly equivalent ───────────────────────────────────────────
+// Converts any DCA frequency + amount into a per-month cash figure.
+export function dcaMonthlyEquiv(amount: number, frequency: string): number {
+  switch (frequency) {
+    case 'weekly':      return safeNum(amount) * (52 / 12);
+    case 'fortnightly': return safeNum(amount) * (26 / 12);
+    case 'monthly':     return safeNum(amount);
+    case 'quarterly':   return safeNum(amount) / 3;
+    default:            return safeNum(amount);
+  }
+}
+
 // ─── Mortgage Calculator ───────────────────────────────────────────────
 export function calcMonthlyRepayment(principal: number, annualRate: number, termYears: number): number {
   const r = annualRate / 100 / 12;
@@ -193,6 +205,10 @@ export function projectNetWorth(params: {
   ppor_growth?: number;
   stockTransactions?: Array<{ transaction_type: string; status: string; transaction_date: string; total_amount: number; }>;
   cryptoTransactions?: Array<{ transaction_type: string; status: string; transaction_date: string; total_amount: number; }>;
+  stockDCASchedules?: Array<{ enabled: boolean; amount: number; frequency: string; start_date: string; end_date?: string | null; }>;
+  cryptoDCASchedules?: Array<{ enabled: boolean; amount: number; frequency: string; start_date: string; end_date?: string | null; }>;
+  plannedStockOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
+  plannedCryptoOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
 }): YearlyProjection[] {
   const years = params.years || 10;
   const inflation = params.inflation || 3;
@@ -325,6 +341,65 @@ export function projectNetWorth(params: {
       }
     }
 
+    // ── DCA schedule impact on net worth ──
+    // DCA cash goes from cash account → investment value (net zero for NW, but shifts asset class)
+    // The actual growth impact is already handled by projectInvestment on individual stocks/cryptos via monthly_dca.
+    // Here we also account for DCA schedules from the dedicated DCA tables (additive to per-stock monthly_dca).
+    const dcaYear = currentYear + y;
+    let totalStockDCAMonthly = 0;
+    for (const dca of (params.stockDCASchedules ?? [])) {
+      if (!dca.enabled) continue;
+      const dcaStartYear = new Date(dca.start_date).getFullYear();
+      const dcaEndYear = dca.end_date ? new Date(dca.end_date).getFullYear() : 9999;
+      if (dcaYear >= dcaStartYear && dcaYear <= dcaEndYear) {
+        totalStockDCAMonthly += dcaMonthlyEquiv(dca.amount, dca.frequency);
+      }
+    }
+    let totalCryptoDCAMonthly = 0;
+    for (const dca of (params.cryptoDCASchedules ?? [])) {
+      if (!dca.enabled) continue;
+      const dcaStartYear = new Date(dca.start_date).getFullYear();
+      const dcaEndYear = dca.end_date ? new Date(dca.end_date).getFullYear() : 9999;
+      if (dcaYear >= dcaStartYear && dcaYear <= dcaEndYear) {
+        totalCryptoDCAMonthly += dcaMonthlyEquiv(dca.amount, dca.frequency);
+      }
+    }
+    // DCA amounts boost investment values (compounded at avg return rate)
+    const avgStockReturn = params.stocks?.length > 0
+      ? params.stocks.reduce((s, st) => s + safeNum(st.expected_return), 0) / params.stocks.length
+      : 10;
+    const avgCryptoReturn = params.cryptos?.length > 0
+      ? params.cryptos.reduce((s, c) => s + safeNum(c.expected_return), 0) / params.cryptos.length
+      : 20;
+    // Compound 12 months of DCA at the avg annual return
+    const monthlyStockRate = avgStockReturn / 100 / 12;
+    const monthlyCryptoRate = avgCryptoReturn / 100 / 12;
+    let dcaStockGrowth = 0;
+    let dcaCryptoGrowth = 0;
+    for (let m = 0; m < 12; m++) {
+      dcaStockGrowth = (dcaStockGrowth + totalStockDCAMonthly) * (1 + monthlyStockRate);
+      dcaCryptoGrowth = (dcaCryptoGrowth + totalCryptoDCAMonthly) * (1 + monthlyCryptoRate);
+    }
+    stockVal += dcaStockGrowth;
+    cryptoVal += dcaCryptoGrowth;
+
+    // ── Planned orders impact on net worth ──
+    for (const o of (params.plannedStockOrders ?? [])) {
+      if (o.status !== 'planned') continue;
+      const oYear = new Date(o.planned_date).getFullYear();
+      if (oYear !== dcaYear) continue;
+      const yearsGrowing = 0; // added this year, grows from next year
+      if (o.action === 'buy') stockVal += safeNum(o.amount_aud);
+      if (o.action === 'sell') stockVal -= safeNum(o.amount_aud);
+    }
+    for (const o of (params.plannedCryptoOrders ?? [])) {
+      if (o.status !== 'planned') continue;
+      const oYear = new Date(o.planned_date).getFullYear();
+      if (oYear !== dcaYear) continue;
+      if (o.action === 'buy') cryptoVal += safeNum(o.amount_aud);
+      if (o.action === 'sell') cryptoVal -= safeNum(o.amount_aud);
+    }
+
     // Annual surplus added to cash
     const annualSurplus = (monthlyIncome - monthlyExpenses) * 12;
     cash += annualSurplus * 0.5; // 50% saved
@@ -447,6 +522,12 @@ export function buildCashFlowSeries(params: {
   incomeGrowthRate?: number; // annual % for income forecast growth (default 3.5)
   stockTransactions?: Array<{ transaction_type: string; status: string; transaction_date: string; total_amount: number; ticker?: string; }>;
   cryptoTransactions?: Array<{ transaction_type: string; status: string; transaction_date: string; total_amount: number; symbol?: string; }>;
+  // DCA schedules — monthly cash outflows for automated investing
+  stockDCASchedules?: Array<{ enabled: boolean; amount: number; frequency: string; start_date: string; end_date?: string | null; }>;
+  cryptoDCASchedules?: Array<{ enabled: boolean; amount: number; frequency: string; start_date: string; end_date?: string | null; }>;
+  // Planned orders — one-time future investment cash flows
+  plannedStockOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
+  plannedCryptoOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
 }): CashFlowMonth[] {
   const START_YEAR = 2025;
   const START_MONTH = 1;
@@ -607,11 +688,56 @@ export function buildCashFlowSeries(params: {
         }
       }
 
+      // ── DCA schedule outflows ──
+      // Each active DCA schedule is a monthly cash outflow (money leaving cash, going into investments)
+      let stockDCAOutflow = 0;
+      for (const dca of (params.stockDCASchedules ?? [])) {
+        if (!dca.enabled) continue;
+        const dcaStart = new Date(dca.start_date);
+        const dcaEnd = dca.end_date ? new Date(dca.end_date) : null;
+        if (monthDate < dcaStart) continue;
+        if (dcaEnd && monthDate > dcaEnd) continue;
+        stockDCAOutflow += dcaMonthlyEquiv(dca.amount, dca.frequency);
+      }
+      let cryptoDCAOutflow = 0;
+      for (const dca of (params.cryptoDCASchedules ?? [])) {
+        if (!dca.enabled) continue;
+        const dcaStart = new Date(dca.start_date);
+        const dcaEnd = dca.end_date ? new Date(dca.end_date) : null;
+        if (monthDate < dcaStart) continue;
+        if (dcaEnd && monthDate > dcaEnd) continue;
+        cryptoDCAOutflow += dcaMonthlyEquiv(dca.amount, dca.frequency);
+      }
+
+      // ── Planned orders (one-time) ──
+      let plannedStockOrderDelta = 0;
+      for (const o of (params.plannedStockOrders ?? [])) {
+        if (o.status !== 'planned') continue;
+        if (!o.planned_date) continue;
+        const oDate = new Date(o.planned_date);
+        if (oDate.getFullYear() === year && oDate.getMonth() + 1 === month) {
+          if (o.action === 'buy') plannedStockOrderDelta -= safeNum(o.amount_aud);
+          if (o.action === 'sell') plannedStockOrderDelta += safeNum(o.amount_aud);
+        }
+      }
+      let plannedCryptoOrderDelta = 0;
+      for (const o of (params.plannedCryptoOrders ?? [])) {
+        if (o.status !== 'planned') continue;
+        if (!o.planned_date) continue;
+        const oDate = new Date(o.planned_date);
+        if (oDate.getFullYear() === year && oDate.getMonth() + 1 === month) {
+          if (o.action === 'buy') plannedCryptoOrderDelta -= safeNum(o.amount_aud);
+          if (o.action === 'sell') plannedCryptoOrderDelta += safeNum(o.amount_aud);
+        }
+      }
+
       // ── Net Cash Flow ──
       // income + rental - expenses (actuals or forecast) - mortgage - invest loans
       // Note: when actuals are used and they include mortgage, mortgageRepayment=0 so no double count
       const netCashFlow = income + rentalIncome - totalExpenses - mortgageRepayment - investmentLoanRepayment
-        - oneTimeCashOutflow + plannedStockCashDelta + plannedCryptoCashDelta;
+        - oneTimeCashOutflow + plannedStockCashDelta + plannedCryptoCashDelta
+        - stockDCAOutflow - cryptoDCAOutflow
+        + plannedStockOrderDelta + plannedCryptoOrderDelta;
       cumulativeBalance += netCashFlow;
 
       const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
