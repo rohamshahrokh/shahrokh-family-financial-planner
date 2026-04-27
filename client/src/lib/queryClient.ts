@@ -253,6 +253,29 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
     if (m === "GET") return await sbFamilyMsgLog.getRecent();
   }
 
+  // ─── Market News cache ──────────────────────────────────────────────────
+  if (path === "/api/market-news-cache") {
+    const SB_URL  = "https://uoraduyyxhtzixcsaidg.supabase.co";
+    const SB_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVvcmFkdXl5eGh0eml4Y3NhaWRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTgsImV4cCI6MjA5MjY5NzAxOH0.qNrqDlG4j0lfGKDsmGyywP8DZeMurB02UWv4bdevW7c";
+    const headers = { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": "application/json", "Prefer": "return=representation" };
+    if (m === "GET") {
+      // Return the single cached row for the given cache_key (from URL ?cache_key=...)
+      const r = await fetch(`${SB_URL}/rest/v1/sf_market_news_cache?select=*&order=fetched_at.desc&limit=1`, { headers });
+      if (!r.ok) return [];
+      return await r.json();
+    }
+    if (m === "POST") {
+      // Upsert cache row
+      const r = await fetch(`${SB_URL}/rest/v1/sf_market_news_cache`, {
+        method: "POST",
+        headers: { ...headers, "Prefer": "resolution=merge-duplicates,return=representation" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) return [];
+      return await r.json();
+    }
+  }
+
   throw new Error(`[localStore] Unhandled: ${m} ${path}`);
 }
 
