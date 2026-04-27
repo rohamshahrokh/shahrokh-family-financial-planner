@@ -191,6 +191,8 @@ export function projectNetWorth(params: {
   years?: number;
   inflation?: number;
   ppor_growth?: number;
+  stockTransactions?: Array<{ transaction_type: string; status: string; transaction_date: string; total_amount: number; }>;
+  cryptoTransactions?: Array<{ transaction_type: string; status: string; transaction_date: string; total_amount: number; }>;
 }): YearlyProjection[] {
   const years = params.years || 10;
   const inflation = params.inflation || 3;
@@ -231,15 +233,48 @@ export function projectNetWorth(params: {
     monthlyIncome *= (1 + 3.5 / 100);
     monthlyExpenses *= (1 + inflation / 100);
 
-    // Property portfolio
+    // Property portfolio — only include investment properties that have settled by this year
     let propValue = 0; let propLoans = 0; let propRent = 0;
+    const todayYear = new Date().getFullYear();
     for (const prop of params.properties) {
-      const proj = projectProperty(prop);
-      const yr = proj[y - 1];
-      if (yr) {
-        propValue += yr.value;
-        propLoans += yr.loanBalance;
-        propRent += yr.rentalIncome;
+      if (prop.type === 'ppor') continue; // PPOR already in snapshot
+
+      // Determine settlement year
+      const settleDateStr = prop.settlement_date || prop.purchase_date;
+      const settleYear = settleDateStr
+        ? new Date(settleDateStr).getFullYear()
+        : todayYear; // if no date, assume already settled
+
+      if (year < settleYear) continue; // not yet purchased
+
+      // Years since settlement for this projection year
+      const yearsSinceSettle = year - settleYear;
+      const startValue = safeNum(prop.purchase_price) || safeNum(prop.current_value);
+      const growthRate = (safeNum(prop.capital_growth) || 6) / 100;
+      const projValue = startValue * Math.pow(1 + growthRate, yearsSinceSettle + 1);
+
+      const loanBal = Math.max(0, calcLoanBalance(
+        safeNum(prop.loan_amount),
+        safeNum(prop.interest_rate) || 6.5,
+        safeNum(prop.loan_term) || 30,
+        (yearsSinceSettle + 1) * 12
+      ));
+
+      propValue += projValue;
+      propLoans += loanBal;
+
+      // Rental income only if settled and rental started
+      const rentalStartStr = prop.rental_start_date;
+      const rentalStartYear = rentalStartStr
+        ? new Date(rentalStartStr).getFullYear()
+        : settleYear;
+      if (year >= rentalStartYear) {
+        const yearsSinceRental = year - rentalStartYear;
+        const annualRent = safeNum(prop.weekly_rent) * 52
+          * (1 - safeNum(prop.vacancy_rate) / 100)
+          * (1 - safeNum(prop.management_fee) / 100)
+          * Math.pow(1 + (safeNum(prop.rental_growth) || 3) / 100, yearsSinceRental);
+        propRent += annualRent;
       }
     }
 
@@ -260,6 +295,33 @@ export function projectNetWorth(params: {
       if (val > 0) {
         const proj = projectInvestment(val, c.expected_return, c.monthly_dca || 0, y);
         cryptoTotal += proj[y - 1]?.value || 0;
+      }
+    }
+
+    // Add planned stock/crypto buys to portfolio value from that year onward
+    const stockTxYear = params.stockTransactions ?? [];
+    const cryptoTxYear = params.cryptoTransactions ?? [];
+
+    for (const tx of stockTxYear) {
+      if (tx.status !== 'planned') continue;
+      const txYear = new Date(tx.transaction_date).getFullYear();
+      if (year < txYear) continue; // not yet
+      const yearsGrowing = year - txYear;
+      const txReturn = (params.stocks?.[0]?.expected_return ?? 10) / 100;
+      if (tx.transaction_type === 'buy') {
+        stocksTotal += safeNum(tx.total_amount) * Math.pow(1 + txReturn, yearsGrowing + 1);
+      }
+      // sells reduce value — handled via cash impact in cashflow
+    }
+
+    for (const tx of cryptoTxYear) {
+      if (tx.status !== 'planned') continue;
+      const txYear = new Date(tx.transaction_date).getFullYear();
+      if (year < txYear) continue;
+      const yearsGrowing = year - txYear;
+      const txReturn = (params.cryptos?.[0]?.expected_return ?? 20) / 100;
+      if (tx.transaction_type === 'buy') {
+        cryptoTotal += safeNum(tx.total_amount) * Math.pow(1 + txReturn, yearsGrowing + 1);
       }
     }
 
@@ -359,6 +421,8 @@ export function buildCashFlowSeries(params: {
     id: number;
     type: string;
     purchase_date?: string;
+    settlement_date?: string;
+    rental_start_date?: string;
     loan_amount: number;
     interest_rate: number;
     loan_term: number;
@@ -372,9 +436,17 @@ export function buildCashFlowSeries(params: {
     maintenance: number;
     capital_growth: number;
     projection_years: number;
+    deposit?: number;
+    stamp_duty?: number;
+    legal_fees?: number;
+    renovation_costs?: number;
+    building_inspection?: number;
+    loan_setup_fees?: number;
   }>;
   inflationRate?: number;   // annual % for expense forecast growth (default 3)
   incomeGrowthRate?: number; // annual % for income forecast growth (default 3.5)
+  stockTransactions?: Array<{ transaction_type: string; status: string; transaction_date: string; total_amount: number; ticker?: string; }>;
+  cryptoTransactions?: Array<{ transaction_type: string; status: string; transaction_date: string; total_amount: number; symbol?: string; }>;
 }): CashFlowMonth[] {
   const START_YEAR = 2025;
   const START_MONTH = 1;
@@ -451,35 +523,95 @@ export function buildCashFlowSeries(params: {
       let investmentLoanRepayment = 0;
       const monthDate = new Date(year, month - 1, 1);
 
+      // Track one-time cash outflows for this month
+      let oneTimeCashOutflow = 0;
+
       for (const prop of investmentProps) {
-        // Only include from purchase date onward
-        let purchaseDate: Date;
-        if (prop.purchase_date) {
-          purchaseDate = new Date(prop.purchase_date);
+        // Prefer settlement_date over purchase_date
+        const settleDateStr = prop.settlement_date || prop.purchase_date;
+        let settleDate: Date;
+        if (settleDateStr) {
+          settleDate = new Date(settleDateStr);
+          settleDate.setDate(1); // normalise to month start
         } else {
-          purchaseDate = new Date(START_YEAR, 0, 1); // default Jan 2025
+          settleDate = new Date(START_YEAR, 0, 1);
         }
-        if (monthDate < purchaseDate) continue;
 
-        // Monthly rent (net of vacancy + management)
-        const monthsSincePurchase = (monthDate.getFullYear() - purchaseDate.getFullYear()) * 12
-          + (monthDate.getMonth() - purchaseDate.getMonth());
-        const yearsSincePurchase = monthsSincePurchase / 12;
-        const annualRent = prop.weekly_rent * 52
-          * (1 - prop.vacancy_rate / 100)
-          * (1 - prop.management_fee / 100)
-          * Math.pow(1 + (prop.rental_growth || 3) / 100, yearsSincePurchase);
-        rentalIncome += annualRent / 12;
+        // Rental start date (default: month after settlement)
+        let rentalStartDate: Date;
+        if (prop.rental_start_date) {
+          rentalStartDate = new Date(prop.rental_start_date);
+          rentalStartDate.setDate(1);
+        } else {
+          rentalStartDate = new Date(settleDate.getFullYear(), settleDate.getMonth() + 1, 1);
+        }
 
-        // Investment loan repayment
-        const monthlyLoanPmt = calcMonthlyRepayment(prop.loan_amount, prop.interest_rate, prop.loan_term);
-        investmentLoanRepayment += monthlyLoanPmt;
+        // One-time purchase costs: subtract in the settlement month
+        const isSettlementMonth = (
+          monthDate.getFullYear() === settleDate.getFullYear() &&
+          monthDate.getMonth() === settleDate.getMonth()
+        );
+        if (isSettlementMonth) {
+          oneTimeCashOutflow += safeNum(prop.deposit)
+            + safeNum(prop.stamp_duty)
+            + safeNum(prop.legal_fees)
+            + safeNum(prop.renovation_costs)
+            + safeNum(prop.building_inspection)
+            + safeNum(prop.loan_setup_fees);
+        }
+
+        // Loan repayment: starts from settlement month
+        if (monthDate >= settleDate) {
+          const monthlyLoanPmt = calcMonthlyRepayment(
+            safeNum(prop.loan_amount),
+            safeNum(prop.interest_rate) || 6.5,
+            safeNum(prop.loan_term) || 30
+          );
+          investmentLoanRepayment += monthlyLoanPmt;
+        }
+
+        // Rental income: only from rental_start_date
+        if (monthDate >= rentalStartDate) {
+          const monthsSinceRental = (monthDate.getFullYear() - rentalStartDate.getFullYear()) * 12
+            + (monthDate.getMonth() - rentalStartDate.getMonth());
+          const yearsSinceRental = monthsSinceRental / 12;
+          const annualRent = safeNum(prop.weekly_rent) * 52
+            * (1 - safeNum(prop.vacancy_rate) / 100)
+            * (1 - safeNum(prop.management_fee) / 100)
+            * Math.pow(1 + (safeNum(prop.rental_growth) || 3) / 100, yearsSinceRental);
+          rentalIncome += annualRent / 12;
+        }
+      }
+
+      // ── Planned stock transactions ──
+      let plannedStockCashDelta = 0;
+      for (const tx of (params.stockTransactions ?? [])) {
+        if (tx.status !== 'planned') continue;
+        if (!tx.transaction_date) continue;
+        const txDate = new Date(tx.transaction_date);
+        if (txDate.getFullYear() === year && txDate.getMonth() + 1 === month) {
+          if (tx.transaction_type === 'buy') plannedStockCashDelta -= safeNum(tx.total_amount);
+          if (tx.transaction_type === 'sell') plannedStockCashDelta += safeNum(tx.total_amount);
+        }
+      }
+
+      // ── Planned crypto transactions ──
+      let plannedCryptoCashDelta = 0;
+      for (const tx of (params.cryptoTransactions ?? [])) {
+        if (tx.status !== 'planned') continue;
+        if (!tx.transaction_date) continue;
+        const txDate = new Date(tx.transaction_date);
+        if (txDate.getFullYear() === year && txDate.getMonth() + 1 === month) {
+          if (tx.transaction_type === 'buy') plannedCryptoCashDelta -= safeNum(tx.total_amount);
+          if (tx.transaction_type === 'sell') plannedCryptoCashDelta += safeNum(tx.total_amount);
+        }
       }
 
       // ── Net Cash Flow ──
       // income + rental - expenses (actuals or forecast) - mortgage - invest loans
       // Note: when actuals are used and they include mortgage, mortgageRepayment=0 so no double count
-      const netCashFlow = income + rentalIncome - totalExpenses - mortgageRepayment - investmentLoanRepayment;
+      const netCashFlow = income + rentalIncome - totalExpenses - mortgageRepayment - investmentLoanRepayment
+        - oneTimeCashOutflow + plannedStockCashDelta + plannedCryptoCashDelta;
       cumulativeBalance += netCashFlow;
 
       const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
