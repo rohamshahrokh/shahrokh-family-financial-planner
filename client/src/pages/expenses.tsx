@@ -769,13 +769,18 @@ export default function ExpensesPage() {
   // ── Filtered income totals (react instantly to filters) ─────────────────────
   const filteredIncomeTotals = useMemo(() => {
     const totalAmount = filteredIncome.reduce((s: number, r: any) => s + (r.amount || 0), 0);
-    // Monthly equiv for filtered set — same deduplication as KPI card
+    // Monthly equiv for filtered set — deduplicate by member+source+description+frequency
     const streamMapF = new Map<string, any>();
     const sortedF = [...filteredIncome]
-      .filter((r: any) => r.recurring && r.frequency !== 'One-off')
+      .filter((r: any) => r.frequency !== 'One-off')
       .sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''));
     for (const r of sortedF) {
-      const key = `${(r.member || '').toLowerCase()}|${(r.source || '').toLowerCase()}|${(r.frequency || '').toLowerCase()}`;
+      const key = [
+        (r.member      || '').toLowerCase().trim(),
+        (r.source      || '').toLowerCase().trim(),
+        (r.description || '').toLowerCase().trim(),
+        (r.frequency   || '').toLowerCase().trim(),
+      ].join('|');
       if (!streamMapF.has(key)) streamMapF.set(key, r);
     }
     const totalMonthlyEquiv = Array.from(streamMapF.values())
@@ -900,17 +905,23 @@ export default function ExpensesPage() {
     const totalIncome = filteredIncome.reduce((s: number, r: any) => s + r.amount, 0);
 
     // Monthly equivalent total — deduplicated per income stream.
-    // Each unique (member + source + frequency) counts ONCE — we take the
-    // most recent record for that stream. This prevents historical salary
-    // rows (Jan, Feb, Mar …) from stacking into an inflated total.
+    // Unique key: member + source + description + frequency.
+    // One-off and non-recurring rows excluded.
+    // Only the most-recent record for each stream is counted.
     const streamMap = new Map<string, any>();
-    const sortedByDateDesc = [...incomeRecords]
-      .filter((r: any) => r.recurring && r.frequency !== 'One-off')
+    const sortedByDateDesc = [...(incomeRecords as any[])]
+      .filter((r: any) => r.frequency !== 'One-off')
       .sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''));
     for (const r of sortedByDateDesc) {
-      const key = `${(r.member || '').toLowerCase()}|${(r.source || '').toLowerCase()}|${(r.frequency || '').toLowerCase()}`;
+      const key = [
+        (r.member      || '').toLowerCase().trim(),
+        (r.source      || '').toLowerCase().trim(),
+        (r.description || '').toLowerCase().trim(),
+        (r.frequency   || '').toLowerCase().trim(),
+      ].join('|');
       if (!streamMap.has(key)) streamMap.set(key, r);
     }
+    const activeStreamsCount = streamMap.size;
     const recurringMonthlyTotal = Array.from(streamMap.values())
       .reduce((s: number, r: any) => s + toMonthlyEquiv(r.amount, r.frequency), 0);
 
@@ -946,7 +957,7 @@ export default function ExpensesPage() {
     const memberData = Object.entries(byMember).sort((a, b) => b[1] - a[1])
       .map(([name, value]) => ({ name, value: value as number }));
 
-    return { totalIncome, recurringMonthlyTotal, thisMonthIncome, sourceData, trendData, memberData };
+    return { totalIncome, recurringMonthlyTotal, thisMonthIncome, sourceData, trendData, memberData, activeStreamsCount };
   }, [filteredIncome, incomeRecords]);
 
   // ── Filtered expense totals (react instantly to filters) ─────────────────
@@ -1907,12 +1918,13 @@ export default function ExpensesPage() {
             {[
               { label: 'Total (filtered)', value: formatCurrency(incomeAnalytics.totalIncome, true), color: 'text-emerald-400' },
               { label: 'This Month', value: formatCurrency(incomeAnalytics.thisMonthIncome, true), color: 'text-emerald-400' },
-              { label: 'Monthly Equiv (recurring)', value: formatCurrency(incomeAnalytics.recurringMonthlyTotal, true), color: 'text-primary' },
-              { label: 'Records', value: filteredIncome.length.toString(), color: '' },
-            ].map(s => (
+              { label: 'Monthly Recurring', value: formatCurrency(incomeAnalytics.recurringMonthlyTotal, true), sub: `${incomeAnalytics.activeStreamsCount} active source${incomeAnalytics.activeStreamsCount !== 1 ? 's' : ''}`, color: 'text-primary' },
+              { label: 'Total Records', value: (incomeRecords as any[]).length.toString(), sub: `${filteredIncome.length} shown`, color: '' },
+            ].map((s: any) => (
               <div key={s.label} className="bg-card border border-border rounded-xl p-4">
                 <p className="text-xs text-muted-foreground">{s.label}</p>
                 <p className={`text-lg font-bold num-display mt-1 ${s.color}`}>{s.value}</p>
+                {s.sub && <p className="text-xs text-muted-foreground mt-0.5">{s.sub}</p>}
               </div>
             ))}
           </div>
