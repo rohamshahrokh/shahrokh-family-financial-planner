@@ -7,6 +7,13 @@
  *  - KPI summary cards (monthly cost, due this week, annual, overdue)
  *  - Upcoming bills with 30/60/90/All tab filter
  *  - Monthly breakdown by category
+ *
+ * FIXES:
+ *  - DB column is `bill_name` not `name` — buildPayload corrected
+ *  - DB column is `reminder_days_before` not `reminder_days` — corrected
+ *  - Bill interface maps DB shape: bill_name, reminder_days_before
+ *  - `active` defaults to true on create
+ *  - Silent catch in sbBills.create removed → errors now surface via onError toast
  */
 
 import { useState, useMemo } from "react";
@@ -41,13 +48,13 @@ import {
 
 interface Bill {
   id: number;
-  name: string;
+  bill_name: string;       // DB column name
   category: string;
   amount: number;
   frequency: string;
   next_due_date: string | null;
   start_date: string | null;
-  reminder_days: number;
+  reminder_days_before: number;  // DB column name
   member: string;
   essential: boolean;
   auto_renew: boolean;
@@ -94,23 +101,13 @@ const safeNum = (v: any) => parseFloat(v) || 0;
 
 function toMonthly(amount: number, frequency: string): number {
   switch (frequency) {
-    case "Weekly":
-      return amount * (52 / 12);
-    case "Fortnightly":
-      return amount * (26 / 12);
-    case "Monthly":
-      return amount;
-    case "Quarterly":
-      return amount / 3;
-    case "Annual":
-      return amount / 12;
-    default:
-      return amount;
+    case "Weekly":      return amount * (52 / 12);
+    case "Fortnightly": return amount * (26 / 12);
+    case "Monthly":     return amount;
+    case "Quarterly":   return amount / 3;
+    case "Annual":      return amount / 12;
+    default:            return amount;
   }
-}
-
-function toAnnual(amount: number, frequency: string): number {
-  return toMonthly(amount, frequency) * 12;
 }
 
 function daysUntil(dateStr: string | null): number | null {
@@ -159,9 +156,6 @@ function BillForm({
   isEditing,
   isPending,
 }: BillFormProps) {
-  const effectiveReminder =
-    form.reminder_days === "custom" ? form.reminder_custom : form.reminder_days;
-
   return (
     <div className="space-y-5">
       {/* Row 1: Name + Category */}
@@ -375,7 +369,7 @@ function BillForm({
           className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-6"
         >
           <Plus className="w-4 h-4 mr-2" />
-          {isEditing ? "Update Bill" : "Add Bill"}
+          {isPending ? "Saving…" : isEditing ? "Update Bill" : "Add Bill"}
         </Button>
         {isEditing && onCancel && (
           <Button
@@ -399,7 +393,7 @@ function DaysUntilBadge({ days }: { days: number | null }) {
 
   if (days < 0) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-zinc-700 text-zinc-300">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-900/60 text-red-300 border border-red-700/40">
         Overdue
       </span>
     );
@@ -436,7 +430,7 @@ export default function RecurringBillsPage() {
 
   const [form, setForm] = useState<BillFormState>(DEFAULT_FORM);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [tabFilter, setTabFilter] = useState<TabFilter>("30");
+  const [tabFilter, setTabFilter] = useState<TabFilter>("all");
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
   // ─── Data fetching ───────────────────────────────────────────────────────
@@ -450,24 +444,30 @@ export default function RecurringBillsPage() {
 
   const invalidateBills = () => qc.invalidateQueries({ queryKey: ["/api/bills"] });
 
+  /**
+   * buildPayload: maps form state → exact DB column names
+   *   form.name           → bill_name
+   *   form.reminder_days  → reminder_days_before
+   */
   function buildPayload(f: BillFormState) {
     const reminderDays =
       f.reminder_days === "custom"
         ? safeNum(f.reminder_custom)
         : safeNum(f.reminder_days);
     return {
-      name: f.name.trim(),
-      category: f.category,
-      amount: safeNum(f.amount),
-      frequency: f.frequency,
-      next_due_date: f.next_due_date || null,
-      start_date: f.start_date || null,
-      reminder_days: reminderDays,
-      member: f.member,
-      essential: f.essential,
-      auto_renew: f.auto_renew,
-      payment_method: f.payment_method.trim(),
-      notes: f.notes.trim(),
+      bill_name:           f.name.trim(),
+      category:            f.category,
+      amount:              safeNum(f.amount),
+      frequency:           f.frequency,
+      next_due_date:       f.next_due_date || null,
+      start_date:          f.start_date || null,
+      reminder_days_before: reminderDays,
+      member:              f.member,
+      essential:           f.essential,
+      auto_renew:          f.auto_renew,
+      payment_method:      f.payment_method.trim(),
+      notes:               f.notes.trim(),
+      active:              true,
     };
   }
 
@@ -479,8 +479,8 @@ export default function RecurringBillsPage() {
       setForm(DEFAULT_FORM);
       toast({ title: "Saved Successfully", description: "Bill added." });
     },
-    onError: () =>
-      toast({ title: "Error", description: "Failed to add bill.", variant: "destructive" }),
+    onError: (err: any) =>
+      toast({ title: "Error saving bill", description: err?.message ?? "Unknown error", variant: "destructive" }),
   });
 
   const updateMutation = useMutation({
@@ -492,26 +492,28 @@ export default function RecurringBillsPage() {
       setEditingId(null);
       toast({ title: "Saved Successfully", description: "Bill updated." });
     },
-    onError: () =>
-      toast({ title: "Error", description: "Failed to update bill.", variant: "destructive" }),
+    onError: (err: any) =>
+      toast({ title: "Error updating bill", description: err?.message ?? "Unknown error", variant: "destructive" }),
   });
 
   const toggleActiveMutation = useMutation({
     mutationFn: ({ id, active }: { id: number; active: boolean }) =>
       apiRequest("PUT", `/api/bills/${id}`, { active }).then((r) => r.json()),
     onSuccess: () => invalidateBills(),
+    onError: (err: any) =>
+      toast({ title: "Error", description: err?.message ?? "Failed to toggle.", variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) =>
-      apiRequest("DELETE", `/api/bills/${id}`).then((r) => r.json()),
+      apiRequest("DELETE", `/api/bills/${id}`).then((r) => r.json().catch(() => null)),
     onSuccess: () => {
       invalidateBills();
       setDeleteConfirm(null);
       toast({ title: "Saved Successfully", description: "Bill deleted." });
     },
-    onError: () =>
-      toast({ title: "Error", description: "Failed to delete bill.", variant: "destructive" }),
+    onError: (err: any) =>
+      toast({ title: "Error deleting bill", description: err?.message ?? "Unknown error", variant: "destructive" }),
   });
 
   // ─── Form handlers ───────────────────────────────────────────────────────
@@ -532,23 +534,23 @@ export default function RecurringBillsPage() {
   function handleEdit(bill: Bill) {
     setEditingId(bill.id);
     setForm({
-      name: bill.name,
-      category: bill.category,
-      amount: String(bill.amount),
-      frequency: bill.frequency,
-      next_due_date: bill.next_due_date ?? "",
-      start_date: bill.start_date ?? "",
-      reminder_days: REMINDER_OPTIONS.slice(0, -1).includes(String(bill.reminder_days))
-        ? String(bill.reminder_days)
+      name:           bill.bill_name,
+      category:       bill.category,
+      amount:         String(bill.amount),
+      frequency:      bill.frequency,
+      next_due_date:  bill.next_due_date ?? "",
+      start_date:     bill.start_date ?? "",
+      reminder_days:  REMINDER_OPTIONS.slice(0, -1).includes(String(bill.reminder_days_before))
+        ? String(bill.reminder_days_before)
         : "custom",
-      reminder_custom: REMINDER_OPTIONS.slice(0, -1).includes(String(bill.reminder_days))
+      reminder_custom: REMINDER_OPTIONS.slice(0, -1).includes(String(bill.reminder_days_before))
         ? ""
-        : String(bill.reminder_days),
-      member: bill.member,
-      essential: bill.essential,
-      auto_renew: bill.auto_renew,
-      payment_method: bill.payment_method ?? "",
-      notes: bill.notes ?? "",
+        : String(bill.reminder_days_before),
+      member:          bill.member,
+      essential:       bill.essential,
+      auto_renew:      bill.auto_renew,
+      payment_method:  bill.payment_method ?? "",
+      notes:           bill.notes ?? "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -822,7 +824,7 @@ export default function RecurringBillsPage() {
                         }`}
                       >
                         <td className="px-4 py-3 font-medium text-white">
-                          {bill.name}
+                          {bill.bill_name}
                           {bill.auto_renew && (
                             <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-400">
                               Auto
@@ -855,7 +857,7 @@ export default function RecurringBillsPage() {
                           )}
                         </td>
                         <td className="px-4 py-3 text-center text-zinc-400 text-xs">
-                          {bill.reminder_days ? `${bill.reminder_days}d` : "—"}
+                          {bill.reminder_days_before ? `${bill.reminder_days_before}d` : "—"}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-center gap-1">
