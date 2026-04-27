@@ -147,11 +147,37 @@ export default function DashboardPage() {
     queryKey: ["/api/expenses"],
     queryFn: () => apiRequest("GET", "/api/expenses").then((r) => r.json()),
   });
+  const { data: incomeRecords = [] } = useQuery<any[]>({
+    queryKey: ["/api/income"],
+    queryFn: () => apiRequest("GET", "/api/income").then((r) => r.json()),
+  });
 
   const updateSnap = useMutation({
     mutationFn: (data: any) => apiRequest("PUT", "/api/snapshot", data).then((r) => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/snapshot"] }),
   });
+
+  // ─── Income Tracker: monthly equivalent sum ─────────────────────────────
+  // Frequency → monthly multiplier
+  const FREQ_MULT: Record<string, number> = {
+    Weekly:      52 / 12,
+    Fortnightly: 26 / 12,
+    Monthly:     1,
+    Quarterly:   4 / 12,
+    Annual:      1 / 12,
+    "One-off":   0,
+  };
+  const incomeTrackerMonthly = useMemo(() => {
+    if (!incomeRecords.length) return 0;
+    return incomeRecords.reduce((sum: number, r: any) => {
+      const mult = FREQ_MULT[r.frequency] ?? 1;
+      return sum + safeNum(r.amount) * mult;
+    }, 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomeRecords]);
+
+  const useIncomeTracker = incomeRecords.length > 0;
+  const incomeSource = useIncomeTracker ? "Income Tracker" : "Snapshot fallback";
 
   // ─── Snapshot defaults ────────────────────────────────────────────────────
   // safeNum() converts undefined / null / NaN / "" → 0 so no arithmetic
@@ -166,7 +192,9 @@ export default function DashboardPage() {
     iran_property:    safeNum(snapshot?.iran_property)    || 150000,
     mortgage:         safeNum(snapshot?.mortgage)         || 1200000,
     other_debts:      safeNum(snapshot?.other_debts)      || 19000,
-    monthly_income:   safeNum(snapshot?.monthly_income)   || 22000,
+    monthly_income:   useIncomeTracker
+      ? incomeTrackerMonthly
+      : safeNum(snapshot?.monthly_income)   || 22000,
     monthly_expenses: safeNum(snapshot?.monthly_expenses) || 14540,
   };
 
@@ -422,6 +450,23 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* ─── Income Source Badge ─────────────────────────────────────────── */}
+      <div className="flex items-center gap-2">
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border ${
+          useIncomeTracker
+            ? 'border-emerald-700/40 bg-emerald-950/30 text-emerald-400'
+            : 'border-amber-700/40 bg-amber-950/20 text-amber-400'
+        }`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${
+            useIncomeTracker ? 'bg-emerald-400' : 'bg-amber-400'
+          }`} />
+          Income source: {incomeSource}
+          {useIncomeTracker && (
+            <span className="opacity-70 ml-0.5">({incomeRecords.length} records · {formatCurrency(incomeTrackerMonthly, true)}/mo)</span>
+          )}
+        </span>
       </div>
 
       {/* ─── KPI Cards ────────────────────────────────────────────────────── */}
@@ -1035,7 +1080,8 @@ export default function DashboardPage() {
         pageLabel="Overall Financial Health"
         getData={() => ({
           netWorth: snapshot?.net_worth,
-          monthlyIncome: snapshot?.monthly_income,
+          monthlyIncome: snap.monthly_income, // uses Income Tracker if records exist
+          incomeSource: incomeSource,
           monthlyExpenses: snapshot?.monthly_expenses,
           monthlySurplus: snapshot?.monthly_surplus,
           savingsRate: snapshot?.savings_rate,
