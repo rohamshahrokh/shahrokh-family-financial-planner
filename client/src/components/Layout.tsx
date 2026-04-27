@@ -144,6 +144,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            {/* Live clock */}
+            <LiveClock />
             {/* Chart view toggle */}
             <ChartViewToggle />
 
@@ -206,6 +208,22 @@ function ChartViewToggle() {
         className={`px-2.5 py-1 text-xs rounded font-medium transition-all ${chartView === 'annual' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
         onClick={() => setChartView('annual')}
       >Annual</button>
+    </div>
+  );
+}
+
+function LiveClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const dateStr = now.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+  return (
+    <div className="hidden md:flex flex-col items-end leading-none select-none">
+      <span className="text-xs font-bold num-display" style={{ color: 'hsl(43,85%,65%)' }}>{timeStr}</span>
+      <span className="text-[10px] text-muted-foreground mt-0.5">{dateStr}</span>
     </div>
   );
 }
