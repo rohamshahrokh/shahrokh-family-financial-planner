@@ -186,8 +186,10 @@ export default function DashboardPage() {
     "One-off":   0,
   };
   // ─── Active recurring income streams ────────────────────────────────────
-  // Deduplicate: per unique (member × source × description × frequency).
-  // Keep ONLY the most-recent record for each stream.
+  // Deduplicate by: member × source × description ONLY.
+  // Frequency is intentionally excluded from the key — a salary stream that
+  // switched from Fortnightly → Monthly is the SAME stream; the most-recent
+  // record carries the current frequency and amount.
   // One-off records are excluded from monthly recurring total.
   const activeIncomeStreams = useMemo(() => {
     const streamMap = new Map<string, any>();
@@ -199,7 +201,6 @@ export default function DashboardPage() {
         (r.member      || '').toLowerCase().trim(),
         (r.source      || '').toLowerCase().trim(),
         (r.description || '').toLowerCase().trim(),
-        (r.frequency   || '').toLowerCase().trim(),
       ].join('|');
       if (!streamMap.has(key)) streamMap.set(key, r);
     }
