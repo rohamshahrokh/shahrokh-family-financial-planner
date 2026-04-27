@@ -17,7 +17,7 @@ import {
 import {
   Plus, Trash2, Edit2, Bitcoin, CheckSquare, Square,
   ArrowUpRight, ArrowDownRight, X, Calendar, Filter,
-  Upload, RefreshCw, Download, ToggleLeft, ToggleRight,
+  Upload, RefreshCw, Download, ToggleLeft, ToggleRight, ShoppingCart,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx";
@@ -112,6 +112,21 @@ function emptyTxForm(): Partial<CryptoTransaction> {
     fee: 0,
     notes: "",
     created_by: "user",
+  };
+}
+
+// ─── Empty planned order form ─────────────────────────────────────────────────
+function emptyOrderForm(): any {
+  return {
+    module: 'crypto',
+    ticker: '',
+    asset_name: '',
+    action: 'buy',
+    amount_aud: 0,
+    units: null,
+    planned_date: new Date().toISOString().split('T')[0],
+    status: 'planned',
+    notes: '',
   };
 }
 
@@ -581,6 +596,179 @@ function CryptoTxForm({ initial, cryptos, onSave, onCancel, isSaving }: CryptoTx
   );
 }
 
+// ─── Planned Order Form Modal ─────────────────────────────────────────────────
+interface PlannedOrderFormProps {
+  initial: any;
+  cryptos: any[];
+  onSave: (data: any) => void;
+  onCancel: () => void;
+  isSaving: boolean;
+}
+
+function PlannedOrderForm({ initial, cryptos, onSave, onCancel, isSaving }: PlannedOrderFormProps) {
+  const [form, setForm] = useState<any>(initial);
+
+  const set = (key: string, value: any) => {
+    setForm((prev: any) => {
+      const next = { ...prev, [key]: value };
+      // Auto-fill asset_name from cryptos list
+      if (key === "ticker") {
+        const match = cryptos.find((c: any) =>
+          c.symbol?.toLowerCase() === String(value).toLowerCase()
+        );
+        if (match) next.asset_name = match.name;
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-2xl shadow-2xl">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="font-bold text-sm">
+            {initial.id ? "Edit Planned Order" : "Add Planned Order"}
+          </h3>
+          <button onClick={onCancel} className="text-muted-foreground hover:text-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Action toggle */}
+        <div className="flex gap-4 mb-4">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Action</label>
+            <div className="flex rounded-lg overflow-hidden border border-border">
+              {(["buy", "sell"] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={() => set("action", t)}
+                  className={`px-4 py-1.5 text-xs font-semibold transition-colors ${
+                    form.action === t
+                      ? t === "buy" ? "bg-emerald-600 text-white" : "bg-red-600 text-white"
+                      : "bg-secondary text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t === "buy" ? "Buy" : "Sell"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Status</label>
+            <div className="flex rounded-lg overflow-hidden border border-border">
+              {(["planned", "executed", "cancelled"] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => set("status", s)}
+                  className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    form.status === s
+                      ? s === "planned" ? "bg-amber-500 text-black"
+                        : s === "executed" ? "bg-emerald-600 text-white"
+                        : "bg-secondary text-foreground"
+                      : "bg-secondary text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Symbol</label>
+            <div className="flex gap-1">
+              <select
+                value={cryptos.find((c: any) => c.symbol === form.ticker) ? form.ticker : "__custom__"}
+                onChange={e => {
+                  if (e.target.value !== "__custom__") set("ticker", e.target.value);
+                }}
+                className="flex-1 h-8 text-xs bg-secondary border border-border rounded px-2 text-foreground"
+              >
+                {cryptos.map((c: any) => <option key={c.symbol} value={c.symbol}>{c.symbol}</option>)}
+                <option value="__custom__">Custom...</option>
+              </select>
+              <Input
+                type="text"
+                placeholder="BTC"
+                value={form.ticker}
+                onChange={e => set("ticker", e.target.value.toUpperCase())}
+                className="w-20 h-8 text-xs"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Asset Name</label>
+            <Input
+              type="text"
+              placeholder="Bitcoin"
+              value={form.asset_name ?? ""}
+              onChange={e => set("asset_name", e.target.value)}
+              className="h-8 text-xs"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Planned Date</label>
+            <Input
+              type="date"
+              value={form.planned_date ?? ""}
+              onChange={e => set("planned_date", e.target.value)}
+              className="h-8 text-xs"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Amount AUD</label>
+            <Input
+              type="number"
+              step="50"
+              min="0"
+              value={form.amount_aud ?? ""}
+              onChange={e => set("amount_aud", parseFloat(e.target.value) || 0)}
+              className="h-8 text-xs"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Units (optional)</label>
+            <Input
+              type="number"
+              step="0.00000001"
+              min="0"
+              placeholder="Optional"
+              value={form.units ?? ""}
+              onChange={e => set("units", e.target.value ? parseFloat(e.target.value) : null)}
+              className="h-8 text-xs"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+            <Input
+              type="text"
+              placeholder="Optional notes..."
+              value={form.notes ?? ""}
+              onChange={e => set("notes", e.target.value)}
+              className="h-8 text-xs"
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-5">
+          <Button
+            onClick={() => onSave(form)}
+            disabled={isSaving}
+            style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+            className="text-xs h-8"
+          >
+            {isSaving ? "Saving..." : "Save Order"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={onCancel} className="text-xs h-8">Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function CryptoPage() {
   const qc = useQueryClient();
@@ -622,12 +810,17 @@ export default function CryptoPage() {
   const [fetchingCryptoPrices, setFetchingCryptoPrices] = useState(false);
   const [lastCryptoPriceFetch, setLastCryptoPriceFetch] = useState<Date | null>(null);
 
-  // Import / DCA state
+  // Import / DCA / Planned Orders state
   const [showImportModal, setShowImportModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'portfolio' | 'dca'>('portfolio');
+  const [activeTab, setActiveTab] = useState<'portfolio' | 'transactions' | 'dca' | 'orders'>('portfolio');
   const [showDCAForm, setShowDCAForm] = useState(false);
   const [dcaDraft, setDcaDraft] = useState<any>(null);
   const [editingDCAId, setEditingDCAId] = useState<number | null>(null);
+
+  // Planned Orders state
+  const [showOrderForm, setShowOrderForm] = useState(false);
+  const [orderDraft, setOrderDraft] = useState<any>(null);
+  const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -644,6 +837,11 @@ export default function CryptoPage() {
   const { data: dcaSchedules = [] } = useQuery<CryptoDCASchedule[]>({
     queryKey: ["/api/crypto-dca"],
     queryFn: () => apiRequest("GET", "/api/crypto-dca").then(r => r.json()),
+  });
+
+  const { data: plannedOrders = [] } = useQuery<any[]>({
+    queryKey: ["/api/planned-investments", "crypto"],
+    queryFn: () => apiRequest("GET", "/api/planned-investments?module=crypto").then(r => r.json()),
   });
 
   // ── Live price + import handlers ────────────────────────────────────────────
@@ -689,14 +887,49 @@ export default function CryptoPage() {
   const createDCAMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/crypto-dca", data).then(r => r.json()),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/crypto-dca"] }); setShowDCAForm(false); setDcaDraft(null); toast({ title: "DCA schedule saved" }); },
+    onError: (err: any) => toast({ title: 'Save failed', description: String(err), variant: 'destructive' }),
   });
   const updateDCAMut = useMutation({
     mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/crypto-dca/${id}`, data).then(r => r.json()),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/crypto-dca"] }); setShowDCAForm(false); setEditingDCAId(null); setDcaDraft(null); toast({ title: "DCA updated" }); },
+    onError: (err: any) => toast({ title: 'Save failed', description: String(err), variant: 'destructive' }),
   });
   const deleteDCAMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/crypto-dca/${id}`).then(r => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/crypto-dca"] }),
+    onError: (err: any) => toast({ title: 'Delete failed', description: String(err), variant: 'destructive' }),
+  });
+
+  // ── Planned Order mutations ────────────────────────────────────────────────
+  const createOrderMut = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/planned-investments", { ...data, module: 'crypto' }).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/planned-investments", "crypto"] });
+      setShowOrderForm(false);
+      setOrderDraft(null);
+      setEditingOrderId(null);
+      toast({ title: "Planned order saved" });
+    },
+    onError: (err: any) => toast({ title: 'Save failed', description: String(err), variant: 'destructive' }),
+  });
+  const updateOrderMut = useMutation({
+    mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/planned-investments/${id}`, data).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/planned-investments", "crypto"] });
+      setShowOrderForm(false);
+      setOrderDraft(null);
+      setEditingOrderId(null);
+      toast({ title: "Planned order updated" });
+    },
+    onError: (err: any) => toast({ title: 'Save failed', description: String(err), variant: 'destructive' }),
+  });
+  const deleteOrderMut = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/planned-investments/${id}`).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/planned-investments", "crypto"] });
+      toast({ title: "Planned order deleted" });
+    },
+    onError: (err: any) => toast({ title: 'Delete failed', description: String(err), variant: 'destructive' }),
   });
 
   // ── Holdings mutations ─────────────────────────────────────────────────────
@@ -797,6 +1030,29 @@ export default function CryptoPage() {
   );
   const netCashImpact = plannedSellTotal - plannedBuyTotal;
 
+  // ── Planned Orders KPIs ────────────────────────────────────────────────────
+  const orderBuyTotal = useMemo(
+    () => plannedOrders.filter((o: any) => o.action === 'buy' && o.status === 'planned').reduce((s: number, o: any) => s + safeNum(o.amount_aud), 0),
+    [plannedOrders]
+  );
+  const orderSellTotal = useMemo(
+    () => plannedOrders.filter((o: any) => o.action === 'sell' && o.status === 'planned').reduce((s: number, o: any) => s + safeNum(o.amount_aud), 0),
+    [plannedOrders]
+  );
+  const orderStatusCounts = useMemo(() => {
+    const counts: Record<string, number> = { planned: 0, executed: 0, cancelled: 0 };
+    for (const o of plannedOrders) {
+      if (o.status in counts) counts[o.status]++;
+    }
+    return counts;
+  }, [plannedOrders]);
+
+  // ── DCA monthly total for projection ──────────────────────────────────────
+  const dcaMonthlyTotal = useMemo(
+    () => dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).reduce((s: number, d: CryptoDCASchedule) => s + cryptoDcaMonthlyEquiv(d.amount, d.frequency), 0),
+    [dcaSchedules]
+  );
+
   // ── Combined projection ────────────────────────────────────────────────────
   const combinedProjection = useMemo(() => {
     const years = 10;
@@ -820,7 +1076,12 @@ export default function CryptoPage() {
         );
         const plannedBuyExtra = plannedBuysForAsset.reduce((sum, t) => sum + safeNum(t.total_amount), 0);
 
-        const proj = projectInvestment(initVal + plannedBuyExtra, c.expected_return, c.monthly_dca || 0, y);
+        // Add DCA monthly contribution for this coin
+        const dcaForCoin = dcaSchedules
+          .filter((d: CryptoDCASchedule) => d.enabled && d.symbol === c.symbol)
+          .reduce((s: number, d: CryptoDCASchedule) => s + cryptoDcaMonthlyEquiv(d.amount, d.frequency), 0);
+
+        const proj = projectInvestment(initVal + plannedBuyExtra, c.expected_return, (c.monthly_dca || 0) + dcaForCoin, y);
         const last = proj[y - 1];
         if (last) { totalVal += last.value; totalInv += last.totalInvested; }
       }
@@ -832,7 +1093,7 @@ export default function CryptoPage() {
       });
     }
     return result;
-  }, [cryptos, transactions]);
+  }, [cryptos, transactions, dcaSchedules]);
 
   const assetProjections = useMemo(() => {
     const years = 10;
@@ -904,6 +1165,14 @@ export default function CryptoPage() {
     setShowTxForm(true);
   };
 
+  const handleSaveOrder = (data: any) => {
+    if (editingOrderId) {
+      updateOrderMut.mutate({ id: editingOrderId, data });
+    } else {
+      createOrderMut.mutate(data);
+    }
+  };
+
   const handleExportBackup = () => {
     const wb = XLSX.utils.book_new();
     const selectedCryptos = cryptos.filter((c: any) => selected.has(c.id));
@@ -943,6 +1212,16 @@ export default function CryptoPage() {
           onSave={handleSaveTx}
           onCancel={() => { setShowTxForm(false); setEditingTxId(null); setTxDraft(emptyTxForm()); }}
           isSaving={createTxMut.isPending || updateTxMut.isPending}
+        />
+      )}
+
+      {showOrderForm && orderDraft && (
+        <PlannedOrderForm
+          initial={orderDraft}
+          cryptos={cryptos}
+          onSave={handleSaveOrder}
+          onCancel={() => { setShowOrderForm(false); setOrderDraft(null); setEditingOrderId(null); }}
+          isSaving={createOrderMut.isPending || updateOrderMut.isPending}
         />
       )}
 
@@ -991,13 +1270,674 @@ export default function CryptoPage() {
 
       {/* ─── Tab Bar ───────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-1 bg-secondary/50 rounded-xl p-1 w-fit">
-        {([['portfolio', 'Portfolio & Transactions'], ['dca', 'DCA Schedules']] as const).map(([id, label]) => (
+        {([
+          ['portfolio', 'Portfolio'],
+          ['transactions', 'Transactions'],
+          ['dca', 'DCA Schedules'],
+          ['orders', 'Planned Orders'],
+        ] as const).map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
             className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${activeTab === id ? 'bg-card shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
             {label}
           </button>
         ))}
       </div>
+
+      {/* ─── Portfolio Tab ─────────────────────────────────────────────────── */}
+      {activeTab === 'portfolio' && (
+        <>
+        {/* ─── 7 KPI Cards ───────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+          {[
+            { label: "Portfolio Value", value: mv(formatCurrency(totalCurrentValue, true)), color: "" },
+            { label: "Cost Basis", value: mv(formatCurrency(totalInvested, true)), color: "" },
+            {
+              label: "Unrealised G/L",
+              value: mv(`${totalGL >= 0 ? "+" : ""}${formatCurrency(totalGL, true)}`),
+              color: totalGL >= 0 ? "text-emerald-400" : "text-red-400",
+            },
+            {
+              label: "G/L %",
+              value: mv(`${totalGLPct >= 0 ? "+" : ""}${totalGLPct.toFixed(1)}%`),
+              color: totalGLPct >= 0 ? "text-emerald-400" : "text-red-400",
+            },
+            {
+              label: "Planned Buys",
+              value: mv(formatCurrency(plannedBuyTotal, true)),
+              color: "text-emerald-400",
+            },
+            {
+              label: "Planned Sells",
+              value: mv(formatCurrency(plannedSellTotal, true)),
+              color: "text-red-400",
+            },
+            {
+              label: "Net Cash Impact",
+              value: mv(`${netCashImpact >= 0 ? "+" : ""}${formatCurrency(netCashImpact, true)}`),
+              color: netCashImpact >= 0 ? "text-emerald-400" : "text-red-400",
+            },
+          ].map(s => (
+            <div key={s.label} className="bg-card border border-border rounded-xl p-4">
+              <p className="text-xs text-muted-foreground">{s.label}</p>
+              <p className={`text-base font-bold num-display mt-1 ${s.color}`}>{s.value}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* ─── Charts row ────────────────────────────────────────────────────── */}
+        <div className="grid lg:grid-cols-2 gap-4">
+          <div className="bg-card border border-border rounded-xl p-5">
+            <h3 className="text-sm font-bold mb-4">Portfolio Growth (10Y)</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="cryptoGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
+                <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
+                <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                <Tooltip content={<CustomTooltip />} />
+                <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#cryptoGrad)" strokeWidth={2} name="Portfolio Value" />
+                <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="bg-card border border-border rounded-xl p-5">
+            <h3 className="text-sm font-bold mb-4">Asset Allocation</h3>
+            {allocationData.length > 0 ? (
+              <div className="flex items-center gap-3">
+                <ResponsiveContainer width="45%" height={180}>
+                  <PieChart>
+                    <Pie
+                      data={allocationData}
+                      cx="50%" cy="50%"
+                      innerRadius={45} outerRadius={75}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {allocationData.map((d: any, i: number) => (
+                        <Cell key={i} fill={d.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => mv(formatCurrency(v, true))} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex-1 space-y-1.5 text-xs overflow-hidden">
+                  {cryptos.map((c: any, i: number) => {
+                    const calc = cryptoCalcs(c, totalCurrentValue);
+                    if (calc.currentValue <= 0) return null;
+                    const proj10 = projectInvestment(calc.currentValue, c.expected_return, c.monthly_dca || 0, 10)[9]?.value || 0;
+                    return (
+                      <div key={c.id} className="rounded-lg p-2 bg-secondary/30">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <div className="w-2 h-2 rounded-full shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
+                            <span className="font-bold truncate">{c.symbol}</span>
+                            <span className="text-muted-foreground text-xs">({calc.actualAllocPct.toFixed(1)}%)</span>
+                          </div>
+                          <span className="num-display">{mv(formatCurrency(calc.currentValue, true))}</span>
+                        </div>
+                        <div className="flex justify-between mt-1 text-muted-foreground">
+                          <span>{c.expected_return}% exp. return</span>
+                          <span className="text-emerald-400">{mv(formatCurrency(proj10, true))} in 10Y</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm">
+                <Bitcoin className="w-8 h-8 opacity-30 mb-2" />
+                <p>Set holdings to see allocation</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Asset comparison chart */}
+        {cryptos.length > 1 && assetProjections.length > 0 && (
+          <div className="bg-card border border-border rounded-xl p-5">
+            <h3 className="text-sm font-bold mb-4">Asset Comparison (10Y Projection)</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={assetProjections} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
+                <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
+                <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend />
+                {cryptos.map((c: any, i: number) => (
+                  <Line
+                    key={c.symbol}
+                    type="monotone"
+                    dataKey={c.symbol}
+                    stroke={COLORS[i % COLORS.length]}
+                    strokeWidth={2}
+                    dot={false}
+                    name={c.symbol}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* ─── Add Asset Form ─────────────────────────────────────────────────── */}
+        {showAdd && (
+          <div className="rounded-xl border border-primary/30 bg-card p-5">
+            <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
+              <Plus className="w-4 h-4 text-primary" /> Add Crypto Asset
+            </h3>
+            <CryptoEditForm
+              data={draft}
+              onChange={handleDraftChange}
+              onEnterSave={() => createMut.mutateAsync(normaliseCrypto(draft))}
+            />
+            <div className="flex gap-2 mt-4">
+              <SaveButton
+                label="Save Crypto Asset"
+                onSave={() => createMut.mutateAsync(normaliseCrypto(draft))}
+              />
+              <Button size="sm" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Bulk toolbar ───────────────────────────────────────────────────── */}
+        {selected.size > 0 && (
+          <div
+            className="flex items-center gap-3 flex-wrap rounded-xl border px-4 py-2.5 text-sm"
+            style={{ borderColor: "hsl(0,72%,35%)", background: "hsl(0,50%,8%)" }}
+          >
+            <span className="text-red-300 font-semibold">{selected.size} selected</span>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} className="text-xs h-7 text-muted-foreground">Clear</Button>
+            <div className="flex-1" />
+            <Button size="sm" onClick={handleExportBackup} variant="outline" className="text-xs h-7 gap-1">Export Selected</Button>
+            <Button
+              size="sm"
+              onClick={() => setShowBulkModal(true)}
+              className="gap-1.5 bg-red-600 hover:bg-red-700 text-white border-0 h-7 text-xs"
+            >
+              <Trash2 className="w-3 h-3" /> Delete {selected.size} assets
+            </Button>
+          </div>
+        )}
+
+        {/* ─── Current Holdings Table ─────────────────────────────────────────── */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="p-4 border-b border-border flex items-center justify-between">
+            <h3 className="text-sm font-bold">Current Holdings</h3>
+            {cryptos.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-xs h-7 gap-1 text-muted-foreground"
+                onClick={() =>
+                  selected.size === cryptos.length
+                    ? setSelected(new Set())
+                    : setSelected(new Set(cryptos.map((c: any) => c.id)))
+                }
+              >
+                {selected.size === cryptos.length ? (
+                  <CheckSquare className="w-3.5 h-3.5 text-primary" />
+                ) : (
+                  <Square className="w-3.5 h-3.5" />
+                )}
+                Select all
+              </Button>
+            )}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border bg-secondary/30">
+                  <th className="px-3 py-2.5 w-8"></th>
+                  {[
+                    "Asset", "Holdings", "Avg Buy", "Price", "Value",
+                    "Invested", "Gain/Loss", "G/L %", "Allocation", "10Y Value", "DCA", "Actions",
+                  ].map(h => (
+                    <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {cryptos.length === 0 && (
+                  <tr>
+                    <td colSpan={13} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                      No crypto assets added yet. Click "Add Asset" to get started.
+                    </td>
+                  </tr>
+                )}
+                {cryptos.map((c: any, i: number) => {
+                  const calc = cryptoCalcs(c, totalCurrentValue);
+                  const isEditing = editingId === c.id;
+                  const isSelected = selected.has(c.id);
+                  const proj10 = projectInvestment(calc.currentValue, c.expected_return, c.monthly_dca || 0, 10)[9]?.value || 0;
+
+                  if (isEditing && editDraft) {
+                    return (
+                      <tr key={c.id} className="border-b border-border bg-secondary/20">
+                        <td colSpan={13} className="p-3">
+                          <CryptoEditForm
+                            data={editDraft}
+                            onChange={handleEditDraftChange}
+                            onEnterSave={handleSaveEdit}
+                          />
+                          <div className="flex gap-2 mt-3">
+                            <SaveButton
+                              label="Save Crypto Asset"
+                              onSave={() => updateMut.mutateAsync({ id: c.id, data: normaliseCrypto(editDraft) })}
+                            />
+                            <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return (
+                    <tr
+                      key={c.id}
+                      className={`border-b border-border/50 hover:bg-secondary/20 transition-colors ${isSelected ? "bg-primary/5" : ""}`}
+                    >
+                      <td className="px-3 py-2.5">
+                        <button
+                          onClick={() =>
+                            setSelected(prev => {
+                              const n = new Set(prev);
+                              n.has(c.id) ? n.delete(c.id) : n.add(c.id);
+                              return n;
+                            })
+                          }
+                          className="flex items-center justify-center text-muted-foreground hover:text-foreground"
+                        >
+                          {isSelected ? (
+                            <CheckSquare className="w-3.5 h-3.5 text-primary" />
+                          ) : (
+                            <Square className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </td>
+
+                      {/* Asset identity */}
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-7 h-7 rounded flex items-center justify-center text-xs font-bold shrink-0"
+                            style={{
+                              background: COLORS[i % COLORS.length] + "20",
+                              color: COLORS[i % COLORS.length],
+                            }}
+                          >
+                            {c.symbol?.charAt(0) ?? "?"}
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold">{c.symbol}</p>
+                            <p className="text-xs text-muted-foreground truncate max-w-[90px]">{c.name}</p>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Holdings — many decimals for crypto */}
+                      <td className="px-3 py-2.5 text-xs num-display">
+                        {calc.units < 1 ? calc.units.toFixed(8) : calc.units.toLocaleString()}
+                      </td>
+
+                      <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(calc.avgBuyPrice))}</td>
+                      <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(calc.currentPrice))}</td>
+                      <td className="px-3 py-2.5 text-xs num-display font-semibold">{mv(formatCurrency(calc.currentValue, true))}</td>
+                      <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(calc.totalInvested, true))}</td>
+
+                      {/* Gain/Loss */}
+                      <td className={`px-3 py-2.5 text-xs num-display font-semibold ${calc.unrealisedGL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        <div className="flex items-center gap-1">
+                          {calc.unrealisedGL >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                          {mv(`${calc.unrealisedGL >= 0 ? "+" : ""}${formatCurrency(calc.unrealisedGL, true)}`)}
+                        </div>
+                      </td>
+
+                      {/* G/L % */}
+                      <td className={`px-3 py-2.5 text-xs num-display font-semibold ${calc.unrealisedGLPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {mv(`${calc.unrealisedGLPct >= 0 ? "+" : ""}${calc.unrealisedGLPct.toFixed(1)}%`)}
+                      </td>
+
+                      {/* Allocation */}
+                      <td className="px-3 py-2.5 text-xs num-display">
+                        {mv(`${calc.actualAllocPct.toFixed(1)}%`)}
+                      </td>
+
+                      <td className="px-3 py-2.5 text-xs num-display text-emerald-400">{mv(formatCurrency(proj10, true))}</td>
+                      <td className="px-3 py-2.5 text-xs num-display text-primary">{mv(formatCurrency(c.monthly_dca || 0))}</td>
+
+                      <td className="px-3 py-2.5">
+                        <div className="flex gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="w-6 h-6"
+                            onClick={() => { setEditingId(c.id); setEditDraft({ ...c }); }}
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="w-6 h-6 text-red-400"
+                            onClick={() => { if (confirm("Delete this asset?")) deleteMut.mutate(c.id); }}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+
+              {/* Footer totals */}
+              {cryptos.length > 0 && (
+                <tfoot>
+                  <tr className="border-t border-border bg-secondary/20">
+                    <td></td>
+                    <td className="px-3 py-2.5 text-xs font-bold" colSpan={4}>TOTAL</td>
+                    <td className="px-3 py-2.5 text-xs font-bold num-display">{mv(formatCurrency(totalCurrentValue, true))}</td>
+                    <td className="px-3 py-2.5 text-xs font-bold num-display">{mv(formatCurrency(totalInvested, true))}</td>
+                    <td className={`px-3 py-2.5 text-xs font-bold num-display ${totalGL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {mv(`${totalGL >= 0 ? "+" : ""}${formatCurrency(totalGL, true)}`)}
+                    </td>
+                    <td className={`px-3 py-2.5 text-xs font-bold num-display ${totalGLPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {mv(`${totalGLPct >= 0 ? "+" : ""}${totalGLPct.toFixed(1)}%`)}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-muted-foreground">100%</td>
+                    <td className="px-3 py-2.5 text-xs font-bold num-display text-emerald-400">{mv(formatCurrency(year10Val, true))}</td>
+                    <td colSpan={2}></td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+
+        {/* ─── Bulk Delete Modal ──────────────────────────────────────────────── */}
+        <BulkDeleteModal
+          open={showBulkModal}
+          count={selected.size}
+          label="crypto assets"
+          onConfirm={async () => {
+            const ids = Array.from(selected);
+            for (const id of ids) await apiRequest("DELETE", `/api/crypto/${id}`);
+            await qc.invalidateQueries({ queryKey: ["/api/crypto"] });
+            setSelected(new Set());
+            setShowBulkModal(false);
+            toast({ title: `Deleted ${ids.length} crypto assets`, description: "Records removed from Supabase and local cache." });
+          }}
+          onCancel={() => setShowBulkModal(false)}
+          onExportBackup={selected.size > 0 ? handleExportBackup : undefined}
+        />
+
+        {/* ─── 10-Year Projection Chart ───────────────────────────────────────── */}
+        {combinedProjection.length > 0 && (
+          <div className="rounded-xl border border-border bg-card p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold">10-Year Portfolio Projection</h3>
+              <span className="text-xs text-muted-foreground">CAGR: <span className="text-primary font-bold">{cagr.toFixed(1)}%</span></span>
+            </div>
+
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="cryptoProjGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
+                <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
+                <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                <Tooltip content={<CustomTooltip />} />
+                <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#cryptoProjGrad)" strokeWidth={2} name="Portfolio Value" />
+                <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
+              </AreaChart>
+            </ResponsiveContainer>
+
+            <div className="overflow-x-auto mt-4">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Year</th>
+                    <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Total Invested</th>
+                    <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Portfolio Value</th>
+                    <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Unrealised Gain</th>
+                    <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Gain %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {combinedProjection.map(p => {
+                    const gain = p.value - p.invested;
+                    const gainPct = p.invested > 0 ? (gain / p.invested) * 100 : 0;
+                    return (
+                      <tr key={p.year} className="border-b border-border/40 hover:bg-secondary/20">
+                        <td className="py-1.5 pr-4 font-semibold text-primary">{p.year}</td>
+                        <td className="py-1.5 pr-4 num-display">{mv(formatCurrency(p.invested, true))}</td>
+                        <td className="py-1.5 pr-4 num-display text-emerald-400 font-bold">{mv(formatCurrency(p.value, true))}</td>
+                        <td className={`py-1.5 pr-4 num-display font-semibold ${gain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {mv(`${gain >= 0 ? "+" : ""}${formatCurrency(gain, true)}`)}
+                        </td>
+                        <td className={`py-1.5 pr-4 num-display ${gainPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {mv(`${gainPct >= 0 ? "+" : ""}${gainPct.toFixed(1)}%`)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        </>
+      )}
+
+      {/* ─── Transactions Tab ──────────────────────────────────────────────── */}
+      {activeTab === 'transactions' && (
+        <div className="space-y-4">
+          {/* ─── Add Transaction button ──────────────────────────────────────── */}
+          <div className="flex justify-end">
+            <Button
+              onClick={() => { setTxDraft(emptyTxForm()); setEditingTxId(null); setShowTxForm(true); }}
+              className="gap-2 text-xs"
+              style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Transaction
+            </Button>
+          </div>
+
+          {/* ─── Transaction Ledger ─────────────────────────────────────────── */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between flex-wrap gap-3">
+              <h3 className="text-sm font-bold">All Transactions</h3>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Type filter */}
+                <div className="flex rounded-lg overflow-hidden border border-border text-xs">
+                  {(["all", "buy", "sell"] as const).map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setTxTypeFilter(t)}
+                      className={`px-2.5 py-1 font-semibold transition-colors ${
+                        txTypeFilter === t ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {t === "all" ? "All" : t === "buy" ? "Buy" : "Sell"}
+                    </button>
+                  ))}
+                </div>
+                {/* Status filter */}
+                <div className="flex rounded-lg overflow-hidden border border-border text-xs">
+                  {(["all", "actual", "planned"] as const).map(s => (
+                    <button
+                      key={s}
+                      onClick={() => setTxStatusFilter(s)}
+                      className={`px-2.5 py-1 font-semibold transition-colors ${
+                        txStatusFilter === s ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {s === "all" ? "All" : s === "actual" ? "Actual" : "Planned"}
+                    </button>
+                  ))}
+                </div>
+                {/* Date range */}
+                <div className="flex items-center gap-1">
+                  <Calendar className="w-3 h-3 text-muted-foreground" />
+                  <Input
+                    type="date"
+                    value={txDateFrom}
+                    onChange={e => setTxDateFrom(e.target.value)}
+                    className="h-7 text-xs w-32"
+                  />
+                  <span className="text-muted-foreground text-xs">–</span>
+                  <Input
+                    type="date"
+                    value={txDateTo}
+                    onChange={e => setTxDateTo(e.target.value)}
+                    className="h-7 text-xs w-32"
+                  />
+                </div>
+                {/* Symbol filter */}
+                {allSymbols.length > 0 && (
+                  <div className="flex items-center gap-1">
+                    <Filter className="w-3 h-3 text-muted-foreground" />
+                    <select
+                      value={txSymbolFilter}
+                      onChange={e => setTxSymbolFilter(e.target.value)}
+                      className="h-7 text-xs bg-secondary border border-border rounded px-2 text-foreground"
+                    >
+                      <option value="all">All Symbols</option>
+                      {allSymbols.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/30">
+                    {["Date", "Type", "Status", "Symbol", "Units", "Price/Unit", "Total", "Fee", "Notes", "Actions"].map(h => (
+                      <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTx.length === 0 && (
+                    <tr>
+                      <td colSpan={10} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                        No transactions found. Click "Add Transaction" to record a trade.
+                      </td>
+                    </tr>
+                  )}
+                  {filteredTx.map(tx => (
+                    <tr key={tx.id} className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
+                      <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">{tx.transaction_date}</td>
+                      <td className="px-3 py-2.5">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          tx.transaction_type === "buy"
+                            ? "bg-emerald-500/15 text-emerald-400"
+                            : "bg-red-500/15 text-red-400"
+                        }`}>
+                          {tx.transaction_type === "buy" ? "Buy" : "Sell"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          tx.status === "actual"
+                            ? "bg-blue-500/15 text-blue-400"
+                            : "bg-amber-500/15 text-amber-400"
+                        }`}>
+                          {tx.status === "actual" ? "Actual" : "Planned"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs font-bold">{tx.symbol}</td>
+                      <td className="px-3 py-2.5 text-xs num-display">
+                        {safeNum(tx.units) < 1 ? safeNum(tx.units).toFixed(8) : safeNum(tx.units).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(safeNum(tx.price_per_unit)))}</td>
+                      <td className="px-3 py-2.5 text-xs num-display font-semibold">{mv(formatCurrency(safeNum(tx.total_amount), true))}</td>
+                      <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">{mv(formatCurrency(safeNum(tx.fee)))}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[120px] truncate">{tx.notes}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="w-6 h-6"
+                            onClick={() => handleEditTx(tx)}
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="w-6 h-6 text-red-400"
+                            onClick={() => { if (confirm("Delete this transaction?")) deleteTxMut.mutate(tx.id); }}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* ─── Planned Future Transactions ────────────────────────────────────── */}
+          {(plannedBuys.length > 0 || plannedSells.length > 0) && (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-amber-400" />
+                Planned Future Transactions
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {[...plannedBuys, ...plannedSells]
+                  .sort((a, b) => a.transaction_date.localeCompare(b.transaction_date))
+                  .map(tx => (
+                    <div
+                      key={tx.id}
+                      className={`rounded-lg border p-3 ${
+                        tx.transaction_type === "buy"
+                          ? "border-emerald-500/30 bg-emerald-500/5"
+                          : "border-red-500/30 bg-red-500/5"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-bold">{tx.symbol}</span>
+                        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
+                          tx.transaction_type === "buy"
+                            ? "bg-emerald-500/20 text-emerald-400"
+                            : "bg-red-500/20 text-red-400"
+                        }`}>
+                          {tx.transaction_type === "buy" ? "Buy" : "Sell"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-1">{tx.transaction_date}</p>
+                      <p className="text-sm font-bold num-display">{mv(formatCurrency(safeNum(tx.total_amount), true))}</p>
+                      {tx.notes && <p className="text-xs text-muted-foreground mt-1 truncate">{tx.notes}</p>}
+                      <div className="mt-2 pt-2 border-t border-border/50">
+                        <span className="text-xs text-amber-400 font-semibold">Planned</span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ─── DCA Schedules Tab ─────────────────────────────────────────────── */}
       {activeTab === 'dca' && (
@@ -1064,8 +2004,8 @@ export default function CryptoPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
               { label: 'Active Schedules', value: String(dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).length) },
-              { label: 'Total Monthly DCA', value: formatCurrency(dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).reduce((s: number, d: CryptoDCASchedule) => s + cryptoDcaMonthlyEquiv(d.amount, d.frequency), 0)) },
-              { label: 'Annual DCA Budget', value: formatCurrency(dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).reduce((s: number, d: CryptoDCASchedule) => s + cryptoDcaMonthlyEquiv(d.amount, d.frequency), 0) * 12) },
+              { label: 'Total Monthly DCA', value: formatCurrency(dcaMonthlyTotal) },
+              { label: 'Annual DCA Budget', value: formatCurrency(dcaMonthlyTotal * 12) },
               { label: 'Coins Scheduled', value: String(new Set(dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).map((d: CryptoDCASchedule) => d.symbol)).size) },
             ].map(k => (
               <div key={k.label} className="bg-card border border-border rounded-xl p-4">
@@ -1074,6 +2014,44 @@ export default function CryptoPage() {
               </div>
             ))}
           </div>
+
+          {/* DCA Forecast impact on projection */}
+          {dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).length > 0 && (
+            <div className="bg-card border border-border rounded-xl p-5">
+              <h3 className="text-sm font-bold mb-3">DCA Impact on Portfolio Projection</h3>
+              <p className="text-xs text-muted-foreground mb-3">
+                Your active DCA schedules contribute <span className="text-primary font-semibold">{mv(formatCurrency(dcaMonthlyTotal))}/mo</span> ({mv(formatCurrency(dcaMonthlyTotal * 12))}/yr) to the portfolio growth model.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Symbol</th>
+                      <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Frequency</th>
+                      <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Amount</th>
+                      <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Monthly Equiv</th>
+                      <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Annual Contrib</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).map((d: CryptoDCASchedule) => {
+                      const monthly = cryptoDcaMonthlyEquiv(d.amount, d.frequency);
+                      return (
+                        <tr key={d.id} className="border-b border-border/40 hover:bg-secondary/20">
+                          <td className="py-1.5 pr-4 font-bold text-primary">{d.symbol || d.asset_name}</td>
+                          <td className="py-1.5 pr-4 capitalize text-muted-foreground">{d.frequency}</td>
+                          <td className="py-1.5 pr-4 num-display">{mv(formatCurrency(d.amount))}</td>
+                          <td className="py-1.5 pr-4 num-display text-primary">{mv(formatCurrency(monthly))}/mo</td>
+                          <td className="py-1.5 pr-4 num-display text-emerald-400">{mv(formatCurrency(monthly * 12))}/yr</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between">
               <h3 className="text-sm font-bold">DCA Schedules</h3>
@@ -1119,644 +2097,128 @@ export default function CryptoPage() {
         </div>
       )}
 
-      {activeTab === 'portfolio' && (
-        <>
-      {/* ─── 7 KPI Cards ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
-        {[
-          { label: "Portfolio Value", value: mv(formatCurrency(totalCurrentValue, true)), color: "" },
-          { label: "Cost Basis", value: mv(formatCurrency(totalInvested, true)), color: "" },
-          {
-            label: "Unrealised G/L",
-            value: mv(`${totalGL >= 0 ? "+" : ""}${formatCurrency(totalGL, true)}`),
-            color: totalGL >= 0 ? "text-emerald-400" : "text-red-400",
-          },
-          {
-            label: "G/L %",
-            value: mv(`${totalGLPct >= 0 ? "+" : ""}${totalGLPct.toFixed(1)}%`),
-            color: totalGLPct >= 0 ? "text-emerald-400" : "text-red-400",
-          },
-          {
-            label: "Planned Buys",
-            value: mv(formatCurrency(plannedBuyTotal, true)),
-            color: "text-emerald-400",
-          },
-          {
-            label: "Planned Sells",
-            value: mv(formatCurrency(plannedSellTotal, true)),
-            color: "text-red-400",
-          },
-          {
-            label: "Net Cash Impact",
-            value: mv(`${netCashImpact >= 0 ? "+" : ""}${formatCurrency(netCashImpact, true)}`),
-            color: netCashImpact >= 0 ? "text-emerald-400" : "text-red-400",
-          },
-        ].map(s => (
-          <div key={s.label} className="bg-card border border-border rounded-xl p-4">
-            <p className="text-xs text-muted-foreground">{s.label}</p>
-            <p className={`text-base font-bold num-display mt-1 ${s.color}`}>{s.value}</p>
+      {/* ─── Planned Orders Tab ────────────────────────────────────────────── */}
+      {activeTab === 'orders' && (
+        <div className="space-y-4">
+          {/* ─── KPI Summary ────────────────────────────────────────────────── */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+            {[
+              { label: 'Total Orders', value: String(plannedOrders.length), color: '' },
+              { label: 'Planned Buy AUD', value: mv(formatCurrency(orderBuyTotal, true)), color: 'text-emerald-400' },
+              { label: 'Planned Sell AUD', value: mv(formatCurrency(orderSellTotal, true)), color: 'text-red-400' },
+              { label: 'Pending', value: String(orderStatusCounts.planned), color: 'text-amber-400' },
+              { label: 'Executed', value: String(orderStatusCounts.executed), color: 'text-emerald-400' },
+            ].map(k => (
+              <div key={k.label} className="bg-card border border-border rounded-xl p-4">
+                <p className="text-xs text-muted-foreground">{k.label}</p>
+                <p className={`text-base font-bold num-display mt-1 ${k.color}`}>{k.value}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      {/* ─── Charts row ────────────────────────────────────────────────────── */}
-      <div className="grid lg:grid-cols-2 gap-4">
-        <div className="bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-bold mb-4">Portfolio Growth (10Y)</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="cryptoGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
-              <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
-              <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-              <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#cryptoGrad)" strokeWidth={2} name="Portfolio Value" />
-              <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-bold mb-4">Asset Allocation</h3>
-          {allocationData.length > 0 ? (
-            <div className="flex items-center gap-3">
-              <ResponsiveContainer width="45%" height={180}>
-                <PieChart>
-                  <Pie
-                    data={allocationData}
-                    cx="50%" cy="50%"
-                    innerRadius={45} outerRadius={75}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {allocationData.map((d: any, i: number) => (
-                      <Cell key={i} fill={d.color} />
+          {/* ─── Orders Table ───────────────────────────────────────────────── */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <ShoppingCart className="w-4 h-4 text-primary" /> Planned Investment Orders
+              </h3>
+              <Button
+                size="sm"
+                onClick={() => { setOrderDraft(emptyOrderForm()); setEditingOrderId(null); setShowOrderForm(true); }}
+                style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+                className="gap-2 text-xs h-7"
+              >
+                <Plus className="w-3 h-3" /> Add Order
+              </Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/30">
+                    {['Date', 'Symbol', 'Asset', 'Action', 'Amount AUD', 'Units', 'Status', 'Notes', 'Actions'].map(h => (
+                      <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
                     ))}
-                  </Pie>
-                  <Tooltip formatter={(v: number) => mv(formatCurrency(v, true))} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="flex-1 space-y-1.5 text-xs overflow-hidden">
-                {cryptos.map((c: any, i: number) => {
-                  const calc = cryptoCalcs(c, totalCurrentValue);
-                  if (calc.currentValue <= 0) return null;
-                  const proj10 = projectInvestment(calc.currentValue, c.expected_return, c.monthly_dca || 0, 10)[9]?.value || 0;
-                  return (
-                    <div key={c.id} className="rounded-lg p-2 bg-secondary/30">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <div className="w-2 h-2 rounded-full shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
-                          <span className="font-bold truncate">{c.symbol}</span>
-                          <span className="text-muted-foreground text-xs">({calc.actualAllocPct.toFixed(1)}%)</span>
-                        </div>
-                        <span className="num-display">{mv(formatCurrency(calc.currentValue, true))}</span>
-                      </div>
-                      <div className="flex justify-between mt-1 text-muted-foreground">
-                        <span>{c.expected_return}% exp. return</span>
-                        <span className="text-emerald-400">{mv(formatCurrency(proj10, true))} in 10Y</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm">
-              <Bitcoin className="w-8 h-8 opacity-30 mb-2" />
-              <p>Set holdings to see allocation</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Asset comparison chart */}
-      {cryptos.length > 1 && assetProjections.length > 0 && (
-        <div className="bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-bold mb-4">Asset Comparison (10Y Projection)</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={assetProjections} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
-              <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
-              <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend />
-              {cryptos.map((c: any, i: number) => (
-                <Line
-                  key={c.symbol}
-                  type="monotone"
-                  dataKey={c.symbol}
-                  stroke={COLORS[i % COLORS.length]}
-                  strokeWidth={2}
-                  dot={false}
-                  name={c.symbol}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* ─── Add Asset Form ─────────────────────────────────────────────────── */}
-      {showAdd && (
-        <div className="rounded-xl border border-primary/30 bg-card p-5">
-          <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
-            <Plus className="w-4 h-4 text-primary" /> Add Crypto Asset
-          </h3>
-          <CryptoEditForm
-            data={draft}
-            onChange={handleDraftChange}
-            onEnterSave={() => createMut.mutateAsync(normaliseCrypto(draft))}
-          />
-          <div className="flex gap-2 mt-4">
-            <SaveButton
-              label="Save Crypto Asset"
-              onSave={() => createMut.mutateAsync(normaliseCrypto(draft))}
-            />
-            <Button size="sm" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Bulk toolbar ───────────────────────────────────────────────────── */}
-      {selected.size > 0 && (
-        <div
-          className="flex items-center gap-3 flex-wrap rounded-xl border px-4 py-2.5 text-sm"
-          style={{ borderColor: "hsl(0,72%,35%)", background: "hsl(0,50%,8%)" }}
-        >
-          <span className="text-red-300 font-semibold">{selected.size} selected</span>
-          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} className="text-xs h-7 text-muted-foreground">Clear</Button>
-          <div className="flex-1" />
-          <Button size="sm" onClick={handleExportBackup} variant="outline" className="text-xs h-7 gap-1">Export Selected</Button>
-          <Button
-            size="sm"
-            onClick={() => setShowBulkModal(true)}
-            className="gap-1.5 bg-red-600 hover:bg-red-700 text-white border-0 h-7 text-xs"
-          >
-            <Trash2 className="w-3 h-3" /> Delete {selected.size} assets
-          </Button>
-        </div>
-      )}
-
-      {/* ─── Current Holdings Table ─────────────────────────────────────────── */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="p-4 border-b border-border flex items-center justify-between">
-          <h3 className="text-sm font-bold">Current Holdings</h3>
-          {cryptos.length > 0 && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-xs h-7 gap-1 text-muted-foreground"
-              onClick={() =>
-                selected.size === cryptos.length
-                  ? setSelected(new Set())
-                  : setSelected(new Set(cryptos.map((c: any) => c.id)))
-              }
-            >
-              {selected.size === cryptos.length ? (
-                <CheckSquare className="w-3.5 h-3.5 text-primary" />
-              ) : (
-                <Square className="w-3.5 h-3.5" />
-              )}
-              Select all
-            </Button>
-          )}
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-secondary/30">
-                <th className="px-3 py-2.5 w-8"></th>
-                {[
-                  "Asset", "Holdings", "Avg Buy", "Price", "Value",
-                  "Invested", "Gain/Loss", "G/L %", "Allocation", "10Y Value", "DCA", "Actions",
-                ].map(h => (
-                  <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {cryptos.length === 0 && (
-                <tr>
-                  <td colSpan={13} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                    No crypto assets added yet. Click "Add Asset" to get started.
-                  </td>
-                </tr>
-              )}
-              {cryptos.map((c: any, i: number) => {
-                const calc = cryptoCalcs(c, totalCurrentValue);
-                const isEditing = editingId === c.id;
-                const isSelected = selected.has(c.id);
-                const proj10 = projectInvestment(calc.currentValue, c.expected_return, c.monthly_dca || 0, 10)[9]?.value || 0;
-
-                if (isEditing && editDraft) {
-                  return (
-                    <tr key={c.id} className="border-b border-border bg-secondary/20">
-                      <td colSpan={13} className="p-3">
-                        <CryptoEditForm
-                          data={editDraft}
-                          onChange={handleEditDraftChange}
-                          onEnterSave={handleSaveEdit}
-                        />
-                        <div className="flex gap-2 mt-3">
-                          <SaveButton
-                            label="Save Crypto Asset"
-                            onSave={() => updateMut.mutateAsync({ id: c.id, data: normaliseCrypto(editDraft) })}
-                          />
-                          <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                }
-
-                return (
-                  <tr
-                    key={c.id}
-                    className={`border-b border-border/50 hover:bg-secondary/20 transition-colors ${isSelected ? "bg-primary/5" : ""}`}
-                  >
-                    <td className="px-3 py-2.5">
-                      <button
-                        onClick={() =>
-                          setSelected(prev => {
-                            const n = new Set(prev);
-                            n.has(c.id) ? n.delete(c.id) : n.add(c.id);
-                            return n;
-                          })
-                        }
-                        className="flex items-center justify-center text-muted-foreground hover:text-foreground"
-                      >
-                        {isSelected ? (
-                          <CheckSquare className="w-3.5 h-3.5 text-primary" />
-                        ) : (
-                          <Square className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </td>
-
-                    {/* Asset identity */}
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="w-7 h-7 rounded flex items-center justify-center text-xs font-bold shrink-0"
-                          style={{
-                            background: COLORS[i % COLORS.length] + "20",
-                            color: COLORS[i % COLORS.length],
-                          }}
-                        >
-                          {c.symbol?.charAt(0) ?? "?"}
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold">{c.symbol}</p>
-                          <p className="text-xs text-muted-foreground truncate max-w-[90px]">{c.name}</p>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Holdings — many decimals for crypto */}
-                    <td className="px-3 py-2.5 text-xs num-display">
-                      {calc.units < 1 ? calc.units.toFixed(8) : calc.units.toLocaleString()}
-                    </td>
-
-                    <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(calc.avgBuyPrice))}</td>
-                    <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(calc.currentPrice))}</td>
-                    <td className="px-3 py-2.5 text-xs num-display font-semibold">{mv(formatCurrency(calc.currentValue, true))}</td>
-                    <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(calc.totalInvested, true))}</td>
-
-                    {/* Gain/Loss */}
-                    <td className={`px-3 py-2.5 text-xs num-display font-semibold ${calc.unrealisedGL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      <div className="flex items-center gap-1">
-                        {calc.unrealisedGL >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                        {mv(`${calc.unrealisedGL >= 0 ? "+" : ""}${formatCurrency(calc.unrealisedGL, true)}`)}
-                      </div>
-                    </td>
-
-                    {/* G/L % */}
-                    <td className={`px-3 py-2.5 text-xs num-display font-semibold ${calc.unrealisedGLPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      {mv(`${calc.unrealisedGLPct >= 0 ? "+" : ""}${calc.unrealisedGLPct.toFixed(1)}%`)}
-                    </td>
-
-                    {/* Allocation */}
-                    <td className="px-3 py-2.5 text-xs num-display">
-                      {mv(`${calc.actualAllocPct.toFixed(1)}%`)}
-                    </td>
-
-                    <td className="px-3 py-2.5 text-xs num-display text-emerald-400">{mv(formatCurrency(proj10, true))}</td>
-                    <td className="px-3 py-2.5 text-xs num-display text-primary">{mv(formatCurrency(c.monthly_dca || 0))}</td>
-
-                    <td className="px-3 py-2.5">
-                      <div className="flex gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="w-6 h-6"
-                          onClick={() => { setEditingId(c.id); setEditDraft({ ...c }); }}
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="w-6 h-6 text-red-400"
-                          onClick={() => { if (confirm("Delete this asset?")) deleteMut.mutate(c.id); }}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </td>
                   </tr>
-                );
-              })}
-            </tbody>
-
-            {/* Footer totals */}
-            {cryptos.length > 0 && (
-              <tfoot>
-                <tr className="border-t border-border bg-secondary/20">
-                  <td></td>
-                  <td className="px-3 py-2.5 text-xs font-bold" colSpan={4}>TOTAL</td>
-                  <td className="px-3 py-2.5 text-xs font-bold num-display">{mv(formatCurrency(totalCurrentValue, true))}</td>
-                  <td className="px-3 py-2.5 text-xs font-bold num-display">{mv(formatCurrency(totalInvested, true))}</td>
-                  <td className={`px-3 py-2.5 text-xs font-bold num-display ${totalGL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {mv(`${totalGL >= 0 ? "+" : ""}${formatCurrency(totalGL, true)}`)}
-                  </td>
-                  <td className={`px-3 py-2.5 text-xs font-bold num-display ${totalGLPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {mv(`${totalGLPct >= 0 ? "+" : ""}${totalGLPct.toFixed(1)}%`)}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground">100%</td>
-                  <td className="px-3 py-2.5 text-xs font-bold num-display text-emerald-400">{mv(formatCurrency(year10Val, true))}</td>
-                  <td colSpan={2}></td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
-
-      {/* ─── Bulk Delete Modal ──────────────────────────────────────────────── */}
-      <BulkDeleteModal
-        open={showBulkModal}
-        count={selected.size}
-        label="crypto assets"
-        onConfirm={async () => {
-          const ids = Array.from(selected);
-          for (const id of ids) await apiRequest("DELETE", `/api/crypto/${id}`);
-          await qc.invalidateQueries({ queryKey: ["/api/crypto"] });
-          setSelected(new Set());
-          setShowBulkModal(false);
-          toast({ title: `Deleted ${ids.length} crypto assets`, description: "Records removed from Supabase and local cache." });
-        }}
-        onCancel={() => setShowBulkModal(false)}
-        onExportBackup={selected.size > 0 ? handleExportBackup : undefined}
-      />
-
-      {/* ─── Transaction Ledger ─────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="p-4 border-b border-border flex items-center justify-between flex-wrap gap-3">
-          <h3 className="text-sm font-bold">All Transactions</h3>
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Type filter */}
-            <div className="flex rounded-lg overflow-hidden border border-border text-xs">
-              {(["all", "buy", "sell"] as const).map(t => (
-                <button
-                  key={t}
-                  onClick={() => setTxTypeFilter(t)}
-                  className={`px-2.5 py-1 font-semibold transition-colors ${
-                    txTypeFilter === t ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {t === "all" ? "All" : t === "buy" ? "Buy" : "Sell"}
-                </button>
-              ))}
-            </div>
-            {/* Status filter */}
-            <div className="flex rounded-lg overflow-hidden border border-border text-xs">
-              {(["all", "actual", "planned"] as const).map(s => (
-                <button
-                  key={s}
-                  onClick={() => setTxStatusFilter(s)}
-                  className={`px-2.5 py-1 font-semibold transition-colors ${
-                    txStatusFilter === s ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {s === "all" ? "All" : s === "actual" ? "Actual" : "Planned"}
-                </button>
-              ))}
-            </div>
-            {/* Date range */}
-            <div className="flex items-center gap-1">
-              <Calendar className="w-3 h-3 text-muted-foreground" />
-              <Input
-                type="date"
-                value={txDateFrom}
-                onChange={e => setTxDateFrom(e.target.value)}
-                className="h-7 text-xs w-32"
-              />
-              <span className="text-muted-foreground text-xs">–</span>
-              <Input
-                type="date"
-                value={txDateTo}
-                onChange={e => setTxDateTo(e.target.value)}
-                className="h-7 text-xs w-32"
-              />
-            </div>
-            {/* Symbol filter */}
-            {allSymbols.length > 0 && (
-              <div className="flex items-center gap-1">
-                <Filter className="w-3 h-3 text-muted-foreground" />
-                <select
-                  value={txSymbolFilter}
-                  onChange={e => setTxSymbolFilter(e.target.value)}
-                  className="h-7 text-xs bg-secondary border border-border rounded px-2 text-foreground"
-                >
-                  <option value="all">All Symbols</option>
-                  {allSymbols.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-secondary/30">
-                {["Date", "Type", "Status", "Symbol", "Units", "Price/Unit", "Total", "Fee", "Notes", "Actions"].map(h => (
-                  <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredTx.length === 0 && (
-                <tr>
-                  <td colSpan={10} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                    No transactions found. Click "Add Transaction" to record a trade.
-                  </td>
-                </tr>
-              )}
-              {filteredTx.map(tx => (
-                <tr key={tx.id} className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
-                  <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">{tx.transaction_date}</td>
-                  <td className="px-3 py-2.5">
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                      tx.transaction_type === "buy"
-                        ? "bg-emerald-500/15 text-emerald-400"
-                        : "bg-red-500/15 text-red-400"
-                    }`}>
-                      {tx.transaction_type === "buy" ? "Buy" : "Sell"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                      tx.status === "actual"
-                        ? "bg-blue-500/15 text-blue-400"
-                        : "bg-amber-500/15 text-amber-400"
-                    }`}>
-                      {tx.status === "actual" ? "Actual" : "Planned"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-xs font-bold">{tx.symbol}</td>
-                  <td className="px-3 py-2.5 text-xs num-display">
-                    {safeNum(tx.units) < 1 ? safeNum(tx.units).toFixed(8) : safeNum(tx.units).toLocaleString()}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(safeNum(tx.price_per_unit)))}</td>
-                  <td className="px-3 py-2.5 text-xs num-display font-semibold">{mv(formatCurrency(safeNum(tx.total_amount), true))}</td>
-                  <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">{mv(formatCurrency(safeNum(tx.fee)))}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[120px] truncate">{tx.notes}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="w-6 h-6"
-                        onClick={() => handleEditTx(tx)}
-                      >
-                        <Edit2 className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="w-6 h-6 text-red-400"
-                        onClick={() => { if (confirm("Delete this transaction?")) deleteTxMut.mutate(tx.id); }}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ─── Planned Future Transactions ────────────────────────────────────── */}
-      {(plannedBuys.length > 0 || plannedSells.length > 0) && (
-        <div className="rounded-xl border border-border bg-card p-5">
-          <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-amber-400" />
-            Planned Future Transactions
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {[...plannedBuys, ...plannedSells]
-              .sort((a, b) => a.transaction_date.localeCompare(b.transaction_date))
-              .map(tx => (
-                <div
-                  key={tx.id}
-                  className={`rounded-lg border p-3 ${
-                    tx.transaction_type === "buy"
-                      ? "border-emerald-500/30 bg-emerald-500/5"
-                      : "border-red-500/30 bg-red-500/5"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold">{tx.symbol}</span>
-                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
-                      tx.transaction_type === "buy"
-                        ? "bg-emerald-500/20 text-emerald-400"
-                        : "bg-red-500/20 text-red-400"
-                    }`}>
-                      {tx.transaction_type === "buy" ? "Buy" : "Sell"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-1">{tx.transaction_date}</p>
-                  <p className="text-sm font-bold num-display">{mv(formatCurrency(safeNum(tx.total_amount), true))}</p>
-                  {tx.notes && <p className="text-xs text-muted-foreground mt-1 truncate">{tx.notes}</p>}
-                  <div className="mt-2 pt-2 border-t border-border/50">
-                    <span className="text-xs text-amber-400 font-semibold">Planned</span>
-                  </div>
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
-
-      {/* ─── 10-Year Projection Chart ───────────────────────────────────────── */}
-      {combinedProjection.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold">10-Year Portfolio Projection</h3>
-            <span className="text-xs text-muted-foreground">CAGR: <span className="text-primary font-bold">{cagr.toFixed(1)}%</span></span>
-          </div>
-
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="cryptoProjGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
-              <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
-              <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-              <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#cryptoProjGrad)" strokeWidth={2} name="Portfolio Value" />
-              <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
-            </AreaChart>
-          </ResponsiveContainer>
-
-          <div className="overflow-x-auto mt-4">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Year</th>
-                  <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Total Invested</th>
-                  <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Portfolio Value</th>
-                  <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Unrealised Gain</th>
-                  <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Gain %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {combinedProjection.map(p => {
-                  const gain = p.value - p.invested;
-                  const gainPct = p.invested > 0 ? (gain / p.invested) * 100 : 0;
-                  return (
-                    <tr key={p.year} className="border-b border-border/40 hover:bg-secondary/20">
-                      <td className="py-1.5 pr-4 font-semibold text-primary">{p.year}</td>
-                      <td className="py-1.5 pr-4 num-display">{mv(formatCurrency(p.invested, true))}</td>
-                      <td className="py-1.5 pr-4 num-display text-emerald-400 font-bold">{mv(formatCurrency(p.value, true))}</td>
-                      <td className={`py-1.5 pr-4 num-display font-semibold ${gain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {mv(`${gain >= 0 ? "+" : ""}${formatCurrency(gain, true)}`)}
-                      </td>
-                      <td className={`py-1.5 pr-4 num-display ${gainPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {mv(`${gainPct >= 0 ? "+" : ""}${gainPct.toFixed(1)}%`)}
+                </thead>
+                <tbody>
+                  {plannedOrders.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                        No planned orders yet. Click "Add Order" to create one.
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  )}
+                  {[...plannedOrders]
+                    .sort((a: any, b: any) => (a.planned_date ?? '').localeCompare(b.planned_date ?? ''))
+                    .map((o: any) => (
+                      <tr key={o.id} className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground num-display">{o.planned_date}</td>
+                        <td className="px-3 py-2.5 text-xs font-bold text-primary">{o.ticker}</td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[100px] truncate">{o.asset_name}</td>
+                        <td className="px-3 py-2.5">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                            o.action === 'buy'
+                              ? 'bg-emerald-500/15 text-emerald-400'
+                              : 'bg-red-500/15 text-red-400'
+                          }`}>
+                            {o.action === 'buy' ? 'Buy' : 'Sell'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-xs num-display font-semibold">{mv(formatCurrency(safeNum(o.amount_aud), true))}</td>
+                        <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">
+                          {o.units != null ? (safeNum(o.units) < 1 ? safeNum(o.units).toFixed(8) : safeNum(o.units).toLocaleString()) : '—'}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                            o.status === 'planned'
+                              ? 'bg-amber-500/15 text-amber-400'
+                              : o.status === 'executed'
+                              ? 'bg-emerald-500/15 text-emerald-400'
+                              : 'bg-secondary text-muted-foreground'
+                          }`}>
+                            {o.status ? o.status.charAt(0).toUpperCase() + o.status.slice(1) : 'Planned'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[120px] truncate">{o.notes}</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex gap-1">
+                            {/* Quick status toggle: planned → executed */}
+                            {o.status === 'planned' && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="w-6 h-6 text-emerald-400"
+                                title="Mark as executed"
+                                onClick={() => updateOrderMut.mutate({ id: o.id, data: { ...o, status: 'executed' } })}
+                              >
+                                <CheckSquare className="w-3 h-3" />
+                              </Button>
+                            )}
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="w-6 h-6"
+                              onClick={() => { setOrderDraft({ ...o }); setEditingOrderId(o.id); setShowOrderForm(true); }}
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="w-6 h-6 text-red-400"
+                              onClick={() => { if (confirm('Delete this order?')) deleteOrderMut.mutate(o.id); }}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-      )}
-
-              </>
       )}
 
       {/* ─── AI Insights ───────────────────────────────────────────────────── */}
