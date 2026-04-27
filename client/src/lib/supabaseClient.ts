@@ -361,14 +361,15 @@ export const sbBills = {
   async getAll(): Promise<any[]> {
     try { return await sbGet("sf_recurring_bills", "order=next_due_date.asc"); } catch { return []; }
   },
-  async create(data: object): Promise<any | null> {
-    try { return await sbInsert("sf_recurring_bills", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); } catch { return null; }
+  // No silent catch — throw so useMutation onError fires with real message
+  async create(data: object): Promise<any> {
+    return await sbInsert("sf_recurring_bills", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
   },
-  async update(id: number, data: object): Promise<any | null> {
-    try { return await sbUpdate("sf_recurring_bills", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  async update(id: number, data: object): Promise<any> {
+    return await sbUpdate("sf_recurring_bills", id, { ...data, updated_at: new Date().toISOString() });
   },
   async delete(id: number): Promise<void> {
-    try { await sbDelete("sf_recurring_bills", id); } catch {}
+    await sbDelete("sf_recurring_bills", id);
   },
 };
 
@@ -381,17 +382,18 @@ export const sbBudgets = {
   async getForMonth(year: number, month: number): Promise<any[]> {
     try { return await sbGet("sf_monthly_budgets", `year=eq.${year}&month=eq.${month}&order=category.asc`); } catch { return []; }
   },
-  async create(data: object): Promise<any | null> {
-    try { return await sbInsert("sf_monthly_budgets", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); } catch { return null; }
+  async create(data: object): Promise<any> {
+    return await sbInsert("sf_monthly_budgets", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
   },
-  async upsert(data: object): Promise<any | null> {
-    try { return await sbUpsert("sf_monthly_budgets", { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  // upsert used for POST /api/budgets (new row from form)
+  async upsert(data: object): Promise<any> {
+    return await sbUpsert("sf_monthly_budgets", { ...data, updated_at: new Date().toISOString() });
   },
-  async update(id: number, data: object): Promise<any | null> {
-    try { return await sbUpdate("sf_monthly_budgets", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  async update(id: number, data: object): Promise<any> {
+    return await sbUpdate("sf_monthly_budgets", id, { ...data, updated_at: new Date().toISOString() });
   },
   async delete(id: number): Promise<void> {
-    try { await sbDelete("sf_monthly_budgets", id); } catch {}
+    await sbDelete("sf_monthly_budgets", id);
   },
   async bulkCreate(rows: object[]): Promise<any[]> {
     const stamped = rows.map(r => ({ ...r, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }));
@@ -409,13 +411,25 @@ export const sbBudgets = {
 
 export const sbTelegramSettings = {
   async get(): Promise<any | null> {
+    // Silent catch on GET is fine — returns null if missing
     try {
       const rows = await sbGet("sf_telegram_settings", "id=eq.shahrokh-family-main");
       return rows[0] ?? null;
     } catch { return null; }
   },
-  async upsert(data: object): Promise<any | null> {
-    try { return await sbUpsert("sf_telegram_settings", { id: "shahrokh-family-main", ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  // NO silent catch on upsert — throw so useMutation onError fires with real message
+  async upsert(data: object): Promise<any> {
+    // Strip any client-only or unknown fields before sending to Supabase
+    const {
+      id: _id,           // never send id in body (it's in the URL filter via sbUpsert)
+      created_at: _ca,  // managed by DB
+      ...rest
+    } = data as any;
+    return await sbUpsert("sf_telegram_settings", {
+      id: "shahrokh-family-main",
+      ...rest,
+      updated_at: new Date().toISOString(),
+    });
   },
 };
 
