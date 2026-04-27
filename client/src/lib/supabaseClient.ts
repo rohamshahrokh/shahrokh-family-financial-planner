@@ -224,6 +224,46 @@ export const sbStockTx = {
   },
 };
 
+// ─── Income ─────────────────────────────────────────────────────────────────
+
+export const sbIncome = {
+  async getAll(): Promise<any[]> {
+    try { return await sbGet("sf_income", "order=date.desc"); } catch { return []; }
+  },
+  async create(data: object): Promise<any | null> {
+    try {
+      return await sbInsert("sf_income", {
+        ...data,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    } catch { return null; }
+  },
+  async update(id: number, data: object): Promise<any | null> {
+    try { return await sbUpdate("sf_income", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  },
+  async delete(id: number): Promise<void> {
+    try { await sbDelete("sf_income", id); } catch {}
+  },
+  async bulkCreate(rows: object[]): Promise<any[]> {
+    const stamped = rows.map(r => ({
+      ...r,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }));
+    const res = await fetch(`${BASE}/sf_income`, {
+      method: "POST",
+      headers: HEADERS,
+      body: JSON.stringify(stamped),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Supabase bulk insert sf_income failed (${res.status}): ${errText}`);
+    }
+    return res.json();
+  },
+};
+
 // ─── Crypto Transactions ──────────────────────────────────────────────────────
 
 export const sbCryptoTx = {
