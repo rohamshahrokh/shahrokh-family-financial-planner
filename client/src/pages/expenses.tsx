@@ -823,7 +823,7 @@ export default function ExpensesPage() {
         return { week: d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: '2-digit' }), amount };
       });
 
-    const months = Object.keys(monthlyTrend).length || 1;
+    const months = Object.keys(monthlyTrendMap).length || 1;
     const weeks = Object.keys(weeklyMap).length || 1;
     const avgMonthlyByCategory = Object.entries(byCategory).sort((a, b) => b[1] - a[1]).slice(0, 10)
       .map(([name, total]) => ({ name, avg: (total as number) / months }));
