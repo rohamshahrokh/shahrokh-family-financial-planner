@@ -34,9 +34,11 @@ import TimelinePage       from "./pages/timeline";
 import DataHealthPage     from "./pages/data-health";
 import HelpPage           from "./pages/help";
 import AIInsightsPage     from "./pages/ai-insights";
-import WealthStrategyPage  from "./pages/wealth-strategy";
-import DebtStrategyPage    from "./pages/debt-strategy";
-import Layout              from "./components/Layout";
+import WealthStrategyPage   from "./pages/wealth-strategy";
+import DebtStrategyPage     from "./pages/debt-strategy";
+import RecurringBillsPage   from "./pages/recurring-bills";
+import BudgetPage           from "./pages/budget";
+import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
 // ─── Page title hook ──────────────────────────────────────────────────────────
@@ -145,6 +147,12 @@ function AppRouter() {
         <Route path="/debt-strategy">
           <ProtectedRoute component={DebtStrategyPage} title="Debt Strategy" />
         </Route>
+        <Route path="/recurring-bills">
+          <ProtectedRoute component={RecurringBillsPage} title="Recurring Bills" />
+        </Route>
+        <Route path="/budget">
+          <ProtectedRoute component={BudgetPage} title="Monthly Budget" />
+        </Route>
 
         {/* 404 */}
         <Route component={NotFound} />
@@ -162,6 +170,14 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
   }, [theme]);
+
+  // ─── Family message dispatcher — fire on app mount ───────────────────────
+  useEffect(() => {
+    // Dynamically import to avoid blocking initial render
+    import("./lib/notifications").then(({ dispatchFamilyMessages }) => {
+      dispatchFamilyMessages().catch(() => {/* silent */});
+    }).catch(() => {/* silent */});
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
