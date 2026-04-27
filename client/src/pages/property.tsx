@@ -81,8 +81,35 @@ const NUM_FIELDS = [
   "selling_costs","projection_years",
 ];
 
+// Columns that exist in sf_properties table.
+// Extended columns (building_inspection etc.) are added via SQL migration.
+// This list is the safe minimum — unknown cols cause Supabase PGRST204 and
+// silently drop to localStorage-only, making the page appear blank.
+const SF_PROPERTY_COLS = new Set([
+  'name','type','purchase_date','settlement_date','purchase_price','deposit',
+  'stamp_duty','legal_fees','building_inspection','loan_setup_fees',
+  'loan_amount','interest_rate','loan_type','loan_term',
+  'io_period_start','io_period_end','current_value','capital_growth',
+  'rental_start_date','weekly_rent','rental_growth','vacancy_rate','management_fee',
+  'insurance','council_rates','water_rates','maintenance','body_corporate',
+  'land_tax','renovation_costs','planned_sale_date','selling_costs',
+  'projection_years','notes',
+]);
+
+// Baseline cols that definitely exist before running the v2 migration
+const SF_PROPERTY_BASELINE = new Set([
+  'name','type','purchase_date','purchase_price','deposit','stamp_duty','legal_fees',
+  'loan_amount','interest_rate','loan_type','loan_term','current_value','capital_growth',
+  'weekly_rent','rental_growth','vacancy_rate','management_fee',
+  'insurance','council_rates','maintenance','selling_costs','projection_years','notes',
+]);
+
 function normalisePropertyDraft(d: any) {
-  const out = { ...d };
+  const out: Record<string, any> = {};
+  const allowedCols = SF_PROPERTY_COLS;
+  for (const k of allowedCols) {
+    if (k in d) out[k] = d[k];
+  }
   for (const k of NUM_FIELDS) {
     if (k in out) out[k] = parseFloat(String(out[k])) || 0;
   }
