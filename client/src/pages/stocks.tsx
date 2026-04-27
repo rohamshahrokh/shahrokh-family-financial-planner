@@ -18,6 +18,7 @@ import {
   Plus, Trash2, Edit2, TrendingUp, CheckSquare, Square,
   ArrowUpRight, ArrowDownRight, X, Calendar, Filter,
   Upload, RefreshCw, Clock, ToggleLeft, ToggleRight, Download,
+  ShoppingCart,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx";
@@ -117,6 +118,21 @@ function emptyTxForm(): Partial<StockTransaction> {
     brokerage_fee: 0,
     notes: "",
     created_by: "user",
+  };
+}
+
+// ─── Empty planned order form ────────────────────────────────────────────────
+function emptyOrderForm(): any {
+  return {
+    module: 'stock',
+    ticker: '',
+    asset_name: '',
+    action: 'buy',
+    amount_aud: 0,
+    units: null,
+    planned_date: new Date().toISOString().split('T')[0],
+    status: 'planned',
+    notes: '',
   };
 }
 
@@ -613,6 +629,177 @@ function StockTxForm({ initial, stocks, onSave, onCancel, isSaving }: TxFormProp
   );
 }
 
+// ─── Planned Order Form Modal ─────────────────────────────────────────────────
+interface OrderFormProps {
+  initial: any;
+  stocks: any[];
+  onSave: (data: any) => void;
+  onCancel: () => void;
+  isSaving: boolean;
+}
+
+function PlannedOrderForm({ initial, stocks, onSave, onCancel, isSaving }: OrderFormProps) {
+  const [form, setForm] = useState<any>(initial);
+
+  const set = (key: string, value: any) => {
+    setForm((prev: any) => {
+      const next = { ...prev, [key]: value };
+      if (key === 'ticker') {
+        const match = stocks.find((s: any) => s.ticker?.toLowerCase() === String(value).toLowerCase());
+        if (match) next.asset_name = match.name;
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-2xl shadow-2xl">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="font-bold text-sm">
+            {initial.id ? "Edit Planned Order" : "Add Planned Order"}
+          </h3>
+          <button onClick={onCancel} className="text-muted-foreground hover:text-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Action toggle */}
+        <div className="flex gap-4 mb-4">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Action</label>
+            <div className="flex rounded-lg overflow-hidden border border-border">
+              {(["buy", "sell"] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={() => set("action", t)}
+                  className={`px-4 py-1.5 text-xs font-semibold transition-colors ${
+                    form.action === t
+                      ? t === "buy" ? "bg-emerald-600 text-white" : "bg-red-600 text-white"
+                      : "bg-secondary text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t === "buy" ? "Buy" : "Sell"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Status</label>
+            <div className="flex rounded-lg overflow-hidden border border-border">
+              {(["planned", "executed", "cancelled"] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => set("status", s)}
+                  className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    form.status === s
+                      ? s === "planned" ? "bg-amber-500 text-white" : s === "executed" ? "bg-emerald-600 text-white" : "bg-secondary text-muted-foreground"
+                      : "bg-secondary text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Ticker</label>
+            <div className="flex gap-1">
+              <select
+                value={stocks.find((s: any) => s.ticker === form.ticker) ? form.ticker : '__custom__'}
+                onChange={e => {
+                  if (e.target.value !== '__custom__') set('ticker', e.target.value);
+                  else set('ticker', '');
+                }}
+                className="h-8 text-xs bg-secondary border border-border rounded px-2 text-foreground flex-1"
+              >
+                {stocks.map((s: any) => <option key={s.ticker} value={s.ticker}>{s.ticker}</option>)}
+                <option value="__custom__">Custom...</option>
+              </select>
+            </div>
+            {(!stocks.find((s: any) => s.ticker === form.ticker) || form.ticker === '') && (
+              <Input
+                type="text"
+                placeholder="TICKER"
+                value={form.ticker}
+                onChange={e => set('ticker', e.target.value.toUpperCase())}
+                className="h-8 text-xs mt-1"
+              />
+            )}
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Asset Name</label>
+            <Input
+              type="text"
+              placeholder="Company name"
+              value={form.asset_name}
+              onChange={e => set('asset_name', e.target.value)}
+              className="h-8 text-xs"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Planned Date</label>
+            <Input
+              type="date"
+              value={form.planned_date}
+              onChange={e => set('planned_date', e.target.value)}
+              className="h-8 text-xs"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Amount AUD</label>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.amount_aud}
+              onChange={e => set('amount_aud', parseFloat(e.target.value) || 0)}
+              className="h-8 text-xs"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Units (optional)</label>
+            <Input
+              type="number"
+              step="0.001"
+              min="0"
+              value={form.units ?? ''}
+              onChange={e => set('units', e.target.value ? parseFloat(e.target.value) : null)}
+              className="h-8 text-xs"
+              placeholder="Optional"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+            <Input
+              type="text"
+              placeholder="Optional notes..."
+              value={form.notes}
+              onChange={e => set('notes', e.target.value)}
+              className="h-8 text-xs"
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-5">
+          <Button
+            onClick={() => onSave(form)}
+            disabled={isSaving}
+            style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+            className="text-xs h-8"
+          >
+            {isSaving ? "Saving..." : "Save Order"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={onCancel} className="text-xs h-8">Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function StocksPage() {
   const qc = useQueryClient();
@@ -657,10 +844,15 @@ export default function StocksPage() {
 
   // Import / DCA state
   const [showImportModal, setShowImportModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'portfolio' | 'dca'>('portfolio');
+  const [activeTab, setActiveTab] = useState<'portfolio' | 'transactions' | 'dca' | 'orders'>('portfolio');
   const [showDCAForm, setShowDCAForm] = useState(false);
   const [dcaDraft, setDcaDraft] = useState<any>(null);
   const [editingDCAId, setEditingDCAId] = useState<number | null>(null);
+
+  // Planned Orders state
+  const [showOrderForm, setShowOrderForm] = useState(false);
+  const [orderDraft, setOrderDraft] = useState<any>(null);
+  const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -677,6 +869,11 @@ export default function StocksPage() {
   const { data: dcaSchedules = [] } = useQuery<StockDCASchedule[]>({
     queryKey: ["/api/stock-dca"],
     queryFn: () => apiRequest("GET", "/api/stock-dca").then(r => r.json()),
+  });
+
+  const { data: plannedOrders = [] } = useQuery<any[]>({
+    queryKey: ['/api/planned-investments', 'stock'],
+    queryFn: () => apiRequest("GET", "/api/planned-investments?module=stock").then(r => r.json()),
   });
 
   // ── Live price fetch handler ───────────────────────────────────────────────
@@ -722,6 +919,9 @@ export default function StocksPage() {
       setShowDCAForm(false); setDcaDraft(null);
       toast({ title: "DCA schedule saved" });
     },
+    onError: (err: any) => {
+      toast({ title: 'Save failed', description: String(err), variant: 'destructive' });
+    },
   });
   const updateDCAMut = useMutation({
     mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/stock-dca/${id}`, data).then(r => r.json()),
@@ -730,10 +930,16 @@ export default function StocksPage() {
       setShowDCAForm(false); setEditingDCAId(null); setDcaDraft(null);
       toast({ title: "DCA schedule updated" });
     },
+    onError: (err: any) => {
+      toast({ title: 'Save failed', description: String(err), variant: 'destructive' });
+    },
   });
   const deleteDCAMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/stock-dca/${id}`).then(r => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/stock-dca"] }),
+    onError: (err: any) => {
+      toast({ title: 'Delete failed', description: String(err), variant: 'destructive' });
+    },
   });
 
   // ── Holdings mutations ─────────────────────────────────────────────────────
@@ -796,6 +1002,43 @@ export default function StocksPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/stock-transactions"] });
       toast({ title: "Transaction deleted" });
+    },
+  });
+
+  // ── Planned Order mutations ────────────────────────────────────────────────
+
+  const createOrderMut = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/planned-investments", data).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/api/planned-investments', 'stock'] });
+      setShowOrderForm(false); setOrderDraft(null); setEditingOrderId(null);
+      toast({ title: "Planned order saved" });
+    },
+    onError: (err: any) => {
+      toast({ title: 'Save failed', description: String(err), variant: 'destructive' });
+    },
+  });
+
+  const updateOrderMut = useMutation({
+    mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/planned-investments/${id}`, data).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/api/planned-investments', 'stock'] });
+      setShowOrderForm(false); setOrderDraft(null); setEditingOrderId(null);
+      toast({ title: "Planned order updated" });
+    },
+    onError: (err: any) => {
+      toast({ title: 'Save failed', description: String(err), variant: 'destructive' });
+    },
+  });
+
+  const deleteOrderMut = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/planned-investments/${id}`).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/api/planned-investments', 'stock'] });
+      toast({ title: "Planned order deleted" });
+    },
+    onError: (err: any) => {
+      toast({ title: 'Delete failed', description: String(err), variant: 'destructive' });
     },
   });
 
@@ -902,6 +1145,27 @@ export default function StocksPage() {
       .sort((a, b) => b.transaction_date.localeCompare(a.transaction_date));
   }, [transactions, txTypeFilter, txStatusFilter, txDateFrom, txDateTo, txTickerFilter]);
 
+  // ── Planned Orders KPIs ────────────────────────────────────────────────────
+  const orderBuyTotal = useMemo(
+    () => plannedOrders.filter(o => o.action === 'buy' && o.status === 'planned').reduce((s: number, o: any) => s + safeNum(o.amount_aud), 0),
+    [plannedOrders]
+  );
+  const orderSellTotal = useMemo(
+    () => plannedOrders.filter(o => o.action === 'sell' && o.status === 'planned').reduce((s: number, o: any) => s + safeNum(o.amount_aud), 0),
+    [plannedOrders]
+  );
+  const ordersByStatus = useMemo(() => {
+    const counts: Record<string, number> = { planned: 0, executed: 0, cancelled: 0 };
+    for (const o of plannedOrders) { counts[o.status] = (counts[o.status] || 0) + 1; }
+    return counts;
+  }, [plannedOrders]);
+
+  // ── DCA monthly total ──────────────────────────────────────────────────────
+  const dcaMonthlyTotal = useMemo(
+    () => dcaSchedules.filter(d => d.enabled).reduce((s, d) => s + dcaMonthlyEquiv(d.amount, d.frequency), 0),
+    [dcaSchedules]
+  );
+
   const mv = (v: string) => maskValue(v, privacyMode);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
@@ -926,6 +1190,20 @@ export default function StocksPage() {
     setTxDraft({ ...tx });
     setEditingTxId(tx.id);
     setShowTxForm(true);
+  };
+
+  const handleSaveOrder = (data: any) => {
+    const payload = { ...data, module: 'stock' };
+    if (editingOrderId) {
+      updateOrderMut.mutate({ id: editingOrderId, data: payload });
+    } else {
+      createOrderMut.mutate(payload);
+    }
+  };
+
+  const handleToggleOrderStatus = (order: any) => {
+    const nextStatus = order.status === 'planned' ? 'executed' : order.status === 'executed' ? 'cancelled' : 'planned';
+    updateOrderMut.mutate({ id: order.id, data: { ...order, status: nextStatus } });
   };
 
   const handleExportBackup = () => {
@@ -960,6 +1238,17 @@ export default function StocksPage() {
           onSave={handleSaveTx}
           onCancel={() => { setShowTxForm(false); setEditingTxId(null); setTxDraft(emptyTxForm()); }}
           isSaving={createTxMut.isPending || updateTxMut.isPending}
+        />
+      )}
+
+      {/* ─── Planned Order Form Modal ────────────────────────────────────────── */}
+      {showOrderForm && orderDraft && (
+        <PlannedOrderForm
+          initial={orderDraft}
+          stocks={stocks}
+          onSave={handleSaveOrder}
+          onCancel={() => { setShowOrderForm(false); setOrderDraft(null); setEditingOrderId(null); }}
+          isSaving={createOrderMut.isPending || updateOrderMut.isPending}
         />
       )}
 
@@ -1008,8 +1297,13 @@ export default function StocksPage() {
       </div>
 
       {/* ─── Tab Bar ───────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 bg-secondary/50 rounded-xl p-1 w-fit">
-        {([['portfolio', 'Portfolio & Transactions'], ['dca', 'DCA Schedules']] as const).map(([id, label]) => (
+      <div className="flex items-center gap-1 bg-secondary/50 rounded-xl p-1 w-fit flex-wrap">
+        {([
+          ['portfolio', 'Portfolio'],
+          ['transactions', 'Transactions'],
+          ['dca', 'DCA Schedules'],
+          ['orders', 'Planned Orders'],
+        ] as const).map(([id, label]) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
@@ -1019,6 +1313,662 @@ export default function StocksPage() {
           </button>
         ))}
       </div>
+
+      {/* ─── Portfolio Tab ─────────────────────────────────────────────────── */}
+      {activeTab === 'portfolio' && (
+        <>
+          {/* ─── 7 KPI Cards ───────────────────────────────────────────────────── */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+            {[
+              { label: "Portfolio Value", value: mv(formatCurrency(totalCurrentValue, true)), color: "" },
+              { label: "Cost Basis", value: mv(formatCurrency(totalInvested, true)), color: "" },
+              {
+                label: "Unrealised G/L",
+                value: mv(`${totalGL >= 0 ? "+" : ""}${formatCurrency(totalGL, true)}`),
+                color: totalGL >= 0 ? "text-emerald-400" : "text-red-400",
+              },
+              {
+                label: "G/L %",
+                value: mv(`${totalGLPct >= 0 ? "+" : ""}${totalGLPct.toFixed(1)}%`),
+                color: totalGLPct >= 0 ? "text-emerald-400" : "text-red-400",
+              },
+              {
+                label: "Planned Buys",
+                value: mv(formatCurrency(plannedBuyTotal, true)),
+                color: "text-emerald-400",
+              },
+              {
+                label: "Planned Sells",
+                value: mv(formatCurrency(plannedSellTotal, true)),
+                color: "text-red-400",
+              },
+              {
+                label: "Net Cash Impact",
+                value: mv(`${netCashImpact >= 0 ? "+" : ""}${formatCurrency(netCashImpact, true)}`),
+                color: netCashImpact >= 0 ? "text-emerald-400" : "text-red-400",
+              },
+            ].map(s => (
+              <div key={s.label} className="bg-card border border-border rounded-xl p-4">
+                <p className="text-xs text-muted-foreground">{s.label}</p>
+                <p className={`text-base font-bold num-display mt-1 ${s.color}`}>{s.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* ─── Charts row ────────────────────────────────────────────────────── */}
+          <div className="grid lg:grid-cols-2 gap-4">
+            <div className="bg-card border border-border rounded-xl p-5">
+              <h3 className="text-sm font-bold mb-4">Portfolio Growth (10Y)</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="stockGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
+                  <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
+                  <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#stockGrad)" strokeWidth={2} name="Portfolio Value" />
+                  <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-card border border-border rounded-xl p-5">
+              <h3 className="text-sm font-bold mb-4">Current Allocation</h3>
+              {allocationData.length > 0 ? (
+                <div className="flex items-center gap-3">
+                  <ResponsiveContainer width="45%" height={180}>
+                    <PieChart>
+                      <Pie
+                        data={allocationData}
+                        cx="50%" cy="50%"
+                        innerRadius={45} outerRadius={75}
+                        paddingAngle={3}
+                        dataKey="value"
+                      >
+                        {allocationData.map((d: any, i: number) => (
+                          <Cell key={i} fill={d.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v: number) => mv(formatCurrency(v, true))} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="flex-1 space-y-1.5 text-xs overflow-hidden">
+                    {allocationData.map((d: any) => {
+                      const stock = stocks.find((s: any) => s.ticker === d.name);
+                      const targetAlloc = safeNum(stock?.allocation_pct);
+                      const actualPct = totalCurrentValue > 0 ? (d.value / totalCurrentValue) * 100 : 0;
+                      const diff = actualPct - targetAlloc;
+                      return (
+                        <div key={d.name} className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <div className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color }} />
+                            <span className="text-muted-foreground truncate">{d.name}</span>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="font-bold num-display">{mv(formatCurrency(d.value, true))}</span>
+                            <span className="text-muted-foreground ml-1">({actualPct.toFixed(1)}%)</span>
+                            {targetAlloc > 0 && (
+                              <span className={`ml-1 ${diff > 0 ? "text-red-400" : "text-emerald-400"}`}>
+                                {diff > 0 ? "+" : ""}{diff.toFixed(1)}%
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm">
+                  <TrendingUp className="w-8 h-8 opacity-30 mb-2" />
+                  <p>Set holdings above zero to see allocation</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ─── Add Holding Form ───────────────────────────────────────────────── */}
+          {showAdd && (
+            <div className="rounded-xl border border-primary/30 bg-card p-5">
+              <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
+                <Plus className="w-4 h-4 text-primary" /> Add Stock Holding
+              </h3>
+              <StockEditForm
+                data={draft}
+                onChange={handleDraftChange}
+                onEnterSave={() => createMut.mutateAsync(normaliseStock(draft))}
+              />
+              <div className="flex gap-2 mt-4">
+                <SaveButton
+                  label="Save Stock Holding"
+                  onSave={() => createMut.mutateAsync(normaliseStock(draft))}
+                />
+                <Button size="sm" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+              </div>
+            </div>
+          )}
+
+          {/* ─── Bulk toolbar ───────────────────────────────────────────────────── */}
+          {selected.size > 0 && (
+            <div
+              className="flex items-center gap-3 flex-wrap rounded-xl border px-4 py-2.5 text-sm"
+              style={{ borderColor: "hsl(0,72%,35%)", background: "hsl(0,50%,8%)" }}
+            >
+              <span className="text-red-300 font-semibold">{selected.size} selected</span>
+              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} className="text-xs h-7 text-muted-foreground">Clear</Button>
+              <div className="flex-1" />
+              <Button size="sm" onClick={handleExportBackup} variant="outline" className="text-xs h-7 gap-1">Export Selected</Button>
+              <Button
+                size="sm"
+                onClick={() => setShowBulkModal(true)}
+                className="gap-1.5 bg-red-600 hover:bg-red-700 text-white border-0 h-7 text-xs"
+              >
+                <Trash2 className="w-3 h-3" /> Delete {selected.size} stocks
+              </Button>
+            </div>
+          )}
+
+          {/* ─── Current Holdings Table ─────────────────────────────────────────── */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="text-sm font-bold">Current Holdings</h3>
+              {stocks.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-xs h-7 gap-1 text-muted-foreground"
+                  onClick={() =>
+                    selected.size === stocks.length
+                      ? setSelected(new Set())
+                      : setSelected(new Set(stocks.map((s: any) => s.id)))
+                  }
+                >
+                  {selected.size === stocks.length ? (
+                    <CheckSquare className="w-3.5 h-3.5 text-primary" />
+                  ) : (
+                    <Square className="w-3.5 h-3.5" />
+                  )}
+                  Select all
+                </Button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/30">
+                    <th className="px-3 py-2.5 w-8"></th>
+                    {[
+                      "Stock", "Units", "Avg Buy", "Stored Price", "Live Price", "Daily Δ", "Value",
+                      "Invested", "Gain/Loss", "G/L %", "Alloc (Act/Tgt)", "10Y Value", "DCA", "Actions",
+                    ].map(h => (
+                      <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {stocks.length === 0 && (
+                    <tr>
+                      <td colSpan={13} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                        No stocks added yet. Click "Add Holding" to get started.
+                      </td>
+                    </tr>
+                  )}
+                  {stocks.map((stock: any, idx: number) => {
+                    const c = stockCalcs(stock, totalCurrentValue);
+                    const isEditing = editingId === stock.id;
+                    const isSelected = selected.has(stock.id);
+                    const proj = projectInvestment(c.currentValue, stock.expected_return, stock.monthly_dca || 0, 10);
+                    const proj10 = proj[9]?.value || c.currentValue;
+
+                    if (isEditing && editDraft) {
+                      return (
+                        <tr key={stock.id} className="border-b border-border bg-secondary/20">
+                          <td colSpan={13} className="p-3">
+                            <StockEditForm
+                              data={editDraft}
+                              onChange={handleEditDraftChange}
+                              onEnterSave={handleSaveEdit}
+                            />
+                            <div className="flex gap-2 mt-3">
+                              <SaveButton
+                                label="Save Stock Holding"
+                                onSave={() => updateMut.mutateAsync({ id: stock.id, data: normaliseStock(editDraft) })}
+                              />
+                              <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return (
+                      <tr
+                        key={stock.id}
+                        className={`border-b border-border/50 hover:bg-secondary/20 transition-colors ${isSelected ? "bg-primary/5" : ""}`}
+                      >
+                        <td className="px-3 py-2.5">
+                          <button
+                            onClick={() =>
+                              setSelected(prev => {
+                                const n = new Set(prev);
+                                n.has(stock.id) ? n.delete(stock.id) : n.add(stock.id);
+                                return n;
+                              })
+                            }
+                            className="flex items-center justify-center text-muted-foreground hover:text-foreground"
+                          >
+                            {isSelected ? (
+                              <CheckSquare className="w-3.5 h-3.5 text-primary" />
+                            ) : (
+                              <Square className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </td>
+
+                        {/* Stock identity */}
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-7 h-7 rounded flex items-center justify-center text-xs font-bold shrink-0"
+                              style={{
+                                background: COLORS[idx % COLORS.length] + "20",
+                                color: COLORS[idx % COLORS.length],
+                              }}
+                            >
+                              {stock.ticker?.charAt(0) ?? "?"}
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold">{stock.ticker}</p>
+                              <p className="text-xs text-muted-foreground truncate max-w-[100px]">{stock.name}</p>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="px-3 py-2.5 text-xs num-display">{c.units.toLocaleString()}</td>
+                        <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(c.avgBuyPrice))}</td>
+                        <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(c.currentPrice))}</td>
+                        <td className="px-3 py-2.5 text-xs">
+                          {livePrices[stock.ticker] ? (
+                            <span className="num-display font-semibold">{mv(formatCurrency(livePrices[stock.ticker].price))}</span>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs">
+                          {livePrices[stock.ticker] ? (
+                            <span className={`num-display font-semibold ${livePrices[stock.ticker].change24h >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {livePrices[stock.ticker].change24h >= 0 ? '+' : ''}{livePrices[stock.ticker].change24h.toFixed(2)}%
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs num-display font-semibold">{mv(formatCurrency(c.currentValue, true))}</td>
+                        <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(c.totalInvested, true))}</td>
+
+                        {/* Gain/Loss */}
+                        <td className={`px-3 py-2.5 text-xs num-display font-semibold ${c.unrealisedGL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          <div className="flex items-center gap-1">
+                            {c.unrealisedGL >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                            {mv(`${c.unrealisedGL >= 0 ? "+" : ""}${formatCurrency(c.unrealisedGL, true)}`)}
+                          </div>
+                        </td>
+
+                        {/* G/L % */}
+                        <td className={`px-3 py-2.5 text-xs num-display font-semibold ${c.unrealisedGLPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {mv(`${c.unrealisedGLPct >= 0 ? "+" : ""}${c.unrealisedGLPct.toFixed(1)}%`)}
+                        </td>
+
+                        {/* Allocation actual / target */}
+                        <td className="px-3 py-2.5 text-xs">
+                          <div className="flex items-center gap-1 whitespace-nowrap">
+                            <span className="num-display font-semibold">{mv(`${c.actualAllocPct.toFixed(1)}%`)}</span>
+                            {c.targetAlloc > 0 && (
+                              <>
+                                <span className="text-muted-foreground">/</span>
+                                <span className="text-muted-foreground">{mv(`${c.targetAlloc.toFixed(1)}%`)}</span>
+                                <span className={`text-xs ml-0.5 ${c.allocDiff > 1 ? "text-red-400" : c.allocDiff < -1 ? "text-emerald-400" : "text-muted-foreground"}`}>
+                                  ({c.allocDiff > 0 ? "+" : ""}{c.allocDiff.toFixed(1)}%)
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </td>
+
+                        <td className="px-3 py-2.5 text-xs num-display text-emerald-400">{mv(formatCurrency(proj10, true))}</td>
+                        <td className="px-3 py-2.5 text-xs num-display text-primary">{mv(formatCurrency(stock.monthly_dca || 0))}</td>
+
+                        <td className="px-3 py-2.5">
+                          <div className="flex gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="w-6 h-6"
+                              onClick={() => { setEditingId(stock.id); setEditDraft({ ...stock }); }}
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="w-6 h-6 text-red-400"
+                              onClick={() => { if (confirm("Delete this stock?")) deleteMut.mutate(stock.id); }}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+
+                {/* Footer totals */}
+                {stocks.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t border-border bg-secondary/20">
+                      <td></td>
+                      <td className="px-3 py-2.5 text-xs font-bold" colSpan={4}>TOTAL</td>
+                      <td className="px-3 py-2.5 text-xs font-bold num-display">{mv(formatCurrency(totalCurrentValue, true))}</td>
+                      <td className="px-3 py-2.5 text-xs font-bold num-display">{mv(formatCurrency(totalInvested, true))}</td>
+                      <td className={`px-3 py-2.5 text-xs font-bold num-display ${totalGL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {mv(`${totalGL >= 0 ? "+" : ""}${formatCurrency(totalGL, true)}`)}
+                      </td>
+                      <td className={`px-3 py-2.5 text-xs font-bold num-display ${totalGLPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {mv(`${totalGLPct >= 0 ? "+" : ""}${totalGLPct.toFixed(1)}%`)}
+                      </td>
+                      <td colSpan={2}></td>
+                      <td className="px-3 py-2.5 text-xs font-bold num-display text-emerald-400">{mv(formatCurrency(year10Val, true))}</td>
+                      <td colSpan={2}></td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+
+          {/* ─── Bulk Delete Modal ──────────────────────────────────────────────── */}
+          <BulkDeleteModal
+            open={showBulkModal}
+            count={selected.size}
+            label="stock holdings"
+            onConfirm={async () => {
+              const ids = Array.from(selected);
+              for (const id of ids) await apiRequest("DELETE", `/api/stocks/${id}`);
+              await qc.invalidateQueries({ queryKey: ["/api/stocks"] });
+              setSelected(new Set());
+              setShowBulkModal(false);
+              toast({ title: `Deleted ${ids.length} stocks`, description: "Records removed from Supabase and local cache." });
+            }}
+            onCancel={() => setShowBulkModal(false)}
+            onExportBackup={selected.size > 0 ? handleExportBackup : undefined}
+          />
+
+          {/* ─── Planned Future Transactions ────────────────────────────────────── */}
+          {(plannedBuys.length > 0 || plannedSells.length > 0) && (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-amber-400" />
+                Planned Future Transactions
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {[...plannedBuys, ...plannedSells]
+                  .sort((a, b) => a.transaction_date.localeCompare(b.transaction_date))
+                  .map(tx => (
+                    <div
+                      key={tx.id}
+                      className={`rounded-lg border p-3 ${
+                        tx.transaction_type === "buy"
+                          ? "border-emerald-500/30 bg-emerald-500/5"
+                          : "border-red-500/30 bg-red-500/5"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-bold">{tx.ticker}</span>
+                        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
+                          tx.transaction_type === "buy"
+                            ? "bg-emerald-500/20 text-emerald-400"
+                            : "bg-red-500/20 text-red-400"
+                        }`}>
+                          {tx.transaction_type === "buy" ? "Buy" : "Sell"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-1">{tx.transaction_date}</p>
+                      <p className="text-sm font-bold num-display">{mv(formatCurrency(safeNum(tx.total_amount), true))}</p>
+                      {tx.notes && <p className="text-xs text-muted-foreground mt-1 truncate">{tx.notes}</p>}
+                      <div className="mt-2 pt-2 border-t border-border/50">
+                        <span className="text-xs text-amber-400 font-semibold">Planned</span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* ─── 10-Year Projection Chart ───────────────────────────────────────── */}
+          {combinedProjection.length > 0 && (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold">10-Year Portfolio Projection</h3>
+                <span className="text-xs text-muted-foreground">CAGR: <span className="text-primary font-bold">{cagr.toFixed(1)}%</span></span>
+              </div>
+
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="projGrad2" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
+                  <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
+                  <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#projGrad2)" strokeWidth={2} name="Portfolio Value" />
+                  <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
+                </AreaChart>
+              </ResponsiveContainer>
+
+              <div className="overflow-x-auto mt-4">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Year</th>
+                      <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Total Invested</th>
+                      <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Portfolio Value</th>
+                      <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Unrealised Gain</th>
+                      <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Gain %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {combinedProjection.map(p => {
+                      const gain = p.value - p.invested;
+                      const gainPct = p.invested > 0 ? (gain / p.invested) * 100 : 0;
+                      return (
+                        <tr key={p.year} className="border-b border-border/40 hover:bg-secondary/20">
+                          <td className="py-1.5 pr-4 font-semibold text-primary">{p.year}</td>
+                          <td className="py-1.5 pr-4 num-display">{mv(formatCurrency(p.invested, true))}</td>
+                          <td className="py-1.5 pr-4 num-display text-emerald-400 font-bold">{mv(formatCurrency(p.value, true))}</td>
+                          <td className={`py-1.5 pr-4 num-display font-semibold ${gain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            {mv(`${gain >= 0 ? "+" : ""}${formatCurrency(gain, true)}`)}
+                          </td>
+                          <td className={`py-1.5 pr-4 num-display ${gainPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            {mv(`${gainPct >= 0 ? "+" : ""}${gainPct.toFixed(1)}%`)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ─── Transactions Tab ──────────────────────────────────────────────── */}
+      {activeTab === 'transactions' && (
+        <div className="space-y-4">
+          {/* Add Transaction button */}
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold">Transaction Ledger</h3>
+            <Button
+              onClick={() => { setTxDraft(emptyTxForm()); setEditingTxId(null); setShowTxForm(true); }}
+              className="gap-2 text-xs h-8"
+              style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Transaction
+            </Button>
+          </div>
+
+          {/* ─── Transaction Ledger ─────────────────────────────────────────────── */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between flex-wrap gap-3">
+              <h3 className="text-sm font-bold">All Transactions</h3>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Type filter */}
+                <div className="flex rounded-lg overflow-hidden border border-border text-xs">
+                  {(["all", "buy", "sell"] as const).map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setTxTypeFilter(t)}
+                      className={`px-2.5 py-1 font-semibold transition-colors ${
+                        txTypeFilter === t ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {t === "all" ? "All" : t === "buy" ? "Buy" : "Sell"}
+                    </button>
+                  ))}
+                </div>
+                {/* Status filter */}
+                <div className="flex rounded-lg overflow-hidden border border-border text-xs">
+                  {(["all", "actual", "planned"] as const).map(s => (
+                    <button
+                      key={s}
+                      onClick={() => setTxStatusFilter(s)}
+                      className={`px-2.5 py-1 font-semibold transition-colors ${
+                        txStatusFilter === s ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {s === "all" ? "All" : s === "actual" ? "Actual" : "Planned"}
+                    </button>
+                  ))}
+                </div>
+                {/* Date range */}
+                <div className="flex items-center gap-1">
+                  <Calendar className="w-3 h-3 text-muted-foreground" />
+                  <Input
+                    type="date"
+                    value={txDateFrom}
+                    onChange={e => setTxDateFrom(e.target.value)}
+                    className="h-7 text-xs w-32"
+                    placeholder="From"
+                  />
+                  <span className="text-muted-foreground text-xs">–</span>
+                  <Input
+                    type="date"
+                    value={txDateTo}
+                    onChange={e => setTxDateTo(e.target.value)}
+                    className="h-7 text-xs w-32"
+                    placeholder="To"
+                  />
+                </div>
+                {/* Ticker filter */}
+                {allTickers.length > 0 && (
+                  <div className="flex items-center gap-1">
+                    <Filter className="w-3 h-3 text-muted-foreground" />
+                    <select
+                      value={txTickerFilter}
+                      onChange={e => setTxTickerFilter(e.target.value)}
+                      className="h-7 text-xs bg-secondary border border-border rounded px-2 text-foreground"
+                    >
+                      <option value="all">All Tickers</option>
+                      {allTickers.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/30">
+                    {["Date", "Type", "Status", "Ticker", "Units", "Price/Unit", "Total", "Fee", "Notes", "Actions"].map(h => (
+                      <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTx.length === 0 && (
+                    <tr>
+                      <td colSpan={10} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                        No transactions found. Click "Add Transaction" to record a trade.
+                      </td>
+                    </tr>
+                  )}
+                  {filteredTx.map(tx => (
+                    <tr key={tx.id} className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
+                      <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">{tx.transaction_date}</td>
+                      <td className="px-3 py-2.5">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          tx.transaction_type === "buy"
+                            ? "bg-emerald-500/15 text-emerald-400"
+                            : "bg-red-500/15 text-red-400"
+                        }`}>
+                          {tx.transaction_type === "buy" ? "Buy" : "Sell"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          tx.status === "actual"
+                            ? "bg-blue-500/15 text-blue-400"
+                            : "bg-amber-500/15 text-amber-400"
+                        }`}>
+                          {tx.status === "actual" ? "Actual" : "Planned"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs font-bold">{tx.ticker}</td>
+                      <td className="px-3 py-2.5 text-xs num-display">{safeNum(tx.units).toLocaleString()}</td>
+                      <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(safeNum(tx.price_per_unit)))}</td>
+                      <td className="px-3 py-2.5 text-xs num-display font-semibold">{mv(formatCurrency(safeNum(tx.total_amount), true))}</td>
+                      <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">{mv(formatCurrency(safeNum(tx.brokerage_fee)))}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[120px] truncate">{tx.notes}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="w-6 h-6"
+                            onClick={() => handleEditTx(tx)}
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="w-6 h-6 text-red-400"
+                            onClick={() => { if (confirm("Delete this transaction?")) deleteTxMut.mutate(tx.id); }}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── DCA Schedules Tab ─────────────────────────────────────────────── */}
       {activeTab === 'dca' && (
@@ -1100,8 +2050,8 @@ export default function StocksPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
               { label: 'Active Schedules', value: String(dcaSchedules.filter(d => d.enabled).length) },
-              { label: 'Total Monthly DCA', value: formatCurrency(dcaSchedules.filter(d => d.enabled).reduce((s, d) => s + dcaMonthlyEquiv(d.amount, d.frequency), 0)) },
-              { label: 'Annual DCA Budget', value: formatCurrency(dcaSchedules.filter(d => d.enabled).reduce((s, d) => s + dcaMonthlyEquiv(d.amount, d.frequency), 0) * 12) },
+              { label: 'Total Monthly DCA', value: formatCurrency(dcaMonthlyTotal) },
+              { label: 'Annual DCA Budget', value: formatCurrency(dcaMonthlyTotal * 12) },
               { label: 'Tickers Scheduled', value: String(new Set(dcaSchedules.filter(d => d.enabled).map(d => d.ticker)).size) },
             ].map(k => (
               <div key={k.label} className="bg-card border border-border rounded-xl p-4">
@@ -1165,9 +2115,172 @@ export default function StocksPage() {
                     <tr className="border-t border-border bg-secondary/20">
                       <td className="px-3 py-2.5 text-xs font-bold" colSpan={3}>TOTAL (active)</td>
                       <td className="px-3 py-2.5 text-xs font-bold num-display text-primary">
-                        {mv(formatCurrency(dcaSchedules.filter(d => d.enabled).reduce((s, d) => s + dcaMonthlyEquiv(d.amount, d.frequency), 0)))}/mo
+                        {mv(formatCurrency(dcaMonthlyTotal))}/mo
                       </td>
                       <td colSpan={5}></td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+
+          {/* DCA Forecast Section */}
+          {dcaMonthlyTotal > 0 && (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <h3 className="text-sm font-bold mb-3 flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-primary" />
+                DCA Forecast Impact
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div className="bg-secondary/40 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground">Monthly DCA Committed</p>
+                  <p className="text-sm font-bold num-display text-primary mt-1">{mv(formatCurrency(dcaMonthlyTotal))}/mo</p>
+                </div>
+                <div className="bg-secondary/40 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground">Annual DCA Committed</p>
+                  <p className="text-sm font-bold num-display text-primary mt-1">{mv(formatCurrency(dcaMonthlyTotal * 12))}/yr</p>
+                </div>
+                <div className="bg-secondary/40 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground">10-Year DCA Total (no returns)</p>
+                  <p className="text-sm font-bold num-display text-emerald-400 mt-1">{mv(formatCurrency(dcaMonthlyTotal * 12 * 10))}</p>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                DCA Impact: <span className="text-primary font-semibold">+{mv(formatCurrency(dcaMonthlyTotal))}/month</span> total committed DCA across {dcaSchedules.filter(d => d.enabled).length} active schedule{dcaSchedules.filter(d => d.enabled).length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── Planned Orders Tab ────────────────────────────────────────────── */}
+      {activeTab === 'orders' && (
+        <div className="space-y-4">
+          {/* KPI Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {[
+              { label: 'Total Planned Buy', value: mv(formatCurrency(orderBuyTotal, true)), color: 'text-emerald-400' },
+              { label: 'Total Planned Sell', value: mv(formatCurrency(orderSellTotal, true)), color: 'text-red-400' },
+              { label: 'Planned', value: String(ordersByStatus.planned || 0), color: 'text-amber-400' },
+              { label: 'Executed', value: String(ordersByStatus.executed || 0), color: 'text-emerald-400' },
+              { label: 'Cancelled', value: String(ordersByStatus.cancelled || 0), color: 'text-muted-foreground' },
+            ].map(k => (
+              <div key={k.label} className="bg-card border border-border rounded-xl p-4">
+                <p className="text-xs text-muted-foreground">{k.label}</p>
+                <p className={`text-base font-bold num-display mt-1 ${k.color}`}>{k.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Orders Table */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <ShoppingCart className="w-4 h-4 text-primary" />
+                Planned Investment Orders
+              </h3>
+              <Button
+                size="sm"
+                onClick={() => { setOrderDraft(emptyOrderForm()); setEditingOrderId(null); setShowOrderForm(true); }}
+                style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
+                className="gap-2 text-xs h-7"
+              >
+                <Plus className="w-3 h-3" /> Add Order
+              </Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/30">
+                    {['Date','Ticker','Action','Amount AUD','Units','Status','Notes','Actions'].map(h => (
+                      <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {plannedOrders.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                        No planned orders yet. Click "Add Order" to plan your next investment.
+                      </td>
+                    </tr>
+                  )}
+                  {[...plannedOrders]
+                    .sort((a, b) => (a.planned_date ?? '').localeCompare(b.planned_date ?? ''))
+                    .map((order: any) => (
+                    <tr key={order.id} className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
+                      <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">{order.planned_date}</td>
+                      <td className="px-3 py-2.5">
+                        <div>
+                          <p className="text-xs font-bold">{order.ticker}</p>
+                          {order.asset_name && <p className="text-xs text-muted-foreground truncate max-w-[100px]">{order.asset_name}</p>}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          order.action === 'buy'
+                            ? 'bg-emerald-500/15 text-emerald-400'
+                            : 'bg-red-500/15 text-red-400'
+                        }`}>
+                          {order.action === 'buy' ? 'Buy' : 'Sell'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs num-display font-semibold">{mv(formatCurrency(safeNum(order.amount_aud), true))}</td>
+                      <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">
+                        {order.units != null ? safeNum(order.units).toLocaleString() : '—'}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <button
+                          onClick={() => handleToggleOrderStatus(order)}
+                          title="Click to cycle status"
+                          className="cursor-pointer"
+                        >
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                            order.status === 'planned'
+                              ? 'bg-amber-500/15 text-amber-400'
+                              : order.status === 'executed'
+                              ? 'bg-emerald-500/15 text-emerald-400'
+                              : 'bg-secondary text-muted-foreground'
+                          }`}>
+                            {order.status === 'planned' ? 'Planned' : order.status === 'executed' ? 'Executed' : 'Cancelled'}
+                          </span>
+                        </button>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[120px] truncate">{order.notes}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="w-6 h-6"
+                            onClick={() => { setOrderDraft({ ...order }); setEditingOrderId(order.id); setShowOrderForm(true); }}
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="w-6 h-6 text-red-400"
+                            onClick={() => { if (confirm('Delete this planned order?')) deleteOrderMut.mutate(order.id); }}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                {plannedOrders.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t border-border bg-secondary/20">
+                      <td className="px-3 py-2.5 text-xs font-bold" colSpan={3}>TOTAL (planned only)</td>
+                      <td className="px-3 py-2.5 text-xs font-bold num-display">
+                        <span className="text-emerald-400">{mv(formatCurrency(orderBuyTotal, true))} buy</span>
+                        <span className="text-muted-foreground mx-1">/</span>
+                        <span className="text-red-400">{mv(formatCurrency(orderSellTotal, true))} sell</span>
+                      </td>
+                      <td colSpan={4}></td>
                     </tr>
                   </tfoot>
                 )}
@@ -1177,646 +2290,7 @@ export default function StocksPage() {
         </div>
       )}
 
-      {activeTab === 'portfolio' && (
-        <>
-      {/* ─── 7 KPI Cards ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
-        {[
-          { label: "Portfolio Value", value: mv(formatCurrency(totalCurrentValue, true)), color: "" },
-          { label: "Cost Basis", value: mv(formatCurrency(totalInvested, true)), color: "" },
-          {
-            label: "Unrealised G/L",
-            value: mv(`${totalGL >= 0 ? "+" : ""}${formatCurrency(totalGL, true)}`),
-            color: totalGL >= 0 ? "text-emerald-400" : "text-red-400",
-          },
-          {
-            label: "G/L %",
-            value: mv(`${totalGLPct >= 0 ? "+" : ""}${totalGLPct.toFixed(1)}%`),
-            color: totalGLPct >= 0 ? "text-emerald-400" : "text-red-400",
-          },
-          {
-            label: "Planned Buys",
-            value: mv(formatCurrency(plannedBuyTotal, true)),
-            color: "text-emerald-400",
-          },
-          {
-            label: "Planned Sells",
-            value: mv(formatCurrency(plannedSellTotal, true)),
-            color: "text-red-400",
-          },
-          {
-            label: "Net Cash Impact",
-            value: mv(`${netCashImpact >= 0 ? "+" : ""}${formatCurrency(netCashImpact, true)}`),
-            color: netCashImpact >= 0 ? "text-emerald-400" : "text-red-400",
-          },
-        ].map(s => (
-          <div key={s.label} className="bg-card border border-border rounded-xl p-4">
-            <p className="text-xs text-muted-foreground">{s.label}</p>
-            <p className={`text-base font-bold num-display mt-1 ${s.color}`}>{s.value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* ─── Charts row ────────────────────────────────────────────────────── */}
-      <div className="grid lg:grid-cols-2 gap-4">
-        <div className="bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-bold mb-4">Portfolio Growth (10Y)</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="stockGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
-              <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
-              <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-              <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#stockGrad)" strokeWidth={2} name="Portfolio Value" />
-              <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-bold mb-4">Current Allocation</h3>
-          {allocationData.length > 0 ? (
-            <div className="flex items-center gap-3">
-              <ResponsiveContainer width="45%" height={180}>
-                <PieChart>
-                  <Pie
-                    data={allocationData}
-                    cx="50%" cy="50%"
-                    innerRadius={45} outerRadius={75}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {allocationData.map((d: any, i: number) => (
-                      <Cell key={i} fill={d.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(v: number) => mv(formatCurrency(v, true))} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="flex-1 space-y-1.5 text-xs overflow-hidden">
-                {allocationData.map((d: any) => {
-                  const stock = stocks.find((s: any) => s.ticker === d.name);
-                  const targetAlloc = safeNum(stock?.allocation_pct);
-                  const actualPct = totalCurrentValue > 0 ? (d.value / totalCurrentValue) * 100 : 0;
-                  const diff = actualPct - targetAlloc;
-                  return (
-                    <div key={d.name} className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color }} />
-                        <span className="text-muted-foreground truncate">{d.name}</span>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <span className="font-bold num-display">{mv(formatCurrency(d.value, true))}</span>
-                        <span className="text-muted-foreground ml-1">({actualPct.toFixed(1)}%)</span>
-                        {targetAlloc > 0 && (
-                          <span className={`ml-1 ${diff > 0 ? "text-red-400" : "text-emerald-400"}`}>
-                            {diff > 0 ? "+" : ""}{diff.toFixed(1)}%
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm">
-              <TrendingUp className="w-8 h-8 opacity-30 mb-2" />
-              <p>Set holdings above zero to see allocation</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ─── Add Holding Form ───────────────────────────────────────────────── */}
-      {showAdd && (
-        <div className="rounded-xl border border-primary/30 bg-card p-5">
-          <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
-            <Plus className="w-4 h-4 text-primary" /> Add Stock Holding
-          </h3>
-          <StockEditForm
-            data={draft}
-            onChange={handleDraftChange}
-            onEnterSave={() => createMut.mutateAsync(normaliseStock(draft))}
-          />
-          <div className="flex gap-2 mt-4">
-            <SaveButton
-              label="Save Stock Holding"
-              onSave={() => createMut.mutateAsync(normaliseStock(draft))}
-            />
-            <Button size="sm" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Bulk toolbar ───────────────────────────────────────────────────── */}
-      {selected.size > 0 && (
-        <div
-          className="flex items-center gap-3 flex-wrap rounded-xl border px-4 py-2.5 text-sm"
-          style={{ borderColor: "hsl(0,72%,35%)", background: "hsl(0,50%,8%)" }}
-        >
-          <span className="text-red-300 font-semibold">{selected.size} selected</span>
-          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} className="text-xs h-7 text-muted-foreground">Clear</Button>
-          <div className="flex-1" />
-          <Button size="sm" onClick={handleExportBackup} variant="outline" className="text-xs h-7 gap-1">Export Selected</Button>
-          <Button
-            size="sm"
-            onClick={() => setShowBulkModal(true)}
-            className="gap-1.5 bg-red-600 hover:bg-red-700 text-white border-0 h-7 text-xs"
-          >
-            <Trash2 className="w-3 h-3" /> Delete {selected.size} stocks
-          </Button>
-        </div>
-      )}
-
-      {/* ─── Current Holdings Table ─────────────────────────────────────────── */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="p-4 border-b border-border flex items-center justify-between">
-          <h3 className="text-sm font-bold">Current Holdings</h3>
-          {stocks.length > 0 && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-xs h-7 gap-1 text-muted-foreground"
-              onClick={() =>
-                selected.size === stocks.length
-                  ? setSelected(new Set())
-                  : setSelected(new Set(stocks.map((s: any) => s.id)))
-              }
-            >
-              {selected.size === stocks.length ? (
-                <CheckSquare className="w-3.5 h-3.5 text-primary" />
-              ) : (
-                <Square className="w-3.5 h-3.5" />
-              )}
-              Select all
-            </Button>
-          )}
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-secondary/30">
-                <th className="px-3 py-2.5 w-8"></th>
-                {[
-                  "Stock", "Units", "Avg Buy", "Stored Price", "Live Price", "Daily Δ", "Value",
-                  "Invested", "Gain/Loss", "G/L %", "Alloc (Act/Tgt)", "10Y Value", "DCA", "Actions",
-                ].map(h => (
-                  <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {stocks.length === 0 && (
-                <tr>
-                  <td colSpan={13} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                    No stocks added yet. Click "Add Holding" to get started.
-                  </td>
-                </tr>
-              )}
-              {stocks.map((stock: any, idx: number) => {
-                const c = stockCalcs(stock, totalCurrentValue);
-                const isEditing = editingId === stock.id;
-                const isSelected = selected.has(stock.id);
-                const proj = projectInvestment(c.currentValue, stock.expected_return, stock.monthly_dca || 0, 10);
-                const proj10 = proj[9]?.value || c.currentValue;
-
-                if (isEditing && editDraft) {
-                  return (
-                    <tr key={stock.id} className="border-b border-border bg-secondary/20">
-                      <td colSpan={13} className="p-3">
-                        <StockEditForm
-                          data={editDraft}
-                          onChange={handleEditDraftChange}
-                          onEnterSave={handleSaveEdit}
-                        />
-                        <div className="flex gap-2 mt-3">
-                          <SaveButton
-                            label="Save Stock Holding"
-                            onSave={() => updateMut.mutateAsync({ id: stock.id, data: normaliseStock(editDraft) })}
-                          />
-                          <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                }
-
-                return (
-                  <tr
-                    key={stock.id}
-                    className={`border-b border-border/50 hover:bg-secondary/20 transition-colors ${isSelected ? "bg-primary/5" : ""}`}
-                  >
-                    <td className="px-3 py-2.5">
-                      <button
-                        onClick={() =>
-                          setSelected(prev => {
-                            const n = new Set(prev);
-                            n.has(stock.id) ? n.delete(stock.id) : n.add(stock.id);
-                            return n;
-                          })
-                        }
-                        className="flex items-center justify-center text-muted-foreground hover:text-foreground"
-                      >
-                        {isSelected ? (
-                          <CheckSquare className="w-3.5 h-3.5 text-primary" />
-                        ) : (
-                          <Square className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </td>
-
-                    {/* Stock identity */}
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="w-7 h-7 rounded flex items-center justify-center text-xs font-bold shrink-0"
-                          style={{
-                            background: COLORS[idx % COLORS.length] + "20",
-                            color: COLORS[idx % COLORS.length],
-                          }}
-                        >
-                          {stock.ticker?.charAt(0) ?? "?"}
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold">{stock.ticker}</p>
-                          <p className="text-xs text-muted-foreground truncate max-w-[100px]">{stock.name}</p>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="px-3 py-2.5 text-xs num-display">{c.units.toLocaleString()}</td>
-                    <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(c.avgBuyPrice))}</td>
-                    <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(c.currentPrice))}</td>
-                    <td className="px-3 py-2.5 text-xs">
-                      {livePrices[stock.ticker] ? (
-                        <span className="num-display font-semibold">{mv(formatCurrency(livePrices[stock.ticker].price))}</span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-xs">
-                      {livePrices[stock.ticker] ? (
-                        <span className={`num-display font-semibold ${livePrices[stock.ticker].change24h >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {livePrices[stock.ticker].change24h >= 0 ? '+' : ''}{livePrices[stock.ticker].change24h.toFixed(2)}%
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-xs num-display font-semibold">{mv(formatCurrency(c.currentValue, true))}</td>
-                    <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(c.totalInvested, true))}</td>
-
-                    {/* Gain/Loss */}
-                    <td className={`px-3 py-2.5 text-xs num-display font-semibold ${c.unrealisedGL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      <div className="flex items-center gap-1">
-                        {c.unrealisedGL >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                        {mv(`${c.unrealisedGL >= 0 ? "+" : ""}${formatCurrency(c.unrealisedGL, true)}`)}
-                      </div>
-                    </td>
-
-                    {/* G/L % */}
-                    <td className={`px-3 py-2.5 text-xs num-display font-semibold ${c.unrealisedGLPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      {mv(`${c.unrealisedGLPct >= 0 ? "+" : ""}${c.unrealisedGLPct.toFixed(1)}%`)}
-                    </td>
-
-                    {/* Allocation actual / target */}
-                    <td className="px-3 py-2.5 text-xs">
-                      <div className="flex items-center gap-1 whitespace-nowrap">
-                        <span className="num-display font-semibold">{mv(`${c.actualAllocPct.toFixed(1)}%`)}</span>
-                        {c.targetAlloc > 0 && (
-                          <>
-                            <span className="text-muted-foreground">/</span>
-                            <span className="text-muted-foreground">{mv(`${c.targetAlloc.toFixed(1)}%`)}</span>
-                            <span className={`text-xs ml-0.5 ${c.allocDiff > 1 ? "text-red-400" : c.allocDiff < -1 ? "text-emerald-400" : "text-muted-foreground"}`}>
-                              ({c.allocDiff > 0 ? "+" : ""}{c.allocDiff.toFixed(1)}%)
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </td>
-
-                    <td className="px-3 py-2.5 text-xs num-display text-emerald-400">{mv(formatCurrency(proj10, true))}</td>
-                    <td className="px-3 py-2.5 text-xs num-display text-primary">{mv(formatCurrency(stock.monthly_dca || 0))}</td>
-
-                    <td className="px-3 py-2.5">
-                      <div className="flex gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="w-6 h-6"
-                          onClick={() => { setEditingId(stock.id); setEditDraft({ ...stock }); }}
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="w-6 h-6 text-red-400"
-                          onClick={() => { if (confirm("Delete this stock?")) deleteMut.mutate(stock.id); }}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-
-            {/* Footer totals */}
-            {stocks.length > 0 && (
-              <tfoot>
-                <tr className="border-t border-border bg-secondary/20">
-                  <td></td>
-                  <td className="px-3 py-2.5 text-xs font-bold" colSpan={4}>TOTAL</td>
-                  <td className="px-3 py-2.5 text-xs font-bold num-display">{mv(formatCurrency(totalCurrentValue, true))}</td>
-                  <td className="px-3 py-2.5 text-xs font-bold num-display">{mv(formatCurrency(totalInvested, true))}</td>
-                  <td className={`px-3 py-2.5 text-xs font-bold num-display ${totalGL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {mv(`${totalGL >= 0 ? "+" : ""}${formatCurrency(totalGL, true)}`)}
-                  </td>
-                  <td className={`px-3 py-2.5 text-xs font-bold num-display ${totalGLPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {mv(`${totalGLPct >= 0 ? "+" : ""}${totalGLPct.toFixed(1)}%`)}
-                  </td>
-                  <td colSpan={2}></td>
-                  <td className="px-3 py-2.5 text-xs font-bold num-display text-emerald-400">{mv(formatCurrency(year10Val, true))}</td>
-                  <td colSpan={2}></td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
-
-      {/* ─── Bulk Delete Modal ──────────────────────────────────────────────── */}
-      <BulkDeleteModal
-        open={showBulkModal}
-        count={selected.size}
-        label="stock holdings"
-        onConfirm={async () => {
-          const ids = Array.from(selected);
-          for (const id of ids) await apiRequest("DELETE", `/api/stocks/${id}`);
-          await qc.invalidateQueries({ queryKey: ["/api/stocks"] });
-          setSelected(new Set());
-          setShowBulkModal(false);
-          toast({ title: `Deleted ${ids.length} stocks`, description: "Records removed from Supabase and local cache." });
-        }}
-        onCancel={() => setShowBulkModal(false)}
-        onExportBackup={selected.size > 0 ? handleExportBackup : undefined}
-      />
-
-      {/* ─── Transaction Ledger ─────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="p-4 border-b border-border flex items-center justify-between flex-wrap gap-3">
-          <h3 className="text-sm font-bold">All Transactions</h3>
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Type filter */}
-            <div className="flex rounded-lg overflow-hidden border border-border text-xs">
-              {(["all", "buy", "sell"] as const).map(t => (
-                <button
-                  key={t}
-                  onClick={() => setTxTypeFilter(t)}
-                  className={`px-2.5 py-1 font-semibold transition-colors ${
-                    txTypeFilter === t ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {t === "all" ? "All" : t === "buy" ? "Buy" : "Sell"}
-                </button>
-              ))}
-            </div>
-            {/* Status filter */}
-            <div className="flex rounded-lg overflow-hidden border border-border text-xs">
-              {(["all", "actual", "planned"] as const).map(s => (
-                <button
-                  key={s}
-                  onClick={() => setTxStatusFilter(s)}
-                  className={`px-2.5 py-1 font-semibold transition-colors ${
-                    txStatusFilter === s ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {s === "all" ? "All" : s === "actual" ? "Actual" : "Planned"}
-                </button>
-              ))}
-            </div>
-            {/* Date range */}
-            <div className="flex items-center gap-1">
-              <Calendar className="w-3 h-3 text-muted-foreground" />
-              <Input
-                type="date"
-                value={txDateFrom}
-                onChange={e => setTxDateFrom(e.target.value)}
-                className="h-7 text-xs w-32"
-                placeholder="From"
-              />
-              <span className="text-muted-foreground text-xs">–</span>
-              <Input
-                type="date"
-                value={txDateTo}
-                onChange={e => setTxDateTo(e.target.value)}
-                className="h-7 text-xs w-32"
-                placeholder="To"
-              />
-            </div>
-            {/* Ticker filter */}
-            {allTickers.length > 0 && (
-              <div className="flex items-center gap-1">
-                <Filter className="w-3 h-3 text-muted-foreground" />
-                <select
-                  value={txTickerFilter}
-                  onChange={e => setTxTickerFilter(e.target.value)}
-                  className="h-7 text-xs bg-secondary border border-border rounded px-2 text-foreground"
-                >
-                  <option value="all">All Tickers</option>
-                  {allTickers.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-secondary/30">
-                {["Date", "Type", "Status", "Ticker", "Units", "Price/Unit", "Total", "Fee", "Notes", "Actions"].map(h => (
-                  <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredTx.length === 0 && (
-                <tr>
-                  <td colSpan={10} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                    No transactions found. Click "Add Transaction" to record a trade.
-                  </td>
-                </tr>
-              )}
-              {filteredTx.map(tx => (
-                <tr key={tx.id} className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
-                  <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">{tx.transaction_date}</td>
-                  <td className="px-3 py-2.5">
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                      tx.transaction_type === "buy"
-                        ? "bg-emerald-500/15 text-emerald-400"
-                        : "bg-red-500/15 text-red-400"
-                    }`}>
-                      {tx.transaction_type === "buy" ? "Buy" : "Sell"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                      tx.status === "actual"
-                        ? "bg-blue-500/15 text-blue-400"
-                        : "bg-amber-500/15 text-amber-400"
-                    }`}>
-                      {tx.status === "actual" ? "Actual" : "Planned"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-xs font-bold">{tx.ticker}</td>
-                  <td className="px-3 py-2.5 text-xs num-display">{safeNum(tx.units).toLocaleString()}</td>
-                  <td className="px-3 py-2.5 text-xs num-display">{mv(formatCurrency(safeNum(tx.price_per_unit)))}</td>
-                  <td className="px-3 py-2.5 text-xs num-display font-semibold">{mv(formatCurrency(safeNum(tx.total_amount), true))}</td>
-                  <td className="px-3 py-2.5 text-xs num-display text-muted-foreground">{mv(formatCurrency(safeNum(tx.brokerage_fee)))}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[120px] truncate">{tx.notes}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="w-6 h-6"
-                        onClick={() => handleEditTx(tx)}
-                      >
-                        <Edit2 className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="w-6 h-6 text-red-400"
-                        onClick={() => { if (confirm("Delete this transaction?")) deleteTxMut.mutate(tx.id); }}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ─── Planned Future Transactions ────────────────────────────────────── */}
-      {(plannedBuys.length > 0 || plannedSells.length > 0) && (
-        <div className="rounded-xl border border-border bg-card p-5">
-          <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-amber-400" />
-            Planned Future Transactions
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {[...plannedBuys, ...plannedSells]
-              .sort((a, b) => a.transaction_date.localeCompare(b.transaction_date))
-              .map(tx => (
-                <div
-                  key={tx.id}
-                  className={`rounded-lg border p-3 ${
-                    tx.transaction_type === "buy"
-                      ? "border-emerald-500/30 bg-emerald-500/5"
-                      : "border-red-500/30 bg-red-500/5"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold">{tx.ticker}</span>
-                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
-                      tx.transaction_type === "buy"
-                        ? "bg-emerald-500/20 text-emerald-400"
-                        : "bg-red-500/20 text-red-400"
-                    }`}>
-                      {tx.transaction_type === "buy" ? "Buy" : "Sell"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-1">{tx.transaction_date}</p>
-                  <p className="text-sm font-bold num-display">{mv(formatCurrency(safeNum(tx.total_amount), true))}</p>
-                  {tx.notes && <p className="text-xs text-muted-foreground mt-1 truncate">{tx.notes}</p>}
-                  <div className="mt-2 pt-2 border-t border-border/50">
-                    <span className="text-xs text-amber-400 font-semibold">Planned</span>
-                  </div>
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
-
-      {/* ─── 10-Year Projection Chart ───────────────────────────────────────── */}
-      {combinedProjection.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold">10-Year Portfolio Projection</h3>
-            <span className="text-xs text-muted-foreground">CAGR: <span className="text-primary font-bold">{cagr.toFixed(1)}%</span></span>
-          </div>
-
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="projGrad2" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
-              <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
-              <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-              <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#projGrad2)" strokeWidth={2} name="Portfolio Value" />
-              <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
-            </AreaChart>
-          </ResponsiveContainer>
-
-          <div className="overflow-x-auto mt-4">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Year</th>
-                  <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Total Invested</th>
-                  <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Portfolio Value</th>
-                  <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Unrealised Gain</th>
-                  <th className="text-left pb-2 pr-4 text-muted-foreground font-semibold">Gain %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {combinedProjection.map(p => {
-                  const gain = p.value - p.invested;
-                  const gainPct = p.invested > 0 ? (gain / p.invested) * 100 : 0;
-                  return (
-                    <tr key={p.year} className="border-b border-border/40 hover:bg-secondary/20">
-                      <td className="py-1.5 pr-4 font-semibold text-primary">{p.year}</td>
-                      <td className="py-1.5 pr-4 num-display">{mv(formatCurrency(p.invested, true))}</td>
-                      <td className="py-1.5 pr-4 num-display text-emerald-400 font-bold">{mv(formatCurrency(p.value, true))}</td>
-                      <td className={`py-1.5 pr-4 num-display font-semibold ${gain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {mv(`${gain >= 0 ? "+" : ""}${formatCurrency(gain, true)}`)}
-                      </td>
-                      <td className={`py-1.5 pr-4 num-display ${gainPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {mv(`${gainPct >= 0 ? "+" : ""}${gainPct.toFixed(1)}%`)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-        </>
-      )}
-
-            {/* ─── AI Insights ───────────────────────────────────────────────────── */}
+      {/* ─── AI Insights ───────────────────────────────────────────────────── */}
       <AIInsightsCard
         pageKey="stocks"
         pageLabel="Stocks Portfolio"
