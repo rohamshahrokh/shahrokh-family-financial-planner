@@ -38,6 +38,7 @@ import WealthStrategyPage   from "./pages/wealth-strategy";
 import DebtStrategyPage     from "./pages/debt-strategy";
 import RecurringBillsPage   from "./pages/recurring-bills";
 import BudgetPage           from "./pages/budget";
+import MarketNewsPage       from "./pages/market-news";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -152,6 +153,9 @@ function AppRouter() {
         </Route>
         <Route path="/budget">
           <ProtectedRoute component={BudgetPage} title="Monthly Budget" />
+        </Route>
+        <Route path="/market-news">
+          <ProtectedRoute component={MarketNewsPage} title="Market News" />
         </Route>
 
         {/* 404 */}
