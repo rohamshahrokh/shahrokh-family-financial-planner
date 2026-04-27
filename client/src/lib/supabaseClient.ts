@@ -29,6 +29,40 @@ async function sbGet(table: string, query = ""): Promise<any[]> {
   return res.json();
 }
 
+/**
+ * sbGetAll — fetches ALL rows from a table using Range-based pagination.
+ * Supabase REST API caps responses at 1000 rows by default.
+ * This function loops in batches of 1000 until no more rows are returned.
+ * Use this for any large table (expenses, income, transactions).
+ */
+async function sbGetAll(table: string, orderQuery = "order=date.asc"): Promise<any[]> {
+  const BATCH = 1000;
+  let allRows: any[] = [];
+  let offset = 0;
+  while (true) {
+    const rangeStart = offset;
+    const rangeEnd   = offset + BATCH - 1;
+    const res = await fetch(`${BASE}/${table}?${orderQuery}`, {
+      headers: {
+        ...HEADERS,
+        "Range": `${rangeStart}-${rangeEnd}`,
+        "Range-Unit": "items",
+        "Prefer": "count=none",
+      },
+    });
+    // 206 Partial Content or 200 OK are both valid
+    if (!res.ok && res.status !== 206) {
+      throw new Error(`Supabase paginated GET ${table} (offset ${offset}): ${res.status} ${await res.text()}`);
+    }
+    const batch: any[] = await res.json();
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    allRows = allRows.concat(batch);
+    if (batch.length < BATCH) break; // last page
+    offset += BATCH;
+  }
+  return allRows;
+}
+
 async function sbUpsert(table: string, data: object): Promise<any> {
   const res = await fetch(`${BASE}/${table}`, {
     method: "POST",
@@ -93,7 +127,7 @@ export const sbSnapshot = {
 
 export const sbExpenses = {
   async getAll(): Promise<any[]> {
-    try { return await sbGet("sf_expenses", "order=date.desc"); } catch { return []; }
+    try { return await sbGetAll("sf_expenses", "order=date.asc"); } catch { return []; }
   },
   async create(data: object): Promise<any | null> {
     try { return await sbInsert("sf_expenses", { ...data, created_at: new Date().toISOString() }); } catch { return null; }
@@ -228,7 +262,7 @@ export const sbStockTx = {
 
 export const sbIncome = {
   async getAll(): Promise<any[]> {
-    try { return await sbGet("sf_income", "order=date.desc"); } catch { return []; }
+    try { return await sbGetAll("sf_income", "order=date.asc"); } catch { return []; }
   },
   async create(data: object): Promise<any | null> {
     try {
