@@ -185,15 +185,35 @@ export default function DashboardPage() {
     Annual:      1 / 12,
     "One-off":   0,
   };
+  // ─── Active recurring income streams ────────────────────────────────────
+  // Deduplicate: per unique (member × source × description × frequency).
+  // Keep ONLY the most-recent record for each stream.
+  // One-off records are excluded from monthly recurring total.
+  const activeIncomeStreams = useMemo(() => {
+    const streamMap = new Map<string, any>();
+    const sorted = [...(incomeRecords as any[])]
+      .filter((r: any) => r.frequency !== 'One-off')
+      .sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''));
+    for (const r of sorted) {
+      const key = [
+        (r.member      || '').toLowerCase().trim(),
+        (r.source      || '').toLowerCase().trim(),
+        (r.description || '').toLowerCase().trim(),
+        (r.frequency   || '').toLowerCase().trim(),
+      ].join('|');
+      if (!streamMap.has(key)) streamMap.set(key, r);
+    }
+    return Array.from(streamMap.values());
+  }, [incomeRecords]);
+
   const incomeTrackerMonthly = useMemo(() => {
-    if (!incomeRecords.length) return 0;
-    return incomeRecords.reduce((sum: number, r: any) => {
+    return activeIncomeStreams.reduce((sum: number, r: any) => {
       const mult = FREQ_MULT[r.frequency] ?? 1;
       return sum + safeNum(r.amount) * mult;
     }, 0);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incomeRecords]);
+  }, [activeIncomeStreams]);
 
+  const activeStreamsCount = activeIncomeStreams.length;
   const useIncomeTracker = incomeRecords.length > 0;
   const incomeSource = useIncomeTracker ? "Income Tracker" : "Snapshot fallback";
 
@@ -570,7 +590,7 @@ export default function DashboardPage() {
           }`} />
           Income source: {incomeSource}
           {useIncomeTracker && (
-            <span className="opacity-70 ml-0.5">({incomeRecords.length} records · {formatCurrency(incomeTrackerMonthly, true)}/mo)</span>
+            <span className="opacity-70 ml-0.5">({activeStreamsCount} active source{activeStreamsCount !== 1 ? 's' : ''} · {formatCurrency(incomeTrackerMonthly, true)}/mo)</span>
           )}
         </span>
       </div>
