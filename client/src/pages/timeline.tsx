@@ -92,6 +92,14 @@ export default function TimelinePage() {
     queryKey: ['/api/expenses'],
     queryFn: () => apiRequest('GET', '/api/expenses').then(r => r.json()),
   });
+  const { data: stockTransactions = [] } = useQuery<any[]>({
+    queryKey: ['/api/stock-transactions'],
+    queryFn: () => apiRequest('GET', '/api/stock-transactions').then(r => r.json()),
+  });
+  const { data: cryptoTransactions = [] } = useQuery<any[]>({
+    queryKey: ['/api/crypto-transactions'],
+    queryFn: () => apiRequest('GET', '/api/crypto-transactions').then(r => r.json()),
+  });
 
   // ── Snapshot with safe defaults ────────────────────────────────────────────
   const snap = useMemo(() => ({
@@ -109,9 +117,13 @@ export default function TimelinePage() {
   }), [snapshot]);
 
   // ── 10-year net worth projection ───────────────────────────────────────────
+  // Only planned transactions (actuals already in expenses — avoid double-counting)
+  const plannedStockTx = useMemo(() => stockTransactions.filter((t: any) => t.status === 'planned'), [stockTransactions]);
+  const plannedCryptoTx = useMemo(() => cryptoTransactions.filter((t: any) => t.status === 'planned'), [cryptoTransactions]);
+
   const projection: YearlyProjection[] = useMemo(() =>
-    projectNetWorth({ snapshot: snap, properties, stocks: stocks, cryptos, years: 10 }),
-    [snap, properties, stocks, cryptos]
+    projectNetWorth({ snapshot: snap, properties, stocks: stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, years: 10 }),
+    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx]
   );
 
   // ── Monthly cash flow series ───────────────────────────────────────────────
@@ -120,8 +132,10 @@ export default function TimelinePage() {
       snapshot: snap,
       expenses,
       properties,
+      stockTransactions: plannedStockTx,
+      cryptoTransactions: plannedCryptoTx,
     }),
-    [snap, expenses, properties]
+    [snap, expenses, properties, plannedStockTx, plannedCryptoTx]
   );
 
   const annualSeries = useMemo(() =>
