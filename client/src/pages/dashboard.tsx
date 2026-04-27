@@ -169,6 +169,16 @@ export default function DashboardPage() {
     queryFn: () => apiRequest("GET", "/api/alert-logs").then((r) => r.json()),
     staleTime: 0,
   });
+  const { data: stockTransactionsRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/stock-transactions"],
+    queryFn: () => apiRequest("GET", "/api/stock-transactions").then((r) => r.json()),
+    staleTime: 0,
+  });
+  const { data: cryptoTransactionsRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/crypto-transactions"],
+    queryFn: () => apiRequest("GET", "/api/crypto-transactions").then((r) => r.json()),
+    staleTime: 0,
+  });
 
   const updateSnap = useMutation({
     mutationFn: (data: any) => apiRequest("PUT", "/api/snapshot", data).then((r) => r.json()),
@@ -249,11 +259,21 @@ export default function DashboardPage() {
   const cryptoTotal    = cryptos.reduce((s: number, c: any) => s + safeNum(c.current_holding) * safeNum(c.current_price), 0);
   const totalInvestments = stocksTotal + cryptoTotal;
 
+  // Planned transactions only — actuals are already counted in expenses
+  const plannedStockTx = useMemo(
+    () => (stockTransactionsRaw as any[]).filter((t: any) => t.status === 'planned'),
+    [stockTransactionsRaw]
+  );
+  const plannedCryptoTx = useMemo(
+    () => (cryptoTransactionsRaw as any[]).filter((t: any) => t.status === 'planned'),
+    [cryptoTransactionsRaw]
+  );
+
   // ─── 10-year projection ───────────────────────────────────────────────────
   const projection = useMemo(
-    () => projectNetWorth({ snapshot: snap, properties, stocks, cryptos, years: 10 }),
+    () => projectNetWorth({ snapshot: snap, properties, stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, years: 10 }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, properties, stocks, cryptos]
+    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx]
   );
 
   const year10NW      = projection[9]?.endNetWorth || netWorth;
@@ -366,9 +386,9 @@ export default function DashboardPage() {
 
   // ─── Master Cash Flow Series (2025 → 2035) ────────────────────────────────
   const cashFlowSeries = useMemo(
-    () => buildCashFlowSeries({ snapshot: snap, expenses: expenses as any[], properties: properties as any[] }),
+    () => buildCashFlowSeries({ snapshot: snap, expenses: expenses as any[], properties: properties as any[], stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, expenses, properties]
+    [snap, expenses, properties, plannedStockTx, plannedCryptoTx]
   );
 
   const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
