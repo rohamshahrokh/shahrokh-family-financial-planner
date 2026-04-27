@@ -53,8 +53,16 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 //   lump_sum_amount  → stores avg_buy_price
 
 // ─── Normalise crypto ─────────────────────────────────────────────────────────
+const SF_CRYPTO_COLS = new Set([
+  'symbol','name','current_price','current_holding',
+  'expected_return','monthly_dca','lump_sum_amount','projection_years',
+]);
+
 function normaliseCrypto(d: any) {
-  const out = { ...d };
+  const out: Record<string, any> = {};
+  for (const k of SF_CRYPTO_COLS) {
+    if (k in d) out[k] = d[k];
+  }
   const numKeys = [
     "current_price", "current_holding", "expected_return",
     "monthly_dca", "lump_sum_amount", "projection_years",
@@ -371,7 +379,7 @@ function CryptoTxForm({ initial, cryptos, onSave, onCancel, isSaving }: CryptoTx
 export default function CryptoPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const { privacyMode } = useAppStore();
+  const { privacyMode, chartView } = useAppStore();
 
   // Holdings state
   const [showAdd, setShowAdd] = useState(false);
