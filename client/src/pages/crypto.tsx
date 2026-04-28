@@ -904,32 +904,41 @@ export default function CryptoPage() {
   // ── Planned Order mutations ────────────────────────────────────────────────
   const createOrderMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/planned-investments", { ...data, module: 'crypto' }).then(r => r.json()),
-    onSuccess: async () => {
+    onSuccess: async (newOrder: any) => {
+      // 1. Optimistically patch the cache so the table shows instantly
+      qc.setQueryData(["/api/planned-investments", "crypto"], (old: any[] = []) => [...old, newOrder]);
+      // 2. Close modal
       setShowOrderForm(false);
       setOrderDraft(null);
       setEditingOrderId(null);
-      // Invalidate all planned-investments queries so stocks page + dashboard + timeline all refresh
-      await qc.invalidateQueries({ queryKey: ["/api/planned-investments"] });
       toast({ title: "Planned order saved" });
+      // 3. Background sync to update dashboard + timeline
+      await qc.refetchQueries({ queryKey: ["/api/planned-investments"] });
     },
     onError: (err: any) => toast({ title: 'Save failed', description: String(err), variant: 'destructive' }),
   });
   const updateOrderMut = useMutation({
     mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/planned-investments/${id}`, data).then(r => r.json()),
-    onSuccess: async () => {
+    onSuccess: async (updatedOrder: any) => {
+      qc.setQueryData(["/api/planned-investments", "crypto"], (old: any[] = []) =>
+        old.map((o: any) => (o.id === updatedOrder?.id ? updatedOrder : o))
+      );
       setShowOrderForm(false);
       setOrderDraft(null);
       setEditingOrderId(null);
-      await qc.invalidateQueries({ queryKey: ["/api/planned-investments"] });
       toast({ title: "Planned order updated" });
+      await qc.refetchQueries({ queryKey: ["/api/planned-investments"] });
     },
     onError: (err: any) => toast({ title: 'Save failed', description: String(err), variant: 'destructive' }),
   });
   const deleteOrderMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/planned-investments/${id}`).then(r => r.json()),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["/api/planned-investments"] });
+    onSuccess: async (_: any, id: number) => {
+      qc.setQueryData(["/api/planned-investments", "crypto"], (old: any[] = []) =>
+        old.filter((o: any) => o.id !== id)
+      );
       toast({ title: "Planned order deleted" });
+      await qc.refetchQueries({ queryKey: ["/api/planned-investments"] });
     },
     onError: (err: any) => toast({ title: 'Delete failed', description: String(err), variant: 'destructive' }),
   });
