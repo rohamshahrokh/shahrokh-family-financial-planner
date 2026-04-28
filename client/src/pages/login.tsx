@@ -5,18 +5,21 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useHashLocation } from "wouter/use-hash-location";
 import familyImg from "@assets/family.jpeg";
+import type { UserRole } from "@/lib/store";
 
-// Credential table — extend here to add more users.
-const USERS: Record<string, { password: string; displayName: "Roham" | "Fara" }> = {
-  Roham: { password: "YaraJana2025", displayName: "Roham" },
-  Fara: { password: "Fara2025", displayName: "Fara" },
+// ── User credential table ─────────────────────────────────────────────────────
+// To add more users: add an entry here.
+// Passwords are plain-text (app is private, family-only, not exposed to internet auth).
+const USERS: Record<string, { password: string; displayName: "Roham" | "Fara"; role: UserRole }> = {
+  Roham: { password: "YaraJana2025", displayName: "Roham", role: "admin" },
+  Fara:  { password: "Fara2025",     displayName: "Fara",  role: "family_user" },
 };
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login, setCurrentUser } = useAppStore();
+  const { login, setCurrentUser, setRole } = useAppStore();
   const { toast } = useToast();
   const [, navigate] = useHashLocation();
 
@@ -31,9 +34,12 @@ export default function LoginPage() {
     if (record && record.password === password) {
       login();
       setCurrentUser(record.displayName);
+      setRole(record.role);
       toast({
         title: `Welcome back, ${record.displayName}`,
-        description: "Your financial command center is ready.",
+        description: record.role === "admin"
+          ? "Full admin access granted."
+          : "Family dashboard ready.",
       });
       navigate("/dashboard");
     } else {
