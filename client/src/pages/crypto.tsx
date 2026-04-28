@@ -842,6 +842,7 @@ export default function CryptoPage() {
   const { data: plannedOrders = [] } = useQuery<any[]>({
     queryKey: ["/api/planned-investments", "crypto"],
     queryFn: () => apiRequest("GET", "/api/planned-investments?module=crypto").then(r => r.json()),
+    staleTime: 0,
   });
 
   // ── Live price + import handlers ────────────────────────────────────────────
@@ -904,7 +905,7 @@ export default function CryptoPage() {
   const createOrderMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/planned-investments", { ...data, module: 'crypto' }).then(r => r.json()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/planned-investments", "crypto"] });
+      qc.invalidateQueries({ queryKey: ["/api/planned-investments"], exact: false });
       setShowOrderForm(false);
       setOrderDraft(null);
       setEditingOrderId(null);
@@ -915,7 +916,7 @@ export default function CryptoPage() {
   const updateOrderMut = useMutation({
     mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/planned-investments/${id}`, data).then(r => r.json()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/planned-investments", "crypto"] });
+      qc.invalidateQueries({ queryKey: ["/api/planned-investments"], exact: false });
       setShowOrderForm(false);
       setOrderDraft(null);
       setEditingOrderId(null);
@@ -926,7 +927,7 @@ export default function CryptoPage() {
   const deleteOrderMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/planned-investments/${id}`).then(r => r.json()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/planned-investments", "crypto"] });
+      qc.invalidateQueries({ queryKey: ["/api/planned-investments"], exact: false });
       toast({ title: "Planned order deleted" });
     },
     onError: (err: any) => toast({ title: 'Delete failed', description: String(err), variant: 'destructive' }),
