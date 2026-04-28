@@ -58,6 +58,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import familyImg from "@assets/family.jpeg";
 import AIInsightsCard from "@/components/AIInsightsCard";
+import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import { Link } from "wouter";
 
 // ─── Chart colours ────────────────────────────────────────────────────────────
@@ -1362,6 +1363,9 @@ export default function DashboardPage() {
           </table>
         </div>
       </div>
+
+      {/* ─── Portfolio Live Return ──────────────────────────────────────── */}
+      <PortfolioLiveReturn />
 
       {/* ─── AI Insights ─────────────────────────────────────────────────── */}
       <AIInsightsCard
