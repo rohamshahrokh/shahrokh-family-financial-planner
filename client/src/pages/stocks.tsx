@@ -1011,9 +1011,9 @@ export default function StocksPage() {
   const createOrderMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/planned-investments", data).then(r => r.json()),
     onSuccess: async () => {
-      await qc.refetchQueries({ queryKey: ['/api/planned-investments', 'stock'], exact: true });
-      qc.invalidateQueries({ queryKey: ['/api/planned-investments'], exact: false });
       setShowOrderForm(false); setOrderDraft(null); setEditingOrderId(null);
+      // Invalidate both the module-filtered key and the generic key so all consumers refresh
+      await qc.invalidateQueries({ queryKey: ['/api/planned-investments'] });
       toast({ title: "Planned order saved" });
     },
     onError: (err: any) => {
@@ -1024,9 +1024,8 @@ export default function StocksPage() {
   const updateOrderMut = useMutation({
     mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/planned-investments/${id}`, data).then(r => r.json()),
     onSuccess: async () => {
-      await qc.refetchQueries({ queryKey: ['/api/planned-investments', 'stock'], exact: true });
-      qc.invalidateQueries({ queryKey: ['/api/planned-investments'], exact: false });
       setShowOrderForm(false); setOrderDraft(null); setEditingOrderId(null);
+      await qc.invalidateQueries({ queryKey: ['/api/planned-investments'] });
       toast({ title: "Planned order updated" });
     },
     onError: (err: any) => {
@@ -1037,8 +1036,7 @@ export default function StocksPage() {
   const deleteOrderMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/planned-investments/${id}`).then(r => r.json()),
     onSuccess: async () => {
-      await qc.refetchQueries({ queryKey: ['/api/planned-investments', 'stock'], exact: true });
-      qc.invalidateQueries({ queryKey: ['/api/planned-investments'], exact: false });
+      await qc.invalidateQueries({ queryKey: ['/api/planned-investments'] });
       toast({ title: "Planned order deleted" });
     },
     onError: (err: any) => {
