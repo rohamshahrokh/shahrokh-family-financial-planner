@@ -29,6 +29,7 @@ import {
   ResponsiveContainer,
   LineChart,
   Line,
+  ReferenceLine,
 } from "recharts";
 import {
   TrendingUp,
@@ -464,6 +465,24 @@ export default function DashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap, surplus, savingsRate, stocksTotal, cryptoTotal]);
 
+  // Detect property settlement months for chart annotations
+  const settlementAnnotations = useMemo(() => {
+    const annotations: Array<{ label: string; name: string; amount: number }> = [];
+    const investProps = (properties as any[]).filter(p => p.type !== 'ppor');
+    for (const prop of investProps) {
+      const settleDateStr = prop.settlement_date || prop.purchase_date;
+      if (!settleDateStr) continue;
+      const d = new Date(settleDateStr);
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const label = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+      const cost = safeNum(prop.deposit) + safeNum(prop.stamp_duty) + safeNum(prop.legal_fees)
+        + safeNum(prop.renovation_costs) + safeNum(prop.building_inspection) + safeNum(prop.loan_setup_fees);
+      const name = prop.address || prop.suburb || prop.name || 'Investment Property';
+      annotations.push({ label, name, amount: cost });
+    }
+    return annotations;
+  }, [properties]);
+
   const masterCFData = useMemo(() => {
     if (cashFlowView === "annual") {
       return cashFlowAnnual.map((y) => ({
@@ -477,24 +496,16 @@ export default function DashboardPage() {
         hasActuals: y.hasActualMonths > 0,
       }));
     } else {
-      const now          = new Date();
-      const cutoffStart  = new Date(now.getFullYear() - 1, now.getMonth() - 11, 1);
-      const cutoffEnd    = new Date(now.getFullYear() + 1, now.getMonth() + 11, 1);
-      return cashFlowSeries
-        .filter((m) => {
-          const d = new Date(m.year, m.month - 1, 1);
-          return d >= cutoffStart && d <= cutoffEnd;
-        })
-        .map((m) => ({
-          label:     m.label,
-          income:    m.income,
-          expenses:  m.totalExpenses,
-          mortgage:  m.mortgageRepayment,
-          rental:    m.rentalIncome,
-          netCF:     m.netCashFlow,
-          balance:   m.cumulativeBalance,
-          hasActuals: m.isActual,
-        }));
+      return cashFlowSeries.map((m) => ({
+        label:     m.label,
+        income:    m.income,
+        expenses:  m.totalExpenses,
+        mortgage:  m.mortgageRepayment,
+        rental:    m.rentalIncome,
+        netCF:     m.netCashFlow,
+        balance:   m.cumulativeBalance,
+        hasActuals: m.isActual,
+      }));
     }
   }, [cashFlowView, cashFlowAnnual, cashFlowSeries]);
 
@@ -1112,17 +1123,23 @@ export default function DashboardPage() {
             { color: "hsl(142,60%,45%)", label: "Income" },
             { color: "hsl(0,72%,51%)",   label: "Expenses" },
             { color: "hsl(43,85%,55%)",  label: "Net CF" },
-            { color: "hsl(188,60%,48%)", label: "Balance" },
+            { color: "hsl(188,60%,48%)", label: "Balance (right axis)", dashed: true },
           ].map((l) => (
             <div key={l.label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <div className="w-2.5 h-2.5 rounded-sm" style={{ background: l.color }} />
+              <div className="w-2.5 h-2.5 rounded-sm" style={{ background: l.color, opacity: (l as any).dashed ? 0.7 : 1 }} />
               {l.label}
             </div>
           ))}
+          {settlementAnnotations.length > 0 && (
+            <div className="flex items-center gap-1.5 text-xs text-amber-400">
+              <div className="w-2.5 h-2.5 rounded-sm bg-amber-400" />
+              Property Settlement
+            </div>
+          )}
         </div>
 
-        <ResponsiveContainer width="100%" height={260}>
-          <LineChart data={masterCFData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height={280}>
+          <LineChart data={masterCFData} margin={{ top: 5, right: 60, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
             <XAxis
               dataKey="label"
@@ -1132,8 +1149,22 @@ export default function DashboardPage() {
               textAnchor={cashFlowView === "monthly" ? "end" : "middle"}
               height={cashFlowView === "monthly" ? 40 : 20}
             />
+            {/* Left axis: Income / Expenses / Net CF — monthly scale */}
             <YAxis
+              yAxisId="left"
               tick={{ fontSize: 9, fill: "hsl(220,10%,55%)" }}
+              tickFormatter={(v) => {
+                const abs = Math.abs(v);
+                if (abs >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
+                if (abs >= 1_000)     return `$${(v / 1_000).toFixed(0)}K`;
+                return `$${v}`;
+              }}
+            />
+            {/* Right axis: Balance — cumulative scale (much larger) */}
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              tick={{ fontSize: 9, fill: "hsl(188,60%,48%)" }}
               tickFormatter={(v) => {
                 const abs = Math.abs(v);
                 if (abs >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
@@ -1144,9 +1175,13 @@ export default function DashboardPage() {
             <Tooltip
               content={({ active, payload, label }) => {
                 if (!active || !payload?.length) return null;
+                const ann = settlementAnnotations.find(a => a.label === label);
                 return (
-                  <div className="bg-card border border-border rounded-lg px-3 py-2 text-xs shadow-xl">
+                  <div className="bg-card border border-border rounded-lg px-3 py-2 text-xs shadow-xl max-w-[220px]">
                     <p className="text-muted-foreground mb-1 font-semibold">{label}</p>
+                    {ann && (
+                      <p className="text-amber-400 mb-1 font-semibold">🏠 {ann.name} settlement{ann.amount > 0 ? ` (${formatCurrency(ann.amount, true)})` : ''}</p>
+                    )}
                     {payload.map((p: any, i: number) => (
                       <p key={i} style={{ color: p.color }}>
                         {p.name}: {formatCurrency(p.value, true)}
@@ -1156,19 +1191,41 @@ export default function DashboardPage() {
                 );
               }}
             />
+            {/* Property settlement reference lines */}
+            {settlementAnnotations.map((ann, i) => (
+              <ReferenceLine
+                key={i}
+                yAxisId="left"
+                x={ann.label}
+                stroke="hsl(43,85%,55%)"
+                strokeDasharray="4 3"
+                strokeWidth={1.5}
+                label={{
+                  value: `🏠 ${ann.name.length > 14 ? ann.name.slice(0, 14) + '…' : ann.name}`,
+                  position: 'insideTopRight',
+                  fill: 'hsl(43,85%,55%)',
+                  fontSize: 9,
+                  fontWeight: 600,
+                }}
+              />
+            ))}
             <Line
+              yAxisId="left"
               type="monotone" dataKey="income"
               stroke="hsl(142,60%,45%)" strokeWidth={1.5} dot={false} name="Income"
             />
             <Line
+              yAxisId="left"
               type="monotone" dataKey="expenses"
               stroke="hsl(0,72%,51%)" strokeWidth={1.5} dot={false} name="Expenses"
             />
             <Line
+              yAxisId="left"
               type="monotone" dataKey="netCF"
               stroke="hsl(43,85%,55%)" strokeWidth={2} dot={false} name="Net CF"
             />
             <Line
+              yAxisId="right"
               type="monotone" dataKey="balance"
               stroke="hsl(188,60%,48%)" strokeWidth={1.5} strokeDasharray="4 2" dot={false} name="Balance"
             />
