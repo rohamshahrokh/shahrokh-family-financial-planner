@@ -11,6 +11,7 @@ import {
   Settings as SettingsIcon, Download, Upload, RefreshCw, User, Moon, Sun, Shield,
   Send, Bell, BellOff, CheckCircle2, XCircle, MessageSquare, Heart, Clock,
   Zap, TrendingDown, AlertTriangle, CreditCard, DollarSign, BarChart2, Lock,
+  UserPlus, KeyRound, UserCheck, UserX, ChevronDown, ChevronUp, Eye, EyeOff,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { sendTestMessage, sendBrowserPush, invalidateSettingsCache } from "@/lib/notifications";
@@ -81,6 +82,296 @@ function SectionCard({
         )}
       </div>
       {children}
+    </div>
+  );
+}
+
+// ─── User Management components (defined outside SettingsPage to avoid re-render focus loss) ─────
+
+function PwdInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <Input
+        type={show ? 'text' : 'password'}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder ?? 'New password'}
+        className="h-8 text-sm pr-8 font-mono"
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={() => setShow(s => !s)}
+        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+      >
+        {show ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  );
+}
+
+function UserRow({ user, onSaved }: { user: any; onSaved: () => void }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
+  const [pwdField, setPwdField] = useState('');
+  const [displayName, setDisplayName] = useState(user.display_name);
+  const [role, setRole] = useState(user.role);
+  const [active, setActive] = useState(user.active);
+  const [notes, setNotes] = useState(user.notes ?? '');
+  const [saving, setSaving] = useState(false);
+
+  const roleBadgeStyle = role === 'admin'
+    ? 'bg-primary/15 text-primary border-primary/30'
+    : 'bg-secondary text-muted-foreground border-border/50';
+
+  const handleSave = async () => {
+    if (!displayName.trim()) { toast({ title: 'Display name is required', variant: 'destructive' }); return; }
+    setSaving(true);
+    try {
+      const payload: any = { display_name: displayName, role, active, notes };
+      if (pwdField.trim()) payload.password = pwdField.trim();
+      await apiRequest('PUT', `/api/users/${user.id}`, payload).then(r => r.json());
+      qc.invalidateQueries({ queryKey: ['/api/users'] });
+      setPwdField('');
+      setExpanded(false);
+      onSaved();
+      toast({ title: 'Saved Successfully', description: `User "${displayName}" updated.` });
+    } catch (err: any) {
+      toast({ title: 'Save Failed', description: err?.message ?? 'Supabase error', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className={`rounded-lg border transition-all ${
+      expanded ? 'border-primary/40 bg-primary/5' : 'border-border/50 bg-secondary/20'
+    }`}>
+      {/* Header row */}
+      <div className="flex items-center gap-3 p-3">
+        <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+          style={{ background: 'hsl(43,85%,55%)', color: 'hsl(224,40%,8%)' }}>
+          {(displayName || user.username).slice(0, 2).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold truncate">{displayName}</p>
+          <p className="text-xs text-muted-foreground">@{user.username}</p>
+        </div>
+        <span className={`text-xs px-2 py-0.5 rounded-full border flex-shrink-0 ${roleBadgeStyle}`}>{role}</span>
+        <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${
+          active ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+        }`}>{active ? 'Active' : 'Disabled'}</span>
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+        >
+          {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
+      </div>
+
+      {/* Expanded edit form */}
+      {expanded && (
+        <div className="px-3 pb-3 space-y-3 border-t border-border/40 pt-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground">Display Name</label>
+              <Input value={displayName} onChange={e => setDisplayName(e.target.value)} className="h-8 text-sm mt-1" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Role</label>
+              <Select value={role} onValueChange={setRole}>
+                <SelectTrigger className="h-8 text-sm mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="family_user">Family User</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground">New Password <span className="text-muted-foreground/60">(leave blank to keep current)</span></label>
+              <div className="mt-1">
+                <PwdInput value={pwdField} onChange={setPwdField} />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Notes</label>
+              <Input value={notes} onChange={e => setNotes(e.target.value)} className="h-8 text-sm mt-1" placeholder="Optional" />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Account Active</span>
+              <button
+                onClick={() => setActive((a: boolean) => !a)}
+                className={`relative w-10 rounded-full transition-colors ${active ? 'bg-primary' : 'bg-secondary'}`}
+                style={{ minWidth: 40, height: 22 }}
+                aria-pressed={active}
+              >
+                <span
+                  className="absolute top-0.5 bg-white rounded-full shadow transition-transform"
+                  style={{ width: 18, height: 18, left: 2, transform: active ? 'translateX(18px)' : 'translateX(0)' }}
+                />
+              </button>
+            </div>
+            <div className="flex-1" />
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setExpanded(false)}>Cancel</Button>
+            <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handleSave} disabled={saving}
+              style={{ background: 'hsl(43,85%,55%)', color: 'hsl(224,40%,8%)', border: 'none' }}>
+              {saving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <KeyRound className="w-3 h-3" />}
+              Save Changes
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ADD_USER_INITIAL = { username: '', display_name: '', password: '', role: 'family_user', notes: '' };
+
+function AddUserForm({ onAdded }: { onAdded: () => void }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [form, setForm] = useState(ADD_USER_INITIAL);
+  const [saving, setSaving] = useState(false);
+
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleAdd = async () => {
+    if (!form.username.trim()) { toast({ title: 'Username is required', variant: 'destructive' }); return; }
+    if (!form.display_name.trim()) { toast({ title: 'Display name is required', variant: 'destructive' }); return; }
+    if (!form.password.trim()) { toast({ title: 'Password is required', variant: 'destructive' }); return; }
+    setSaving(true);
+    try {
+      await apiRequest('POST', '/api/users', {
+        username: form.username.trim().toLowerCase(),
+        display_name: form.display_name.trim(),
+        password: form.password.trim(),
+        role: form.role,
+        notes: form.notes,
+      }).then(r => r.json());
+      qc.invalidateQueries({ queryKey: ['/api/users'] });
+      setForm(ADD_USER_INITIAL);
+      onAdded();
+      toast({ title: 'Saved Successfully', description: `User "${form.display_name}" created.` });
+    } catch (err: any) {
+      toast({ title: 'Save Failed', description: err?.message ?? 'Supabase error. Username may already exist.', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-dashed border-primary/40 bg-primary/5 p-4 space-y-3">
+      <p className="text-xs font-semibold text-primary flex items-center gap-1.5"><UserPlus className="w-3.5 h-3.5" /> New User</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-muted-foreground">Username</label>
+          <Input value={form.username} onChange={e => set('username', e.target.value)} className="h-8 text-sm mt-1" placeholder="fara" />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Display Name</label>
+          <Input value={form.display_name} onChange={e => set('display_name', e.target.value)} className="h-8 text-sm mt-1" placeholder="Fara Ghiyasi" />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Password</label>
+          <div className="mt-1">
+            <PwdInput value={form.password} onChange={v => set('password', v)} placeholder="Initial password" />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Role</label>
+          <Select value={form.role} onValueChange={v => set('role', v)}>
+            <SelectTrigger className="h-8 text-sm mt-1"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="family_user">Family User</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">Notes <span className="text-muted-foreground/60">(optional)</span></label>
+        <Input value={form.notes} onChange={e => set('notes', e.target.value)} className="h-8 text-sm mt-1" placeholder="e.g. Fara's account" />
+      </div>
+      <div className="flex justify-end">
+        <Button size="sm" className="h-8 text-xs gap-1.5" onClick={handleAdd} disabled={saving}
+          style={{ background: 'hsl(43,85%,55%)', color: 'hsl(224,40%,8%)', border: 'none' }}>
+          {saving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
+          Create User
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function UserManagementSection({ isAdmin }: { isAdmin: boolean }) {
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  const { data: users = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ['/api/users'],
+    queryFn: () => apiRequest('GET', '/api/users').then(r => r.json()),
+    staleTime: 0,
+    enabled: isAdmin,
+  });
+
+  if (!isAdmin) {
+    return (
+      <div className="rounded-xl border border-border/50 bg-card/50 p-4 opacity-70">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold text-muted-foreground">User Management</h2>
+          <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">
+            <Lock className="w-3 h-3" /> Admin only
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">This section is restricted to admin. Contact Roham to make changes.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+      <div className="flex items-center gap-2">
+        <Shield className="w-4 h-4 text-primary" />
+        <h2 className="text-sm font-bold">User Management</h2>
+        <span className="ml-auto flex items-center gap-1 text-xs text-primary/60 bg-primary/10 px-2 py-0.5 rounded-full">
+          <Shield className="w-3 h-3" /> Admin
+        </span>
+      </div>
+
+      <div className="rounded-lg bg-secondary/30 border border-border/50 p-3 text-xs text-muted-foreground space-y-1">
+        <p>Manage all family app users. Changes are written directly to Supabase — no code changes required.</p>
+        <p>Family users cannot change admin settings, API keys, Telegram tokens, or other users' passwords.</p>
+      </div>
+
+      {isLoading ? (
+        <div className="text-xs text-muted-foreground animate-pulse">Loading users from Supabase...</div>
+      ) : users.length === 0 ? (
+        <div className="text-xs text-muted-foreground">No users found in sf_users table.</div>
+      ) : (
+        <div className="space-y-2">
+          {(users as any[]).map((u: any) => (
+            <UserRow key={u.id} user={u} onSaved={() => refetch()} />
+          ))}
+        </div>
+      )}
+
+      {showAddForm ? (
+        <AddUserForm onAdded={() => { setShowAddForm(false); refetch(); }} />
+      ) : (
+        <Button
+          size="sm" variant="outline"
+          className="w-full h-8 text-xs gap-1.5 border-dashed"
+          onClick={() => setShowAddForm(true)}
+        >
+          <UserPlus className="w-3.5 h-3.5" /> Add New User
+        </Button>
+      )}
     </div>
   );
 }
@@ -501,14 +792,8 @@ export default function SettingsPage() {
         }} />
       </SectionCard>
 
-      {/* ── Security ─────────────────────────────────────────────────────── */}
-      <SectionCard title="Security" icon={Shield} adminOnly isAdmin={isAdmin}>
-        <div className="rounded-lg bg-secondary/40 p-3 text-xs text-muted-foreground space-y-1">
-          <p><span className="font-semibold text-foreground">Username:</span> Roham</p>
-          <p><span className="font-semibold text-foreground">Password:</span> ●●●●●●●●●●●</p>
-          <p className="text-muted-foreground mt-2">To change credentials, update the login page source code.</p>
-        </div>
-      </SectionCard>
+      {/* ── User Management ───────────────────────────────────────────────── */}
+      <UserManagementSection isAdmin={isAdmin} />
 
       {/* ── Backup & Restore ─────────────────────────────────────────────── */}
       <SectionCard title="Backup & Restore" icon={RefreshCw} adminOnly isAdmin={isAdmin}>
