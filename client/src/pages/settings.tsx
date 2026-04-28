@@ -10,7 +10,7 @@ import { useAppStore } from "@/lib/store";
 import {
   Settings as SettingsIcon, Download, Upload, RefreshCw, User, Moon, Sun, Shield,
   Send, Bell, BellOff, CheckCircle2, XCircle, MessageSquare, Heart, Clock,
-  Zap, TrendingDown, AlertTriangle, CreditCard, DollarSign, BarChart2,
+  Zap, TrendingDown, AlertTriangle, CreditCard, DollarSign, BarChart2, Lock,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { sendTestMessage, sendBrowserPush, invalidateSettingsCache } from "@/lib/notifications";
@@ -43,12 +43,42 @@ function ToggleRow({
 
 // ─── Section card ─────────────────────────────────────────────────────────────
 
-function SectionCard({ title, icon: Icon, children }: { title: string; icon: React.ComponentType<any>; children: React.ReactNode }) {
+function SectionCard({
+  title, icon: Icon, children, adminOnly, isAdmin,
+}: {
+  title: string;
+  icon: React.ComponentType<any>;
+  children: React.ReactNode;
+  adminOnly?: boolean;
+  isAdmin?: boolean;
+}) {
+  // Locked state for non-admin users on admin-only sections
+  if (adminOnly && !isAdmin) {
+    return (
+      <div className="rounded-xl border border-border/50 bg-card/50 p-4 opacity-70">
+        <div className="flex items-center gap-2">
+          <Icon className="w-4 h-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold text-muted-foreground">{title}</h2>
+          <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">
+            <Lock className="w-3 h-3" /> Admin only
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          This section is restricted to admin. Contact Roham to make changes.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="rounded-xl border border-border bg-card p-5 space-y-4">
       <div className="flex items-center gap-2">
         <Icon className="w-4 h-4 text-primary" />
         <h2 className="text-sm font-bold">{title}</h2>
+        {adminOnly && isAdmin && (
+          <span className="ml-auto flex items-center gap-1 text-xs text-primary/60 bg-primary/10 px-2 py-0.5 rounded-full">
+            <Shield className="w-3 h-3" /> Admin
+          </span>
+        )}
       </div>
       {children}
     </div>
@@ -59,7 +89,8 @@ function SectionCard({ title, icon: Icon, children }: { title: string; icon: Rea
 
 export default function SettingsPage() {
   const { toast } = useToast();
-  const { theme, toggleTheme } = useAppStore();
+  const { theme, toggleTheme, role } = useAppStore();
+  const isAdmin = role === "admin";
   const qc = useQueryClient();
 
   // ── General settings ──────────────────────────────────────────────────────
@@ -225,7 +256,7 @@ export default function SettingsPage() {
       </div>
 
       {/* ── User Preferences ─────────────────────────────────────────────── */}
-      <SectionCard title="User Preferences" icon={User}>
+      <SectionCard title="User Preferences" icon={User} isAdmin={isAdmin}>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-xs text-muted-foreground">Display Name</label>
@@ -273,7 +304,7 @@ export default function SettingsPage() {
       </SectionCard>
 
       {/* ── Telegram Bot Configuration ───────────────────────────────────── */}
-      <SectionCard title={`Telegram Bot${tgLoading ? ' — Loading…' : ''}`} icon={Send}>
+      <SectionCard title={`Telegram Bot${tgLoading ? ' — Loading…' : ''}`} icon={Send} adminOnly isAdmin={isAdmin}>
         <div className="rounded-lg bg-secondary/30 p-3 text-xs text-muted-foreground space-y-1 border border-border/50">
           <p className="font-semibold text-foreground">Setup Guide</p>
           <p>1. Open Telegram → search <strong>@BotFather</strong> → send <code>/newbot</code> → copy the token below</p>
@@ -313,7 +344,7 @@ export default function SettingsPage() {
       </SectionCard>
 
       {/* ── Alert Toggles ────────────────────────────────────────────────── */}
-      <SectionCard title="Alert Thresholds & Toggles" icon={Bell}>
+      <SectionCard title="Alert Thresholds & Toggles" icon={Bell} adminOnly isAdmin={isAdmin}>
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div>
             <label className="text-xs text-muted-foreground">Large Expense Threshold ($)</label>
@@ -350,7 +381,7 @@ export default function SettingsPage() {
       </SectionCard>
 
       {/* ── Family Messages ──────────────────────────────────────────────── */}
-      <SectionCard title="Daily Family Messages" icon={Heart}>
+      <SectionCard title="Daily Family Messages" icon={Heart} adminOnly isAdmin={isAdmin}>
         <div className="rounded-lg bg-amber-950/20 border border-amber-800/30 p-3 text-xs text-amber-200/80">
           <p className="font-semibold text-amber-200 mb-1">About Family Messages</p>
           <p>Send 3 warm, meaningful messages per day to Roham, Fara, or both via Telegram — reminding you why you are building wealth together. Uses a 100+ built-in message library. No AI cost.</p>
@@ -407,7 +438,7 @@ export default function SettingsPage() {
       </SectionCard>
 
       {/* ── Browser Push ─────────────────────────────────────────────────── */}
-      <SectionCard title="Browser Push Notifications" icon={Zap}>
+      <SectionCard title="Browser Push Notifications" icon={Zap} adminOnly isAdmin={isAdmin}>
         <ToggleRow label="Enable Browser Push" desc="Receive alerts in browser even when app is open" checked={tgSettings.push_enabled} onChange={v => handleTgChange('push_enabled', v)} />
         <div className="flex gap-2 mt-1">
           <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs" onClick={handleTestPush}>
@@ -418,7 +449,7 @@ export default function SettingsPage() {
       </SectionCard>
 
       {/* ── Planning Assumptions ─────────────────────────────────────────── */}
-      <SectionCard title="Planning Assumptions" icon={SettingsIcon}>
+      <SectionCard title="Planning Assumptions" icon={SettingsIcon} adminOnly isAdmin={isAdmin}>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {[
             { label: 'Inflation Rate %', key: 'inflation', step: 0.5 },
@@ -471,7 +502,7 @@ export default function SettingsPage() {
       </SectionCard>
 
       {/* ── Security ─────────────────────────────────────────────────────── */}
-      <SectionCard title="Security" icon={Shield}>
+      <SectionCard title="Security" icon={Shield} adminOnly isAdmin={isAdmin}>
         <div className="rounded-lg bg-secondary/40 p-3 text-xs text-muted-foreground space-y-1">
           <p><span className="font-semibold text-foreground">Username:</span> Roham</p>
           <p><span className="font-semibold text-foreground">Password:</span> ●●●●●●●●●●●</p>
@@ -480,7 +511,7 @@ export default function SettingsPage() {
       </SectionCard>
 
       {/* ── Backup & Restore ─────────────────────────────────────────────── */}
-      <SectionCard title="Backup & Restore" icon={RefreshCw}>
+      <SectionCard title="Backup & Restore" icon={RefreshCw} adminOnly isAdmin={isAdmin}>
         <div className="rounded-lg bg-secondary/40 p-3 text-xs text-muted-foreground">
           <p>All data is synced to Supabase. Download a full JSON backup (includes bills + budgets) or restore from a previous backup file.</p>
         </div>
@@ -498,7 +529,7 @@ export default function SettingsPage() {
       </SectionCard>
 
       {/* ── Family Members ───────────────────────────────────────────────── */}
-      <SectionCard title="Family Members" icon={User}>
+      <SectionCard title="Family Members" icon={User} isAdmin={isAdmin}>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             { name: 'Roham Shahrokh', role: 'Primary', initials: 'RS' },
