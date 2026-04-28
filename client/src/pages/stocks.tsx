@@ -874,6 +874,7 @@ export default function StocksPage() {
   const { data: plannedOrders = [] } = useQuery<any[]>({
     queryKey: ['/api/planned-investments', 'stock'],
     queryFn: () => apiRequest("GET", "/api/planned-investments?module=stock").then(r => r.json()),
+    staleTime: 0,
   });
 
   // ── Live price fetch handler ───────────────────────────────────────────────
@@ -1010,7 +1011,7 @@ export default function StocksPage() {
   const createOrderMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/planned-investments", data).then(r => r.json()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['/api/planned-investments', 'stock'] });
+      qc.invalidateQueries({ queryKey: ['/api/planned-investments'], exact: false });
       setShowOrderForm(false); setOrderDraft(null); setEditingOrderId(null);
       toast({ title: "Planned order saved" });
     },
@@ -1022,7 +1023,7 @@ export default function StocksPage() {
   const updateOrderMut = useMutation({
     mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/planned-investments/${id}`, data).then(r => r.json()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['/api/planned-investments', 'stock'] });
+      qc.invalidateQueries({ queryKey: ['/api/planned-investments'], exact: false });
       setShowOrderForm(false); setOrderDraft(null); setEditingOrderId(null);
       toast({ title: "Planned order updated" });
     },
@@ -1034,7 +1035,7 @@ export default function StocksPage() {
   const deleteOrderMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/planned-investments/${id}`).then(r => r.json()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['/api/planned-investments', 'stock'] });
+      qc.invalidateQueries({ queryKey: ['/api/planned-investments'], exact: false });
       toast({ title: "Planned order deleted" });
     },
     onError: (err: any) => {
