@@ -5,15 +5,8 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useHashLocation } from "wouter/use-hash-location";
 import familyImg from "@assets/family.jpeg";
+import { sbUsers } from "@/lib/supabaseClient";
 import type { UserRole } from "@/lib/store";
-
-// ── User credential table ─────────────────────────────────────────────────────
-// To add more users: add an entry here.
-// Passwords are plain-text (app is private, family-only, not exposed to internet auth).
-const USERS: Record<string, { password: string; displayName: "Roham" | "Fara"; role: UserRole }> = {
-  Roham: { password: "YaraJana2025", displayName: "Roham", role: "admin" },
-  Fara:  { password: "Fara2025",     displayName: "Fara",  role: "family_user" },
-};
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -27,25 +20,32 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
 
-    // Simulate network latency for a premium feel
-    await new Promise((r) => setTimeout(r, 800));
-
-    const record = USERS[username];
-    if (record && record.password === password) {
-      login();
-      setCurrentUser(record.displayName);
-      setRole(record.role);
+    try {
+      // Try Supabase-backed auth first (production)
+      const user = await sbUsers.verifyLogin(username, password);
+      if (user) {
+        login();
+        setCurrentUser(user.display_name);
+        setRole(user.role as UserRole);
+        toast({
+          title: `Welcome back, ${user.display_name}`,
+          description: user.role === "admin"
+            ? "Full admin access granted."
+            : "Family dashboard ready.",
+        });
+        navigate("/dashboard");
+      } else {
+        toast({
+          title: "Access Denied",
+          description: "Invalid credentials. Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch (err) {
+      // Supabase unavailable — deny access
       toast({
-        title: `Welcome back, ${record.displayName}`,
-        description: record.role === "admin"
-          ? "Full admin access granted."
-          : "Family dashboard ready.",
-      });
-      navigate("/dashboard");
-    } else {
-      toast({
-        title: "Access Denied",
-        description: "Invalid credentials. Please try again.",
+        title: "Login Error",
+        description: "Cannot connect to auth server. Please try again.",
         variant: "destructive",
       });
     }
