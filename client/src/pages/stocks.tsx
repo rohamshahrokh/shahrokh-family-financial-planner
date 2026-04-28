@@ -1010,11 +1010,14 @@ export default function StocksPage() {
 
   const createOrderMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/planned-investments", data).then(r => r.json()),
-    onSuccess: async () => {
+    onSuccess: async (newOrder: any) => {
+      // 1. Optimistically patch the cache so the table updates instantly
+      qc.setQueryData(['/api/planned-investments', 'stock'], (old: any[] = []) => [...old, newOrder]);
+      // 2. Close the modal
       setShowOrderForm(false); setOrderDraft(null); setEditingOrderId(null);
-      // Invalidate both the module-filtered key and the generic key so all consumers refresh
-      await qc.invalidateQueries({ queryKey: ['/api/planned-investments'] });
       toast({ title: "Planned order saved" });
+      // 3. Background sync — refetch from Supabase to confirm and update dashboard/timeline
+      await qc.refetchQueries({ queryKey: ['/api/planned-investments'] });
     },
     onError: (err: any) => {
       toast({ title: 'Save failed', description: String(err), variant: 'destructive' });
@@ -1023,10 +1026,14 @@ export default function StocksPage() {
 
   const updateOrderMut = useMutation({
     mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/planned-investments/${id}`, data).then(r => r.json()),
-    onSuccess: async () => {
+    onSuccess: async (updatedOrder: any) => {
+      // Optimistically patch the cache
+      qc.setQueryData(['/api/planned-investments', 'stock'], (old: any[] = []) =>
+        old.map((o: any) => (o.id === updatedOrder?.id ? updatedOrder : o))
+      );
       setShowOrderForm(false); setOrderDraft(null); setEditingOrderId(null);
-      await qc.invalidateQueries({ queryKey: ['/api/planned-investments'] });
       toast({ title: "Planned order updated" });
+      await qc.refetchQueries({ queryKey: ['/api/planned-investments'] });
     },
     onError: (err: any) => {
       toast({ title: 'Save failed', description: String(err), variant: 'destructive' });
@@ -1035,9 +1042,13 @@ export default function StocksPage() {
 
   const deleteOrderMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/planned-investments/${id}`).then(r => r.json()),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['/api/planned-investments'] });
+    onSuccess: async (_: any, id: number) => {
+      // Optimistically remove from cache
+      qc.setQueryData(['/api/planned-investments', 'stock'], (old: any[] = []) =>
+        old.filter((o: any) => o.id !== id)
+      );
       toast({ title: "Planned order deleted" });
+      await qc.refetchQueries({ queryKey: ['/api/planned-investments'] });
     },
     onError: (err: any) => {
       toast({ title: 'Delete failed', description: String(err), variant: 'destructive' });
