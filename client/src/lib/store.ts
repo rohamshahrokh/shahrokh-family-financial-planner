@@ -7,6 +7,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
 type CurrentUser = "Roham" | "Fara";
+export type UserRole = "admin" | "family_user";
 
 interface AppState {
   isAuthenticated: boolean;
@@ -15,6 +16,7 @@ interface AppState {
   chartView: "monthly" | "annual";
   privacyMode: boolean;       // true = numbers hidden (default for new users)
   currentUser: CurrentUser;   // which family member is logged in
+  role: UserRole;             // admin = full access, family_user = restricted
   login: () => void;
   logout: () => void;
   toggleTheme: () => void;
@@ -22,6 +24,7 @@ interface AppState {
   setChartView: (view: "monthly" | "annual") => void;
   togglePrivacy: () => void;
   setCurrentUser: (user: CurrentUser) => void;
+  setRole: (role: UserRole) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -33,10 +36,11 @@ export const useAppStore = create<AppState>()(
       chartView: "annual",
       privacyMode: true,       // hidden by default
       currentUser: "Roham",    // default user
+      role: "admin",           // default role
 
       login: () => set({ isAuthenticated: true }),
 
-      logout: () => set({ isAuthenticated: false }),
+      logout: () => set({ isAuthenticated: false, role: "admin", currentUser: "Roham" }),
 
       togglePrivacy: () => set((state) => ({ privacyMode: !state.privacyMode })),
 
@@ -52,6 +56,8 @@ export const useAppStore = create<AppState>()(
       setChartView: (view) => set({ chartView: view }),
 
       setCurrentUser: (user: CurrentUser) => set({ currentUser: user }),
+
+      setRole: (role: UserRole) => set({ role }),
     }),
     {
       name: "shahrokh-app-state",           // localStorage key
@@ -62,6 +68,7 @@ export const useAppStore = create<AppState>()(
         chartView: state.chartView,
         privacyMode: state.privacyMode,
         currentUser: state.currentUser,
+        role: state.role,
       }),
     }
   )
