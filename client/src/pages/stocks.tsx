@@ -8,6 +8,8 @@ import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
+import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
+import { fetchAllStockPrices, formatLastUpdated, isStaleByAge, type PriceEntry } from "@/lib/marketData";
 import { Input } from "@/components/ui/input";
 import type { StockTransaction, StockDCASchedule } from "@/lib/localStore";
 import {
@@ -136,48 +138,8 @@ function emptyOrderForm(): any {
   };
 }
 
-// ─── Live Price Cache (15-min TTL) ─────────────────────────────────────────
-const PRICE_CACHE_KEY = "sf_live_prices_cache";
-const PRICE_TTL_MS = 15 * 60 * 1000;
-
-interface PriceCacheEntry { price: number; change24h: number; fetchedAt: number; }
-type PriceCache = Record<string, PriceCacheEntry>;
-
-function getLivePriceCache(): PriceCache {
-  try { return JSON.parse(localStorage.getItem(PRICE_CACHE_KEY) ?? "{}" ); } catch { return {}; }
-}
-function saveLivePriceCache(cache: PriceCache) {
-  try { localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(cache)); } catch {}
-}
-
-async function fetchLiveStockPrice(ticker: string): Promise<{ price: number; change24h: number } | null> {
-  const cache = getLivePriceCache();
-  const cached = cache[ticker];
-  if (cached && Date.now() - cached.fetchedAt < PRICE_TTL_MS) {
-    return { price: cached.price, change24h: cached.change24h };
-  }
-  // Try Yahoo Finance via allorigins proxy
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`;
-    const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-    const res = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) throw new Error("allorigins failed");
-    const outer = await res.json();
-    const data = JSON.parse(outer.contents);
-    const meta = data?.chart?.result?.[0]?.meta;
-    if (!meta) throw new Error("no meta");
-    const price = meta.regularMarketPrice ?? meta.chartPreviousClose ?? 0;
-    const prev = meta.chartPreviousClose ?? price;
-    const change24h = prev > 0 ? ((price - prev) / prev) * 100 : 0;
-    const entry: PriceCacheEntry = { price, change24h, fetchedAt: Date.now() };
-    const updated = { ...getLivePriceCache(), [ticker]: entry };
-    saveLivePriceCache(updated);
-    return { price, change24h };
-  } catch (err) {
-    console.warn(`[LivePrice] Failed for ${ticker}:`, err);
-    return null;
-  }
-}
+// ─── Live price state uses marketData.ts multi-source engine ────────────────
+// fetchAllStockPrices is imported from @/lib/marketData (Yahoo→Stooq fallback)
 
 // ─── Bulk Import Modal ───────────────────────────────────────────────────────
 interface ImportRow {
@@ -834,13 +796,10 @@ export default function StocksPage() {
   const handleDraftChange = useCallback((d: any) => setDraft(d), []);
   const handleEditDraftChange = useCallback((d: any) => setEditDraft(d), []);
 
-  // Live price state
-  const [livePrices, setLivePrices] = useState<Record<string, { price: number; change24h: number }>>(() => {
-    const cache = getLivePriceCache();
-    return Object.fromEntries(Object.entries(cache).map(([k, v]: any) => [k, { price: v.price, change24h: v.change24h }]));
-  });
+  // Live price state — sourced from multi-source engine (marketData.ts)
+  const [livePrices, setLivePrices] = useState<Record<string, PriceEntry>>({});
   const [fetchingPrices, setFetchingPrices] = useState(false);
-  const [lastPriceFetch, setLastPriceFetch] = useState<Date | null>(null);
+  const [lastPriceFetch, setLastPriceFetch] = useState<number | null>(null);
 
   // Import / DCA state
   const [showImportModal, setShowImportModal] = useState(false);
@@ -877,24 +836,26 @@ export default function StocksPage() {
     staleTime: 0,
   });
 
-  // ── Live price fetch handler ───────────────────────────────────────────────
+  // ── Live price fetch handler (multi-source: Yahoo → Stooq fallback) ─────
   const handleFetchLivePrices = useCallback(async () => {
     if (stocks.length === 0 || fetchingPrices) return;
     setFetchingPrices(true);
-    const results: Record<string, { price: number; change24h: number }> = {};
-    await Promise.allSettled(
-      stocks.map(async (s: any) => {
-        if (!s.ticker) return;
-        const r = await fetchLiveStockPrice(s.ticker);
-        if (r) results[s.ticker] = r;
-      })
+    const tickers = stocks.map((s: any) => s.ticker).filter(Boolean);
+    const results = await fetchAllStockPrices(
+      tickers,
+      (ticker, entry) => setLivePrices(prev => ({ ...prev, [ticker]: entry }))
     );
     setLivePrices(prev => ({ ...prev, ...results }));
-    setLastPriceFetch(new Date());
+    setLastPriceFetch(Date.now());
     setFetchingPrices(false);
-    toast({ title: "Live prices updated", description: `Fetched prices for ${Object.keys(results).length} tickers.` });
+    const fetched = Object.keys(results).length;
+    const failed  = tickers.filter((t: string) => !results[t]);
+    if (failed.length > 0) console.warn("[Stocks] Failed to fetch prices for:", failed);
+    toast({
+      title: "Live prices updated",
+      description: `${fetched}/${tickers.length} tickers updated${failed.length > 0 ? ` · ${failed.join(", ")} stale` : ""}.`,
+    });
   }, [stocks, fetchingPrices, toast]);
-
   // ── Bulk import handler ────────────────────────────────────────────────────
   const handleBulkImport = useCallback(async (rows: ImportRow[]) => {
     let imported = 0;
@@ -1272,17 +1233,26 @@ export default function StocksPage() {
           <p className="text-muted-foreground text-sm">US & International equities — transaction ledger & DCA planning</p>
         </div>
         <div className="flex gap-2">
-          <Button
-            onClick={handleFetchLivePrices}
-            variant="outline"
-            size="sm"
-            disabled={fetchingPrices}
-            className="gap-2 text-xs"
-            title={lastPriceFetch ? `Last updated: ${lastPriceFetch.toLocaleTimeString()}` : "Fetch live market prices"}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${fetchingPrices ? 'animate-spin' : ''}`} />
-            {fetchingPrices ? "Fetching..." : "Live Prices"}
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              onClick={handleFetchLivePrices}
+              variant="outline"
+              size="sm"
+              disabled={fetchingPrices}
+              className="gap-2 text-xs"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${fetchingPrices ? 'animate-spin' : ''}`} />
+              {fetchingPrices ? "Fetching..." : "Live Prices"}
+            </Button>
+            {lastPriceFetch && (
+              <span className={`text-xs flex items-center gap-1 ${
+                isStaleByAge(lastPriceFetch) ? 'text-amber-400' : 'text-muted-foreground'
+              }`}>
+                {isStaleByAge(lastPriceFetch) && <span title="Stale">⚠</span>}
+                {formatLastUpdated(lastPriceFetch)}
+              </span>
+            )}
+          </div>
           <Button
             onClick={() => setShowImportModal(true)}
             variant="outline"
@@ -2302,6 +2272,9 @@ export default function StocksPage() {
           </div>
         </div>
       )}
+
+      {/* ─── Portfolio Live Return ───────────────────────────────────────────── */}
+      <PortfolioLiveReturn />
 
       {/* ─── AI Insights ───────────────────────────────────────────────────── */}
       <AIInsightsCard
