@@ -304,14 +304,15 @@ export const sbStockDCA = {
   async getAll(): Promise<any[]> {
     try { return await sbGet("sf_stock_dca", "order=created_at.asc"); } catch { return []; }
   },
-  async create(data: object): Promise<any | null> {
-    try { return await sbInsert("sf_stock_dca", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); } catch { return null; }
+  // No silent catch — throw so useMutation onError fires with real message
+  async create(data: object): Promise<any> {
+    return await sbInsert("sf_stock_dca", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
   },
-  async update(id: number, data: object): Promise<any | null> {
-    try { return await sbUpdate("sf_stock_dca", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  async update(id: number, data: object): Promise<any> {
+    return await sbUpdate("sf_stock_dca", id, { ...data, updated_at: new Date().toISOString() });
   },
   async delete(id: number): Promise<void> {
-    try { await sbDelete("sf_stock_dca", id); } catch {}
+    await sbDelete("sf_stock_dca", id);
   },
 };
 
@@ -321,18 +322,49 @@ export const sbCryptoDCA = {
   async getAll(): Promise<any[]> {
     try { return await sbGet("sf_crypto_dca", "order=created_at.asc"); } catch { return []; }
   },
-  async create(data: object): Promise<any | null> {
-    try { return await sbInsert("sf_crypto_dca", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); } catch { return null; }
+  // No silent catch — throw so useMutation onError fires with real message
+  async create(data: object): Promise<any> {
+    return await sbInsert("sf_crypto_dca", { ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
   },
-  async update(id: number, data: object): Promise<any | null> {
-    try { return await sbUpdate("sf_crypto_dca", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
+  async update(id: number, data: object): Promise<any> {
+    return await sbUpdate("sf_crypto_dca", id, { ...data, updated_at: new Date().toISOString() });
   },
   async delete(id: number): Promise<void> {
-    try { await sbDelete("sf_crypto_dca", id); } catch {}
+    await sbDelete("sf_crypto_dca", id);
+  },
+};
+
+// ─── Planned Investments ──────────────────────────────────────────────────────
+// One-time planned buy/sell orders for both stocks and crypto.
+// Table: sf_planned_investments, filtered by module='stock'|'crypto'
+
+export const sbPlannedInvestments = {
+  async getAll(module?: string): Promise<any[]> {
+    const query = module
+      ? `module=eq.${module}&order=planned_date.asc`
+      : `order=planned_date.asc`;
+    try { return await sbGet("sf_planned_investments", query); } catch { return []; }
+  },
+  async create(data: object): Promise<any> {
+    return await sbInsert("sf_planned_investments", {
+      ...data,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+  },
+  async update(id: number, data: object): Promise<any> {
+    return await sbUpdate("sf_planned_investments", id, {
+      ...data,
+      updated_at: new Date().toISOString(),
+    });
+  },
+  async delete(id: number): Promise<void> {
+    await sbDelete("sf_planned_investments", id);
   },
 };
 
 // ─── Crypto Transactions ──────────────────────────────────────────────────────
+
 
 export const sbCryptoTx = {
   async getAll(): Promise<any[]> {
@@ -482,5 +514,62 @@ export const sbAppSettings = {
   /** Save a single named key inside the settings JSONB. */
   async saveKey(key: string, value: any): Promise<void> {
     await this.merge({ [key]: value });
+  },
+};
+
+// ─── User Management (sf_users table) ────────────────────────────────────────
+// Custom auth: username + password stored in Supabase.
+// Passwords stored with "plain:" prefix — app is private/family-only.
+// Future: migrate to bcrypt hash if needed.
+
+export const sbUsers = {
+  async getAll(): Promise<any[]> {
+    try { return await sbGet("sf_users", "order=id.asc"); } catch { return []; }
+  },
+
+  async getByUsername(username: string): Promise<any | null> {
+    try {
+      const rows = await sbGet("sf_users", `username=eq.${encodeURIComponent(username)}&active=eq.true`);
+      return rows[0] ?? null;
+    } catch { return null; }
+  },
+
+  async updatePassword(id: number, newPassword: string): Promise<void> {
+    await sbUpdate("sf_users", id, {
+      password_hash: `plain:${newPassword}`,
+      updated_at: new Date().toISOString(),
+    });
+  },
+
+  async updateUser(id: number, data: { display_name?: string; role?: string; active?: boolean; notes?: string }): Promise<any> {
+    return await sbUpdate("sf_users", id, {
+      ...data,
+      updated_at: new Date().toISOString(),
+    });
+  },
+
+  async createUser(data: { username: string; display_name: string; password: string; role: string }): Promise<any> {
+    return await sbInsert("sf_users", {
+      username: data.username,
+      display_name: data.display_name,
+      password_hash: `plain:${data.password}`,
+      role: data.role,
+      active: true,
+      notes: "",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+  },
+
+  /** Verify login: returns user record if valid, null if invalid */
+  async verifyLogin(username: string, password: string): Promise<any | null> {
+    const user = await this.getByUsername(username);
+    if (!user) return null;
+    // Support "plain:PASSWORD" format
+    const stored = user.password_hash ?? '';
+    const match = stored.startsWith('plain:')
+      ? stored.slice(6) === password
+      : stored === password;
+    return match ? user : null;
   },
 };
