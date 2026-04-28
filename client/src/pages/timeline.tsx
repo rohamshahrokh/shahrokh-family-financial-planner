@@ -111,10 +111,12 @@ export default function TimelinePage() {
   const { data: plannedStockOrders = [] } = useQuery<any[]>({
     queryKey: ['/api/planned-investments', 'stock'],
     queryFn: () => apiRequest('GET', '/api/planned-investments?module=stock').then(r => r.json()),
+    staleTime: 0,
   });
   const { data: plannedCryptoOrders = [] } = useQuery<any[]>({
     queryKey: ['/api/planned-investments', 'crypto'],
     queryFn: () => apiRequest('GET', '/api/planned-investments?module=crypto').then(r => r.json()),
+    staleTime: 0,
   });
 
   // ── Snapshot with safe defaults ────────────────────────────────────────────
