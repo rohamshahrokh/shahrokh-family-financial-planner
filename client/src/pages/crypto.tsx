@@ -904,7 +904,8 @@ export default function CryptoPage() {
   // ── Planned Order mutations ────────────────────────────────────────────────
   const createOrderMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/planned-investments", { ...data, module: 'crypto' }).then(r => r.json()),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: ["/api/planned-investments", "crypto"], exact: true });
       qc.invalidateQueries({ queryKey: ["/api/planned-investments"], exact: false });
       setShowOrderForm(false);
       setOrderDraft(null);
@@ -915,7 +916,8 @@ export default function CryptoPage() {
   });
   const updateOrderMut = useMutation({
     mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/planned-investments/${id}`, data).then(r => r.json()),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: ["/api/planned-investments", "crypto"], exact: true });
       qc.invalidateQueries({ queryKey: ["/api/planned-investments"], exact: false });
       setShowOrderForm(false);
       setOrderDraft(null);
@@ -926,7 +928,8 @@ export default function CryptoPage() {
   });
   const deleteOrderMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/planned-investments/${id}`).then(r => r.json()),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: ["/api/planned-investments", "crypto"], exact: true });
       qc.invalidateQueries({ queryKey: ["/api/planned-investments"], exact: false });
       toast({ title: "Planned order deleted" });
     },
