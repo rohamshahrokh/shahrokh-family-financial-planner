@@ -8,6 +8,8 @@ import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
+import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
+import { fetchAllCryptoPrices, formatLastUpdated, isStaleByAge, type PriceEntry } from "@/lib/marketData";
 import { Input } from "@/components/ui/input";
 import type { CryptoTransaction, CryptoDCASchedule } from "@/lib/localStore";
 import {
@@ -130,53 +132,8 @@ function emptyOrderForm(): any {
   };
 }
 
-// ─── Crypto Live Price Cache ─────────────────────────────────────────────────
-const CRYPTO_PRICE_CACHE_KEY = "sf_crypto_prices_cache";
-const CRYPTO_TTL_MS = 15 * 60 * 1000;
-
-interface CryptoPriceCacheEntry { price: number; change24h: number; fetchedAt: number; }
-type CryptoPriceCache = Record<string, CryptoPriceCacheEntry>;
-
-function getCryptoLivePriceCache(): CryptoPriceCache {
-  try { return JSON.parse(localStorage.getItem(CRYPTO_PRICE_CACHE_KEY) ?? "{}"); } catch { return {}; }
-}
-function saveCryptoLivePriceCache(cache: CryptoPriceCache) {
-  try { localStorage.setItem(CRYPTO_PRICE_CACHE_KEY, JSON.stringify(cache)); } catch {}
-}
-
-// Maps common crypto symbols to CoinGecko IDs
-const COINGECKO_ID_MAP: Record<string, string> = {
-  BTC: "bitcoin", ETH: "ethereum", SOL: "solana", BNB: "binancecoin",
-  ADA: "cardano", XRP: "ripple", DOGE: "dogecoin", AVAX: "avalanche-2",
-  DOT: "polkadot", MATIC: "matic-network", LINK: "chainlink", LTC: "litecoin",
-  UNI: "uniswap", ATOM: "cosmos", FIL: "filecoin", NEAR: "near", APT: "aptos",
-  ARB: "arbitrum", OP: "optimism", INJ: "injective-protocol",
-};
-
-async function fetchLiveCryptoPrice(symbol: string): Promise<{ price: number; change24h: number } | null> {
-  const cache = getCryptoLivePriceCache();
-  const cached = cache[symbol.toUpperCase()];
-  if (cached && Date.now() - cached.fetchedAt < CRYPTO_TTL_MS) {
-    return { price: cached.price, change24h: cached.change24h };
-  }
-  const id = COINGECKO_ID_MAP[symbol.toUpperCase()] ?? symbol.toLowerCase();
-  try {
-    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) throw new Error("coingecko failed");
-    const data = await res.json();
-    const entry = data[id];
-    if (!entry) throw new Error("no data");
-    const price = entry.usd ?? 0;
-    const change24h = entry.usd_24h_change ?? 0;
-    const cacheEntry: CryptoPriceCacheEntry = { price, change24h, fetchedAt: Date.now() };
-    saveCryptoLivePriceCache({ ...getCryptoLivePriceCache(), [symbol.toUpperCase()]: cacheEntry });
-    return { price, change24h };
-  } catch (err) {
-    console.warn(`[CryptoLivePrice] Failed for ${symbol}:`, err);
-    return null;
-  }
-}
+// ─── Live price state uses marketData.ts multi-source engine ────────────────
+// fetchAllCryptoPrices is imported from @/lib/marketData (CoinGecko→Binance fallback)
 
 // ─── Crypto Bulk Import ───────────────────────────────────────────────────────
 interface CryptoImportRow {
@@ -802,14 +759,10 @@ export default function CryptoPage() {
   const handleDraftChange = useCallback((d: any) => setDraft(d), []);
   const handleEditDraftChange = useCallback((d: any) => setEditDraft(d), []);
 
-  // Live price state
-  const [liveCryptoPrices, setLiveCryptoPrices] = useState<Record<string, { price: number; change24h: number }>>(() => {
-    const cache = getCryptoLivePriceCache();
-    return Object.fromEntries(Object.entries(cache).map(([k, v]: any) => [k, { price: v.price, change24h: v.change24h }]));
-  });
+  // Live price state — sourced from multi-source engine (marketData.ts)
+  const [liveCryptoPrices, setLiveCryptoPrices] = useState<Record<string, PriceEntry>>({});
   const [fetchingCryptoPrices, setFetchingCryptoPrices] = useState(false);
-  const [lastCryptoPriceFetch, setLastCryptoPriceFetch] = useState<Date | null>(null);
-
+  const [lastCryptoPriceFetch, setLastCryptoPriceFetch] = useState<number | null>(null);
   // Import / DCA / Planned Orders state
   const [showImportModal, setShowImportModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'portfolio' | 'transactions' | 'dca' | 'orders'>('portfolio');
@@ -845,22 +798,25 @@ export default function CryptoPage() {
     staleTime: 0,
   });
 
-  // ── Live price + import handlers ────────────────────────────────────────────
+  // ── Live price + import handlers (multi-source: CoinGecko → Binance) ───────
   const handleFetchLivePrices = useCallback(async () => {
     if (cryptos.length === 0 || fetchingCryptoPrices) return;
     setFetchingCryptoPrices(true);
-    const results: Record<string, { price: number; change24h: number }> = {};
-    await Promise.allSettled(
-      cryptos.map(async (c: any) => {
-        if (!c.symbol) return;
-        const r = await fetchLiveCryptoPrice(c.symbol);
-        if (r) results[c.symbol.toUpperCase()] = r;
-      })
+    const symbols = cryptos.map((c: any) => c.symbol).filter(Boolean);
+    const results = await fetchAllCryptoPrices(
+      symbols,
+      (sym, entry) => setLiveCryptoPrices(prev => ({ ...prev, [sym.toUpperCase()]: entry }))
     );
-    setLiveCryptoPrices(prev => ({ ...prev, ...results }));
-    setLastCryptoPriceFetch(new Date());
+    setLiveCryptoPrices(prev => ({ ...prev, ...Object.fromEntries(Object.entries(results).map(([k,v]) => [k.toUpperCase(), v])) }));
+    setLastCryptoPriceFetch(Date.now());
     setFetchingCryptoPrices(false);
-    toast({ title: "Live crypto prices updated", description: `Fetched for ${Object.keys(results).length} tokens.` });
+    const fetched = Object.keys(results).length;
+    const failed  = symbols.filter((s: string) => !results[s.toUpperCase()] && !results[s]);
+    if (failed.length > 0) console.warn("[Crypto] Failed to fetch prices for:", failed);
+    toast({
+      title: "Live crypto prices updated",
+      description: `${fetched}/${symbols.length} tokens updated${failed.length > 0 ? ` · ${failed.join(", ")} stale` : ""}.`,
+    });
   }, [cryptos, fetchingCryptoPrices, toast]);
 
   const handleBulkImport = useCallback(async (rows: CryptoImportRow[]) => {
@@ -1243,16 +1199,26 @@ export default function CryptoPage() {
           <p className="text-muted-foreground text-sm">Bitcoin, Ethereum & digital assets — transaction ledger & DCA planning</p>
         </div>
         <div className="flex gap-2">
-          <Button
-            onClick={handleFetchLivePrices}
-            variant="outline"
-            size="sm"
-            disabled={fetchingCryptoPrices}
-            className="gap-2 text-xs"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${fetchingCryptoPrices ? 'animate-spin' : ''}`} />
-            {fetchingCryptoPrices ? "Fetching..." : "Live Prices"}
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              onClick={handleFetchLivePrices}
+              variant="outline"
+              size="sm"
+              disabled={fetchingCryptoPrices}
+              className="gap-2 text-xs"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${fetchingCryptoPrices ? 'animate-spin' : ''}`} />
+              {fetchingCryptoPrices ? "Fetching..." : "Live Prices"}
+            </Button>
+            {lastCryptoPriceFetch && (
+              <span className={`text-xs flex items-center gap-1 ${
+                isStaleByAge(lastCryptoPriceFetch) ? 'text-amber-400' : 'text-muted-foreground'
+              }`}>
+                {isStaleByAge(lastCryptoPriceFetch) && <span title="Stale">⚠</span>}
+                {formatLastUpdated(lastCryptoPriceFetch)}
+              </span>
+            )}
+          </div>
           <Button
             onClick={() => setShowImportModal(true)}
             variant="outline"
@@ -2231,6 +2197,9 @@ export default function CryptoPage() {
           </div>
         </div>
       )}
+
+      {/* ─── Portfolio Live Return ───────────────────────────────────────────── */}
+      <PortfolioLiveReturn />
 
       {/* ─── AI Insights ───────────────────────────────────────────────────── */}
       <AIInsightsCard
