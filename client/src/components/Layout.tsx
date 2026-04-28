@@ -10,31 +10,36 @@ import {
   Eye, EyeOff, Calculator, Activity, HelpCircle, Sparkles, Briefcase, CreditCard, Target, Newspaper,
 } from "lucide-react";
 
-const navItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/expenses", label: "Expenses", icon: Receipt },
-  { href: "/property", label: "Property", icon: Home },
-  { href: "/stocks", label: "Stocks", icon: TrendingUp },
-  { href: "/crypto", label: "Crypto", icon: Bitcoin },
-  { href: "/reports", label: "Reports", icon: FileText },
-  { href: "/tax", label: "Tax Calculator", icon: Calculator },
-  { href: "/timeline", label: "Net Worth Timeline", icon: TrendingUp },
-  { href: "/data-health", label: "Data Health", icon: Activity },
-  { href: "/wealth-strategy", label: "Wealth Strategy", icon: Briefcase },
-  { href: "/debt-strategy", label: "Debt Strategy", icon: CreditCard },
-  { href: "/recurring-bills", label: "Recurring Bills", icon: Receipt },
-  { href: "/budget", label: "Monthly Budget", icon: Target },
-  { href: "/market-news", label: "Market News", icon: Newspaper },
-  { href: "/ai-insights", label: "AI Insights", icon: Sparkles },
-  { href: "/help", label: "Help", icon: HelpCircle },
-  { href: "/settings", label: "Settings", icon: Settings },
+// All nav items — adminOnly ones are hidden from family_user role
+const ALL_NAV_ITEMS = [
+  { href: "/",              label: "Dashboard",       icon: LayoutDashboard, adminOnly: false },
+  { href: "/expenses",      label: "Expenses",         icon: Receipt,         adminOnly: false },
+  { href: "/property",      label: "Property",         icon: Home,            adminOnly: false },
+  { href: "/stocks",        label: "Stocks",           icon: TrendingUp,      adminOnly: false },
+  { href: "/crypto",        label: "Crypto",           icon: Bitcoin,         adminOnly: false },
+  { href: "/reports",       label: "Reports",          icon: FileText,        adminOnly: false },
+  { href: "/tax",           label: "Tax Calculator",   icon: Calculator,      adminOnly: false },
+  { href: "/timeline",      label: "Net Worth Timeline",icon: TrendingUp,     adminOnly: false },
+  { href: "/wealth-strategy",label: "Wealth Strategy", icon: Briefcase,       adminOnly: false },
+  { href: "/debt-strategy", label: "Debt Strategy",    icon: CreditCard,      adminOnly: false },
+  { href: "/recurring-bills",label: "Recurring Bills", icon: Receipt,         adminOnly: false },
+  { href: "/budget",        label: "Monthly Budget",   icon: Target,          adminOnly: false },
+  { href: "/market-news",   label: "Market News",      icon: Newspaper,       adminOnly: false },
+  { href: "/ai-insights",   label: "AI Insights",      icon: Sparkles,        adminOnly: true  },
+  { href: "/data-health",   label: "Data Health",      icon: Activity,        adminOnly: true  },
+  { href: "/help",          label: "Help",             icon: HelpCircle,      adminOnly: false },
+  { href: "/settings",      label: "Settings",         icon: Settings,        adminOnly: false },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const [, navigate] = useHashLocation();
-  const { theme, toggleTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy } = useAppStore();
+  const { theme, toggleTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role } = useAppStore();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const isAdmin = role === "admin";
+
+  // Filter nav items by role — family_user can't see adminOnly items
+  const navItems = ALL_NAV_ITEMS.filter(item => !item.adminOnly || isAdmin);
 
   const handleLogout = () => {
     logout();
@@ -48,7 +53,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // Avatar letter and label derived from currentUser
   const avatarLetter = currentUser === "Fara" ? "F" : "R";
-  const avatarLabel = currentUser === "Fara" ? "Logged in as Fara" : "Logged in as Roham";
+  const roleLabel = isAdmin ? "Admin" : "Family";
+  const avatarLabel = `${currentUser} · ${roleLabel}`;
 
   const Logo = () => (
     <div className="flex items-center gap-2.5">
