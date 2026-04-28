@@ -20,7 +20,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { localStore } from "./localStore";
 import { sbAppSettings } from "./supabaseClient";
-import { sbBills, sbBudgets, sbTelegramSettings, sbAlertLogs, sbFamilyMsgLog } from "./supabaseClient";
+import { sbBills, sbBudgets, sbTelegramSettings, sbAlertLogs, sbFamilyMsgLog, sbPlannedInvestments, sbUsers } from "./supabaseClient";
 
 // ─── Detect deployment mode ───────────────────────────────────────────────────
 
@@ -201,6 +201,24 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
     const id = parseInt(cryptoDCAMatch[1]);
     if (m === "PUT")    return await localStore.updateCryptoDCASchedule(id, body as any);
     if (m === "DELETE") { await localStore.deleteCryptoDCASchedule(id); return { success: true }; }
+  }
+
+  // ── Planned Investments — one-time bulk buy/sell orders ——————————————————
+  if (path === "/api/planned-investments" || path.startsWith("/api/planned-investments?")) {
+    if (m === "GET") {
+      // Support ?module=stock or ?module=crypto filter
+      const moduleParam = path.includes("?module=")
+        ? path.split("?module=")[1].split("&")[0]
+        : undefined;
+      return await sbPlannedInvestments.getAll(moduleParam);
+    }
+    if (m === "POST") return await sbPlannedInvestments.create(body as any);
+  }
+  const plannedInvMatch = path.match(/^\/api\/planned-investments\/(\d+)$/);
+  if (plannedInvMatch) {
+    const id = parseInt(plannedInvMatch[1]);
+    if (m === "PUT")    return await sbPlannedInvestments.update(id, body as any);
+    if (m === "DELETE") { await sbPlannedInvestments.delete(id); return { success: true }; }
   }
 
   // ── Income ────────────────────────────────────────────────────────────────
@@ -445,6 +463,24 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
       } catch {}
 
       return result;
+    }
+  }
+
+  // ── User Management ──────────────────────────────────────────────────────
+  if (path === "/api/users") {
+    if (m === "GET")  return await sbUsers.getAll();
+    if (m === "POST") return await sbUsers.createUser(body as any);
+  }
+  const userMatch = path.match(/^\/api\/users\/(\d+)$/);
+  if (userMatch) {
+    const id = parseInt(userMatch[1]);
+    if (m === "PUT") {
+      const { password, ...rest } = body as any;
+      // Update user fields
+      if (Object.keys(rest).length > 0) await sbUsers.updateUser(id, rest);
+      // Update password separately if provided
+      if (password) await sbUsers.updatePassword(id, password);
+      return await sbUsers.getAll().then(all => all.find((u: any) => u.id === id) ?? { id });
     }
   }
 
