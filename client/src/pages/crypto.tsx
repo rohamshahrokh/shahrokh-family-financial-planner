@@ -905,11 +905,11 @@ export default function CryptoPage() {
   const createOrderMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/planned-investments", { ...data, module: 'crypto' }).then(r => r.json()),
     onSuccess: async () => {
-      await qc.refetchQueries({ queryKey: ["/api/planned-investments", "crypto"], exact: true });
-      qc.invalidateQueries({ queryKey: ["/api/planned-investments"], exact: false });
       setShowOrderForm(false);
       setOrderDraft(null);
       setEditingOrderId(null);
+      // Invalidate all planned-investments queries so stocks page + dashboard + timeline all refresh
+      await qc.invalidateQueries({ queryKey: ["/api/planned-investments"] });
       toast({ title: "Planned order saved" });
     },
     onError: (err: any) => toast({ title: 'Save failed', description: String(err), variant: 'destructive' }),
@@ -917,11 +917,10 @@ export default function CryptoPage() {
   const updateOrderMut = useMutation({
     mutationFn: ({ id, data }: any) => apiRequest("PUT", `/api/planned-investments/${id}`, data).then(r => r.json()),
     onSuccess: async () => {
-      await qc.refetchQueries({ queryKey: ["/api/planned-investments", "crypto"], exact: true });
-      qc.invalidateQueries({ queryKey: ["/api/planned-investments"], exact: false });
       setShowOrderForm(false);
       setOrderDraft(null);
       setEditingOrderId(null);
+      await qc.invalidateQueries({ queryKey: ["/api/planned-investments"] });
       toast({ title: "Planned order updated" });
     },
     onError: (err: any) => toast({ title: 'Save failed', description: String(err), variant: 'destructive' }),
@@ -929,8 +928,7 @@ export default function CryptoPage() {
   const deleteOrderMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/planned-investments/${id}`).then(r => r.json()),
     onSuccess: async () => {
-      await qc.refetchQueries({ queryKey: ["/api/planned-investments", "crypto"], exact: true });
-      qc.invalidateQueries({ queryKey: ["/api/planned-investments"], exact: false });
+      await qc.invalidateQueries({ queryKey: ["/api/planned-investments"] });
       toast({ title: "Planned order deleted" });
     },
     onError: (err: any) => toast({ title: 'Delete failed', description: String(err), variant: 'destructive' }),
