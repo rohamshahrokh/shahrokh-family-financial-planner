@@ -171,6 +171,15 @@ export function projectInvestment(
 }
 
 // ─── Net Worth Projection ─────────────────────────────────────────────
+export interface PropertyYearDetail {
+  id: number;
+  name: string;
+  value: number;
+  loanBalance: number;
+  equity: number;
+  annualCashFlow: number; // rental income minus loan repayments
+}
+
 export interface YearlyProjection {
   year: number;
   startNetWorth: number;
@@ -179,6 +188,7 @@ export interface YearlyProjection {
   propertyValue: number;
   propertyLoans: number;
   propertyEquity: number;
+  propertyDetails: PropertyYearDetail[]; // per-property breakdown
   stockValue: number;
   cryptoValue: number;
   cash: number;
@@ -251,6 +261,7 @@ export function projectNetWorth(params: {
 
     // Property portfolio — only include investment properties that have settled by this year
     let propValue = 0; let propLoans = 0; let propRent = 0;
+    const propertyDetails: PropertyYearDetail[] = [];
     const todayYear = new Date().getFullYear();
     for (const prop of params.properties) {
       if (prop.type === 'ppor') continue; // PPOR already in snapshot
@@ -280,18 +291,35 @@ export function projectNetWorth(params: {
       propLoans += loanBal;
 
       // Rental income only if settled and rental started
+      let annualRent = 0;
       const rentalStartStr = prop.rental_start_date;
       const rentalStartYear = rentalStartStr
         ? new Date(rentalStartStr).getFullYear()
         : settleYear;
       if (year >= rentalStartYear) {
         const yearsSinceRental = year - rentalStartYear;
-        const annualRent = safeNum(prop.weekly_rent) * 52
+        annualRent = safeNum(prop.weekly_rent) * 52
           * (1 - safeNum(prop.vacancy_rate) / 100)
           * (1 - safeNum(prop.management_fee) / 100)
           * Math.pow(1 + (safeNum(prop.rental_growth) || 3) / 100, yearsSinceRental);
         propRent += annualRent;
       }
+
+      // Annual loan repayment for this property
+      const annualLoanRepayment = calcMonthlyRepayment(
+        safeNum(prop.loan_amount),
+        safeNum(prop.interest_rate) || 6.5,
+        safeNum(prop.loan_term) || 30
+      ) * 12;
+
+      propertyDetails.push({
+        id: prop.id,
+        name: prop.name || prop.address || `Property ${prop.id}`,
+        value: Math.round(projValue),
+        loanBalance: Math.round(loanBal),
+        equity: Math.round(projValue - loanBal),
+        annualCashFlow: Math.round(annualRent - annualLoanRepayment),
+      });
     }
 
     // Stocks projection
@@ -419,6 +447,7 @@ export function projectNetWorth(params: {
       propertyValue: Math.round(ppor + propValue),
       propertyLoans: Math.round(mortgage + propLoans),
       propertyEquity: Math.round(ppor + propValue - mortgage - propLoans),
+      propertyDetails,
       stockValue: Math.round(stocksTotal),
       cryptoValue: Math.round(cryptoTotal),
       cash: Math.round(cash),
@@ -528,6 +557,8 @@ export function buildCashFlowSeries(params: {
   // Planned orders — one-time future investment cash flows
   plannedStockOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
   plannedCryptoOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
+  // Recurring bills — monthly outflows (insurance, subscriptions, utilities not in expenses)
+  bills?: Array<{ amount: number; frequency: string; next_due_date?: string; is_active?: boolean; }>;
 }): CashFlowMonth[] {
   const START_YEAR = 2025;
   const START_MONTH = 1;
@@ -731,13 +762,24 @@ export function buildCashFlowSeries(params: {
         }
       }
 
+      // ── Recurring bills outflow ──
+      // Only apply to forecast months (not actual months — bills are already in tracked expenses)
+      let billsOutflow = 0;
+      if (!isActual) {
+        for (const bill of (params.bills ?? [])) {
+          if (bill.is_active === false) continue;
+          billsOutflow += dcaMonthlyEquiv(safeNum(bill.amount), bill.frequency || 'monthly');
+        }
+      }
+
       // ── Net Cash Flow ──
       // income + rental - expenses (actuals or forecast) - mortgage - invest loans
       // Note: when actuals are used and they include mortgage, mortgageRepayment=0 so no double count
       const netCashFlow = income + rentalIncome - totalExpenses - mortgageRepayment - investmentLoanRepayment
         - oneTimeCashOutflow + plannedStockCashDelta + plannedCryptoCashDelta
         - stockDCAOutflow - cryptoDCAOutflow
-        + plannedStockOrderDelta + plannedCryptoOrderDelta;
+        + plannedStockOrderDelta + plannedCryptoOrderDelta
+        - billsOutflow;
       cumulativeBalance += netCashFlow;
 
       const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
