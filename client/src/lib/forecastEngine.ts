@@ -48,6 +48,10 @@ export interface ForecastInput {
   };
   // Per-year overrides — when provided, override flat assumptions year-by-year
   yearlyAssumptions?: YearAssumptions[];
+  // Australian Negative Gearing
+  ngRefundMode?: 'lump-sum' | 'payg';
+  ngAnnualBenefit?: number;    // total NG tax benefit per year (from calcNegativeGearing)
+  annualSalaryIncome?: number; // gross annual salary
 }
 
 export interface ForecastOutput {
@@ -111,6 +115,10 @@ export function buildForecast(input: ForecastInput): ForecastOutput {
     bills:                bills ?? [],
     inflationRate:        firstYearAss.inflation,
     incomeGrowthRate:     firstYearAss.income_growth,
+    // Australian NG
+    ngRefundMode:         input.ngRefundMode,
+    ngAnnualBenefit:      input.ngAnnualBenefit,
+    annualSalaryIncome:   input.annualSalaryIncome,
   });
 
   const annual = aggregateCashFlowToAnnual(monthly);
