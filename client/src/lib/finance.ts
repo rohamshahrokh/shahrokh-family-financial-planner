@@ -285,9 +285,21 @@ export function projectNetWorth(params: {
   const cars         = safeNum(s.cars);
   const iranProp     = safeNum(s.iran_property);
 
+  // Track previous year's endNW so startNW is always consistent with endNW
+  // (same asset set — includes investment property equity). Year 0 baseline
+  // is computed once here using today's snapshot including investment props.
+  const _initPropEquity = params.properties
+    .filter((p: any) => p.type !== 'ppor')
+    .reduce((sum: number, p: any) => {
+      const v = safeNum(p.current_value) || safeNum(p.purchase_price);
+      const l = safeNum(p.loan_amount);
+      return sum + v - l;
+    }, 0);
+  let prevEndNW = (ppor + cash + superBal + stockVal + cryptoVal + cars * 0.8 + iranProp + _initPropEquity) - (mortgage + otherDebts);
+
   for (let y = 1; y <= years; y++) {
     const year = currentYear + y;
-    const startNW = (ppor + cash + superBal + stockVal + cryptoVal + cars + iranProp) - (mortgage + otherDebts);
+    const startNW = prevEndNW;
 
     // Resolve per-year assumptions if available
     const yAss = params.yearlyAssumptions?.find(a => a.year === year);
@@ -485,6 +497,7 @@ export function projectNetWorth(params: {
     const totalAssets = ppor + cash + superBal + stocksTotal + cryptoTotal + cars * 0.8 + iranProp + propValue;
     const totalLiabilities = mortgage + otherDebts * Math.max(0, 1 - y * 0.1) + propLoans;
     const endNW = totalAssets - totalLiabilities;
+    prevEndNW = endNW; // carry forward as next year's startNW
     const passiveIncome = propRent + stocksTotal * 0.02 + cryptoTotal * 0.01;
     const monthlyCF = monthlyIncome - monthlyExpenses + passiveIncome / 12;
 
