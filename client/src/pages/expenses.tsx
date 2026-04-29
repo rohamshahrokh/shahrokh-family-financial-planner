@@ -574,6 +574,10 @@ export default function ExpensesPage() {
     else { setLocalChartView(null); setGlobalChartView(v); }
   };
 
+  // ── Recurring breakdown expand/collapse ──────────────────────────────────────
+  const [showAllRecurring, setShowAllRecurring] = useState(false);
+  const RECURRING_PREVIEW_COUNT = 4;
+
   // ── Income filter state ──────────────────────────────────────────────────────
   const [incomeSearch, setIncomeSearch] = useState('');
   const [incomeFilterYear, setIncomeFilterYear] = useState('all');
@@ -1005,6 +1009,36 @@ export default function ExpensesPage() {
 
     return { totalIncome, recurringMonthlyTotal, thisMonthIncome, sourceData, trendData, memberData, activeStreamsCount };
   }, [filteredIncome, incomeRecords]);
+
+  // ── Grouped recurring income — deduplicated and sorted for the compact panel ──
+  // Groups all recurring (non-one-off) income records by (member, source).
+  // Within each group, picks the most-recent record's amount and frequency as the
+  // representative value (same logic as streamMap in incomeAnalytics).
+  // Result: sorted by monthly equivalent descending so biggest streams show first.
+  const groupedRecurring = useMemo(() => {
+    // Build a map of (member|source) → { latestRecord, count }
+    const groupMap = new Map<string, { record: any; count: number }>();
+    const sorted = [...(incomeRecords as any[])]
+      .filter((r: any) => r.recurring && r.frequency !== 'One-off')
+      .sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''));
+    for (const r of sorted) {
+      const key = [
+        (r.member || '').toLowerCase().trim(),
+        (r.source || '').toLowerCase().trim(),
+      ].join('|');
+      if (!groupMap.has(key)) {
+        groupMap.set(key, { record: r, count: 1 });
+      } else {
+        groupMap.get(key)!.count += 1;
+      }
+    }
+    return Array.from(groupMap.values())
+      .sort((a, b) =>
+        toMonthlyEquiv(b.record.amount, b.record.frequency) -
+        toMonthlyEquiv(a.record.amount, a.record.frequency)
+      );
+  }, [incomeRecords]);
+
 
   // ── Filtered expense totals (react instantly to filters) ─────────────────
   const filteredExpensesTotals = useMemo(() => {
@@ -2078,26 +2112,74 @@ export default function ExpensesPage() {
                   </div>
                 </div>
               )}
-              {/* Recurring monthly equiv summary */}
+              {/* Recurring Monthly Breakdown — compact grouped widget */}
               <div className="bg-card border border-border rounded-xl p-5">
-                <h3 className="text-sm font-bold mb-4">Recurring Monthly Breakdown</h3>
-                <div className="space-y-2">
-                  {incomeRecords.filter((r: any) => r.recurring && r.frequency !== 'One-off').map((r: any, i: number) => (
-                    <div key={r.id} className="flex items-center justify-between text-xs py-1 border-b border-border/30">
-                      <div className="flex flex-col min-w-0">
-                        <span className="font-medium truncate">{r.source}{r.description ? ` — ${r.description}` : ''}</span>
-                        <span className="text-muted-foreground">{r.member} · {r.frequency}</span>
-                      </div>
-                      <div className="text-right shrink-0 ml-2">
-                        <p className="font-bold num-display text-emerald-400">{formatCurrency(toMonthlyEquiv(r.amount, r.frequency))}<span className="text-muted-foreground font-normal">/mo</span></p>
-                        <p className="text-muted-foreground">{formatCurrency(r.amount)} {r.frequency.toLowerCase()}</p>
-                      </div>
-                    </div>
-                  ))}
-                  {incomeRecords.filter((r: any) => r.recurring).length === 0 && (
-                    <p className="text-sm text-muted-foreground text-center py-4">No recurring income records yet.</p>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold">Recurring Monthly Breakdown</h3>
+                  {groupedRecurring.length > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      {groupedRecurring.length} stream{groupedRecurring.length !== 1 ? 's' : ''}
+                    </span>
                   )}
                 </div>
+
+                {groupedRecurring.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">No recurring income records yet.</p>
+                ) : (
+                  <>
+                    <div className="space-y-0">
+                      {(showAllRecurring
+                        ? groupedRecurring
+                        : groupedRecurring.slice(0, RECURRING_PREVIEW_COUNT)
+                      ).map(({ record: r, count }) => {
+                        const monthly = toMonthlyEquiv(r.amount, r.frequency);
+                        return (
+                          <div key={`${r.member}|${r.source}`} className="flex items-center justify-between text-xs py-2 border-b border-border/30 last:border-0">
+                            <div className="flex flex-col min-w-0 gap-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-medium truncate">{r.source}</span>
+                                {count > 1 && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground shrink-0">
+                                    {count} records
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-muted-foreground">{r.member} · {r.frequency}</span>
+                            </div>
+                            <div className="text-right shrink-0 ml-3">
+                              <p className="font-bold num-display text-emerald-400">
+                                {formatCurrency(monthly)}
+                                <span className="text-muted-foreground font-normal">/mo</span>
+                              </p>
+                              <p className="text-muted-foreground">{formatCurrency(r.amount)} {r.frequency.toLowerCase()}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {groupedRecurring.length > RECURRING_PREVIEW_COUNT && (
+                      <button
+                        onClick={() => setShowAllRecurring(v => !v)}
+                        className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs text-primary/80 hover:text-primary font-medium py-1.5 rounded-lg border border-border/40 hover:border-primary/30 hover:bg-primary/5 transition-all"
+                      >
+                        {showAllRecurring ? (
+                          <><ChevronDown className="w-3.5 h-3.5 rotate-180" /> Show Less</>
+                        ) : (
+                          <><ChevronDown className="w-3.5 h-3.5" /> Show {groupedRecurring.length - RECURRING_PREVIEW_COUNT} More</>
+                        )}
+                      </button>
+                    )}
+
+                    <div className="mt-3 pt-3 border-t border-border/40 flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Total monthly</span>
+                      <span className="font-bold num-display text-emerald-400">
+                        {formatCurrency(incomeAnalytics.recurringMonthlyTotal)}
+                        <span className="text-muted-foreground font-normal">/mo</span>
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}
