@@ -285,7 +285,7 @@ export function projectNetWorth(params: {
       monthly_expenses: safeNum(s.monthly_expenses),
       mortgage:         safeNum(s.mortgage),
       other_debts:      safeNum(s.other_debts),
-      cash:             safeNum(s.cash),
+      cash:             safeNum(s.cash) + safeNum(s.offset_balance),
     },
     expenses:            params.expenses            ?? [],
     properties:          params.properties          as any[],
@@ -309,7 +309,8 @@ export function projectNetWorth(params: {
 
   // ── Initialise mutable state ──────────────────────────────────────────────
   let ppor          = safeNum(s.ppor);
-  let cash          = safeNum(s.cash);
+  // Include offset_balance in starting cash so year-0 NW and projections are correct.
+  let cash          = safeNum(s.cash) + safeNum(s.offset_balance);
   let stockVal      = safeNum(s.stocks);
   let cryptoVal     = safeNum(s.crypto);
   let mortgage      = safeNum(s.mortgage);
@@ -354,11 +355,21 @@ export function projectNetWorth(params: {
 
   // Previous-year values for growth breakdown (initialised to year-0 snapshot)
   let prevPpor    = ppor;
-  let prevPropVal = _initPropEquity; // investment prop equity as proxy for value
-  let prevStocks  = stockVal;
-  let prevCrypto  = cryptoVal;
-  let prevLiab    = mortgage + otherDebts;
+  // BUG FIX: use gross investment property VALUE (not equity) for year-0 baseline
+  // so year-1 appreciation = (ppor_y1 + propValue_y1) - (ppor_y0 + propValue_y0)
+  let prevPropVal = params.properties
+    .filter((p: any) => p.type !== 'ppor')
+    .reduce((sum: number, p: any) => sum + (safeNum(p.current_value) || safeNum(p.purchase_price)), 0);
+  let prevStocks   = stockVal;
+  let prevCrypto   = cryptoVal;
+  let prevLiab     = mortgage + otherDebts;
   let prevSuperTotal = superRoham + superFara;
+
+  // BUG FIX: carry stock/crypto values forward properly so they compound.
+  // projectInvestment uses initial snapshot value each call — we must track
+  // the running compounded value and add new DCA/orders on top each year.
+  let stockRunning  = stockVal;   // grows each year via appreciation + DCA + orders
+  let cryptoRunning = cryptoVal;  // same for crypto
 
   const results: YearlyProjection[] = [];
 
@@ -458,20 +469,19 @@ export function projectNetWorth(params: {
     }
 
     // ── Stocks projection ─────────────────────────────────────────────────────
-    let stocksBefore = stockVal;
-    let stocksTotal  = 0;  // reset each year — we project from scratch each iteration
+    // BUG FIX: compound stockRunning forward each year instead of re-projecting
+    // from snapshot value. This ensures year-N value = year-(N-1) value * (1+r) + DCA.
     const avgStockReturn = params.stocks?.length > 0
-      ? params.stocks.reduce((acc, st) => acc + safeNum(st.expected_return), 0) / params.stocks.length
-      : 10;
-    for (const stock of params.stocks) {
-      const val = stock.current_holding * stock.current_price;
-      if (val > 0) {
-        const proj = projectInvestment(val, stock.expected_return, stock.monthly_dca || 0, y);
-        stocksTotal += proj[y - 1]?.value || 0;
-      }
-    }
-    // DCA schedules (additive to per-stock monthly_dca)
+      ? params.stocks.reduce((acc: number, st: any) => acc + safeNum(st.expected_return), 0) / params.stocks.length
+      : (yAss?.stocks_return ?? 10);
     const dcaYear = year;
+
+    // Step 1: apply market return to last year's stock value
+    const monthlyStockRate = avgStockReturn / 100 / 12;
+    let stocksTotal = stockRunning;
+    for (let m = 0; m < 12; m++) stocksTotal = stocksTotal * (1 + monthlyStockRate);
+
+    // Step 2: add DCA schedule contributions for this year (cash already deducted via cashEngine)
     let totalStockDCAMonthly = 0;
     for (const dca of (params.stockDCASchedules ?? [])) {
       if (!dca.enabled) continue;
@@ -481,45 +491,41 @@ export function projectNetWorth(params: {
         totalStockDCAMonthly += dcaMonthlyEquiv(dca.amount, dca.frequency);
     }
     if (totalStockDCAMonthly > 0) {
-      const monthlyStockRate = avgStockReturn / 100 / 12;
       let dcaStockGrowth = 0;
       for (let m = 0; m < 12; m++)
         dcaStockGrowth = (dcaStockGrowth + totalStockDCAMonthly) * (1 + monthlyStockRate);
-      stockVal += dcaStockGrowth;
       stocksTotal += dcaStockGrowth;
     }
-    // Planned buy orders (one-off)
+
+    // Step 3: planned one-off buy/sell orders in this calendar year
     for (const o of (params.plannedStockOrders ?? [])) {
       if (o.status !== 'planned') continue;
       const oYear = new Date(o.planned_date).getFullYear();
       if (oYear !== dcaYear) continue;
-      if (o.action === 'buy')  { stockVal += safeNum(o.amount_aud); stocksTotal += safeNum(o.amount_aud); }
-      if (o.action === 'sell') { stockVal -= safeNum(o.amount_aud); stocksTotal -= safeNum(o.amount_aud); }
+      if (o.action === 'buy')  stocksTotal += safeNum(o.amount_aud);
+      if (o.action === 'sell') stocksTotal -= safeNum(o.amount_aud);
     }
+    // Planned transactions (legacy)
     for (const tx of (params.stockTransactions ?? [])) {
       if (tx.status !== 'planned') continue;
       const txYear = new Date(tx.transaction_date).getFullYear();
-      if (year < txYear) continue;
-      const yearsGrowing = year - txYear;
-      const txReturn = avgStockReturn / 100;
-      if (tx.transaction_type === 'buy')
-        stocksTotal += safeNum(tx.total_amount) * Math.pow(1 + txReturn, yearsGrowing + 1);
+      if (txYear !== dcaYear) continue;  // only add in the purchase year, not every year
+      if (tx.transaction_type === 'buy')  stocksTotal += safeNum(tx.total_amount);
+      if (tx.transaction_type === 'sell') stocksTotal -= safeNum(tx.total_amount);
     }
-    stocksBefore = prevStocks; // use prev-year value for appreciation calc
+    stocksTotal = Math.max(0, stocksTotal);
+    const stocksBefore = prevStocks;
 
     // ── Crypto projection ─────────────────────────────────────────────────────
-    let cryptoBefore = prevCrypto;
-    let cryptoTotal  = 0;
+    // BUG FIX: same pattern as stocks — compound cryptoRunning forward each year.
     const avgCryptoReturn = params.cryptos?.length > 0
-      ? params.cryptos.reduce((acc, c) => acc + safeNum(c.expected_return), 0) / params.cryptos.length
-      : 20;
-    for (const c of params.cryptos) {
-      const val = c.current_holding * c.current_price;
-      if (val > 0) {
-        const proj = projectInvestment(val, c.expected_return, c.monthly_dca || 0, y);
-        cryptoTotal += proj[y - 1]?.value || 0;
-      }
-    }
+      ? params.cryptos.reduce((acc: number, c: any) => acc + safeNum(c.expected_return), 0) / params.cryptos.length
+      : (yAss?.crypto_return ?? 20);
+    const monthlyCryptoRate = avgCryptoReturn / 100 / 12;
+
+    let cryptoTotal = cryptoRunning;
+    for (let m = 0; m < 12; m++) cryptoTotal = cryptoTotal * (1 + monthlyCryptoRate);
+
     let totalCryptoDCAMonthly = 0;
     for (const dca of (params.cryptoDCASchedules ?? [])) {
       if (!dca.enabled) continue;
@@ -529,30 +535,27 @@ export function projectNetWorth(params: {
         totalCryptoDCAMonthly += dcaMonthlyEquiv(dca.amount, dca.frequency);
     }
     if (totalCryptoDCAMonthly > 0) {
-      const monthlyCryptoRate = avgCryptoReturn / 100 / 12;
       let dcaCryptoGrowth = 0;
       for (let m = 0; m < 12; m++)
         dcaCryptoGrowth = (dcaCryptoGrowth + totalCryptoDCAMonthly) * (1 + monthlyCryptoRate);
-      cryptoVal += dcaCryptoGrowth;
       cryptoTotal += dcaCryptoGrowth;
     }
     for (const o of (params.plannedCryptoOrders ?? [])) {
       if (o.status !== 'planned') continue;
       const oYear = new Date(o.planned_date).getFullYear();
       if (oYear !== dcaYear) continue;
-      if (o.action === 'buy')  { cryptoVal += safeNum(o.amount_aud); cryptoTotal += safeNum(o.amount_aud); }
-      if (o.action === 'sell') { cryptoVal -= safeNum(o.amount_aud); cryptoTotal -= safeNum(o.amount_aud); }
+      if (o.action === 'buy')  cryptoTotal += safeNum(o.amount_aud);
+      if (o.action === 'sell') cryptoTotal -= safeNum(o.amount_aud);
     }
     for (const tx of (params.cryptoTransactions ?? [])) {
       if (tx.status !== 'planned') continue;
       const txYear = new Date(tx.transaction_date).getFullYear();
-      if (year < txYear) continue;
-      const yearsGrowing = year - txYear;
-      const txReturn = avgCryptoReturn / 100;
-      if (tx.transaction_type === 'buy')
-        cryptoTotal += safeNum(tx.total_amount) * Math.pow(1 + txReturn, yearsGrowing + 1);
+      if (txYear !== dcaYear) continue;  // only add in purchase year
+      if (tx.transaction_type === 'buy')  cryptoTotal += safeNum(tx.total_amount);
+      if (tx.transaction_type === 'sell') cryptoTotal -= safeNum(tx.total_amount);
     }
-    cryptoBefore = prevCrypto;
+    cryptoTotal = Math.max(0, cryptoTotal);
+    const cryptoBefore = prevCrypto;
 
     // ── Cash balance from central monthly engine ──────────────────────────────
     cash = _cashByYear.get(year) ?? cash;
@@ -608,11 +611,15 @@ export function projectNetWorth(params: {
     // ── Carry forward ─────────────────────────────────────────────────────────
     prevEndNW      = endNW;
     prevPpor       = ppor;
-    prevPropVal    = propValue;
+    prevPropVal    = propValue;   // inv property value only (not ppor)
     prevStocks     = stocksTotal;
     prevCrypto     = cryptoTotal;
     prevLiab       = liabNow;
     prevSuperTotal = totalSuperNow;
+    // BUG FIX: carry stockRunning / cryptoRunning forward so next year
+    // compounds from this year's ending value, not the original snapshot.
+    stockRunning   = stocksTotal;
+    cryptoRunning  = cryptoTotal;
 
     results.push({
       year,
