@@ -24,6 +24,7 @@ import {
   calcNegativeGearing,
   type YearlyProjection, type PropertyYearDetail, type NGSummary,
 } from "@/lib/finance";
+import { runCashEngine } from "@/lib/cashEngine";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend, LineChart, Line,
@@ -212,6 +213,28 @@ export default function TimelinePage() {
   const annualSeries = useMemo(() =>
     aggregateCashFlowToAnnual(monthlySeries),
     [monthlySeries]
+  );
+
+  // ── Central Cash Engine (full ledger + liquidity for this page)
+  const cashEngineOut = useMemo(() => runCashEngine({
+    snapshot: snap,
+    properties:          properties as any[],
+    stockTransactions:   plannedStockTx,
+    cryptoTransactions:  plannedCryptoTx,
+    stockDCASchedules,
+    cryptoDCASchedules,
+    plannedStockOrders,
+    plannedCryptoOrders,
+    bills:               billsRaw as any[],
+    expenses:            expenses as any[],
+    inflationRate:       fa.flat.inflation,
+    incomeGrowthRate:    fa.flat.income_growth,
+    ngRefundMode:        'lump-sum',
+    ngAnnualBenefit:     ngSummary.totalAnnualTaxBenefit,
+    annualSalaryIncome:  safeNum(snap.monthly_income) * 12,
+  }),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [snap, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, billsRaw, expenses, fa, ngSummary.totalAnnualTaxBenefit]
   );
 
   // ── Summary KPIs ───────────────────────────────────────────────────────────
@@ -521,7 +544,7 @@ export default function TimelinePage() {
                       ])
                     : []
                   ),
-                  'Stocks', 'Crypto', 'Cash', 'Total Liab.', 'End NW', 'Growth', 'Monthly CF'
+                  'Stocks', 'Crypto', 'Forecast Cash', 'Total Liab.', 'End NW', 'Growth', 'Monthly CF'
                 ].map(h => (
                   <th key={h} className="text-left pb-2 pr-3 text-muted-foreground font-medium whitespace-nowrap">{h}</th>
                 ))}
