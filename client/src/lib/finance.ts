@@ -225,6 +225,12 @@ export function projectNetWorth(params: {
   cryptoDCASchedules?: Array<{ enabled: boolean; amount: number; frequency: string; start_date: string; end_date?: string | null; }>;
   plannedStockOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
   plannedCryptoOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
+  // Central Cash Engine params (for real cash balance vs. 50% shortcut)
+  expenses?: Array<{ date: string; amount: number; category: string }>;
+  bills?: Array<{ amount: number; frequency: string; next_due_date?: string; is_active?: boolean; }>;
+  ngRefundMode?: 'lump-sum' | 'payg';
+  ngAnnualBenefit?: number;
+  annualSalaryIncome?: number;
 }): YearlyProjection[] {
   const years = params.years || 10;
   const inflation = params.inflation || 3;
@@ -233,6 +239,39 @@ export function projectNetWorth(params: {
 
   const results: YearlyProjection[] = [];
   const currentYear = new Date().getFullYear();
+
+  // ── Central Cash Engine: run buildCashFlowSeries to get real annual cash balances ──
+  // This replaces the old "annualSurplus * 0.5" shortcut.
+  // We build a Map<year, endingCashBalance> from the monthly engine.
+  const _cashSeries = buildCashFlowSeries({
+    snapshot: {
+      monthly_income:   safeNum(params.snapshot.monthly_income),
+      monthly_expenses: safeNum(params.snapshot.monthly_expenses),
+      mortgage:         safeNum(params.snapshot.mortgage),
+      other_debts:      safeNum(params.snapshot.other_debts),
+      cash:             safeNum(params.snapshot.cash),
+    },
+    expenses:            params.expenses            ?? [],
+    properties:          params.properties          as any[],
+    stockTransactions:   params.stockTransactions   ?? [],
+    cryptoTransactions:  params.cryptoTransactions  ?? [],
+    stockDCASchedules:   params.stockDCASchedules   ?? [],
+    cryptoDCASchedules:  params.cryptoDCASchedules  ?? [],
+    plannedStockOrders:  params.plannedStockOrders  ?? [],
+    plannedCryptoOrders: params.plannedCryptoOrders ?? [],
+    bills:               params.bills               ?? [],
+    ngRefundMode:        params.ngRefundMode,
+    ngAnnualBenefit:     params.ngAnnualBenefit,
+    annualSalaryIncome:  params.annualSalaryIncome,
+    inflationRate:       params.inflation,
+    incomeGrowthRate:    params.yearlyAssumptions?.[0]?.income_growth,
+  });
+  // Build year → ending cash balance map (last December of each year, or last month available)
+  const _cashByYear = new Map<number, number>();
+  for (const m of _cashSeries) {
+    // Always overwrite — last month of each year wins (Dec, or whatever is latest)
+    _cashByYear.set(m.year, m.cumulativeBalance);
+  }
 
   // Guard every field — if snapshot came back with undefined/NaN fields
   // (e.g. field name mismatch), calculations silently use 0 instead of NaN.
@@ -441,9 +480,8 @@ export function projectNetWorth(params: {
       if (o.action === 'sell') cryptoVal -= safeNum(o.amount_aud);
     }
 
-    // Annual surplus added to cash
-    const annualSurplus = (monthlyIncome - monthlyExpenses) * 12;
-    cash += annualSurplus * 0.5; // 50% saved
+    // Cash balance from central monthly engine (real projected ending balance for this year)
+    cash = _cashByYear.get(year) ?? cash;
 
     // Calculate totals
     const totalAssets = ppor + cash + superBal + stocksTotal + cryptoTotal + cars * 0.8 + iranProp + propValue;
