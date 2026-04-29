@@ -10,6 +10,7 @@ import html2canvas from 'html2canvas';
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/finance";
+import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -725,16 +726,29 @@ function DebtKiller({ snap }: { snap: Record<string, number> }) {
 // ─── TAB 3: NET WORTH SIMULATOR ───────────────────────────────────────────────
 
 function NetWorthSimulator({ snap }: { snap: Record<string, number> }) {
-  // ── Wealth assumptions — Supabase-backed via sf_app_settings ───────────────
-  const WA_DEFAULTS = { propGrowth:6, stockReturn:8, cryptoReturn:10, inflationRate:3, incomeGrowth:3, expenseGrowth:2, interestRate:6, rentGrowth:3 };
+  // ── Seed defaults from global forecast store ─────────────────────────────
+  // wealthAssumptionsEdit = null means “use global store”; once the user
+  // manually edits a field it becomes a local override for scenario testing.
+  const fa = useForecastAssumptions();
+  const WA_DEFAULTS = {
+    propGrowth:   fa.flat.property_growth,
+    stockReturn:  fa.flat.stocks_return,
+    cryptoReturn: fa.flat.crypto_return,
+    inflationRate: fa.flat.inflation,
+    incomeGrowth: fa.flat.income_growth,
+    expenseGrowth: fa.flat.expense_growth,
+    interestRate: fa.flat.interest_rate,
+    rentGrowth:   fa.flat.rent_growth,
+  };
   const { data: appSettings } = useQuery({
     queryKey: ['/api/app-settings'],
     queryFn: () => apiRequest('GET', '/api/app-settings').then(r => r.json()),
     staleTime: 0,
   });
   const [wealthAssumptionsEdit, setWealthAssumptionsEdit] = useState<any>(null);
-  const wealthAssumptions = wealthAssumptionsEdit ??
-    (appSettings?.wealth_assumptions ? { ...WA_DEFAULTS, ...appSettings.wealth_assumptions } : WA_DEFAULTS);
+  // When mode changes externally, local override is cleared so the new global
+  // defaults flow through (user must re-edit to override again).
+  const wealthAssumptions = wealthAssumptionsEdit ?? WA_DEFAULTS;
 
   const propGrowth    = wealthAssumptions.propGrowth;
   const stockReturn   = wealthAssumptions.stockReturn;
