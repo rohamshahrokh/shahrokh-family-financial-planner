@@ -334,7 +334,7 @@ function LoadingSkeleton() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function MarketNewsPage() {
-  const { privacyMode, setPrivacyMode } = useAppStore();
+  const { privacyMode, togglePrivacy } = useAppStore();
   const { toast } = useToast();
   const [activeNewsTab, setActiveNewsTab] = useState<string>("stocks");
 
@@ -502,7 +502,7 @@ export default function MarketNewsPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setPrivacyMode(!privacyMode)}
+              onClick={() => togglePrivacy()}
               className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors font-semibold ${
                 privacyMode
                   ? "bg-amber-900/40 border-amber-700 text-amber-400"

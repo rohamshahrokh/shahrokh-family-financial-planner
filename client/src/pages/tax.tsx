@@ -418,11 +418,11 @@ export default function Tax() {
   }, [roham, fara, rohamResult, faraResult, chartPeriod]);
 
   // ── Negative gearing integration ──
-  const { data: propertiesRaw } = useQuery({
+  const { data: propertiesRaw } = useQuery<any[]>({
     queryKey: ["/api/properties"],
-    queryFn: () => apiRequest("GET", "/api/properties"),
+    queryFn: () => apiRequest("GET", "/api/properties").then((r) => r.json()),
   });
-  const properties = (propertiesRaw as any[]) ?? [];
+  const properties: any[] = propertiesRaw ?? [];
   const ngProperties = properties.filter((p: any) => p.type === "Investment");
   const hasNgProperties = ngProperties.length > 0;
 
