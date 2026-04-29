@@ -20,7 +20,7 @@ import { useAppStore } from "@/lib/store";
 import {
   formatCurrency, safeNum,
   projectNetWorth, buildCashFlowSeries, aggregateCashFlowToAnnual,
-  type YearlyProjection,
+  type YearlyProjection, type PropertyYearDetail,
 } from "@/lib/finance";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -28,7 +28,7 @@ import {
 } from "recharts";
 import {
   TrendingUp, Download, BarChart2,
-  Home, DollarSign, Layers, Target, Info
+  Home, DollarSign, Layers, Target, Info, ChevronRight, ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
@@ -70,6 +70,7 @@ export default function TimelinePage() {
   // Use global chartView from store (controlled by the header toggle)
   const { chartView: view } = useAppStore();
   const [activeChart, setActiveChart] = useState<'networth' | 'assets' | 'cashflow' | 'equity'>('networth');
+  const [showPropertyDetail, setShowPropertyDetail] = useState(false);
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   const { data: snapshot } = useQuery<any>({
@@ -438,9 +439,26 @@ export default function TimelinePage() {
             <BarChart2 className="w-4 h-4 text-primary" />
             <p className="text-sm font-bold">Year-by-Year Projection</p>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Info className="w-3.5 h-3.5" />
-            <span>Assumes 6% PPOR growth, 10% super growth, 3% inflation</span>
+          <div className="flex items-center gap-3">
+            {/* Per-property detail toggle */}
+            {projection[0]?.propertyDetails?.length > 0 && (
+              <button
+                className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border transition-all ${
+                  showPropertyDetail
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:border-muted-foreground'
+                }`}
+                onClick={() => setShowPropertyDetail(v => !v)}
+              >
+                <Home className="w-3 h-3" />
+                {showPropertyDetail ? 'Hide' : 'Show'} per-property
+                {showPropertyDetail ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+              </button>
+            )}
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Info className="w-3.5 h-3.5" />
+              <span>6% PPOR, 10% super, 3% inflation</span>
+            </div>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -449,7 +467,13 @@ export default function TimelinePage() {
               <tr className="border-b border-border">
                 {[
                   'Year', 'Start NW', 'Total Assets', 'Prop Value', 'Prop Equity',
-                  'Stocks', 'Crypto', 'Cash', 'Total Liabilities', 'End NW', 'Growth', 'Monthly CF'
+                  ...(showPropertyDetail
+                    ? (projection[0]?.propertyDetails ?? []).flatMap((d: PropertyYearDetail) => [
+                        `${d.name} Value`, `${d.name} Loan`, `${d.name} Equity`, `${d.name} CF/yr`
+                      ])
+                    : []
+                  ),
+                  'Stocks', 'Crypto', 'Cash', 'Total Liab.', 'End NW', 'Growth', 'Monthly CF'
                 ].map(h => (
                   <th key={h} className="text-left pb-2 pr-3 text-muted-foreground font-medium whitespace-nowrap">{h}</th>
                 ))}
@@ -471,6 +495,15 @@ export default function TimelinePage() {
                     <td className="py-2 pr-3 num-display text-emerald-400">{formatCurrency(p.totalAssets, true)}</td>
                     <td className="py-2 pr-3 num-display">{formatCurrency(p.propertyValue, true)}</td>
                     <td className="py-2 pr-3 num-display text-primary">{formatCurrency(p.propertyEquity, true)}</td>
+                    {/* Per-property detail columns */}
+                    {showPropertyDetail && (p.propertyDetails ?? []).map((d: PropertyYearDetail) => (
+                      <>
+                        <td key={`${d.id}-val`} className="py-2 pr-3 num-display text-amber-300/80">{formatCurrency(d.value, true)}</td>
+                        <td key={`${d.id}-loan`} className="py-2 pr-3 num-display text-red-400/70">{formatCurrency(d.loanBalance, true)}</td>
+                        <td key={`${d.id}-eq`} className="py-2 pr-3 num-display text-cyan-400">{formatCurrency(d.equity, true)}</td>
+                        <td key={`${d.id}-cf`} className={`py-2 pr-3 num-display ${d.annualCashFlow >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{formatCurrency(d.annualCashFlow, true)}</td>
+                      </>
+                    ))}
                     <td className="py-2 pr-3 num-display">{formatCurrency(p.stockValue, true)}</td>
                     <td className="py-2 pr-3 num-display">{formatCurrency(p.cryptoValue, true)}</td>
                     <td className="py-2 pr-3 num-display">{formatCurrency(p.cash, true)}</td>
@@ -493,11 +526,17 @@ export default function TimelinePage() {
             {projection.length > 0 && (
               <tfoot>
                 <tr className="border-t border-border">
-                  <td className="pt-3 text-xs text-muted-foreground font-medium" colSpan={1}>Summary</td>
+                  <td className="pt-3 text-xs text-muted-foreground font-medium">Summary</td>
                   <td className="pt-3 pr-3" />
                   <td className="pt-3 pr-3" />
                   <td className="pt-3 pr-3" />
                   <td className="pt-3 pr-3" />
+                  {showPropertyDetail && (projection[0]?.propertyDetails ?? []).flatMap((_: PropertyYearDetail) => [
+                    <td className="pt-3 pr-3" />,
+                    <td className="pt-3 pr-3" />,
+                    <td className="pt-3 pr-3" />,
+                    <td className="pt-3 pr-3" />,
+                  ])}
                   <td className="pt-3 pr-3" />
                   <td className="pt-3 pr-3" />
                   <td className="pt-3 pr-3" />
