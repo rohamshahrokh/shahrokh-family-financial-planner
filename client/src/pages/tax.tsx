@@ -24,7 +24,7 @@ import {
 } from "recharts";
 import {
   Calculator, AlertTriangle, Info, ChevronDown, ChevronRight,
-  DollarSign, TrendingUp, Home, PieChart, Zap
+  DollarSign, TrendingUp, Home, PieChart, Zap, ArrowRight, CheckCircle2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -235,11 +235,44 @@ export default function TaxPage() {
   const [propMaintenance, setPropMaintenance] = useState(0);
   const [propOther, setPropOther] = useState(0);
 
-  // ── Capital Gains ──────────────────────────────────────────────────────────
-  const [cgtAssetType, setCgtAssetType] = useState<'property' | 'shares'>('shares');
+  // ── Capital Gains (full calculator) ──────────────────────────────────────
+  const [cgtAssetType, setCgtAssetType] = useState<'property' | 'shares' | 'crypto'>('shares');
+  const [cgtPurchaseDate, setCgtPurchaseDate] = useState('');
+  const [cgtSaleDate, setCgtSaleDate] = useState('');
   const [cgtPurchasePrice, setCgtPurchasePrice] = useState(0);
   const [cgtSalePrice, setCgtSalePrice] = useState(0);
-  const [cgtHeld12m, setCgtHeld12m] = useState(true);
+  const [cgtSellingCosts, setCgtSellingCosts] = useState(0);
+  const [cgtOwnershipPct, setCgtOwnershipPct] = useState(100);
+  const [cgtPerson, setCgtPerson] = useState<'roham' | 'fara' | 'joint'>('roham');
+  const [cgtCurrentIncome, setCgtCurrentIncome] = useState(0);
+
+  // Auto-detect held >12m from dates
+  const cgtHeld12m = useMemo(() => {
+    if (!cgtPurchaseDate || !cgtSaleDate) return true;
+    const purchaseMs = new Date(cgtPurchaseDate).getTime();
+    const saleMs = new Date(cgtSaleDate).getTime();
+    if (isNaN(purchaseMs) || isNaN(saleMs)) return true;
+    return (saleMs - purchaseMs) / (1000 * 60 * 60 * 24) >= 365;
+  }, [cgtPurchaseDate, cgtSaleDate]);
+
+  // Full CGT calculation — step-by-step
+  const cgtCalc = useMemo(() => {
+    const ownerFrac = safeNum(cgtOwnershipPct) / 100;
+    const grossProceeds = safeNum(cgtSalePrice) * ownerFrac;
+    const costBase = (safeNum(cgtPurchasePrice) + safeNum(cgtSellingCosts)) * ownerFrac;
+    const grossCG = grossProceeds - costBase;
+    const discount = (cgtHeld12m && grossCG > 0) ? grossCG * 0.5 : 0;
+    const taxableCapitalGain = Math.max(0, grossCG - discount);
+    const capitalLoss = grossCG < 0 ? Math.abs(grossCG) : 0;
+    const baseIncome = safeNum(cgtCurrentIncome);
+    const newTaxableIncome = baseIncome + taxableCapitalGain;
+    const taxWithout = Math.max(0, calcIncomeTax(baseIncome) + calcMedicareLevy(baseIncome) - calcLITO(baseIncome) - calcLMITO(baseIncome));
+    const taxWith = Math.max(0, calcIncomeTax(newTaxableIncome) + calcMedicareLevy(newTaxableIncome) - calcLITO(newTaxableIncome) - calcLMITO(newTaxableIncome));
+    const extraTax = Math.max(0, taxWith - taxWithout);
+    const effectiveCgtRate = taxableCapitalGain > 0 ? (extraTax / taxableCapitalGain) * 100 : 0;
+    const netProceeds = grossProceeds - safeNum(cgtSellingCosts) * ownerFrac - extraTax;
+    return { ownerFrac, grossProceeds, costBase, grossCG, discount, taxableCapitalGain, capitalLoss, baseIncome, newTaxableIncome, taxWithout, taxWith, extraTax, effectiveCgtRate, netProceeds };
+  }, [cgtSalePrice, cgtPurchasePrice, cgtSellingCosts, cgtOwnershipPct, cgtCurrentIncome, cgtHeld12m]);
 
   // ── Section visibility ─────────────────────────────────────────────────────
   const [showP1Super, setShowP1Super] = useState(false);
@@ -271,18 +304,20 @@ export default function TaxPage() {
   const totalPropExpenses = propInterest + propRates + propInsurance + propMaintenance + propOther;
   const propertyNetIncome = rentalIncome - totalPropExpenses; // negative = negative gearing
 
-  const rawCapitalGain = cgtSalePrice - cgtPurchasePrice;
-  const cgtDiscount = cgtHeld12m && rawCapitalGain > 0 ? 0.5 : 1;
-  const discountedCapitalGain = rawCapitalGain > 0 ? rawCapitalGain * cgtDiscount : rawCapitalGain;
-  // Only positive CGT adds to taxable income; losses can offset (simplified: person 1)
-  const cgtForP1 = discountedCapitalGain > 0 ? discountedCapitalGain : 0;
+  // cgtForP1: discounted taxable gain — passed to income tax calc for person by cgtPerson
+  const cgtForP1 = cgtPerson === 'joint'
+    ? cgtCalc.taxableCapitalGain * 0.5
+    : cgtPerson === 'roham' ? cgtCalc.taxableCapitalGain : 0;
+  const cgtForP2 = cgtPerson === 'joint'
+    ? cgtCalc.taxableCapitalGain * 0.5
+    : cgtPerson === 'fara' ? cgtCalc.taxableCapitalGain : 0;
 
   // Property net income split 50/50 between both persons (simplified assumption)
   const propNetP1 = propertyNetIncome / 2;
   const propNetP2 = propertyNetIncome / 2;
 
   const p1 = calcTax(p1Salary, p1Other, propNetP1, cgtForP1, p1Concessional);
-  const p2 = calcTax(p2Salary, p2Other, propNetP2, 0, p2Concessional);
+  const p2 = calcTax(p2Salary, p2Other, propNetP2, cgtForP2, p2Concessional);
 
   const combinedTax = p1.netTaxPayable + p2.netTaxPayable;
   const combinedGross = p1.grossIncome + p2.grossIncome;
@@ -319,8 +354,8 @@ export default function TaxPage() {
           positive={propertyNetIncome > 0}
         />
       )}
-      {person === 1 && cgtForP1 > 0 && (
-        <TaxRow label="Capital gain (discounted)" value={`+ ${formatCurrency(cgtForP1)}`} indent muted />
+      {((person === 1 && cgtForP1 > 0) || (person === 2 && cgtForP2 > 0)) && (
+        <TaxRow label="Capital gain (discounted)" value={`+ ${formatCurrency(person === 1 ? cgtForP1 : cgtForP2)}`} indent muted />
       )}
       <TaxRow label="Taxable income" value={formatCurrency(result.taxableIncome)} highlight />
       <TaxRow label="Income tax" value={`- ${formatCurrency(result.incomeTax)}`} indent negative />
@@ -497,67 +532,228 @@ export default function TaxPage() {
             )}
           </div>
 
-          {/* Capital Gains */}
+          {/* Capital Gains / CGT Calculator */}
           <div className="rounded-xl border border-border bg-card p-5">
             <SectionHeader
               icon={<TrendingUp className="w-4 h-4" />}
-              title="Capital Gains / CGT"
+              title="Capital Gains / CGT Calculator"
               expanded={showCgt}
               onToggle={() => setShowCgt(!showCgt)}
             />
             {showCgt && (
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground">Asset type:</span>
-                  {(['property', 'shares'] as const).map(t => (
-                    <button
-                      key={t}
-                      className={`px-3 py-1 text-xs rounded-lg border transition-all ${cgtAssetType === t ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-muted-foreground'}`}
-                      onClick={() => setCgtAssetType(t)}
-                    >
-                      {t === 'property' ? '🏠 Property' : '📈 Shares'}
-                    </button>
-                  ))}
+              <div className="space-y-4">
+                {/* Disclaimer */}
+                <div className="flex items-start gap-2 rounded-lg border border-amber-800/40 bg-amber-950/20 p-2.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-200/80">General information only — not tax advice. Consult a registered tax agent.</p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <AUDInput label="Purchase price" value={cgtPurchasePrice} onChange={setCgtPurchasePrice} />
-                  <AUDInput label="Sale price" value={cgtSalePrice} onChange={setCgtSalePrice} />
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground">Held more than 12 months?</span>
-                  {[true, false].map(v => (
-                    <button
-                      key={String(v)}
-                      className={`px-3 py-1 text-xs rounded-lg border transition-all ${cgtHeld12m === v ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-muted-foreground'}`}
-                      onClick={() => setCgtHeld12m(v)}
-                    >
-                      {v ? 'Yes (50% discount)' : 'No (full gain)'}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="rounded-lg bg-secondary/60 p-3 space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">Raw capital gain/loss</span>
-                    <span className={`font-mono num-display font-semibold ${rawCapitalGain >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {rawCapitalGain < 0 ? `- ${formatCurrency(Math.abs(rawCapitalGain))}` : formatCurrency(rawCapitalGain)}
-                    </span>
-                  </div>
-                  {rawCapitalGain > 0 && cgtHeld12m && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">50% CGT discount applied</span>
-                      <span className="font-mono num-display text-primary">- {formatCurrency(rawCapitalGain * 0.5)}</span>
+                {/* Row 1: Asset type + Person */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-muted-foreground font-medium">Asset type</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {(['property', 'shares', 'crypto'] as const).map(t => (
+                        <button key={t} className={`px-3 py-1 text-xs rounded-lg border transition-all ${cgtAssetType === t ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-muted-foreground'}`} onClick={() => setCgtAssetType(t)}>
+                          {t === 'property' ? 'Property' : t === 'shares' ? 'Shares/ETF' : 'Crypto'}
+                        </button>
+                      ))}
                     </div>
-                  )}
-                  <div className="flex justify-between text-xs border-t border-border pt-1 mt-1">
-                    <span className="font-medium">Added to Person 1 taxable income</span>
-                    <span className={`font-mono num-display font-bold ${cgtForP1 > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}>
-                      {formatCurrency(cgtForP1)}
-                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-muted-foreground font-medium">Selling person</p>
+                    <div className="flex gap-2">
+                      {(['roham', 'fara', 'joint'] as const).map(p => (
+                        <button key={p} className={`px-3 py-1 text-xs rounded-lg border transition-all capitalize ${cgtPerson === p ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-muted-foreground'}`} onClick={() => setCgtPerson(p)}>
+                          {p === 'roham' ? 'Roham' : p === 'fara' ? 'Fara' : 'Joint (50/50)'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
+
+                {/* Row 2: Dates */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground font-medium">Purchase date</label>
+                    <input
+                      type="date"
+                      className="w-full h-8 rounded-md border border-border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                      value={cgtPurchaseDate}
+                      onChange={e => setCgtPurchaseDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground font-medium">Sale date (actual or planned)</label>
+                    <input
+                      type="date"
+                      className="w-full h-8 rounded-md border border-border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                      value={cgtSaleDate}
+                      onChange={e => setCgtSaleDate(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {/* Held period auto-detected */}
+                {cgtPurchaseDate && cgtSaleDate && (
+                  <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${cgtHeld12m ? 'bg-emerald-950/30 border border-emerald-800/30 text-emerald-400' : 'bg-amber-950/30 border border-amber-800/30 text-amber-400'}`}>
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    {cgtHeld12m
+                      ? 'Held more than 12 months — 50% CGT discount applies'
+                      : 'Held less than 12 months — no CGT discount, full gain taxable'}
+                  </div>
+                )}
+
+                {/* Row 3: Prices + costs */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <AUDInput label="Purchase price (cost base)" value={cgtPurchasePrice} onChange={setCgtPurchasePrice} />
+                  <AUDInput label="Sale price (gross proceeds)" value={cgtSalePrice} onChange={setCgtSalePrice} />
+                  <AUDInput label="Selling costs (agent, legal, etc.)" value={cgtSellingCosts} onChange={setCgtSellingCosts} hint="Added to cost base, reduces gain" />
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground font-medium">Your ownership %</label>
+                    <div className="relative flex items-center">
+                      <Input
+                        type="number"
+                        className="pr-8 text-right font-mono num-display text-sm h-8"
+                        value={cgtOwnershipPct || ''}
+                        onChange={e => setCgtOwnershipPct(safeNum(e.target.value))}
+                        placeholder="100"
+                        min={1} max={100}
+                      />
+                      <span className="absolute right-3 text-xs text-muted-foreground">%</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Your share of the asset</p>
+                  </div>
+                </div>
+
+                {/* Row 4: Base income */}
+                <AUDInput
+                  label={cgtPerson === 'fara' ? "Fara's current taxable income (before this sale)" : cgtPerson === 'joint' ? "Each person's current taxable income (before this sale)" : "Roham's current taxable income (before this sale)"}
+                  value={cgtCurrentIncome}
+                  onChange={setCgtCurrentIncome}
+                  hint="Used to calculate which tax bracket the gain falls into"
+                />
+
+                {/* Step-by-step results */}
+                {(cgtSalePrice > 0 || cgtPurchasePrice > 0) && (
+                  <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-2.5">
+                    <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Step-by-Step CGT Breakdown</p>
+
+                    {/* Step 1: Gross proceeds */}
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold text-foreground/80">Step 1 — Your share of proceeds</p>
+                      <div className="pl-3 space-y-0.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Sale price × {cgtOwnershipPct}% ownership</span>
+                          <span className="font-mono num-display">{formatCurrency(cgtCalc.grossProceeds)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Step 2: Cost base */}
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold text-foreground/80">Step 2 — Cost base (your share)</p>
+                      <div className="pl-3 space-y-0.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">(Purchase price + selling costs) × {cgtOwnershipPct}%</span>
+                          <span className="font-mono num-display text-red-400">− {formatCurrency(cgtCalc.costBase)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Step 3: Gross CG */}
+                    <div className="flex justify-between text-xs border-t border-border pt-2">
+                      <span className="font-semibold">Gross capital gain / (loss)</span>
+                      <span className={`font-mono num-display font-bold ${cgtCalc.grossCG >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {cgtCalc.grossCG < 0 ? `(${formatCurrency(Math.abs(cgtCalc.grossCG))})` : formatCurrency(cgtCalc.grossCG)}
+                      </span>
+                    </div>
+
+                    {/* Step 4: 50% discount */}
+                    {cgtCalc.grossCG > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold text-foreground/80">Step 3 — 50% CGT discount</p>
+                        <div className="pl-3 space-y-0.5">
+                          {cgtHeld12m ? (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-muted-foreground">Held &gt;12m — 50% discount applies</span>
+                              <span className="font-mono num-display text-primary">− {formatCurrency(cgtCalc.discount)}</span>
+                            </div>
+                          ) : (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-muted-foreground">Held &lt;12m — no discount</span>
+                              <span className="font-mono num-display text-muted-foreground">$0</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Taxable CG */}
+                    {cgtCalc.grossCG > 0 && (
+                      <div className="flex justify-between text-xs border-t border-border pt-2">
+                        <span className="font-semibold">Taxable capital gain</span>
+                        <span className="font-mono num-display font-bold text-amber-400">{formatCurrency(cgtCalc.taxableCapitalGain)}</span>
+                      </div>
+                    )}
+                    {cgtCalc.capitalLoss > 0 && (
+                      <div className="flex justify-between text-xs border-t border-border pt-2">
+                        <span className="font-semibold">Capital loss (can offset future gains)</span>
+                        <span className="font-mono num-display font-bold text-red-400">{formatCurrency(cgtCalc.capitalLoss)}</span>
+                      </div>
+                    )}
+
+                    {/* Step 5: Income impact */}
+                    {cgtCalc.taxableCapitalGain > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold text-foreground/80">Step 4 — Income tax impact</p>
+                        <div className="pl-3 space-y-0.5">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Taxable income (before CGT)</span>
+                            <span className="font-mono num-display">{formatCurrency(cgtCalc.baseIncome)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">+ Taxable capital gain</span>
+                            <span className="font-mono num-display text-amber-400">+ {formatCurrency(cgtCalc.taxableCapitalGain)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs font-semibold border-t border-border/50 pt-1">
+                            <span>New taxable income</span>
+                            <span className="font-mono num-display">{formatCurrency(cgtCalc.newTaxableIncome)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Tax before CGT</span>
+                            <span className="font-mono num-display text-red-400/70">− {formatCurrency(cgtCalc.taxWithout)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Tax after CGT</span>
+                            <span className="font-mono num-display text-red-400">− {formatCurrency(cgtCalc.taxWith)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Final summary cards */}
+                    {cgtCalc.taxableCapitalGain > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-3 pt-3 border-t border-border">
+                        <div className="rounded-lg bg-red-950/30 border border-red-800/30 p-3 text-center">
+                          <p className="text-xs text-muted-foreground mb-1">Extra tax due to CGT</p>
+                          <p className="text-sm font-bold num-display text-red-400">{formatCurrency(cgtCalc.extraTax)}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">Effective rate {cgtCalc.effectiveCgtRate.toFixed(1)}%</p>
+                        </div>
+                        <div className="rounded-lg bg-emerald-950/30 border border-emerald-800/30 p-3 text-center">
+                          <p className="text-xs text-muted-foreground mb-1">Net proceeds after tax</p>
+                          <p className="text-sm font-bold num-display text-emerald-400">{formatCurrency(cgtCalc.netProceeds)}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">Cash you keep</p>
+                        </div>
+                        <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-center">
+                          <p className="text-xs text-muted-foreground mb-1">Total gain kept</p>
+                          <p className="text-sm font-bold num-display text-primary">{formatCurrency(cgtCalc.netProceeds - cgtCalc.costBase)}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">After all costs + tax</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
