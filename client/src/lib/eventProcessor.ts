@@ -9,7 +9,7 @@
  * no % heuristics — every dollar hits the exact calendar month it belongs to.
  */
 
-import { safeNum, dcaMonthlyEquiv, calcMonthlyRepayment } from './finance';
+import { safeNum, dcaMonthlyEquiv, calcMonthlyRepayment } from './mathUtils';
 
 // ─── Event Types ──────────────────────────────────────────────────────────────
 
