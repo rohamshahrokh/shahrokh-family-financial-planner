@@ -1656,13 +1656,19 @@ export default function ExpensesPage() {
           )}
 
           {/* Add Form */}
+          {/* Add expense modal — fixed overlay, same pattern as income modal */}
           {showAdd && (
-            <div className="rounded-xl border border-primary/30 bg-card p-5">
-              <h3 className="text-sm font-bold mb-4">Add Expense</h3>
-              <ExpenseForm data={draft} onChange={handleDraftChange} />
-              <div className="flex gap-2 mt-4">
-                <SaveButton label="Save Expense Entry" onSave={() => createMut.mutateAsync(normaliseDraft(draft))} />
-                <Button size="sm" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+              <div className="bg-card border border-primary/30 rounded-2xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="font-bold text-sm">Add Expense</h3>
+                  <button onClick={() => setShowAdd(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                </div>
+                <ExpenseForm data={draft} onChange={handleDraftChange} />
+                <div className="flex gap-2 mt-5">
+                  <SaveButton label="Save Expense Entry" onSave={() => createMut.mutateAsync(normaliseDraft(draft))} />
+                  <Button size="sm" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+                </div>
               </div>
             </div>
           )}

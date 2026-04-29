@@ -50,6 +50,10 @@ interface MarketData {
   fearGreed: number | null;
   fearGreedLabel?: string;
   lastUpdated: string;
+  dataStatus?: string;        // "live" | "partial" | "cached" | "failed"
+  stale?: boolean;            // true when served from localStorage fallback
+  staleAgeMin?: number;       // minutes since cache was written
+  failedSymbols?: string[];   // symbols that returned no data
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -425,6 +429,7 @@ export default function MarketNewsPage() {
   const handleRefresh = () => {
     try {
       localStorage.removeItem("sf_market_data_cache");
+      localStorage.removeItem("sf_market_data_cache_v2");
     } catch {}
     refetch();
     toast({ title: "Refreshing market data…", description: "Cache cleared. Fetching fresh data." });
@@ -453,6 +458,19 @@ export default function MarketNewsPage() {
     );
   }
 
+  // ── Status helpers ─────────────────────────────────────────────────────────
+  const isStale = marketData?.stale === true;
+  const staleAge = marketData?.staleAgeMin ?? 0;
+  const dataStatus = marketData?.dataStatus ?? (isStale ? "cached" : "live");
+  const failedSymbols = marketData?.failedSymbols ?? [];
+
+  const statusBadge = (() => {
+    if (isStale) return { label: `Cached ${staleAge > 0 ? `(${staleAge}m ago)` : ""}`, cls: "bg-amber-900/40 border-amber-700 text-amber-400" };
+    if (dataStatus === "partial") return { label: "Partial", cls: "bg-amber-900/40 border-amber-700 text-amber-400" };
+    if (dataStatus === "failed")  return { label: "Failed",  cls: "bg-red-900/40 border-red-700 text-red-400" };
+    return { label: "Live", cls: "bg-emerald-900/40 border-emerald-700 text-emerald-400" };
+  })();
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 pb-12">
       {/* ── Header ── */}
@@ -464,11 +482,22 @@ export default function MarketNewsPage() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-zinc-100 tracking-tight">Wall Street Terminal</h1>
-              {marketData?.lastUpdated && (
-                <p className="text-xs text-zinc-500 font-mono">
-                  Updated {new Date(marketData.lastUpdated).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
-                </p>
-              )}
+              <div className="flex items-center gap-2 mt-0.5">
+                {marketData?.lastUpdated && (
+                  <p className="text-xs text-zinc-500 font-mono">
+                    Updated {new Date(marketData.lastUpdated).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                )}
+                {marketData && (
+                  <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded border ${statusBadge.cls}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      isStale || dataStatus === "failed" ? "bg-amber-400" :
+                      dataStatus === "partial" ? "bg-amber-400" : "bg-emerald-400"
+                    } animate-pulse`} />
+                    {statusBadge.label}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -493,6 +522,35 @@ export default function MarketNewsPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Stale / degraded banner ── */}
+      {isStale && (
+        <div className="bg-amber-900/30 border-b border-amber-800/60 px-4 py-2">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-amber-400 text-xs font-semibold">
+              <AlertTriangle size={13} />
+              Showing cached data{staleAge > 0 ? ` from ${staleAge} minute${staleAge !== 1 ? "s" : ""} ago` : ""} — live feed unavailable.
+              {failedSymbols.length > 0 && (
+                <span className="text-amber-500/80 font-mono ml-1">(failed: {failedSymbols.join(", ")})</span>
+              )}
+            </div>
+            <button
+              onClick={handleRefresh}
+              className="flex items-center gap-1 text-xs bg-amber-800/40 hover:bg-amber-700/60 border border-amber-700 text-amber-300 px-2.5 py-1 rounded transition-colors font-semibold"
+            >
+              <RefreshCw size={11} /> Retry
+            </button>
+          </div>
+        </div>
+      )}
+      {!isStale && dataStatus === "partial" && failedSymbols.length > 0 && (
+        <div className="bg-amber-900/20 border-b border-amber-900/40 px-4 py-1.5">
+          <div className="max-w-7xl mx-auto flex items-center gap-2 text-amber-500 text-xs">
+            <AlertTriangle size={12} />
+            Partial data — some symbols unavailable: <span className="font-mono">{failedSymbols.join(", ")}</span>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-7xl mx-auto px-4 pt-6 space-y-8">
 

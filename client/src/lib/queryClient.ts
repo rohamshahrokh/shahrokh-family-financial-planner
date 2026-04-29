@@ -296,173 +296,49 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
   // ─── Market Data (prices + news) — fetched server-side to avoid CORS ────
   if (path === "/api/market-data") {
     if (m === "GET") {
-      // Returns: { prices: {...}, news: [...], fearGreed: number, lastUpdated: string }
-      // Check localStorage cache first (45 min TTL)
-      const CACHE_KEY = "sf_market_data_cache";
-      const CACHE_TTL = 45 * 60 * 1000;
+      // ── Market Data: delegate to /api/market-data Vercel serverless function ──
+      // Falls back to localStorage cache if the server call fails.
+      // Cache TTL: 5 min for live data, serve stale indefinitely on failure.
+      const CACHE_KEY  = "sf_market_data_cache_v2";
+      const LIVE_TTL   = 5 * 60 * 1000;   // 5 min
+      const STALE_TTL  = 30 * 60 * 1000;  // show stale badge after 30 min
+
+      // Read existing cache
+      let cached: { data: any; ts: number } | null = null;
       try {
-        const cached = localStorage.getItem(CACHE_KEY);
-        if (cached) {
-          const { data, ts } = JSON.parse(cached);
-          if (Date.now() - ts < CACHE_TTL) return data;
+        const raw = localStorage.getItem(CACHE_KEY);
+        if (raw) cached = JSON.parse(raw);
+      } catch {}
+
+      // If cache is fresh, return it immediately
+      if (cached && Date.now() - cached.ts < LIVE_TTL) {
+        return { ...cached.data, stale: false };
+      }
+
+      // Try the Vercel serverless API (server-side fetches, no CORS issues)
+      try {
+        const apiBase = window.location.origin;
+        const res = await fetch(`${apiBase}/api/market-data`, {
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() })); } catch {}
+          return { ...data, stale: false };
         }
       } catch {}
 
-      const result: any = {
-        prices: {},
-        indices: {},
-        news: {},
-        fearGreed: null,
-        lastUpdated: new Date().toISOString(),
+      // Server call failed — return stale cache with stale flag
+      if (cached) {
+        const ageMin = Math.round((Date.now() - cached.ts) / 60_000);
+        return { ...cached.data, stale: true, staleAgeMin: ageMin };
+      }
+
+      // Nothing at all — return empty skeleton
+      return {
+        prices: {}, indices: {}, news: {}, fearGreed: null, fearGreedLabel: "",
+        lastUpdated: new Date().toISOString(), dataStatus: "failed", stale: true,
       };
-
-      // ── Crypto prices via CoinGecko (no CORS issues) ──
-      try {
-        const cgUrl = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true";
-        const cgRes = await fetch(cgUrl);
-        if (cgRes.ok) {
-          const cg = await cgRes.json();
-          result.prices.BTC = { price: cg.bitcoin?.usd ?? 0, change: cg.bitcoin?.usd_24h_change ?? 0 };
-          result.prices.ETH = { price: cg.ethereum?.usd ?? 0, change: cg.ethereum?.usd_24h_change ?? 0 };
-        }
-      } catch {}
-
-      // ── Watchlist prices via CoinGecko (BTC/ETH already done above) ──
-      // For stocks (NVDA, GOOGL, MSFT, AVGO, CEG, CCJ, WPM) use Yahoo Finance via allorigins proxy
-      const stockSymbols = ["NVDA", "GOOGL", "MSFT", "AVGO", "CEG", "CCJ", "WPM"];
-      for (const sym of stockSymbols) {
-        try {
-          const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=2d`;
-          const proxies = [
-            `https://api.allorigins.win/raw?url=${encodeURIComponent(yUrl)}`,
-            `https://corsproxy.io/?${encodeURIComponent(yUrl)}`,
-          ];
-          let done = false;
-          for (const proxy of proxies) {
-            if (done) break;
-            try {
-              const res = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
-              if (!res.ok) continue;
-              const json = await res.json();
-              const meta = json?.chart?.result?.[0]?.meta;
-              if (meta) {
-                const price = meta.regularMarketPrice ?? 0;
-                const prev = meta.chartPreviousClose ?? meta.previousClose ?? price;
-                const change = prev > 0 ? ((price - prev) / prev) * 100 : 0;
-                result.prices[sym] = { price, change };
-                done = true;
-              }
-            } catch {}
-          }
-          if (!result.prices[sym]) result.prices[sym] = { price: 0, change: 0 };
-        } catch {}
-      }
-
-      // ── Market indices via Stooq CSV (open CORS) ──
-      const indicesMap: Record<string, string> = {
-        "SP500": "%5ESPX",
-        "NASDAQ": "%5EIXIC",
-        "DOW": "%5EDJI",
-        "VIX": "%5EVIX",
-        "GOLD": "GC.F",
-        "OIL": "CL.F",
-        "USDAUD": "AUDUSD",
-      };
-      for (const [key, sym] of Object.entries(indicesMap)) {
-        try {
-          const stooqUrl = `https://stooq.com/q/l/?s=${sym}&f=sd2t2ohlcvn&h&e=csv`;
-          const res = await fetch(stooqUrl, { signal: AbortSignal.timeout(6000) });
-          if (!res.ok) continue;
-          const csv = await res.text();
-          const lines = csv.trim().split("\n");
-          if (lines.length < 2) continue;
-          const cols = lines[1].split(",");
-          const close = parseFloat(cols[6] ?? "0");
-          const open = parseFloat(cols[3] ?? "0");
-          const change = open > 0 ? ((close - open) / open) * 100 : 0;
-          result.indices[key] = { price: close, change };
-        } catch {}
-      }
-
-      // ── Fear & Greed Index ──
-      try {
-        const fgRes = await fetch("https://api.alternative.me/fng/?limit=1", { signal: AbortSignal.timeout(5000) });
-        if (fgRes.ok) {
-          const fg = await fgRes.json();
-          result.fearGreed = parseInt(fg?.data?.[0]?.value ?? "50");
-          result.fearGreedLabel = fg?.data?.[0]?.value_classification ?? "";
-        }
-      } catch {}
-
-      // ── News feeds via CORS proxies ──
-      const RSS_FEEDS = {
-        stocks: [
-          "https://feeds.finance.yahoo.com/rss/2.0/headline?s=SPY,QQQ&region=US&lang=en-US",
-          "https://www.cnbc.com/id/10001147/device/rss/rss.html",
-        ],
-        crypto: [
-          "https://cointelegraph.com/rss",
-          "https://cryptonews.com/news/feed/",
-        ],
-        tech: [
-          "https://hnrss.org/frontpage",
-          "https://techcrunch.com/feed/",
-        ],
-        macro: [
-          "https://www.cnbc.com/id/20910258/device/rss/rss.html",
-          "https://feeds.bloomberg.com/markets/news.rss",
-        ],
-        australia: [
-          "https://www.rba.gov.au/rss/rss-cb-speeches.xml",
-          "https://www.abc.net.au/news/feed/51120/rss.xml",
-        ],
-      };
-
-      const PROXIES = [
-        (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-        (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-        (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-      ];
-
-      async function fetchRSS(feedUrl: string): Promise<any[]> {
-        for (const mkProxy of PROXIES) {
-          try {
-            const res = await fetch(mkProxy(feedUrl), { signal: AbortSignal.timeout(7000) });
-            if (!res.ok) continue;
-            const xml = await res.text();
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(xml, "text/xml");
-            const items = Array.from(doc.querySelectorAll("item")).slice(0, 8);
-            if (items.length === 0) continue;
-            return items.map((item) => ({
-              title: item.querySelector("title")?.textContent?.trim() ?? "",
-              link: item.querySelector("link")?.textContent?.trim() ?? "",
-              pubDate: item.querySelector("pubDate")?.textContent?.trim() ?? "",
-              description: (item.querySelector("description")?.textContent ?? "").replace(/<[^>]*>/g, "").substring(0, 160).trim(),
-            })).filter(i => i.title);
-          } catch {}
-        }
-        return [];
-      }
-
-      for (const [tab, feeds] of Object.entries(RSS_FEEDS)) {
-        const articles: any[] = [];
-        for (const feed of feeds) {
-          const items = await fetchRSS(feed);
-          articles.push(...items);
-          if (articles.length >= 10) break;
-        }
-        result.news[tab] = articles.slice(0, 12);
-      }
-
-      result.lastUpdated = new Date().toISOString();
-
-      // Cache it
-      try {
-        localStorage.setItem(CACHE_KEY, JSON.stringify({ data: result, ts: Date.now() }));
-      } catch {}
-
-      return result;
     }
   }
 

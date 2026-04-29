@@ -2,7 +2,13 @@
   "version": 2,
   "buildCommand": "npm run build:client",
   "outputDirectory": "dist/public",
+  "functions": {
+    "api/ai-insights.ts": { "maxDuration": 30 },
+    "api/market-data.ts": { "maxDuration": 25 }
+  },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/ai-insights", "destination": "/api/ai-insights" },
+    { "source": "/api/market-data",  "destination": "/api/market-data"  },
+    { "source": "/(.*)",             "destination": "/index.html"       }
   ]
 }
