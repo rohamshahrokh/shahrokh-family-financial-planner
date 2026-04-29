@@ -1,126 +1,223 @@
 /**
- * api/ai-insights.ts
- * Vercel Serverless Function — POST /api/ai-insights
- *
- * Receives summarised financial data from the frontend,
- * calls OpenAI gpt-4o-mini, returns structured insights JSON.
- * OPENAI_API_KEY is never exposed to the client.
+ * pages/ai-insights.tsx
+ * Dedicated AI Insights hub — /ai-insights
+ * Shows insights for all financial areas on one page.
  */
 
-type VercelRequest  = import("http").IncomingMessage & { body?: any; query: Record<string, string | string[]> };
-type VercelResponse = import("http").ServerResponse  & { status: (c: number) => VercelResponse; json: (b: any) => void; end: () => VercelResponse; setHeader: (k: string, v: string) => VercelResponse };
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import AIInsightsCard from "@/components/AIInsightsCard";
+import {
+  Sparkles, LayoutDashboard, Receipt, Home,
+  TrendingUp, Bitcoin, Clock, Info,
+} from "lucide-react";
 
-// ─── Prompt templates per page type ──────────────────────────────────────────
+// ─── Data summarisers ─────────────────────────────────────────────────────────
+// These trim the raw data to only what AI needs — keeps tokens low and cost minimal.
 
-function buildPrompt(page: string, data: Record<string, unknown>): string {
-  const base = `You are a concise financial analysis assistant for an Australian family.
-Analyse the data provided and return a JSON object with exactly these keys:
-{
-  "summary": "2-3 sentence overall assessment",
-  "risks": ["risk 1", "risk 2", "risk 3"],
-  "opportunities": ["opportunity 1", "opportunity 2", "opportunity 3"],
-  "recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
-  "nextActions": ["action 1", "action 2", "action 3"]
-}
-Keep each item under 20 words. Be direct and practical. No fluff.
-IMPORTANT: This is general information only, not financial advice.
-Return ONLY valid JSON — no markdown, no preamble.
-
-DATA:
-${JSON.stringify(data, null, 2)}`;
-
-  const pageContext: Record<string, string> = {
-    dashboard: `Focus on: overall financial health, net worth trajectory, savings rate adequacy, debt management, cash flow sustainability, and 10-year forecast risks. If incomeSource is 'Income Tracker', comment on income tracking quality. If 'Snapshot fallback', recommend setting up the income tracker.`,
-    expenses: `Focus on: overspending categories, unusual spikes, savings opportunities, spending trends, and a practical action plan to reduce costs.`,
-    income: `Focus on: income stability across sources, salary vs passive income ratio, recurring vs one-off income mix, whether income is growing, diversification opportunities, and family member income balance. If income records are sparse, highlight the risk.`,
-    cashflow: `Focus on: monthly net cash flow trend, whether savings rate is sustainable, months with negative cash flow (daily spikes), income vs expense trajectory, and specific months where spending exceeded income. Provide concrete recommendations to improve cash flow.`,
-    property: `Focus on: LVR risk, cash flow pressure from loans, rental yield adequacy, equity opportunities, and whether future purchases look affordable.`,
-    stocks: `Focus on: portfolio concentration risk, sector imbalance, underweight/overweight positions, DCA effectiveness, and unrealised gain/loss implications.`,
-    crypto: `Focus on: volatility exposure, concentration in BTC/ETH vs altcoins, DCA strategy effectiveness, allocation as % of net worth, and long-term risk.`,
-    timeline: `Focus on: net worth milestone projections, weak years in the forecast, years of strong growth, recommended adjustments to reach goals faster.`,
-    "ai-insights": `Provide a holistic view across all financial areas. Identify the single biggest risk and the single best opportunity across the entire financial picture. If income tracking data is available, comment on cashflow sustainability.`,
+function summariseSnapshot(snap: any) {
+  if (!snap) return {};
+  return {
+    netWorth: snap.net_worth,
+    monthlyIncome: snap.monthly_income,
+    monthlyExpenses: snap.monthly_expenses,
+    monthlySurplus: snap.monthly_surplus,
+    savingsRate: snap.savings_rate,
+    totalDebt: snap.total_debt,
+    totalAssets: snap.total_assets,
+    totalLiabilities: snap.total_liabilities,
+    cashFlow: snap.cash_flow,
+    forecast10yr: snap.forecast_10yr,
   };
-
-  return `${pageContext[page] || pageContext.dashboard}\n\n${base}`;
 }
 
-// ─── Handler ──────────────────────────────────────────────────────────────────
-
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS headers for the static SPA origin
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({
-      error: "OPENAI_API_KEY is not configured. Add it to Vercel Environment Variables.",
-    });
-  }
-
-  const { page, data } = req.body as { page: string; data: Record<string, unknown> };
-  if (!page || !data) {
-    return res.status(400).json({ error: "Missing required fields: page, data" });
-  }
-
-  try {
-    const prompt = buildPrompt(page, data);
-
-    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.4,
-        max_tokens: 600,
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!openaiRes.ok) {
-      const errText = await openaiRes.text();
-      console.error("[ai-insights] OpenAI error:", errText);
-      return res.status(502).json({ error: `OpenAI API error: ${openaiRes.status}` });
+function summariseExpenses(expenses: any[]) {
+  if (!expenses?.length) return { count: 0 };
+  const byCategory: Record<string, number> = {};
+  let totalMonthly = 0;
+  const now = new Date();
+  expenses.forEach((e: any) => {
+    byCategory[e.category] = (byCategory[e.category] || 0) + e.amount;
+    const d = new Date(e.date);
+    if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
+      totalMonthly += e.amount;
     }
+  });
+  const topCategories = Object.entries(byCategory)
+    .sort((a, b) => b[1] - a[1]).slice(0, 8)
+    .map(([cat, amt]) => ({ cat, amt: Math.round(amt) }));
+  return { count: expenses.length, totalMonthly: Math.round(totalMonthly), topCategories };
+}
 
-    const openaiData = await openaiRes.json() as any;
-    const content = openaiData.choices?.[0]?.message?.content;
+function summariseProperties(props: any[]) {
+  if (!props?.length) return { count: 0 };
+  return props.map(p => ({
+    name: p.name,
+    value: p.value,
+    loan: p.loan_balance,
+    lvr: p.lvr,
+    rentalYield: p.rental_yield,
+    weeklyRent: p.weekly_rent,
+    type: p.property_type,
+  }));
+}
 
-    if (!content) {
-      return res.status(502).json({ error: "Empty response from OpenAI" });
-    }
+function summariseStocks(stocks: any[]) {
+  if (!stocks?.length) return { count: 0 };
+  return stocks.map(s => ({
+    ticker: s.ticker,
+    shares: s.shares,
+    avgBuy: s.avg_buy_price,
+    current: s.current_price,
+    pnl: ((s.current_price - s.avg_buy_price) * s.shares).toFixed(2),
+    sector: s.sector,
+  }));
+}
 
-    let insights: unknown;
-    try {
-      insights = JSON.parse(content);
-    } catch {
-      return res.status(502).json({ error: "OpenAI returned invalid JSON" });
-    }
+function summariseCrypto(crypto: any[]) {
+  if (!crypto?.length) return { count: 0 };
+  return crypto.map(c => ({
+    symbol: c.symbol,
+    qty: c.quantity,
+    avgBuy: c.avg_buy_price,
+    current: c.current_price,
+    pnl: ((c.current_price - c.avg_buy_price) * c.quantity).toFixed(2),
+  }));
+}
 
-    const usage = openaiData.usage;
-    console.log(`[ai-insights] page=${page} tokens=${usage?.total_tokens ?? 0}`);
+function summariseTimeline(events: any[], snap: any) {
+  return {
+    netWorth: snap?.net_worth,
+    totalAssets: snap?.total_assets,
+    totalLiabilities: snap?.total_liabilities,
+    monthlyIncome: snap?.monthly_income,
+    monthlyExpenses: snap?.monthly_expenses,
+    milestones: (events || []).slice(0, 10).map((e: any) => ({
+      date: e.date,
+      label: e.label,
+      amount: e.amount,
+    })),
+  };
+}
 
-    return res.status(200).json({
-      insights,
-      generatedAt: new Date().toISOString(),
-      model: "gpt-4o-mini",
-      tokens: usage?.total_tokens ?? 0,
-    });
-  } catch (err: unknown) {
-    console.error("[ai-insights] Unexpected error:", err);
-    return res.status(500).json({ error: "Internal server error" });
-  }
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function AIInsightsPage() {
+  const { data: snapshot } = useQuery<any>({
+    queryKey: ["/api/snapshot"],
+    queryFn: () => apiRequest("GET", "/api/snapshot").then(r => r.json()),
+  });
+  const { data: expenses = [] } = useQuery<any[]>({
+    queryKey: ["/api/expenses"],
+    queryFn: () => apiRequest("GET", "/api/expenses").then(r => r.json()),
+  });
+  const { data: properties = [] } = useQuery<any[]>({
+    queryKey: ["/api/properties"],
+    queryFn: () => apiRequest("GET", "/api/properties").then(r => r.json()),
+  });
+  const { data: stocks = [] } = useQuery<any[]>({
+    queryKey: ["/api/stocks"],
+    queryFn: () => apiRequest("GET", "/api/stocks").then(r => r.json()),
+  });
+  const { data: crypto = [] } = useQuery<any[]>({
+    queryKey: ["/api/crypto"],
+    queryFn: () => apiRequest("GET", "/api/crypto").then(r => r.json()),
+  });
+  const { data: timeline = [] } = useQuery<any[]>({
+    queryKey: ["/api/timeline"],
+    queryFn: () => apiRequest("GET", "/api/timeline").then(r => r.json()),
+  });
+
+  const panels = [
+    {
+      pageKey: "dashboard",
+      pageLabel: "Dashboard — Overall Financial Health",
+      icon: <LayoutDashboard className="w-4 h-4" />,
+      getData: () => summariseSnapshot(snapshot),
+    },
+    {
+      pageKey: "expenses",
+      pageLabel: "Expenses — Spending Analysis",
+      icon: <Receipt className="w-4 h-4" />,
+      getData: () => summariseExpenses(expenses),
+    },
+    {
+      pageKey: "property",
+      pageLabel: "Property — Portfolio Analysis",
+      icon: <Home className="w-4 h-4" />,
+      getData: () => ({ properties: summariseProperties(properties) }),
+    },
+    {
+      pageKey: "stocks",
+      pageLabel: "Stocks — Portfolio Review",
+      icon: <TrendingUp className="w-4 h-4" />,
+      getData: () => ({ stocks: summariseStocks(stocks) }),
+    },
+    {
+      pageKey: "crypto",
+      pageLabel: "Crypto — Portfolio Risk",
+      icon: <Bitcoin className="w-4 h-4" />,
+      getData: () => ({ crypto: summariseCrypto(crypto) }),
+    },
+    {
+      pageKey: "timeline",
+      pageLabel: "Net Worth Timeline — Projections",
+      icon: <Clock className="w-4 h-4" />,
+      getData: () => summariseTimeline(timeline, snapshot),
+    },
+  ];
+
+  return (
+    <div className="space-y-5 pb-8">
+      {/* ─── Header ─────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center gap-3 mb-1">
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ background: "linear-gradient(135deg, hsl(270,60%,40%), hsl(240,80%,55%))" }}
+          >
+            <Sparkles className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold">AI Insights</h1>
+            <p className="text-xs text-muted-foreground">Powered by GPT-4o mini · Cached 24 hours</p>
+          </div>
+        </div>
+
+        {/* Info callout */}
+        <div className="flex items-start gap-2 bg-secondary/40 border border-border rounded-xl px-4 py-3 mt-3">
+          <Info className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Click "Generate Insights" on any section below. Your financial data is summarised and sent securely to OpenAI — raw records are never sent. Results are cached for 24 hours to minimise cost.
+            <span className="block mt-1 text-muted-foreground/60">
+              This is general information only and not financial advice.
+            </span>
+          </p>
+        </div>
+      </div>
+
+      {/* ─── Section cards ──────────────────────────────────────── */}
+      <div className="space-y-4">
+        {panels.map(panel => (
+          <div key={panel.pageKey}>
+            {/* Section header */}
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <span className="text-muted-foreground">{panel.icon}</span>
+              <span className="text-sm font-semibold">{panel.pageLabel}</span>
+            </div>
+            <AIInsightsCard
+              pageKey={panel.pageKey}
+              pageLabel={panel.pageLabel}
+              getData={panel.getData}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* ─── Cost note ──────────────────────────────────────────── */}
+      <div className="text-center text-xs text-muted-foreground/50 pt-2">
+        GPT-4o mini costs ~$0.002 per 1,000 tokens. A typical analysis uses 400–600 tokens ≈ $0.001 per insight.
+      </div>
+    </div>
+  );
 }
