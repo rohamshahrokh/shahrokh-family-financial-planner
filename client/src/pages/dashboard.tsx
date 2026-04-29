@@ -10,6 +10,7 @@ import {
   calcNegativeGearing,
   type NGSummary,
 } from "@/lib/finance";
+import { runCashEngine, getCashKPICards } from "@/lib/cashEngine";
 import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import { maskValue } from "@/components/PrivacyMask";
@@ -501,6 +502,32 @@ export default function DashboardPage() {
   );
 
   const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
+
+  // ─── Central Cash Engine (professional monthly ledger + liquidity analysis) ───
+  const cashEngineOut = useMemo(() => runCashEngine({
+    snapshot: snap,
+    properties:          properties as any[],
+    stockTransactions:   plannedStockTx,
+    cryptoTransactions:  plannedCryptoTx,
+    stockDCASchedules,
+    cryptoDCASchedules,
+    plannedStockOrders,
+    plannedCryptoOrders,
+    bills:               billsRaw as any[],
+    expenses:            expenses as any[],
+    inflationRate:       fa.flat.inflation,
+    incomeGrowthRate:    fa.flat.income_growth,
+    ngRefundMode,
+    ngAnnualBenefit:     ngSummary.totalAnnualTaxBenefit,
+    annualSalaryIncome:  safeNum(snap.monthly_income) * 12,
+    reservedCash:        30_000,
+  }),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [snap, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, billsRaw, expenses, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]
+  );
+  const cashKPIs = useMemo(() => getCashKPICards(cashEngineOut, safeNum(snap.cash)), [cashEngineOut, snap.cash]);
+  const liquidityWarnings = cashEngineOut.liquidity.warnings.filter(w => w.level === 'warning' || w.level === 'critical');
+
   // ─── Wealth Strategy Summary Cards ───────────────────────────────────────
   const wealthCards = useMemo(() => {
     // FIRE progress
@@ -836,6 +863,79 @@ export default function DashboardPage() {
         />
       </div>
 
+
+      {/* ─── Cash Engine KPI Cards ─────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-1">
+        <div className="bg-card border border-border rounded-xl p-4">
+          <p className="text-xs text-muted-foreground font-medium mb-1">Current Cash</p>
+          <p className="text-lg font-bold num-display" style={{ color: 'hsl(43,85%,65%)' }}>
+            {maskValue(formatCurrency(cashKPIs.currentCash), privacyMode, 'currency')}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">Available today</p>
+        </div>
+        <div className="bg-card border border-border rounded-xl p-4">
+          <p className="text-xs text-muted-foreground font-medium mb-1">Forecast Cash 2030</p>
+          <p className={`text-lg font-bold num-display ${cashKPIs.forecastCash2030 < 0 ? 'text-red-400' : ''}`}
+             style={cashKPIs.forecastCash2030 >= 0 ? { color: 'hsl(43,85%,65%)' } : undefined}>
+            {maskValue(formatCurrency(cashKPIs.forecastCash2030), privacyMode, 'currency')}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">Engine projection</p>
+        </div>
+        <div className="bg-card border border-border rounded-xl p-4">
+          <p className="text-xs text-muted-foreground font-medium mb-1">Forecast Cash 2035</p>
+          <p className={`text-lg font-bold num-display ${cashKPIs.forecastCash2035 < 0 ? 'text-red-400' : ''}`}
+             style={cashKPIs.forecastCash2035 >= 0 ? { color: 'hsl(43,85%,65%)' } : undefined}>
+            {maskValue(formatCurrency(cashKPIs.forecastCash2035), privacyMode, 'currency')}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">Engine projection</p>
+        </div>
+        <div className="bg-card border border-border rounded-xl p-4">
+          <p className="text-xs text-muted-foreground font-medium mb-1">Lowest Future Cash</p>
+          <p className={`text-lg font-bold num-display ${cashKPIs.lowestFutureCash < 30000 ? 'text-red-400' : ''}`}
+             style={cashKPIs.lowestFutureCash >= 30000 ? { color: 'hsl(43,85%,65%)' } : undefined}>
+            {maskValue(formatCurrency(cashKPIs.lowestFutureCash), privacyMode, 'currency')}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">{cashKPIs.lowestFutureMonth}</p>
+        </div>
+        <div className="bg-card border border-border rounded-xl p-4">
+          <p className="text-xs text-muted-foreground font-medium mb-1">Next Major Event</p>
+          <p className="text-sm font-semibold truncate" style={{ color: 'hsl(43,85%,65%)' }}>
+            {cashKPIs.nextMajorEvent}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">Planned cash event</p>
+        </div>
+        <div className={`bg-card border rounded-xl p-4 ${
+          cashKPIs.bufferStatus === 'healthy' ? 'border-green-700/50' :
+          cashKPIs.bufferStatus === 'at_risk'  ? 'border-yellow-600/50' : 'border-red-700/50'
+        }`}>
+          <p className="text-xs text-muted-foreground font-medium mb-1">Emergency Buffer</p>
+          <p className={`text-sm font-bold ${
+            cashKPIs.bufferStatus === 'healthy' ? 'text-green-400' :
+            cashKPIs.bufferStatus === 'at_risk'  ? 'text-yellow-400' : 'text-red-400'
+          }`}>{cashKPIs.bufferStatusLabel}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">$30k reserve target</p>
+        </div>
+      </div>
+
+      {/* Liquidity warnings */}
+      {liquidityWarnings.length > 0 && (
+        <div className="rounded-xl border border-red-800/50 bg-red-950/20 p-4 mb-1">
+          <p className="text-sm font-semibold text-red-400 mb-2">⚠ Liquidity Stress Detected</p>
+          <div className="space-y-1">
+            {liquidityWarnings.slice(0, 3).map(w => (
+              <p key={w.monthKey} className="text-xs text-red-300">{w.message}</p>
+            ))}
+          </div>
+          {cashEngineOut.liquidity.smartActions.length > 0 && (
+            <div className="mt-3 border-t border-red-800/30 pt-3">
+              <p className="text-xs text-muted-foreground font-medium mb-1">Suggested actions:</p>
+              {cashEngineOut.liquidity.smartActions.slice(0, 2).map((a, i) => (
+                <p key={i} className="text-xs text-yellow-300">• {a.description}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ─── Smart CFO Cards ──────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
