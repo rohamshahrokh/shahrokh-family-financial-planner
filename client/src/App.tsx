@@ -14,6 +14,7 @@
  */
 
 import { Switch, Route, Router, Redirect } from "wouter";
+import PwaInstallBanner from "@/components/PwaInstallBanner";
 import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
@@ -39,6 +40,7 @@ import DebtStrategyPage     from "./pages/debt-strategy";
 import RecurringBillsPage   from "./pages/recurring-bills";
 import BudgetPage           from "./pages/budget";
 import MarketNewsPage       from "./pages/market-news";
+import AIForecastEnginePage from "./pages/ai-forecast-engine";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -157,6 +159,9 @@ function AppRouter() {
         <Route path="/market-news">
           <ProtectedRoute component={MarketNewsPage} title="Market News" />
         </Route>
+        <Route path="/ai-forecast-engine">
+          <ProtectedRoute component={AIForecastEnginePage} title="AI Forecast Engine" />
+        </Route>
 
         {/* 404 */}
         <Route component={NotFound} />
@@ -203,6 +208,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AppRouter />
       <Toaster />
+      <PwaInstallBanner />
     </QueryClientProvider>
   );
 }
