@@ -176,8 +176,9 @@ export const sbStocks = {
   async getAll(): Promise<any[]> {
     try { return await sbGet("sf_stocks", "order=created_at.asc"); } catch { return []; }
   },
-  async create(data: object): Promise<any | null> {
-    try { return await sbInsert("sf_stocks", { ...data, created_at: new Date().toISOString() }); } catch { return null; }
+  // No silent catch — throw so localStore can surface the real error to the UI
+  async create(data: object): Promise<any> {
+    return await sbInsert("sf_stocks", { ...data, created_at: new Date().toISOString() });
   },
   async update(id: number, data: object): Promise<any | null> {
     try { return await sbUpdate("sf_stocks", id, data); } catch { return null; }
@@ -193,8 +194,9 @@ export const sbCrypto = {
   async getAll(): Promise<any[]> {
     try { return await sbGet("sf_crypto", "order=created_at.asc"); } catch { return []; }
   },
-  async create(data: object): Promise<any | null> {
-    try { return await sbInsert("sf_crypto", { ...data, created_at: new Date().toISOString() }); } catch { return null; }
+  // No silent catch — throw so localStore can surface the real error to the UI
+  async create(data: object): Promise<any> {
+    return await sbInsert("sf_crypto", { ...data, created_at: new Date().toISOString() });
   },
   async update(id: number, data: object): Promise<any | null> {
     try { return await sbUpdate("sf_crypto", id, data); } catch { return null; }
@@ -264,14 +266,13 @@ export const sbIncome = {
   async getAll(): Promise<any[]> {
     try { return await sbGetAll("sf_income", "order=date.asc"); } catch { return []; }
   },
-  async create(data: object): Promise<any | null> {
-    try {
-      return await sbInsert("sf_income", {
-        ...data,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-    } catch { return null; }
+  // No silent catch — throw so localStore can surface the real error to the UI
+  async create(data: object): Promise<any> {
+    return await sbInsert("sf_income", {
+      ...data,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
   },
   async update(id: number, data: object): Promise<any | null> {
     try { return await sbUpdate("sf_income", id, { ...data, updated_at: new Date().toISOString() }); } catch { return null; }
