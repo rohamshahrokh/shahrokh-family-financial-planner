@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Home, TrendingUp, Bitcoin, FileText,
   Settings, LogOut, Sun, Moon, Menu, X, Bell,
   ChevronRight, DollarSign, Receipt, Clock,
-  Eye, EyeOff, Calculator, Activity, HelpCircle, Sparkles, Briefcase, CreditCard, Target, Newspaper,
+  Eye, EyeOff, Calculator, Activity, HelpCircle, Sparkles, Briefcase, CreditCard, Target, Newspaper, BrainCircuit,
 } from "lucide-react";
 
 // All nav items — adminOnly ones are hidden from family_user role
@@ -25,6 +25,7 @@ const ALL_NAV_ITEMS = [
   { href: "/recurring-bills",label: "Recurring Bills", icon: Receipt,         adminOnly: false },
   { href: "/budget",        label: "Monthly Budget",   icon: Target,          adminOnly: false },
   { href: "/market-news",   label: "Market News",      icon: Newspaper,       adminOnly: false },
+  { href: "/ai-forecast-engine", label: "AI Forecast Engine", icon: BrainCircuit, adminOnly: true  },
   { href: "/ai-insights",   label: "AI Insights",      icon: Sparkles,        adminOnly: true  },
   { href: "/data-health",   label: "Data Health",      icon: Activity,        adminOnly: true  },
   { href: "/help",          label: "Help",             icon: HelpCircle,      adminOnly: false },
