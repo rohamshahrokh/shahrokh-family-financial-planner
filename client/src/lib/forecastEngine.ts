@@ -25,6 +25,11 @@ export interface ForecastInput {
   stockTransactions: any[];
   cryptoTransactions: any[];
   bills: any[];
+  expenses?: any[];
+  stockDCASchedules?: any[];
+  cryptoDCASchedules?: any[];
+  plannedStockOrders?: any[];
+  plannedCryptoOrders?: any[];
   assumptions: {
     inflation?: number;
     ppor_growth?: number;
@@ -44,7 +49,9 @@ export interface ForecastOutput {
 export function buildForecast(input: ForecastInput): ForecastOutput {
   const {
     snapshot, properties, stocks, cryptos,
-    stockTransactions, cryptoTransactions, assumptions,
+    stockTransactions, cryptoTransactions, bills, assumptions,
+    expenses, stockDCASchedules, cryptoDCASchedules,
+    plannedStockOrders, plannedCryptoOrders,
   } = input;
 
   // Only planned transactions (don't double-count actuals which are in expenses)
@@ -53,10 +60,15 @@ export function buildForecast(input: ForecastInput): ForecastOutput {
 
   const monthly = buildCashFlowSeries({
     snapshot,
-    expenses: [], // caller should pass actual expenses separately if available
+    expenses: expenses ?? [],
     properties,
     stockTransactions: plannedStockTx,
     cryptoTransactions: plannedCryptoTx,
+    stockDCASchedules: stockDCASchedules ?? [],
+    cryptoDCASchedules: cryptoDCASchedules ?? [],
+    plannedStockOrders: plannedStockOrders ?? [],
+    plannedCryptoOrders: plannedCryptoOrders ?? [],
+    bills: bills ?? [],
     inflationRate: assumptions.inflation ?? 3,
     incomeGrowthRate: assumptions.income_growth ?? 3.5,
   });
@@ -70,6 +82,10 @@ export function buildForecast(input: ForecastInput): ForecastOutput {
     cryptos,
     stockTransactions: plannedStockTx,
     cryptoTransactions: plannedCryptoTx,
+    stockDCASchedules: stockDCASchedules ?? [],
+    cryptoDCASchedules: cryptoDCASchedules ?? [],
+    plannedStockOrders: plannedStockOrders ?? [],
+    plannedCryptoOrders: plannedCryptoOrders ?? [],
     years: 10,
     inflation: assumptions.inflation ?? 3,
     ppor_growth: assumptions.ppor_growth ?? 6,
