@@ -6,6 +6,7 @@ import {
 } from "@/lib/finance";
 import { maskValue } from "@/components/PrivacyMask";
 import { useAppStore } from "@/lib/store";
+import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
@@ -789,8 +790,16 @@ export default function PropertyPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const { privacyMode } = useAppStore();
+  const fa = useForecastAssumptions();
+  // Seed new-property form defaults from global forecast assumptions
+  const emptyWithDefaults = {
+    ...EMPTY_PROPERTY,
+    capital_growth: fa.flat.property_growth,
+    rental_growth:  fa.flat.rent_growth,
+    interest_rate:  fa.flat.interest_rate,
+  };
   const [showAdd, setShowAdd] = useState(false);
-  const [draft, setDraft] = useState<any>({ ...EMPTY_PROPERTY });
+  const [draft, setDraft] = useState<any>({ ...emptyWithDefaults });
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showBulkModal, setShowBulkModal] = useState(false);
 
