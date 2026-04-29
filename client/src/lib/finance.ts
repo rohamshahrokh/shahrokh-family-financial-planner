@@ -916,36 +916,39 @@ export function buildCashFlowSeries(params: {
 // ═══════════════════════════════════════════════════════════════════════
 
 /**
- * Australian 2024-25 individual income tax brackets (resident, excluding Medicare levy).
- * We add 2% Medicare levy on top for a realistic marginal effective rate.
+ * Australian 2025-26 individual income tax brackets (resident, Stage 3 cuts).
+ * Excludes Medicare levy — used for negative gearing marginal rate calculation.
  *
- * Brackets: https://www.ato.gov.au/tax-rates-and-codes/tax-rates-australian-residents
+ * Brackets (same for 2024-25 and 2025-26 post Stage 3):
  *   $0       – $18,200   : 0%
- *   $18,201  – $45,000   : 19%
- *   $45,001  – $120,000  : 32.5%
- *   $120,001 – $180,000  : 37%
- *   $180,001+            : 45%
- * Medicare levy: 2% on top (approximation — full threshold logic omitted for simplicity)
+ *   $18,201  – $45,000   : 16%   ← Stage 3 (was 19%)
+ *   $45,001  – $135,000  : 30%   ← Stage 3 (was 32.5%, threshold was $120k)
+ *   $135,001 – $190,000  : 37%   ← Stage 3 (threshold was $180k)
+ *   $190,001+            : 45%   ← Stage 3 (threshold was $180k)
+ *
+ * Medicare levy: +2% on top for effective marginal rate.
+ * Source: ATO — https://www.ato.gov.au/tax-rates-and-codes/tax-rates-australian-residents
  */
 export function auMarginalRate(annualIncome: number): number {
   const income = Math.max(0, annualIncome);
-  if (income <= 18_200) return 0;
-  if (income <= 45_000) return 0.19 + 0.02; // 21%
-  if (income <= 120_000) return 0.325 + 0.02; // 34.5%
-  if (income <= 180_000) return 0.37 + 0.02; // 39%
+  if (income <= 18_200)  return 0;
+  if (income <= 45_000)  return 0.16 + 0.02; // 18%
+  if (income <= 135_000) return 0.30 + 0.02; // 32%
+  if (income <= 190_000) return 0.37 + 0.02; // 39%
   return 0.45 + 0.02; // 47%
 }
 
 /**
- * Calculate tax payable at each bracket (for display purposes only).
+ * Income tax payable (2025-26 Stage 3 brackets, before offsets & Medicare levy).
+ * Used by negative gearing benefit calculation and as a utility.
  */
 export function auTaxPayable(annualIncome: number): number {
   const income = Math.max(0, annualIncome);
-  if (income <= 18_200) return 0;
-  if (income <= 45_000) return (income - 18_200) * 0.19;
-  if (income <= 120_000) return 5_092 + (income - 45_000) * 0.325;
-  if (income <= 180_000) return 29_467 + (income - 120_000) * 0.37;
-  return 51_667 + (income - 180_000) * 0.45;
+  if (income <= 18_200)  return 0;
+  if (income <= 45_000)  return (income - 18_200) * 0.16;
+  if (income <= 135_000) return 4_288 + (income - 45_000) * 0.30;
+  if (income <= 190_000) return 31_288 + (income - 135_000) * 0.37;
+  return 51_638 + (income - 190_000) * 0.45;
 }
 
 /**

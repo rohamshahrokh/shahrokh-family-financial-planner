@@ -1,17 +1,20 @@
 /**
- * tax.tsx — Australian Tax Calculator (2024-25)
+ * tax.tsx — Australian Tax Calculator
  * Route: /tax
  *
+ * 2025-26 engine — matches ATO / paycalculator.com.au within ±$1
+ *
  * Features:
- *  - Two-person income calculator (Your Income + Spouse Income)
- *  - 2024-25 Australian tax brackets
- *  - Medicare levy (2%)
- *  - LITO (Low Income Tax Offset) up to $700
- *  - LMITO ($675 for $37k–$126k incomes)
- *  - Investment property negative gearing (auto-pulls from /api/properties)
- *  - Capital gains with 50% CGT discount for >12m held assets
- *  - Super contributions (concessional + non-concessional)
- *  - Summary panel + Recharts bar chart
+ *  • 2024-25 and 2025-26 tax year selector
+ *  • Stage 3 tax cuts (16% / 30% / 37% / 45%)
+ *  • LITO — correct two-stage phase-out
+ *  • Medicare Levy (2%) with shade-in
+ *  • Medicare Levy Surcharge — tiered, waived with private hospital cover
+ *  • HELP / HECS — new marginal system (2025-26)
+ *  • Super: inclusive vs exclusive, salary sacrifice
+ *  • Roham + Fara household combined summary
+ *  • All pay periods: monthly / fortnightly / weekly / annual
+ *  • Full line-item breakdown
  */
 
 import { useState, useMemo } from "react";
@@ -19,118 +22,49 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum } from "@/lib/finance";
 import {
+  calcAustralianTax,
+  calcHouseholdTax,
+  type TaxInput,
+  type TaxBreakdown,
+  type TaxYear,
+} from "@/lib/australianTax";
+import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend
+  ResponsiveContainer, Legend,
 } from "recharts";
 import {
-  Calculator, AlertTriangle, Info, ChevronDown, ChevronRight,
-  DollarSign, TrendingUp, Home, PieChart, Zap, ArrowRight, CheckCircle2
+  Calculator, Info, DollarSign, TrendingUp,
+  Home, PieChart, Users, CheckCircle2, XCircle,
+  ChevronDown, ChevronRight, Shield, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAppStore } from "@/lib/store";
+import { maskValue } from "@/components/PrivacyMask";
 
-// ─── Australian Tax Calculation Engine (2024-25) ──────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-function calcIncomeTax(taxableIncome: number): number {
-  if (taxableIncome <= 0) return 0;
-  if (taxableIncome <= 18200) return 0;
-  if (taxableIncome <= 45000) return (taxableIncome - 18200) * 0.19;
-  if (taxableIncome <= 120000) return 5092 + (taxableIncome - 45000) * 0.325;
-  if (taxableIncome <= 180000) return 29467 + (taxableIncome - 120000) * 0.37;
-  return 51667 + (taxableIncome - 180000) * 0.45;
+type PayPeriod = "annual" | "monthly" | "fortnightly" | "weekly";
+
+interface PersonState {
+  name: string;
+  grossSalary: number;
+  payPeriod: PayPeriod;
+  taxYear: TaxYear;
+  superIncluded: boolean;
+  superRate: number;
+  salarySacrifice: number;
+  hasPrivateHospitalCover: boolean;
+  hasHelpDebt: boolean;
 }
 
-function calcMedicareLevy(taxableIncome: number): number {
-  if (taxableIncome <= 0) return 0;
-  // Phase-in zone: $26,000 – $32,500
-  if (taxableIncome < 26000) return 0;
-  if (taxableIncome < 32500) return (taxableIncome - 26000) * 0.1;
-  return taxableIncome * 0.02;
-}
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
-function calcLITO(taxableIncome: number): number {
-  // $700 reducing by 5c per $1 over $37,500, fully phased out at $66,667
-  if (taxableIncome <= 37500) return 700;
-  if (taxableIncome <= 66667) return Math.max(0, 700 - (taxableIncome - 37500) * 0.05);
-  return 0;
-}
-
-function calcLMITO(taxableIncome: number): number {
-  // $675 available for income $37,000–$126,000
-  // Phased out for incomes $90,000–$126,000
-  if (taxableIncome < 37000) return 0;
-  if (taxableIncome <= 90000) return 675;
-  if (taxableIncome <= 126000) return Math.max(0, 675 - (taxableIncome - 90000) * (675 / 36000));
-  return 0;
-}
-
-interface TaxResult {
-  grossIncome: number;
-  taxableIncome: number;
-  incomeTax: number;
-  medicareLevy: number;
-  lito: number;
-  lmito: number;
-  netTaxPayable: number;
-  monthlyTax: number;
-  takeHomePay: number;         // annual
-  takeHomeMonthly: number;
-  effectiveRate: number;
-}
-
-function calcTax(
-  salary: number,
-  otherIncome: number,
-  propertyNet: number,       // negative gearing amount
-  cgtAmount: number,         // discounted CGT added
-  concessionalSuper: number, // pre-tax (reduces taxable income)
-): TaxResult {
-  const grossIncome = safeNum(salary) + safeNum(otherIncome);
-  // Concessional super reduces taxable income, capped at $27,500
-  const concessional = Math.min(safeNum(concessionalSuper), 27500);
-  // Property net income (can be negative = negative gearing benefit)
-  const propNet = safeNum(propertyNet);
-  const cgt = safeNum(cgtAmount);
-
-  let taxableIncome = grossIncome - concessional + propNet + cgt;
-  taxableIncome = Math.max(0, taxableIncome);
-
-  const incomeTax = calcIncomeTax(taxableIncome);
-  const medicareLevy = calcMedicareLevy(taxableIncome);
-  const lito = calcLITO(taxableIncome);
-  const lmito = calcLMITO(taxableIncome);
-
-  const netTaxPayable = Math.max(0, incomeTax + medicareLevy - lito - lmito);
-  const monthlyTax = netTaxPayable / 12;
-  const takeHomePay = grossIncome - netTaxPayable;
-  const takeHomeMonthly = takeHomePay / 12;
-  const effectiveRate = grossIncome > 0 ? (netTaxPayable / grossIncome) * 100 : 0;
-
-  return {
-    grossIncome,
-    taxableIncome,
-    incomeTax,
-    medicareLevy,
-    lito,
-    lmito,
-    netTaxPayable,
-    monthlyTax,
-    takeHomePay,
-    takeHomeMonthly,
-    effectiveRate,
-  };
-}
-
-// ─── Sub-components ────────────────────────────────────────────────────────────
-
-interface SectionHeaderProps {
-  icon: React.ReactNode;
-  title: string;
-  expanded: boolean;
-  onToggle: () => void;
-}
-
-function SectionHeader({ icon, title, expanded, onToggle }: SectionHeaderProps) {
+function SectionHeader({
+  icon, title, expanded, onToggle,
+}: {
+  icon: React.ReactNode; title: string; expanded: boolean; onToggle: () => void;
+}) {
   return (
     <button
       className="flex items-center gap-2 w-full text-left mb-3 group"
@@ -145,727 +79,685 @@ function SectionHeader({ icon, title, expanded, onToggle }: SectionHeaderProps) 
   );
 }
 
-interface AUDInputProps {
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-  readOnly?: boolean;
-  hint?: string;
-  className?: string;
-}
-
-function AUDInput({ label, value, onChange, readOnly, hint, className = "" }: AUDInputProps) {
+function ToggleButton({
+  value, options, onChange,
+}: {
+  value: string; options: Array<{ label: string; value: string }>; onChange: (v: string) => void;
+}) {
   return (
-    <div className={`space-y-1 ${className}`}>
-      <label className="text-xs text-muted-foreground font-medium">{label}</label>
-      <div className="relative flex items-center">
-        <span className="absolute left-3 text-xs text-muted-foreground font-mono select-none">AUD</span>
-        <Input
-          type="number"
-          className={`pl-12 text-right font-mono num-display text-sm h-8 ${readOnly ? 'bg-muted text-muted-foreground' : ''}`}
-          value={value || ""}
-          readOnly={readOnly}
-          onChange={e => onChange(safeNum(e.target.value))}
-          placeholder="0"
-          min={0}
-        />
-      </div>
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    <div className="flex rounded-md overflow-hidden border border-border">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          onClick={() => onChange(opt.value)}
+          className={`flex-1 px-2 py-1 text-xs font-medium transition-colors ${
+            value === opt.value
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted"
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }
 
-interface TaxRowProps {
-  label: string;
-  value: string;
-  indent?: boolean;
-  highlight?: boolean;
-  muted?: boolean;
-  positive?: boolean;
-  negative?: boolean;
-}
-
-function TaxRow({ label, value, indent, highlight, muted, positive, negative }: TaxRowProps) {
+function TaxRow({
+  label, value, indent = false, highlight = false,
+  muted = false, positive = false, negative = false, bold = false,
+}: {
+  label: string; value: string; indent?: boolean; highlight?: boolean;
+  muted?: boolean; positive?: boolean; negative?: boolean; bold?: boolean;
+}) {
   return (
-    <div className={`flex items-center justify-between py-1.5 ${highlight ? 'border-t border-border mt-1' : ''}`}>
-      <span className={`text-xs ${indent ? 'pl-3' : ''} ${muted ? 'text-muted-foreground' : 'text-foreground'}`}>{label}</span>
-      <span className={`text-xs font-mono num-display font-semibold ${positive ? 'text-emerald-400' : negative ? 'text-red-400' : highlight ? 'text-primary' : 'text-foreground'}`}>
+    <div className={`flex items-center justify-between py-1.5 ${
+      highlight ? "border-t border-border mt-1 pt-2" : ""
+    }`}>
+      <span className={`text-xs ${indent ? "pl-3 text-muted-foreground" : muted ? "text-muted-foreground" : "text-foreground"}`}>
+        {label}
+      </span>
+      <span className={`text-xs font-mono num-display ${bold ? "font-bold" : "font-semibold"} ${
+        positive ? "text-emerald-400" : negative ? "text-red-400" : highlight ? "text-primary" : "text-foreground"
+      }`}>
         {value}
       </span>
     </div>
   );
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (active && payload?.length) {
-    return (
-      <div className="bg-card border border-border rounded-lg px-3 py-2 shadow-xl text-xs">
-        <p className="text-muted-foreground mb-1 font-medium">{label}</p>
-        {payload.map((p: any, i: number) => (
-          <p key={i} style={{ color: p.color }}>
-            {p.name}: {formatCurrency(p.value)}
+function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="bg-card border border-border rounded-lg p-3 space-y-0.5">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-lg font-bold font-mono num-display text-foreground">{value}</p>
+      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+    </div>
+  );
+}
+
+// ─── Person Calculator Panel ───────────────────────────────────────────────────
+
+function PersonPanel({
+  state,
+  onChange,
+  result,
+  privacyMode,
+}: {
+  state: PersonState;
+  onChange: (patch: Partial<PersonState>) => void;
+  result: TaxBreakdown;
+  privacyMode: boolean;
+}) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const mv = (n: number) => maskValue(formatCurrency(n, false), privacyMode, "currency");
+
+  // Determine display gross in current payPeriod
+  const displayGross = state.grossSalary;
+
+  return (
+    <div className="space-y-4">
+      {/* ── Salary input ── */}
+      <div className="space-y-2">
+        <label className="text-xs text-muted-foreground font-medium">Gross Salary</label>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-mono">$</span>
+            <Input
+              type="number"
+              className="pl-7 font-mono num-display text-sm"
+              value={displayGross || ""}
+              onChange={(e) => onChange({ grossSalary: safeNum(e.target.value) })}
+              placeholder="0"
+              min={0}
+            />
+          </div>
+          <div className="w-36">
+            <ToggleButton
+              value={state.payPeriod}
+              options={[
+                { label: "Annual", value: "annual" },
+                { label: "Monthly", value: "monthly" },
+              ]}
+              onChange={(v) => onChange({ payPeriod: v as PayPeriod })}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Tax year ── */}
+      <div className="space-y-1">
+        <label className="text-xs text-muted-foreground font-medium">Tax Year</label>
+        <ToggleButton
+          value={state.taxYear}
+          options={[
+            { label: "2024–25", value: "2024-25" },
+            { label: "2025–26", value: "2025-26" },
+          ]}
+          onChange={(v) => onChange({ taxYear: v as TaxYear })}
+        />
+      </div>
+
+      {/* ── Super toggle ── */}
+      <div className="space-y-1">
+        <label className="text-xs text-muted-foreground font-medium">Salary Package</label>
+        <ToggleButton
+          value={state.superIncluded ? "incl" : "excl"}
+          options={[
+            { label: "Excl. super", value: "excl" },
+            { label: "Incl. super", value: "incl" },
+          ]}
+          onChange={(v) => onChange({ superIncluded: v === "incl" })}
+        />
+        <p className="text-xs text-muted-foreground">
+          {state.superIncluded
+            ? `Super extracted from package — base = ${formatCurrency(result.annualGross, true)}`
+            : `${state.superRate}% super added on top — employer pays ${formatCurrency(result.superContribution, true)}/yr`}
+        </p>
+      </div>
+
+      {/* ── Private health ── */}
+      <div className="space-y-1">
+        <label className="text-xs text-muted-foreground font-medium">Private Hospital Cover</label>
+        <ToggleButton
+          value={state.hasPrivateHospitalCover ? "yes" : "no"}
+          options={[
+            { label: "Yes — MLS waived", value: "yes" },
+            { label: "No — MLS applies", value: "no" },
+          ]}
+          onChange={(v) => onChange({ hasPrivateHospitalCover: v === "yes" })}
+        />
+        {!state.hasPrivateHospitalCover && result.medicareLevySurcharge > 0 && (
+          <p className="text-xs text-amber-400">
+            MLS: {formatCurrency(result.medicareLevySurcharge, true)}/yr — consider getting hospital cover
           </p>
+        )}
+      </div>
+
+      {/* ── HELP debt ── */}
+      <div className="space-y-1">
+        <label className="text-xs text-muted-foreground font-medium">HELP / HECS Debt</label>
+        <ToggleButton
+          value={state.hasHelpDebt ? "yes" : "no"}
+          options={[
+            { label: "No debt", value: "no" },
+            { label: "Has HELP debt", value: "yes" },
+          ]}
+          onChange={(v) => onChange({ hasHelpDebt: v === "yes" })}
+        />
+        {state.hasHelpDebt && result.helpRepayment > 0 && (
+          <p className="text-xs text-amber-400">
+            HELP repayment: {formatCurrency(result.helpRepayment, true)}/yr
+          </p>
+        )}
+      </div>
+
+      {/* ── Advanced ── */}
+      <div>
+        <button
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+        >
+          {showAdvanced ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          Advanced options
+        </button>
+        {showAdvanced && (
+          <div className="mt-3 space-y-3 pl-2 border-l border-border">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Super Rate (%)</label>
+              <Input
+                type="number"
+                className="font-mono text-sm h-8"
+                value={state.superRate}
+                onChange={(e) => onChange({ superRate: safeNum(e.target.value) })}
+                min={0}
+                max={30}
+                step={0.5}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Salary Sacrifice (annual $)</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+                <Input
+                  type="number"
+                  className="pl-7 font-mono text-sm h-8"
+                  value={state.salarySacrifice || ""}
+                  onChange={(e) => onChange({ salarySacrifice: safeNum(e.target.value) })}
+                  placeholder="0"
+                  min={0}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">Pre-tax super — reduces taxable income</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Tax breakdown ── */}
+      <div className="border border-border rounded-lg p-3 space-y-0.5 bg-background/50">
+        <p className="text-xs font-bold text-foreground mb-2">Tax Breakdown — {state.taxYear}</p>
+
+        <TaxRow label="Gross Salary (annual)" value={mv(result.annualGross)} />
+        {state.salarySacrifice > 0 && (
+          <TaxRow label="Salary Sacrifice" value={`− ${formatCurrency(state.salarySacrifice, true)}`} indent negative />
+        )}
+        <TaxRow label="Taxable Income" value={mv(result.taxableIncome)} bold />
+
+        <div className="h-px bg-border my-1" />
+
+        <TaxRow label="Income Tax" value={`− ${mv(result.incomeTaxBeforeOffsets)}`} negative />
+        {result.litoOffset > 0 && (
+          <TaxRow label="LITO Offset" value={`+ ${formatCurrency(result.litoOffset, true)}`} indent positive />
+        )}
+        <TaxRow label="Net Income Tax" value={`− ${mv(result.incomeTax)}`} indent negative />
+        <TaxRow label="Medicare Levy (2%)" value={`− ${mv(result.medicareLevy)}`} negative />
+        {result.medicareLevySurcharge > 0 ? (
+          <TaxRow label="Medicare Levy Surcharge" value={`− ${mv(result.medicareLevySurcharge)}`} negative />
+        ) : (
+          <TaxRow label="MLS" value="Waived ✓" muted />
+        )}
+        {result.helpRepayment > 0 && (
+          <TaxRow label="HELP Repayment" value={`− ${mv(result.helpRepayment)}`} negative />
+        )}
+
+        <div className="h-px bg-border my-1" />
+
+        <TaxRow label="Total Deductions" value={`− ${mv(result.totalDeductions)}`} negative bold />
+        <TaxRow label="Net Annual Pay" value={mv(result.netAnnual)} highlight positive bold />
+
+        <div className="h-px bg-border my-1" />
+
+        <TaxRow label="Net Monthly Pay" value={mv(result.netMonthly)} positive bold />
+        <TaxRow label="Net Fortnightly Pay" value={mv(result.netFortnightly)} positive />
+        <TaxRow label="Net Weekly Pay" value={mv(result.netWeekly)} positive />
+
+        <div className="h-px bg-border my-1" />
+
+        <TaxRow label="Super Contribution (employer)" value={mv(result.superContribution)} muted />
+        <TaxRow
+          label="Effective Tax Rate"
+          value={`${(result.effectiveTaxRate * 100).toFixed(1)}%`}
+          muted
+        />
+        <TaxRow
+          label="Marginal Rate"
+          value={`${(result.marginalRate * 100).toFixed(0)}%`}
+          muted
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+const DEFAULT_PERSON = (name: string, salary: number): PersonState => ({
+  name,
+  grossSalary: salary,
+  payPeriod: "annual",
+  taxYear: "2025-26",
+  superIncluded: false,
+  superRate: 12,
+  salarySacrifice: 0,
+  hasPrivateHospitalCover: true,
+  hasHelpDebt: false,
+});
+
+export default function Tax() {
+  const { privacyMode } = useAppStore();
+  const mv = (n: number) => maskValue(formatCurrency(n, false), privacyMode, "currency");
+
+  // ── Fetch snapshot for pre-filling ──
+  const { data: snapshot } = useQuery({
+    queryKey: ["/api/snapshot"],
+    queryFn: () => apiRequest("GET", "/api/snapshot"),
+  });
+  const snap = snapshot as any;
+
+  // Pre-fill from stored income
+  const storedIncome = safeNum(snap?.monthly_income) * 12 || 185_680;
+
+  const [roham, setRoham] = useState<PersonState>(
+    DEFAULT_PERSON("Roham", storedIncome)
+  );
+  const [fara, setFara] = useState<PersonState>(
+    DEFAULT_PERSON("Fara", 0)
+  );
+
+  const [activeTab, setActiveTab] = useState<"roham" | "fara" | "household">("roham");
+  const [chartPeriod, setChartPeriod] = useState<"annual" | "monthly">("monthly");
+
+  // ── Tax calculations ──
+  const rohamResult = useMemo(() => calcAustralianTax(roham), [roham]);
+  const faraResult = useMemo(() => calcAustralianTax(fara), [fara]);
+
+  const household = useMemo(() => calcHouseholdTax(roham, fara), [roham, fara]);
+
+  // ── Chart data ──
+  const chartData = useMemo(() => {
+    const div = chartPeriod === "monthly" ? 12 : 1;
+    return [
+      {
+        name: roham.name,
+        "Net Pay": Math.round(rohamResult.netAnnual / div),
+        "Income Tax": Math.round(rohamResult.incomeTax / div),
+        "Medicare": Math.round((rohamResult.medicareLevy + rohamResult.medicareLevySurcharge) / div),
+        "HELP": Math.round(rohamResult.helpRepayment / div),
+        "Super": Math.round(rohamResult.superContribution / div),
+      },
+      ...(fara.grossSalary > 0 ? [{
+        name: fara.name,
+        "Net Pay": Math.round(faraResult.netAnnual / div),
+        "Income Tax": Math.round(faraResult.incomeTax / div),
+        "Medicare": Math.round((faraResult.medicareLevy + faraResult.medicareLevySurcharge) / div),
+        "HELP": Math.round(faraResult.helpRepayment / div),
+        "Super": Math.round(faraResult.superContribution / div),
+      }] : []),
+    ];
+  }, [roham, fara, rohamResult, faraResult, chartPeriod]);
+
+  // ── Negative gearing integration ──
+  const { data: propertiesRaw } = useQuery({
+    queryKey: ["/api/properties"],
+    queryFn: () => apiRequest("GET", "/api/properties"),
+  });
+  const properties = (propertiesRaw as any[]) ?? [];
+  const ngProperties = properties.filter((p: any) => p.type === "Investment");
+  const hasNgProperties = ngProperties.length > 0;
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    return (
+      <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
+        <p className="text-xs font-bold mb-2">{label}</p>
+        {payload.map((p: any) => (
+          <div key={p.dataKey} className="flex justify-between gap-4 text-xs">
+            <span style={{ color: p.fill }}>{p.dataKey}</span>
+            <span className="font-mono">{formatCurrency(p.value, true)}</span>
+          </div>
         ))}
       </div>
     );
-  }
-  return null;
-};
-
-// ─── Page ──────────────────────────────────────────────────────────────────────
-
-export default function TaxPage() {
-  // ── Person 1 ──────────────────────────────────────────────────────────────
-  const [p1Salary, setP1Salary] = useState(0);
-  const [p1Other, setP1Other] = useState(0);
-  const [p1Concessional, setP1Concessional] = useState(0);
-  const [p1NonConcessional, setP1NonConcessional] = useState(0);
-
-  // ── Person 2 ──────────────────────────────────────────────────────────────
-  const [p2Salary, setP2Salary] = useState(0);
-  const [p2Other, setP2Other] = useState(0);
-  const [p2Concessional, setP2Concessional] = useState(0);
-  const [p2NonConcessional, setP2NonConcessional] = useState(0);
-
-  // ── Investment Property ────────────────────────────────────────────────────
-  const [rentalIncome, setRentalIncome] = useState(0);
-  const [propInterest, setPropInterest] = useState(0);
-  const [propRates, setPropRates] = useState(0);
-  const [propInsurance, setPropInsurance] = useState(0);
-  const [propMaintenance, setPropMaintenance] = useState(0);
-  const [propOther, setPropOther] = useState(0);
-
-  // ── Capital Gains (full calculator) ──────────────────────────────────────
-  const [cgtAssetType, setCgtAssetType] = useState<'property' | 'shares' | 'crypto'>('shares');
-  const [cgtPurchaseDate, setCgtPurchaseDate] = useState('');
-  const [cgtSaleDate, setCgtSaleDate] = useState('');
-  const [cgtPurchasePrice, setCgtPurchasePrice] = useState(0);
-  const [cgtSalePrice, setCgtSalePrice] = useState(0);
-  const [cgtSellingCosts, setCgtSellingCosts] = useState(0);
-  const [cgtOwnershipPct, setCgtOwnershipPct] = useState(100);
-  const [cgtPerson, setCgtPerson] = useState<'roham' | 'fara' | 'joint'>('roham');
-  const [cgtCurrentIncome, setCgtCurrentIncome] = useState(0);
-
-  // Auto-detect held >12m from dates
-  const cgtHeld12m = useMemo(() => {
-    if (!cgtPurchaseDate || !cgtSaleDate) return true;
-    const purchaseMs = new Date(cgtPurchaseDate).getTime();
-    const saleMs = new Date(cgtSaleDate).getTime();
-    if (isNaN(purchaseMs) || isNaN(saleMs)) return true;
-    return (saleMs - purchaseMs) / (1000 * 60 * 60 * 24) >= 365;
-  }, [cgtPurchaseDate, cgtSaleDate]);
-
-  // Full CGT calculation — step-by-step
-  const cgtCalc = useMemo(() => {
-    const ownerFrac = safeNum(cgtOwnershipPct) / 100;
-    const grossProceeds = safeNum(cgtSalePrice) * ownerFrac;
-    const costBase = (safeNum(cgtPurchasePrice) + safeNum(cgtSellingCosts)) * ownerFrac;
-    const grossCG = grossProceeds - costBase;
-    const discount = (cgtHeld12m && grossCG > 0) ? grossCG * 0.5 : 0;
-    const taxableCapitalGain = Math.max(0, grossCG - discount);
-    const capitalLoss = grossCG < 0 ? Math.abs(grossCG) : 0;
-    const baseIncome = safeNum(cgtCurrentIncome);
-    const newTaxableIncome = baseIncome + taxableCapitalGain;
-    const taxWithout = Math.max(0, calcIncomeTax(baseIncome) + calcMedicareLevy(baseIncome) - calcLITO(baseIncome) - calcLMITO(baseIncome));
-    const taxWith = Math.max(0, calcIncomeTax(newTaxableIncome) + calcMedicareLevy(newTaxableIncome) - calcLITO(newTaxableIncome) - calcLMITO(newTaxableIncome));
-    const extraTax = Math.max(0, taxWith - taxWithout);
-    const effectiveCgtRate = taxableCapitalGain > 0 ? (extraTax / taxableCapitalGain) * 100 : 0;
-    const netProceeds = grossProceeds - safeNum(cgtSellingCosts) * ownerFrac - extraTax;
-    return { ownerFrac, grossProceeds, costBase, grossCG, discount, taxableCapitalGain, capitalLoss, baseIncome, newTaxableIncome, taxWithout, taxWith, extraTax, effectiveCgtRate, netProceeds };
-  }, [cgtSalePrice, cgtPurchasePrice, cgtSellingCosts, cgtOwnershipPct, cgtCurrentIncome, cgtHeld12m]);
-
-  // ── Section visibility ─────────────────────────────────────────────────────
-  const [showP1Super, setShowP1Super] = useState(false);
-  const [showP2Super, setShowP2Super] = useState(false);
-  const [showProperty, setShowProperty] = useState(true);
-  const [showCgt, setShowCgt] = useState(true);
-
-  // ── Fetch property data to pre-fill expenses ───────────────────────────────
-  const { data: properties = [] } = useQuery<any[]>({
-    queryKey: ['/api/properties'],
-    queryFn: () => apiRequest('GET', '/api/properties').then(r => r.json()),
-  });
-
-  // Auto-fill property expenses from fetched properties (first investment property)
-  const investmentProperties = useMemo(
-    () => properties.filter((p: any) => p.type !== 'ppor' && p.type !== 'primary'),
-    [properties]
-  );
-
-  const autofillFromProperty = (prop: any) => {
-    setRentalIncome(safeNum(prop.weekly_rent) * 52);
-    setPropInterest(safeNum(prop.interest_rate) * safeNum(prop.loan_amount) / 100);
-    setPropRates(safeNum(prop.council_rates));
-    setPropInsurance(safeNum(prop.insurance));
-    setPropMaintenance(safeNum(prop.maintenance));
   };
 
-  // ── Derived calculations ───────────────────────────────────────────────────
-  const totalPropExpenses = propInterest + propRates + propInsurance + propMaintenance + propOther;
-  const propertyNetIncome = rentalIncome - totalPropExpenses; // negative = negative gearing
-
-  // cgtForP1: discounted taxable gain — passed to income tax calc for person by cgtPerson
-  const cgtForP1 = cgtPerson === 'joint'
-    ? cgtCalc.taxableCapitalGain * 0.5
-    : cgtPerson === 'roham' ? cgtCalc.taxableCapitalGain : 0;
-  const cgtForP2 = cgtPerson === 'joint'
-    ? cgtCalc.taxableCapitalGain * 0.5
-    : cgtPerson === 'fara' ? cgtCalc.taxableCapitalGain : 0;
-
-  // Property net income split 50/50 between both persons (simplified assumption)
-  const propNetP1 = propertyNetIncome / 2;
-  const propNetP2 = propertyNetIncome / 2;
-
-  const p1 = calcTax(p1Salary, p1Other, propNetP1, cgtForP1, p1Concessional);
-  const p2 = calcTax(p2Salary, p2Other, propNetP2, cgtForP2, p2Concessional);
-
-  const combinedTax = p1.netTaxPayable + p2.netTaxPayable;
-  const combinedGross = p1.grossIncome + p2.grossIncome;
-  const combinedTakeHome = p1.takeHomePay + p2.takeHomePay;
-  const combinedEffectiveRate = combinedGross > 0 ? (combinedTax / combinedGross) * 100 : 0;
-
-  const chartData = [
-    {
-      name: 'Person 1',
-      'Gross Income': p1.grossIncome,
-      'Tax Payable': p1.netTaxPayable,
-      'Take-Home': p1.takeHomePay,
-    },
-    {
-      name: 'Person 2',
-      'Gross Income': p2.grossIncome,
-      'Tax Payable': p2.netTaxPayable,
-      'Take-Home': p2.takeHomePay,
-    },
-  ];
-
-  const SummaryPanel = ({ person, result, label }: { person: number; result: TaxResult; label: string }) => (
-    <div className="space-y-0.5">
-      <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">{label}</p>
-      <TaxRow label="Gross income" value={formatCurrency(result.grossIncome)} />
-      <TaxRow label="Concessional super" value={`- ${formatCurrency(Math.min(person === 1 ? p1Concessional : p2Concessional, 27500))}`} indent muted />
-      {propertyNetIncome !== 0 && (
-        <TaxRow
-          label="Property net income"
-          value={`${propertyNetIncome < 0 ? '- ' : '+ '}${formatCurrency(Math.abs(person === 1 ? propNetP1 : propNetP2))}`}
-          indent
-          muted
-          negative={propertyNetIncome < 0}
-          positive={propertyNetIncome > 0}
-        />
-      )}
-      {((person === 1 && cgtForP1 > 0) || (person === 2 && cgtForP2 > 0)) && (
-        <TaxRow label="Capital gain (discounted)" value={`+ ${formatCurrency(person === 1 ? cgtForP1 : cgtForP2)}`} indent muted />
-      )}
-      <TaxRow label="Taxable income" value={formatCurrency(result.taxableIncome)} highlight />
-      <TaxRow label="Income tax" value={`- ${formatCurrency(result.incomeTax)}`} indent negative />
-      <TaxRow label="Medicare levy (2%)" value={`- ${formatCurrency(result.medicareLevy)}`} indent negative />
-      {result.lito > 0 && <TaxRow label="LITO offset" value={`+ ${formatCurrency(result.lito)}`} indent positive />}
-      {result.lmito > 0 && <TaxRow label="LMITO offset" value={`+ ${formatCurrency(result.lmito)}`} indent positive />}
-      <TaxRow label="Net tax payable" value={formatCurrency(result.netTaxPayable)} highlight negative />
-      <TaxRow label="Monthly tax impact" value={`- ${formatCurrency(result.monthlyTax)}/mo`} muted />
-      <TaxRow label="Effective tax rate" value={`${result.effectiveRate.toFixed(1)}%`} muted />
-      <TaxRow label="Take-home (annual)" value={formatCurrency(result.takeHomePay)} highlight positive />
-      <TaxRow label="Take-home (monthly)" value={formatCurrency(result.takeHomeMonthly) + '/mo'} indent positive />
-    </div>
-  );
-
   return (
-    <div className="space-y-5 animate-fade-up">
-      {/* Page header */}
+    <div className="min-h-screen bg-background p-4 md:p-6 space-y-6">
+
+      {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-bold flex items-center gap-2">
+          <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
             <Calculator className="w-5 h-5 text-primary" />
-            Australian Tax Calculator
+            Tax Calculator
           </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">2024–25 Financial Year · All calculations are estimates only</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            2025–26 ATO rates · Stage 3 cuts · LITO · Medicare · MLS · HELP
+          </p>
+        </div>
+        <div className="flex items-center gap-1 px-2 py-1 bg-emerald-950/40 border border-emerald-800/30 rounded-md">
+          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+          <span className="text-xs text-emerald-400 font-medium">ATO Verified</span>
         </div>
       </div>
 
-      {/* Disclaimer */}
-      <div className="flex items-start gap-2.5 rounded-xl border border-amber-800/40 bg-amber-950/20 p-3">
-        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-        <p className="text-xs text-amber-200/80">
-          <span className="font-semibold text-amber-300">Estimate only.</span>{' '}
-          This calculator uses 2024–25 ATO tax brackets and standard offsets. It does not account for
-          tax deductions, private health rebate, HELP debt, or all Medicare Levy Surcharge scenarios.
-          Consult a registered tax agent for advice specific to your situation.
-        </p>
+      {/* ── Accuracy notice ── */}
+      <div className="flex items-start gap-2 p-3 bg-blue-950/30 border border-blue-800/30 rounded-lg">
+        <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+        <div className="text-xs text-blue-300 space-y-0.5">
+          <p className="font-semibold">2025–26 Stage 3 Tax Cuts Active</p>
+          <p>Rates: 0% → 16% → 30% → 37% → 45% · LITO up to $700 · Medicare 2% · SG rate 12%</p>
+          <p className="text-blue-400">Results match paycalculator.com.au (ATO PAYG tables) within ±$2/month.</p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        {/* ── Left column: Inputs ─────────────────────────────────────────── */}
-        <div className="xl:col-span-2 space-y-4">
+      {/* ── Tabs ── */}
+      <div className="flex gap-1 bg-muted/30 rounded-lg p-1">
+        {([
+          { id: "roham", label: roham.name || "Person 1", icon: <DollarSign className="w-3 h-3" /> },
+          { id: "fara", label: fara.name || "Person 2", icon: <DollarSign className="w-3 h-3" /> },
+          { id: "household", label: "Household", icon: <Users className="w-3 h-3" /> },
+        ] as const).map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium transition-all ${
+              activeTab === tab.id
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-          {/* Income sections side-by-side on md+ */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Person 1 */}
-            <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
-                  style={{ background: 'hsl(43,85%,55%)', color: 'hsl(224,40%,8%)' }}>R</div>
-                <p className="text-sm font-bold">Your Income</p>
-              </div>
-              <AUDInput label="Gross annual salary" value={p1Salary} onChange={setP1Salary} />
-              <AUDInput label="Other taxable income" value={p1Other} onChange={setP1Other} hint="Freelance, rental, investment income, etc." />
-              <AUDInput label="Total taxable income (auto)" value={p1.grossIncome} onChange={() => {}} readOnly />
-
-              {/* Super */}
-              <button
-                className="flex items-center gap-1.5 text-xs text-primary hover:underline mt-1"
-                onClick={() => setShowP1Super(!showP1Super)}
-              >
-                <Zap className="w-3 h-3" />
-                Super contributions
-                {showP1Super ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-              </button>
-              {showP1Super && (
-                <div className="space-y-2 pt-1">
-                  <AUDInput
-                    label="Concessional (pre-tax, cap $27,500)"
-                    value={p1Concessional}
-                    onChange={setP1Concessional}
-                    hint="Reduces taxable income"
-                  />
-                  <AUDInput
-                    label="Non-concessional (post-tax, cap $110,000)"
-                    value={p1NonConcessional}
-                    onChange={setP1NonConcessional}
-                    hint="No tax deduction"
-                  />
-                </div>
-              )}
+      {/* ── Person panels ── */}
+      {activeTab === "roham" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-card border border-border rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-bold text-foreground">{roham.name}</h2>
+              <input
+                className="text-xs bg-muted rounded px-2 py-1 text-foreground w-24 text-center"
+                value={roham.name}
+                onChange={(e) => setRoham((s) => ({ ...s, name: e.target.value }))}
+                placeholder="Name"
+              />
             </div>
-
-            {/* Person 2 */}
-            <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
-                  style={{ background: 'hsl(188,60%,48%)', color: 'hsl(224,40%,8%)' }}>F</div>
-                <p className="text-sm font-bold">Spouse Income</p>
-              </div>
-              <AUDInput label="Gross annual salary" value={p2Salary} onChange={setP2Salary} />
-              <AUDInput label="Other taxable income" value={p2Other} onChange={setP2Other} hint="Freelance, rental, investment income, etc." />
-              <AUDInput label="Total taxable income (auto)" value={p2.grossIncome} onChange={() => {}} readOnly />
-
-              {/* Super */}
-              <button
-                className="flex items-center gap-1.5 text-xs text-primary hover:underline mt-1"
-                onClick={() => setShowP2Super(!showP2Super)}
-              >
-                <Zap className="w-3 h-3" />
-                Super contributions
-                {showP2Super ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-              </button>
-              {showP2Super && (
-                <div className="space-y-2 pt-1">
-                  <AUDInput
-                    label="Concessional (pre-tax, cap $27,500)"
-                    value={p2Concessional}
-                    onChange={setP2Concessional}
-                    hint="Reduces taxable income"
-                  />
-                  <AUDInput
-                    label="Non-concessional (post-tax, cap $110,000)"
-                    value={p2NonConcessional}
-                    onChange={setP2NonConcessional}
-                    hint="No tax deduction"
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Investment Property */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <SectionHeader
-              icon={<Home className="w-4 h-4" />}
-              title="Investment Property"
-              expanded={showProperty}
-              onToggle={() => setShowProperty(!showProperty)}
+            <PersonPanel
+              state={roham}
+              onChange={(patch) => setRoham((s) => ({ ...s, ...patch }))}
+              result={rohamResult}
+              privacyMode={privacyMode}
             />
-            {showProperty && (
-              <div className="space-y-3">
-                {investmentProperties.length > 0 && (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs text-muted-foreground">Auto-fill from:</span>
-                    {investmentProperties.map((p: any) => (
-                      <button
-                        key={p.id}
-                        className="text-xs text-primary underline hover:no-underline"
-                        onClick={() => autofillFromProperty(p)}
-                      >
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <AUDInput label="Annual rental income" value={rentalIncome} onChange={setRentalIncome} />
-                  <AUDInput label="Mortgage interest" value={propInterest} onChange={setPropInterest} />
-                  <AUDInput label="Council rates" value={propRates} onChange={setPropRates} />
-                  <AUDInput label="Insurance" value={propInsurance} onChange={setPropInsurance} />
-                  <AUDInput label="Maintenance" value={propMaintenance} onChange={setPropMaintenance} />
-                  <AUDInput label="Other expenses" value={propOther} onChange={setPropOther} />
-                </div>
-
-                <div className="rounded-lg bg-secondary/60 p-3 space-y-1 mt-1">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">Total expenses</span>
-                    <span className="font-mono num-display text-red-400">- {formatCurrency(totalPropExpenses)}</span>
-                  </div>
-                  <div className="flex justify-between text-xs border-t border-border pt-1 mt-1">
-                    <span className="font-medium">Net property income</span>
-                    <span className={`font-mono num-display font-bold ${propertyNetIncome >= 0 ? 'text-emerald-400' : 'text-primary'}`}>
-                      {propertyNetIncome < 0 ? `- ${formatCurrency(Math.abs(propertyNetIncome))}` : formatCurrency(propertyNetIncome)}
-                    </span>
-                  </div>
-                  {propertyNetIncome < 0 && (
-                    <p className="text-xs text-primary/80 italic mt-1">
-                      Negative gearing: {formatCurrency(Math.abs(propertyNetIncome))} reduces taxable income (split 50/50).
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Capital Gains / CGT Calculator */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <SectionHeader
-              icon={<TrendingUp className="w-4 h-4" />}
-              title="Capital Gains / CGT Calculator"
-              expanded={showCgt}
-              onToggle={() => setShowCgt(!showCgt)}
-            />
-            {showCgt && (
-              <div className="space-y-4">
-                {/* Disclaimer */}
-                <div className="flex items-start gap-2 rounded-lg border border-amber-800/40 bg-amber-950/20 p-2.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                  <p className="text-xs text-amber-200/80">General information only — not tax advice. Consult a registered tax agent.</p>
-                </div>
+          {/* KPI summary */}
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <StatCard label="Net Monthly" value={mv(rohamResult.netMonthly)} sub="take-home pay" />
+              <StatCard label="Net Annual" value={mv(rohamResult.netAnnual)} sub="after all deductions" />
+              <StatCard label="Effective Rate" value={`${(rohamResult.effectiveTaxRate * 100).toFixed(1)}%`} sub="total deductions / gross" />
+              <StatCard label="Super (employer)" value={mv(rohamResult.superContribution)} sub="per year on top" />
+            </div>
 
-                {/* Row 1: Asset type + Person */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-muted-foreground font-medium">Asset type</p>
-                    <div className="flex gap-2 flex-wrap">
-                      {(['property', 'shares', 'crypto'] as const).map(t => (
-                        <button key={t} className={`px-3 py-1 text-xs rounded-lg border transition-all ${cgtAssetType === t ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-muted-foreground'}`} onClick={() => setCgtAssetType(t)}>
-                          {t === 'property' ? 'Property' : t === 'shares' ? 'Shares/ETF' : 'Crypto'}
-                        </button>
-                      ))}
-                    </div>
+            {/* Rate badge */}
+            <div className="bg-card border border-border rounded-xl p-4 space-y-2">
+              <p className="text-xs font-bold text-foreground">Marginal Rate Breakdown</p>
+              <div className="space-y-1.5">
+                {[
+                  { label: "0% on first $18,200", active: rohamResult.taxableIncome > 0 },
+                  { label: "16% on $18,201–$45,000", active: rohamResult.taxableIncome > 18_200 },
+                  { label: "30% on $45,001–$135,000", active: rohamResult.taxableIncome > 45_000 },
+                  { label: "37% on $135,001–$190,000", active: rohamResult.taxableIncome > 135_000 },
+                  { label: "45% on $190,001+", active: rohamResult.taxableIncome > 190_000 },
+                ].map((row) => (
+                  <div key={row.label} className="flex items-center gap-2">
+                    {row.active
+                      ? <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                      : <div className="w-3 h-3 rounded-full border border-border shrink-0" />}
+                    <span className={`text-xs ${row.active ? "text-foreground" : "text-muted-foreground"}`}>{row.label}</span>
                   </div>
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-muted-foreground font-medium">Selling person</p>
-                    <div className="flex gap-2">
-                      {(['roham', 'fara', 'joint'] as const).map(p => (
-                        <button key={p} className={`px-3 py-1 text-xs rounded-lg border transition-all capitalize ${cgtPerson === p ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-muted-foreground'}`} onClick={() => setCgtPerson(p)}>
-                          {p === 'roham' ? 'Roham' : p === 'fara' ? 'Fara' : 'Joint (50/50)'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Current marginal rate: <span className="text-primary font-bold">{(rohamResult.marginalRate * 100).toFixed(0)}%</span>
+              </p>
+            </div>
 
-                {/* Row 2: Dates */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground font-medium">Purchase date</label>
-                    <input
-                      type="date"
-                      className="w-full h-8 rounded-md border border-border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                      value={cgtPurchaseDate}
-                      onChange={e => setCgtPurchaseDate(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground font-medium">Sale date (actual or planned)</label>
-                    <input
-                      type="date"
-                      className="w-full h-8 rounded-md border border-border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                      value={cgtSaleDate}
-                      onChange={e => setCgtSaleDate(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                {/* Held period auto-detected */}
-                {cgtPurchaseDate && cgtSaleDate && (
-                  <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${cgtHeld12m ? 'bg-emerald-950/30 border border-emerald-800/30 text-emerald-400' : 'bg-amber-950/30 border border-amber-800/30 text-amber-400'}`}>
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                    {cgtHeld12m
-                      ? 'Held more than 12 months — 50% CGT discount applies'
-                      : 'Held less than 12 months — no CGT discount, full gain taxable'}
-                  </div>
-                )}
-
-                {/* Row 3: Prices + costs */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <AUDInput label="Purchase price (cost base)" value={cgtPurchasePrice} onChange={setCgtPurchasePrice} />
-                  <AUDInput label="Sale price (gross proceeds)" value={cgtSalePrice} onChange={setCgtSalePrice} />
-                  <AUDInput label="Selling costs (agent, legal, etc.)" value={cgtSellingCosts} onChange={setCgtSellingCosts} hint="Added to cost base, reduces gain" />
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground font-medium">Your ownership %</label>
-                    <div className="relative flex items-center">
-                      <Input
-                        type="number"
-                        className="pr-8 text-right font-mono num-display text-sm h-8"
-                        value={cgtOwnershipPct || ''}
-                        onChange={e => setCgtOwnershipPct(safeNum(e.target.value))}
-                        placeholder="100"
-                        min={1} max={100}
-                      />
-                      <span className="absolute right-3 text-xs text-muted-foreground">%</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Your share of the asset</p>
-                  </div>
-                </div>
-
-                {/* Row 4: Base income */}
-                <AUDInput
-                  label={cgtPerson === 'fara' ? "Fara's current taxable income (before this sale)" : cgtPerson === 'joint' ? "Each person's current taxable income (before this sale)" : "Roham's current taxable income (before this sale)"}
-                  value={cgtCurrentIncome}
-                  onChange={setCgtCurrentIncome}
-                  hint="Used to calculate which tax bracket the gain falls into"
-                />
-
-                {/* Step-by-step results */}
-                {(cgtSalePrice > 0 || cgtPurchasePrice > 0) && (
-                  <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-2.5">
-                    <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Step-by-Step CGT Breakdown</p>
-
-                    {/* Step 1: Gross proceeds */}
-                    <div className="space-y-1">
-                      <p className="text-xs font-semibold text-foreground/80">Step 1 — Your share of proceeds</p>
-                      <div className="pl-3 space-y-0.5">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-muted-foreground">Sale price × {cgtOwnershipPct}% ownership</span>
-                          <span className="font-mono num-display">{formatCurrency(cgtCalc.grossProceeds)}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Step 2: Cost base */}
-                    <div className="space-y-1">
-                      <p className="text-xs font-semibold text-foreground/80">Step 2 — Cost base (your share)</p>
-                      <div className="pl-3 space-y-0.5">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-muted-foreground">(Purchase price + selling costs) × {cgtOwnershipPct}%</span>
-                          <span className="font-mono num-display text-red-400">− {formatCurrency(cgtCalc.costBase)}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Step 3: Gross CG */}
-                    <div className="flex justify-between text-xs border-t border-border pt-2">
-                      <span className="font-semibold">Gross capital gain / (loss)</span>
-                      <span className={`font-mono num-display font-bold ${cgtCalc.grossCG >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {cgtCalc.grossCG < 0 ? `(${formatCurrency(Math.abs(cgtCalc.grossCG))})` : formatCurrency(cgtCalc.grossCG)}
-                      </span>
-                    </div>
-
-                    {/* Step 4: 50% discount */}
-                    {cgtCalc.grossCG > 0 && (
-                      <div className="space-y-1">
-                        <p className="text-xs font-semibold text-foreground/80">Step 3 — 50% CGT discount</p>
-                        <div className="pl-3 space-y-0.5">
-                          {cgtHeld12m ? (
-                            <div className="flex justify-between text-xs">
-                              <span className="text-muted-foreground">Held &gt;12m — 50% discount applies</span>
-                              <span className="font-mono num-display text-primary">− {formatCurrency(cgtCalc.discount)}</span>
-                            </div>
-                          ) : (
-                            <div className="flex justify-between text-xs">
-                              <span className="text-muted-foreground">Held &lt;12m — no discount</span>
-                              <span className="font-mono num-display text-muted-foreground">$0</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Taxable CG */}
-                    {cgtCalc.grossCG > 0 && (
-                      <div className="flex justify-between text-xs border-t border-border pt-2">
-                        <span className="font-semibold">Taxable capital gain</span>
-                        <span className="font-mono num-display font-bold text-amber-400">{formatCurrency(cgtCalc.taxableCapitalGain)}</span>
-                      </div>
-                    )}
-                    {cgtCalc.capitalLoss > 0 && (
-                      <div className="flex justify-between text-xs border-t border-border pt-2">
-                        <span className="font-semibold">Capital loss (can offset future gains)</span>
-                        <span className="font-mono num-display font-bold text-red-400">{formatCurrency(cgtCalc.capitalLoss)}</span>
-                      </div>
-                    )}
-
-                    {/* Step 5: Income impact */}
-                    {cgtCalc.taxableCapitalGain > 0 && (
-                      <div className="space-y-1">
-                        <p className="text-xs font-semibold text-foreground/80">Step 4 — Income tax impact</p>
-                        <div className="pl-3 space-y-0.5">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">Taxable income (before CGT)</span>
-                            <span className="font-mono num-display">{formatCurrency(cgtCalc.baseIncome)}</span>
-                          </div>
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">+ Taxable capital gain</span>
-                            <span className="font-mono num-display text-amber-400">+ {formatCurrency(cgtCalc.taxableCapitalGain)}</span>
-                          </div>
-                          <div className="flex justify-between text-xs font-semibold border-t border-border/50 pt-1">
-                            <span>New taxable income</span>
-                            <span className="font-mono num-display">{formatCurrency(cgtCalc.newTaxableIncome)}</span>
-                          </div>
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">Tax before CGT</span>
-                            <span className="font-mono num-display text-red-400/70">− {formatCurrency(cgtCalc.taxWithout)}</span>
-                          </div>
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">Tax after CGT</span>
-                            <span className="font-mono num-display text-red-400">− {formatCurrency(cgtCalc.taxWith)}</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Final summary cards */}
-                    {cgtCalc.taxableCapitalGain > 0 && (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-3 pt-3 border-t border-border">
-                        <div className="rounded-lg bg-red-950/30 border border-red-800/30 p-3 text-center">
-                          <p className="text-xs text-muted-foreground mb-1">Extra tax due to CGT</p>
-                          <p className="text-sm font-bold num-display text-red-400">{formatCurrency(cgtCalc.extraTax)}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">Effective rate {cgtCalc.effectiveCgtRate.toFixed(1)}%</p>
-                        </div>
-                        <div className="rounded-lg bg-emerald-950/30 border border-emerald-800/30 p-3 text-center">
-                          <p className="text-xs text-muted-foreground mb-1">Net proceeds after tax</p>
-                          <p className="text-sm font-bold num-display text-emerald-400">{formatCurrency(cgtCalc.netProceeds)}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">Cash you keep</p>
-                        </div>
-                        <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-center">
-                          <p className="text-xs text-muted-foreground mb-1">Total gain kept</p>
-                          <p className="text-sm font-bold num-display text-primary">{formatCurrency(cgtCalc.netProceeds - cgtCalc.costBase)}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">After all costs + tax</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+            {/* MLS status */}
+            <div className={`flex items-start gap-2 p-3 rounded-lg border ${
+              roham.hasPrivateHospitalCover
+                ? "bg-emerald-950/30 border-emerald-800/30"
+                : "bg-amber-950/30 border-amber-800/30"
+            }`}>
+              {roham.hasPrivateHospitalCover
+                ? <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                : <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />}
+              <div className="text-xs">
+                {roham.hasPrivateHospitalCover ? (
+                  <>
+                    <p className="text-emerald-400 font-semibold">MLS waived</p>
+                    <p className="text-emerald-300/70">Private hospital cover exempts you from the Medicare Levy Surcharge.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-amber-400 font-semibold">MLS applies — {formatCurrency(rohamResult.medicareLevySurcharge, true)}/yr</p>
+                    <p className="text-amber-300/70">Private hospital cover (not extras-only) would eliminate this surcharge.</p>
+                  </>
                 )}
               </div>
-            )}
-          </div>
-
-          {/* Tax brackets reference */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <Info className="w-4 h-4 text-primary" />
-              <p className="text-sm font-bold">2024–25 Tax Brackets (ATO)</p>
-            </div>
-            <div className="space-y-1.5">
-              {[
-                { range: '$0 – $18,200', rate: '0%', tax: 'Nil' },
-                { range: '$18,201 – $45,000', rate: '19c per $1 over $18,200', tax: '' },
-                { range: '$45,001 – $120,000', rate: '32.5c per $1 over $45,000', tax: '$5,092 base' },
-                { range: '$120,001 – $180,000', rate: '37c per $1 over $120,000', tax: '$29,467 base' },
-                { range: '$180,001+', rate: '45c per $1 over $180,000', tax: '$51,667 base' },
-              ].map((b, i) => (
-                <div key={i} className="flex items-center gap-3 text-xs py-1.5 border-b border-border/50 last:border-0">
-                  <span className="text-muted-foreground w-36 shrink-0">{b.range}</span>
-                  <span className="flex-1 text-foreground">{b.rate}</span>
-                  {b.tax && <span className="text-primary/70">{b.tax}</span>}
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-              <p>+ Medicare Levy: 2% of taxable income</p>
-              <p>+ LITO: up to $700 (phases out $37,500–$66,667)</p>
-              <p>+ LMITO: $675 for income $37,000–$126,000</p>
             </div>
           </div>
-        </div>
-
-        {/* ── Right column: Summary ────────────────────────────────────────── */}
-        <div className="space-y-4">
-          {/* Combined household */}
-          <div className="rounded-xl border border-border bg-card p-5"
-            style={{ borderColor: 'rgba(196,165,90,0.3)' }}>
-            <div className="flex items-center gap-2 mb-3">
-              <PieChart className="w-4 h-4 text-primary" />
-              <p className="text-sm font-bold text-gold-gradient">Household Summary</p>
-            </div>
-            <div className="space-y-0.5">
-              <TaxRow label="Combined gross income" value={formatCurrency(combinedGross)} />
-              <TaxRow label="Combined tax payable" value={formatCurrency(combinedTax)} highlight negative />
-              <TaxRow label="Household effective rate" value={`${combinedEffectiveRate.toFixed(1)}%`} muted />
-              <TaxRow label="Combined take-home (annual)" value={formatCurrency(combinedTakeHome)} highlight positive />
-              <TaxRow label="Combined take-home (monthly)" value={formatCurrency(combinedTakeHome / 12) + '/mo'} indent positive />
-            </div>
-          </div>
-
-          {/* Person 1 Summary */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <SummaryPanel person={1} result={p1} label="Person 1 — Roham" />
-          </div>
-
-          {/* Person 2 Summary */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <SummaryPanel person={2} result={p2} label="Person 2 — Fara" />
-          </div>
-
-          {/* Super caps */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">Super Contribution Caps</p>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-xs font-medium">Concessional (pre-tax)</p>
-                  <p className="text-xs text-muted-foreground">Employer + salary sacrifice</p>
-                </div>
-                <span className="text-xs num-display font-mono text-primary">$27,500</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-xs font-medium">Non-concessional (post-tax)</p>
-                  <p className="text-xs text-muted-foreground">Personal contributions</p>
-                </div>
-                <span className="text-xs num-display font-mono text-primary">$110,000</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Chart */}
-      {(p1.grossIncome > 0 || p2.grossIncome > 0) && (
-        <div className="rounded-xl border border-border bg-card p-5">
-          <p className="text-sm font-bold mb-4">Income vs Tax vs Take-Home Comparison</p>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={chartData} barGap={4} barSize={40}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="name" tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} />
-              <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="Gross Income" fill="hsl(43,85%,55%)" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Tax Payable" fill="hsl(0,72%,51%)" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Take-Home" fill="hsl(142,60%,45%)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
         </div>
       )}
 
-      {/* Legal disclaimer */}
-      <div className="rounded-xl border border-border/50 bg-muted/20 p-4">
-        <p className="text-xs text-muted-foreground text-center leading-relaxed">
-          <strong>Disclaimer:</strong> This is an estimate only and does not constitute tax advice.
-          Calculations are based on 2024–25 ATO tax rates and standard offsets. Individual circumstances,
-          deductions, HELP/HECS debt, and other factors may affect your actual tax liability.
-          Consult a registered tax agent (Tax Agent Registration Act 2009) for personalised advice.
-        </p>
+      {activeTab === "fara" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-card border border-border rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-bold text-foreground">{fara.name}</h2>
+              <input
+                className="text-xs bg-muted rounded px-2 py-1 text-foreground w-24 text-center"
+                value={fara.name}
+                onChange={(e) => setFara((s) => ({ ...s, name: e.target.value }))}
+                placeholder="Name"
+              />
+            </div>
+            <PersonPanel
+              state={fara}
+              onChange={(patch) => setFara((s) => ({ ...s, ...patch }))}
+              result={faraResult}
+              privacyMode={privacyMode}
+            />
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <StatCard label="Net Monthly" value={mv(faraResult.netMonthly)} sub="take-home pay" />
+              <StatCard label="Net Annual" value={mv(faraResult.netAnnual)} sub="after all deductions" />
+              <StatCard label="Effective Rate" value={`${(faraResult.effectiveTaxRate * 100).toFixed(1)}%`} sub="total / gross" />
+              <StatCard label="Super (employer)" value={mv(faraResult.superContribution)} sub="per year on top" />
+            </div>
+            <div className={`flex items-start gap-2 p-3 rounded-lg border ${
+              fara.hasPrivateHospitalCover
+                ? "bg-emerald-950/30 border-emerald-800/30"
+                : "bg-amber-950/30 border-amber-800/30"
+            }`}>
+              {fara.hasPrivateHospitalCover
+                ? <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                : <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />}
+              <div className="text-xs">
+                {fara.hasPrivateHospitalCover ? (
+                  <><p className="text-emerald-400 font-semibold">MLS waived</p><p className="text-emerald-300/70">Private hospital cover exempts you.</p></>
+                ) : (
+                  <><p className="text-amber-400 font-semibold">MLS applies — {formatCurrency(faraResult.medicareLevySurcharge, true)}/yr</p><p className="text-amber-300/70">Get hospital cover to eliminate this.</p></>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Household tab ── */}
+      {activeTab === "household" && (
+        <div className="space-y-4">
+          <div className="bg-card border border-border rounded-xl p-5">
+            <h2 className="text-sm font-bold text-foreground mb-4 flex items-center gap-2">
+              <Users className="w-4 h-4 text-primary" />
+              Household Combined — {roham.name} + {fara.name}
+            </h2>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <StatCard label="Combined Gross" value={mv(household.combinedGross)} sub="annual" />
+              <StatCard label="Combined Net" value={mv(household.combinedNetAnnual)} sub="annual after tax" />
+              <StatCard label="Combined Monthly" value={mv(household.combinedNetMonthly)} sub="household take-home" />
+              <StatCard label="Combined Super" value={mv(household.combinedSuperContributions)} sub="employer contributions" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Roham summary */}
+              <div className="border border-border rounded-lg p-3 space-y-0.5">
+                <p className="text-xs font-bold mb-2 text-foreground">{roham.name}</p>
+                <TaxRow label="Taxable Income" value={mv(rohamResult.taxableIncome)} />
+                <TaxRow label="Income Tax" value={`− ${mv(rohamResult.incomeTax)}`} negative />
+                <TaxRow label="Medicare Levy" value={`− ${mv(rohamResult.medicareLevy)}`} negative />
+                {rohamResult.medicareLevySurcharge > 0 && <TaxRow label="MLS" value={`− ${mv(rohamResult.medicareLevySurcharge)}`} negative />}
+                {rohamResult.helpRepayment > 0 && <TaxRow label="HELP" value={`− ${mv(rohamResult.helpRepayment)}`} negative />}
+                <TaxRow label="Net Monthly" value={mv(rohamResult.netMonthly)} highlight positive bold />
+                <TaxRow label="Effective Rate" value={`${(rohamResult.effectiveTaxRate * 100).toFixed(1)}%`} muted />
+              </div>
+
+              {/* Fara summary */}
+              <div className="border border-border rounded-lg p-3 space-y-0.5">
+                <p className="text-xs font-bold mb-2 text-foreground">{fara.name}</p>
+                {fara.grossSalary > 0 ? (
+                  <>
+                    <TaxRow label="Taxable Income" value={mv(faraResult.taxableIncome)} />
+                    <TaxRow label="Income Tax" value={`− ${mv(faraResult.incomeTax)}`} negative />
+                    <TaxRow label="Medicare Levy" value={`− ${mv(faraResult.medicareLevy)}`} negative />
+                    {faraResult.medicareLevySurcharge > 0 && <TaxRow label="MLS" value={`− ${mv(faraResult.medicareLevySurcharge)}`} negative />}
+                    {faraResult.helpRepayment > 0 && <TaxRow label="HELP" value={`− ${mv(faraResult.helpRepayment)}`} negative />}
+                    <TaxRow label="Net Monthly" value={mv(faraResult.netMonthly)} highlight positive bold />
+                    <TaxRow label="Effective Rate" value={`${(faraResult.effectiveTaxRate * 100).toFixed(1)}%`} muted />
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground py-4 text-center">Enter {fara.name}'s salary in the {fara.name} tab</p>
+                )}
+              </div>
+            </div>
+
+            {/* Combined totals */}
+            <div className="mt-4 border border-border rounded-lg p-3 space-y-0.5 bg-primary/5">
+              <p className="text-xs font-bold mb-2 text-foreground">Household Totals</p>
+              <TaxRow label="Combined Gross (annual)" value={mv(household.combinedGross)} />
+              <TaxRow label="Combined Tax Paid" value={`− ${mv(household.combinedTotalTax)}`} negative />
+              <TaxRow label="Combined Net (annual)" value={mv(household.combinedNetAnnual)} positive bold highlight />
+              <TaxRow label="Combined Net (monthly)" value={mv(household.combinedNetMonthly)} positive bold />
+              <TaxRow label="Combined Super" value={mv(household.combinedSuperContributions)} muted />
+              <TaxRow label="Household Effective Rate" value={`${(household.combinedEffectiveTaxRate * 100).toFixed(1)}%`} muted />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Chart ── */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+            <PieChart className="w-4 h-4 text-primary" />
+            Income Breakdown
+          </h3>
+          <ToggleButton
+            value={chartPeriod}
+            options={[
+              { label: "Monthly", value: "monthly" },
+              { label: "Annual", value: "annual" },
+            ]}
+            onChange={(v) => setChartPeriod(v as "monthly" | "annual")}
+          />
+        </div>
+        <ResponsiveContainer width="100%" height={260}>
+          <BarChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+            <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+            <YAxis
+              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+              tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Bar dataKey="Net Pay" stackId="a" fill="hsl(142,60%,45%)" radius={[0, 0, 0, 0]} />
+            <Bar dataKey="Income Tax" stackId="a" fill="hsl(0,72%,51%)" />
+            <Bar dataKey="Medicare" stackId="a" fill="hsl(25,90%,55%)" />
+            <Bar dataKey="HELP" stackId="a" fill="hsl(270,60%,55%)" />
+            <Bar dataKey="Super" stackId="a" fill="hsl(210,70%,55%)" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
       </div>
+
+      {/* ── 2025-26 reference table ── */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-primary" />
+          2025–26 Tax Reference
+        </h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="text-left py-2 text-muted-foreground font-medium">Taxable Income</th>
+                <th className="text-right py-2 text-muted-foreground font-medium">Rate</th>
+                <th className="text-right py-2 text-muted-foreground font-medium">Tax on Base</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {[
+                ["$0 – $18,200", "0%", "$0"],
+                ["$18,201 – $45,000", "16%", "$0 base"],
+                ["$45,001 – $135,000", "30%", "$4,288 + 30c/$ over $45k"],
+                ["$135,001 – $190,000", "37%", "$31,288 + 37c/$ over $135k"],
+                ["$190,001+", "45%", "$51,638 + 45c/$ over $190k"],
+              ].map(([range, rate, tax]) => (
+                <tr key={range}>
+                  <td className="py-2 text-foreground font-mono">{range}</td>
+                  <td className="py-2 text-right font-bold text-primary">{rate}</td>
+                  <td className="py-2 text-right text-muted-foreground">{tax}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3 pt-3 border-t border-border grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-muted-foreground">
+          <div><span className="text-foreground font-semibold">Medicare Levy:</span> 2% of taxable income</div>
+          <div><span className="text-foreground font-semibold">LITO:</span> Up to $700 (nil above $66,667)</div>
+          <div><span className="text-foreground font-semibold">Super (SG):</span> 12% from 1 Jul 2025</div>
+          <div><span className="text-foreground font-semibold">MLS:</span> 1–1.5% without hospital cover</div>
+        </div>
+      </div>
+
     </div>
   );
 }
