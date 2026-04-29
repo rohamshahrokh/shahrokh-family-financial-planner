@@ -21,6 +21,7 @@ import {
   type CashFlowYear,
   type YearlyProjection,
 } from './finance';
+import { runCashEngine, type CashEngineOutput } from './cashEngine';
 import type { YearAssumptions } from './forecastStore';
 
 export interface ForecastInput {
@@ -58,6 +59,8 @@ export interface ForecastOutput {
   monthly: CashFlowMonth[];
   annual: CashFlowYear[];
   netWorth: YearlyProjection[];
+  /** Full professional cash engine output (ledger, liquidity, cashByYear, events) */
+  cashEngine: CashEngineOutput;
 }
 
 // ─── Resolve effective assumptions for a given year ───────────────────────────
@@ -149,7 +152,26 @@ export function buildForecast(input: ForecastInput): ForecastOutput {
     annualSalaryIncome:  input.annualSalaryIncome,
   });
 
-  return { monthly, annual, netWorth };
+  // Run central Cash Engine for full ledger, liquidity, cashByYear
+  const cashEngine = runCashEngine({
+    snapshot,
+    properties,
+    stockTransactions:   plannedStockTx,
+    cryptoTransactions:  plannedCryptoTx,
+    stockDCASchedules:   stockDCASchedules   ?? [],
+    cryptoDCASchedules:  cryptoDCASchedules  ?? [],
+    plannedStockOrders:  plannedStockOrders  ?? [],
+    plannedCryptoOrders: plannedCryptoOrders ?? [],
+    bills:               bills               ?? [],
+    expenses:            expenses            ?? [],
+    inflationRate:        firstYearAss.inflation,
+    incomeGrowthRate:     firstYearAss.income_growth,
+    ngRefundMode:         input.ngRefundMode,
+    ngAnnualBenefit:      input.ngAnnualBenefit,
+    annualSalaryIncome:   input.annualSalaryIncome,
+  });
+
+  return { monthly, annual, netWorth, cashEngine };
 }
 
 // ─── Helper: build assumptions from forecastStore state ───────────────────────
