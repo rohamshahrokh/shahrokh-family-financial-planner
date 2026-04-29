@@ -311,16 +311,21 @@ function BulkImportModal({ onImport, onClose }: BulkImportModalProps) {
 }
 
 // ─── DCA Schedule Form ────────────────────────────────────────────────────────
-function emptyDCAForm(tickers: string[]): Omit<StockDCASchedule, 'id'|'created_at'|'updated_at'> {
+// Default portfolio tickers — always available in DCA selector even if holdings table is empty
+const DEFAULT_STOCK_TICKERS = ['NVDA','GOOGL','MSFT','AVGO','CEG','CCJ','WPM','TSLA','OKLO','ANET'];
+
+function emptyDCAForm(extraTickers: string[] = []): Omit<StockDCASchedule, 'id'|'created_at'|'updated_at'> {
+  // Prefer first available ticker from defaults
+  const ticker = DEFAULT_STOCK_TICKERS[0];
   return {
-    ticker: tickers[0] ?? "",
-    asset_name: "",
+    ticker,
+    asset_name: '',
     amount: 0,
-    frequency: "monthly",
-    start_date: new Date().toISOString().split("T")[0],
+    frequency: 'monthly',
+    start_date: new Date().toISOString().split('T')[0],
     end_date: null,
     enabled: true,
-    notes: "",
+    notes: '',
   };
 }
 
@@ -913,6 +918,7 @@ export default function StocksPage() {
       setShowAdd(false);
       setDraft({ ticker: "", name: "", current_price: "", current_holding: "", allocation_pct: 0, expected_return: 12, monthly_dca: 0, annual_lump_sum: 0, projection_years: 10 });
     },
+    onError: (err: any) => toast({ title: 'Save failed', description: String(err?.message || err), variant: 'destructive' }),
   });
 
   const updateMut = useMutation({
@@ -1969,17 +1975,25 @@ export default function StocksPage() {
                     <label className="text-xs text-muted-foreground block mb-1">Ticker</label>
                     <select
                       value={dcaDraft.ticker}
-                      onChange={e => setDcaDraft((p: any) => ({ ...p, ticker: e.target.value }))}
+                      onChange={e => setDcaDraft((p: any) => ({ ...p, ticker: e.target.value, asset_name: e.target.value === '' ? p.asset_name : '' }))}
                       className="w-full h-8 text-xs bg-secondary border border-border rounded px-2 text-foreground"
                     >
-                      {stocks.map((s: any) => <option key={s.ticker} value={s.ticker}>{s.ticker} — {s.name}</option>)}
+                      {/* Default portfolio + any additional holdings loaded from DB */}
+                      {['NVDA','GOOGL','MSFT','AVGO','CEG','CCJ','WPM','TSLA','OKLO','ANET'].map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                      {/* Any stocks in portfolio not already in the default list */}
+                      {stocks
+                        .filter((s: any) => !['NVDA','GOOGL','MSFT','AVGO','CEG','CCJ','WPM','TSLA','OKLO','ANET'].includes(s.ticker))
+                        .map((s: any) => <option key={s.ticker} value={s.ticker}>{s.ticker} — {s.name}</option>)
+                      }
                       <option value="">Custom...</option>
                     </select>
                   </div>
                   {dcaDraft.ticker === '' && (
                     <div>
                       <label className="text-xs text-muted-foreground block mb-1">Custom Ticker</label>
-                      <Input type="text" value={dcaDraft.asset_name} onChange={e => setDcaDraft((p: any) => ({ ...p, asset_name: e.target.value }))} className="h-8 text-xs" placeholder="TICKER" />
+                      <Input type="text" value={dcaDraft.asset_name} onChange={e => setDcaDraft((p: any) => ({ ...p, asset_name: e.target.value }))} className="h-8 text-xs" placeholder="e.g. AAPL" />
                     </div>
                   )}
                   <div>
@@ -2016,7 +2030,12 @@ export default function StocksPage() {
                 </div>
                 <div className="flex gap-2 mt-5">
                   <Button
-                    onClick={() => editingDCAId ? updateDCAMut.mutate({ id: editingDCAId, data: dcaDraft }) : createDCAMut.mutate(dcaDraft)}
+                    onClick={() => {
+                      // When custom ticker, use asset_name as the ticker value
+                      const payload = { ...dcaDraft, ticker: dcaDraft.ticker || dcaDraft.asset_name };
+                      if (!payload.ticker) { toast({ title: 'Ticker required', description: 'Enter a ticker symbol.', variant: 'destructive' }); return; }
+                      editingDCAId ? updateDCAMut.mutate({ id: editingDCAId, data: payload }) : createDCAMut.mutate(payload);
+                    }}
                     disabled={createDCAMut.isPending || updateDCAMut.isPending}
                     style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
                     className="text-xs h-8"
