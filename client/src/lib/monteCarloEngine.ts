@@ -82,6 +82,10 @@ export interface MCInput {
   // User-editable volatility parameters (optional — defaults used if omitted)
   volatilityParams?: Partial<MCVolatilityParams>;
 
+  // Australian negative gearing refund (added to August cashflow each year)
+  ngAnnualBenefit?: number;
+  ngRefundMode?: 'lump-sum' | 'payg';
+
   // Simulation config
   simulations?: number;
   financialFreedomThreshold?: number;
@@ -102,6 +106,13 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
 
   // Merge default volatility with user overrides
   const vp: MCVolatilityParams = { ...DEFAULT_MC_VOLATILITY, ...(input.volatilityParams ?? {}) };
+
+  // Australian NG refund
+  const ngAnnualBenefit  = safeNum(input.ngAnnualBenefit);
+  const ngRefundMode     = input.ngRefundMode ?? 'lump-sum';
+  const ngMonthlyBenefit = ngAnnualBenefit / 12;
+  // August = month index 7 (0-based within a year)
+  const NG_MONTH_IDX = 7;
 
   const s = input.snapshot;
   const investProps = input.properties.filter(p => p.type !== 'ppor');
@@ -358,8 +369,21 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
       // ── Cash interest (earned on positive cash balance) ──
       const cashInterest = Math.max(0, cash) * cashIntRate;
 
+      // ── Australian Negative Gearing Refund ──
+      let ngCashflow = 0;
+      if (ngAnnualBenefit > 0) {
+        if (ngRefundMode === 'payg') {
+          ngCashflow = ngMonthlyBenefit;
+        } else {
+          // Lump-sum: inject in August (mi % 12 === 7) for years after year 0
+          if ((mi % 12) === NG_MONTH_IDX && mi >= 12) {
+            ngCashflow = ngAnnualBenefit;
+          }
+        }
+      }
+
       // ── Net monthly cashflow ──
-      const grossCF = income + propRent + cashInterest
+      const grossCF = income + propRent + cashInterest + ngCashflow
         - expenses - pporMonthlyActual - propLoanRepay - propMaintCost
         - dcaPerMonth[mi] - billsMonthly
         + deterministicDeltas[mi];
