@@ -53,12 +53,65 @@ export interface MonteCarloResult {
   prob_5m: number;
   prob_10m: number;
   prob_neg_cf: number;   // % probability of at least one year with negative cashflow
+  prob_cash_shortfall: number; // % probability cash ever drops below emergency buffer
+  lowest_cash_median: number;  // median of lowest cash balance across all sims
+  highest_risk_year: number;   // year where most sims had negative cashflow
+  biggest_risk_driver: string; // top risk driver label
   fan_data: MonteCarloFanPoint[];
   key_risks: string[];
   recommended_actions: string[];
   ran_at: string;        // ISO timestamp
   simulations: number;
 }
+
+// ─── Per-asset MC volatility assumptions ──────────────────────────────────────
+// User-editable parameters that feed directly into the Monte Carlo engine.
+
+export interface MCVolatilityParams {
+  // Property
+  prop_volatility:       number;  // annual std dev % (default 5)
+  prop_vacancy_rate:     number;  // % of time vacant (default 3)
+  prop_maintenance_pct:  number;  // % of value per year (default 1)
+  prop_purchase_cost_pct: number; // stamp duty + legal as % of price (default 4)
+  // Stocks
+  stock_volatility:      number;  // annual std dev % (default 18)
+  stock_correction_prob: number;  // probability of ≥20% correction in any year (default 15)
+  stock_correction_size: number;  // median correction size % (default 30)
+  // Crypto
+  crypto_volatility:     number;  // annual std dev % (default 60)
+  crypto_crash_prob:     number;  // probability of ≥50% crash in any year (default 25)
+  crypto_crash_size:     number;  // median crash size % (default 65)
+  crypto_bull_prob:      number;  // probability of ≥100% bull run in any year (default 20)
+  crypto_bull_upside:    number;  // median bull run upside % (default 150)
+  // Cash
+  cash_interest_rate:    number;  // savings account rate % (default 4.5)
+  emergency_buffer:      number;  // target minimum cash $ (default 30000)
+  // Debt
+  rate_shock_prob:       number;  // probability of 1%+ rate rise in any year (default 30)
+  rate_shock_size:       number;  // shock size % (default 1.5)
+  // General
+  inflation_volatility:  number;  // std dev of inflation (default 0.5)
+}
+
+export const DEFAULT_MC_VOLATILITY: MCVolatilityParams = {
+  prop_volatility:        5,
+  prop_vacancy_rate:      3,
+  prop_maintenance_pct:   1,
+  prop_purchase_cost_pct: 4,
+  stock_volatility:       18,
+  stock_correction_prob:  15,
+  stock_correction_size:  30,
+  crypto_volatility:      60,
+  crypto_crash_prob:      25,
+  crypto_crash_size:      65,
+  crypto_bull_prob:       20,
+  crypto_bull_upside:     150,
+  cash_interest_rate:     4.5,
+  emergency_buffer:       30_000,
+  rate_shock_prob:        30,
+  rate_shock_size:        1.5,
+  inflation_volatility:   0.5,
+};
 
 // ─── Profile presets ─────────────────────────────────────────────────────────
 
@@ -197,6 +250,7 @@ interface ForecastStoreState {
   profile: ForecastProfile;
   yearlyAssumptions: YearAssumptions[];  // 2026–2035
   monteCarloResult: MonteCarloResult | null;
+  mcVolatility: MCVolatilityParams;      // per-asset volatility + event params
   isRunningMC: boolean;
   isSaving: boolean;
 
@@ -208,6 +262,8 @@ interface ForecastStoreState {
   generateFromProfile: (profile: ForecastProfile) => void;
   setMonteCarloResult: (result: MonteCarloResult) => void;
   setIsRunningMC: (v: boolean) => void;
+  setMCVolatility: (params: Partial<MCVolatilityParams>) => void;
+  resetMCVolatility: () => void;
 
   // Persistence
   saveToSupabase: () => Promise<void>;
@@ -237,6 +293,7 @@ export const useForecastStore = create<ForecastStoreState>()(
       profile: 'moderate',
       yearlyAssumptions: DEFAULT_YEARLY,
       monteCarloResult: null,
+      mcVolatility: { ...DEFAULT_MC_VOLATILITY },
       isRunningMC: false,
       isSaving: false,
 
@@ -266,6 +323,11 @@ export const useForecastStore = create<ForecastStoreState>()(
 
       setMonteCarloResult: (result) => set({ monteCarloResult: result }),
       setIsRunningMC: (v) => set({ isRunningMC: v }),
+
+      setMCVolatility: (params) => set(state => ({
+        mcVolatility: { ...state.mcVolatility, ...params },
+      })),
+      resetMCVolatility: () => set({ mcVolatility: { ...DEFAULT_MC_VOLATILITY } }),
 
       saveToSupabase: async () => {
         const { yearlyAssumptions, forecastMode, profile } = get();
@@ -333,6 +395,7 @@ export const useForecastStore = create<ForecastStoreState>()(
         profile:            state.profile,
         yearlyAssumptions:  state.yearlyAssumptions,
         monteCarloResult:   state.monteCarloResult,
+        mcVolatility:       state.mcVolatility,
       }),
     }
   )
