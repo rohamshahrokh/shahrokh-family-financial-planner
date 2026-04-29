@@ -27,6 +27,9 @@ interface AppState {
   setRole: (role: UserRole) => void;
 }
 
+// Re-export forecast mode type for convenience
+export type { ForecastMode, ForecastProfile } from './forecastStore';
+
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
