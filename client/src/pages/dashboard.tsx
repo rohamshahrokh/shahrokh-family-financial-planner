@@ -297,6 +297,7 @@ export default function DashboardPage() {
   const snap = {
     ppor:             safeNum(snapshot?.ppor)             || 1510000,
     cash:             safeNum(snapshot?.cash)             || 220000,
+    offset_balance:   safeNum(snapshot?.offset_balance),   // mortgage offset account
     super_balance:    safeNum(snapshot?.super_balance)    || 85000,
     stocks:           safeNum(snapshot?.stocks),
     crypto:           safeNum(snapshot?.crypto),
@@ -326,7 +327,11 @@ export default function DashboardPage() {
   };
 
   // ─── Derived values ───────────────────────────────────────────────────────
-  const totalAssets      = snap.ppor + snap.cash + snap.super_balance + snap.stocks + snap.crypto + snap.cars + snap.iran_property;
+  // Use live holdings for stocks/crypto (from DB), add offset_balance alongside cash.
+  // snap.stocks / snap.crypto are snapshot fallbacks — do NOT add both or you double-count.
+  const liveStocks  = stocksTotal  > 0 ? stocksTotal  : snap.stocks;
+  const liveCrypto  = cryptoTotal  > 0 ? cryptoTotal  : snap.crypto;
+  const totalAssets = snap.ppor + snap.cash + snap.offset_balance + snap.super_balance + liveStocks + liveCrypto + snap.cars + snap.iran_property;
   const totalLiabilities = snap.mortgage + snap.other_debts;
   const netWorth         = totalAssets - totalLiabilities;
   const surplus          = snap.monthly_income - snap.monthly_expenses;
@@ -495,12 +500,12 @@ export default function DashboardPage() {
   // ─── Chart data ───────────────────────────────────────────────────────────
   const assetData = [
     { name: "PPOR",          value: snap.ppor },
-    { name: "Cash",          value: snap.cash },
+    { name: "Cash",          value: snap.cash + snap.offset_balance },
     { name: "Super",         value: snap.super_balance },
     { name: "Cars",          value: snap.cars },
     { name: "Iran Property", value: snap.iran_property },
-    { name: "Stocks",        value: stocksTotal + snap.stocks },
-    { name: "Crypto",        value: cryptoTotal + snap.crypto },
+    { name: "Stocks",        value: liveStocks },
+    { name: "Crypto",        value: liveCrypto },
   ].filter((d) => d.value > 0);
 
   const cashFlowData = [
@@ -561,8 +566,8 @@ export default function DashboardPage() {
 
   // ─── Wealth Strategy Summary Cards ───────────────────────────────────────
   const wealthCards = useMemo(() => {
-    // FIRE progress
-    const currentInvestable = snap.cash + snap.super_balance + snap.stocks + snap.crypto + stocksTotal + cryptoTotal;
+    // FIRE progress — use liveStocks/liveCrypto (no double-count), include offset_balance
+    const currentInvestable = snap.cash + snap.offset_balance + snap.super_balance + liveStocks + liveCrypto;
     const requiredFIRE = (10000 * 12) / 0.04; // default: $10k/mo at 4% SWR
     const fireProgress = Math.min(100, Math.round((currentInvestable / requiredFIRE) * 100));
 
@@ -580,10 +585,10 @@ export default function DashboardPage() {
     // Property readiness (rough)
     const targetIP = 750000;
     const depositNeeded = targetIP * 0.2 + targetIP * 0.035; // 20% + stamp duty
-    const depositReady = Math.min(100, Math.round((snap.cash * 0.7 / depositNeeded) * 100));
+    const depositReady = Math.min(100, Math.round(((snap.cash + snap.offset_balance) * 0.7 / depositNeeded) * 100));
 
     // Retirement age estimate (rough)
-    const currentInvestable2 = snap.cash + snap.super_balance + snap.stocks + snap.crypto + stocksTotal + cryptoTotal;
+    const currentInvestable2 = snap.cash + snap.offset_balance + snap.super_balance + liveStocks + liveCrypto;
     const targetFIRE = (8000 * 12) / 0.04;
     const monthlySaving = Math.max(surplus, 100);
     const r = 0.07 / 12;
@@ -686,6 +691,7 @@ export default function DashboardPage() {
   const snapFields = [
     { label: "PPOR",             key: "ppor",             group: "asset" },
     { label: "Cash",             key: "cash",             group: "asset" },
+    { label: "Offset Balance",   key: "offset_balance",   group: "asset" },
     { label: "Super",            key: "super_balance",    group: "asset" },
     { label: "Cars",             key: "cars",             group: "asset" },
     { label: "Iran Property",    key: "iran_property",    group: "asset" },
