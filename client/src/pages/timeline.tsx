@@ -17,6 +17,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAppStore } from "@/lib/store";
+import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import {
   formatCurrency, safeNum,
   projectNetWorth, buildCashFlowSeries, aggregateCashFlowToAnnual,
@@ -137,12 +138,13 @@ export default function TimelinePage() {
 
   // ── 10-year net worth projection ───────────────────────────────────────────
   // Only planned transactions (actuals already in expenses — avoid double-counting)
+  const fa = useForecastAssumptions();
   const plannedStockTx = useMemo(() => stockTransactions.filter((t: any) => t.status === 'planned'), [stockTransactions]);
   const plannedCryptoTx = useMemo(() => cryptoTransactions.filter((t: any) => t.status === 'planned'), [cryptoTransactions]);
 
   const projection: YearlyProjection[] = useMemo(() =>
-    projectNetWorth({ snapshot: snap, properties, stocks: stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, years: 10 }),
-    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders]
+    projectNetWorth({ snapshot: snap, properties, stocks: stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, years: 10, inflation: fa.flat.inflation, ppor_growth: fa.flat.property_growth, yearlyAssumptions: fa.yearly }),
+    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa]
   );
 
   // ── Monthly cash flow series ───────────────────────────────────────────────
@@ -157,8 +159,10 @@ export default function TimelinePage() {
       cryptoDCASchedules,
       plannedStockOrders,
       plannedCryptoOrders,
+      inflationRate: fa.flat.inflation,
+      incomeGrowthRate: fa.flat.income_growth,
     }),
-    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders]
+    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa]
   );
 
   const annualSeries = useMemo(() =>
@@ -457,7 +461,7 @@ export default function TimelinePage() {
             )}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Info className="w-3.5 h-3.5" />
-              <span>6% PPOR, 10% super, 3% inflation</span>
+              <span>{fa.flat.property_growth}% PPOR, {fa.flat.super_return}% super, {fa.flat.inflation}% inflation — {fa.mode === 'year-by-year' ? 'Year-by-Year' : fa.mode === 'monte-carlo' ? 'Monte Carlo' : `Profile: ${fa.profile}`}</span>
             </div>
           </div>
         </div>
@@ -562,12 +566,12 @@ export default function TimelinePage() {
           <div className="text-xs text-muted-foreground space-y-1">
             <p className="font-medium text-foreground/70">Projection Assumptions</p>
             <ul className="space-y-0.5 list-disc list-inside">
-              <li>PPOR value growth: 6% p.a.</li>
-              <li>Super balance growth: 10% p.a.</li>
+              <li>PPOR value growth: {fa.flat.property_growth}% p.a.</li>
+              <li>Super balance growth: {fa.flat.super_return}% p.a.</li>
               <li>Stocks/Crypto: individual expected return rates per asset</li>
-              <li>Expenses: 3% annual inflation</li>
-              <li>Income: 3.5% annual growth</li>
-              <li>Mortgage: 6.5% rate, 30-year term (from snapshot balance)</li>
+              <li>Expenses: {fa.flat.expense_growth}% annual inflation</li>
+              <li>Income: {fa.flat.income_growth}% annual growth</li>
+              <li>Mortgage: {fa.flat.interest_rate}% rate, 30-year term (from snapshot balance)</li>
               <li>50% of annual surplus added to cash savings</li>
               <li>Past months use actual expense records where available</li>
             </ul>
