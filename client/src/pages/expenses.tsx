@@ -601,14 +601,16 @@ export default function ExpensesPage() {
   const importJustSetFilterRef = useRef(false);
 
   // ── Data fetching ─────────────────────────────────────────────────────────────
-  const { data: rawExpenses = [] } = useQuery<any[]>({
+  const { data: rawExpenses = [], isLoading: expensesLoading } = useQuery<any[]>({
     queryKey: ['/api/expenses'],
     queryFn: () => apiRequest('GET', '/api/expenses').then(r => r.json()),
+    staleTime: 0,
   });
 
   const { data: incomeRecords = [] } = useQuery<any[]>({
     queryKey: ['/api/income'],
     queryFn: () => apiRequest('GET', '/api/income').then(r => r.json()),
+    staleTime: 0,
   });
 
   const expenses = useMemo(() => rawExpenses.map(migrateExpense), [rawExpenses]);
@@ -1801,7 +1803,14 @@ export default function ExpensesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {paginated.length === 0 ? (
+                  {expensesLoading ? (
+                    <tr><td colSpan={11} className="py-10 text-center text-sm text-muted-foreground">
+                      <div className="flex flex-col items-center gap-3">
+                        <RefreshCw className="w-5 h-5 animate-spin text-primary" />
+                        <span>Loading expenses from Supabase…</span>
+                      </div>
+                    </td></tr>
+                  ) : paginated.length === 0 ? (
                     <tr><td colSpan={11} className="py-10 text-center text-sm text-muted-foreground">
                       <div className="flex flex-col items-center gap-3">
                         <span>No expenses found{hasActiveFilters ? ' matching your filters' : ''}.</span>
@@ -2012,14 +2021,19 @@ export default function ExpensesPage() {
             </div>
           )}
 
-          {/* Add income form */}
+          {/* Add income modal — fixed overlay so it's immediately visible from top button */}
           {showAddIncome && (
-            <div className="rounded-xl border border-emerald-500/30 bg-card p-5">
-              <h3 className="text-sm font-bold mb-4">Add Income Record</h3>
-              <IncomeForm data={incomeDraft} onChange={handleIncomeDraftChange} />
-              <div className="flex gap-2 mt-4">
-                <SaveButton label="Save Income Record" onSave={() => createIncomeMut.mutateAsync(normaliseIncomeDraft(incomeDraft))} />
-                <Button size="sm" variant="outline" onClick={() => setShowAddIncome(false)}>Cancel</Button>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+              <div className="bg-card border border-emerald-500/30 rounded-2xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="font-bold text-sm">Add Income Record</h3>
+                  <button onClick={() => setShowAddIncome(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                </div>
+                <IncomeForm data={incomeDraft} onChange={handleIncomeDraftChange} />
+                <div className="flex gap-2 mt-5">
+                  <SaveButton label="Save Income Record" onSave={() => createIncomeMut.mutateAsync(normaliseIncomeDraft(incomeDraft))} />
+                  <Button size="sm" variant="outline" onClick={() => setShowAddIncome(false)}>Cancel</Button>
+                </div>
               </div>
             </div>
           )}
