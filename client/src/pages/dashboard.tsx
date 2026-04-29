@@ -308,6 +308,21 @@ export default function DashboardPage() {
       ? incomeTrackerMonthly
       : safeNum(snapshot?.monthly_income)   || 22000,
     monthly_expenses: safeNum(snapshot?.monthly_expenses) || 14540,
+    // ── Super per-person fields (passed through to finance engine) ──
+    roham_super_balance:     safeNum(snapshot?.roham_super_balance),
+    roham_super_salary:      safeNum(snapshot?.roham_super_salary),
+    roham_employer_contrib:  safeNum(snapshot?.roham_employer_contrib)  || 11.5,
+    roham_salary_sacrifice:  safeNum(snapshot?.roham_salary_sacrifice),
+    roham_super_growth_rate: safeNum(snapshot?.roham_super_growth_rate) || 8.0,
+    roham_super_fee_pct:     safeNum(snapshot?.roham_super_fee_pct)     || 0.5,
+    roham_super_insurance_pa:safeNum(snapshot?.roham_super_insurance_pa),
+    fara_super_balance:      safeNum(snapshot?.fara_super_balance),
+    fara_super_salary:       safeNum(snapshot?.fara_super_salary),
+    fara_employer_contrib:   safeNum(snapshot?.fara_employer_contrib)   || 11.5,
+    fara_salary_sacrifice:   safeNum(snapshot?.fara_salary_sacrifice),
+    fara_super_growth_rate:  safeNum(snapshot?.fara_super_growth_rate)  || 8.0,
+    fara_super_fee_pct:      safeNum(snapshot?.fara_super_fee_pct)      || 0.5,
+    fara_super_insurance_pa: safeNum(snapshot?.fara_super_insurance_pa),
   };
 
   // ─── Derived values ───────────────────────────────────────────────────────
@@ -372,6 +387,22 @@ export default function DashboardPage() {
 
   const year10NW      = projection[9]?.endNetWorth || netWorth;
   const passiveIncome = projection[0]?.passiveIncome || 0;
+
+  // ─── Super KPI values ────────────────────────────────────────────────────
+  // Current super = per-person if available, else fall back to legacy super_balance
+  const currentSuperRoham = snap.roham_super_balance || snap.super_balance * 0.6;
+  const currentSuperFara  = snap.fara_super_balance  || snap.super_balance * 0.4;
+  const currentTotalSuper = currentSuperRoham + currentSuperFara;
+  // 10-year projected super from projection engine
+  const super10Year = projection[9]?.totalSuper || currentTotalSuper;
+  // Projected super at Roham age 60 (born ~1987 → 2047 = ~21 years from 2026)
+  // projection only runs 10 years on the dashboard; use year 10 as best available proxy
+  const superAt60Idx = Math.min(20, projection.length - 1);
+  // Estimate at 60 by compounding year-10 super forward at 8% p.a. for remaining years
+  const super10SuperVal = projection[Math.min(9, projection.length - 1)]?.totalSuper || currentTotalSuper;
+  const yearsToSixty = Math.max(0, 2047 - (2026 + Math.min(9, projection.length - 1)));
+  const superAt60 = projection[superAt60Idx]?.totalSuper
+    || Math.round(super10SuperVal * Math.pow(1.08, yearsToSixty));
 
   // ─── CFO card computed values ─────────────────────────────────────────
   const today = new Date();
@@ -852,6 +883,18 @@ export default function DashboardPage() {
           trend={passiveIncome > 0 ? 1 : 0}
           icon={<PiggyBank />}
           accent="hsl(43,85%,55%)"
+        />
+        <KpiCard
+          label="Super (Combined)"
+          value={maskValue(formatCurrency(currentTotalSuper, true), privacyMode, "currency")}
+          subValue={maskValue(
+            `At 60: ${formatCurrency(superAt60, true)}`,
+            privacyMode,
+            "currency"
+          )}
+          trend={1}
+          icon={<Shield />}
+          accent="hsl(270,60%,60%)"
         />
         <KpiCard
           label="Savings Rate"

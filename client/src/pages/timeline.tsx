@@ -22,7 +22,7 @@ import {
   formatCurrency, safeNum,
   projectNetWorth, buildCashFlowSeries, aggregateCashFlowToAnnual,
   calcNegativeGearing,
-  type YearlyProjection, type PropertyYearDetail, type NGSummary,
+  type YearlyProjection, type PropertyYearDetail, type NGSummary, type GrowthBreakdown,
 } from "@/lib/finance";
 import { runCashEngine } from "@/lib/cashEngine";
 import {
@@ -32,6 +32,7 @@ import {
 import {
   TrendingUp, Download, BarChart2,
   Home, DollarSign, Layers, Target, Info, ChevronRight, ChevronDown,
+  ShieldCheck, TrendingDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
@@ -141,6 +142,21 @@ export default function TimelinePage() {
     other_debts:      safeNum(snapshot?.other_debts)      || 19000,
     monthly_income:   safeNum(snapshot?.monthly_income)   || 22000,
     monthly_expenses: safeNum(snapshot?.monthly_expenses) || 14540,
+    // Per-person super fields
+    roham_super_balance:     safeNum(snapshot?.roham_super_balance),
+    roham_super_salary:      safeNum(snapshot?.roham_super_salary),
+    roham_employer_contrib:  safeNum(snapshot?.roham_employer_contrib),
+    roham_salary_sacrifice:  safeNum(snapshot?.roham_salary_sacrifice),
+    roham_super_growth_rate: safeNum(snapshot?.roham_super_growth_rate),
+    roham_super_fee_pct:     safeNum(snapshot?.roham_super_fee_pct),
+    roham_super_insurance_pa:safeNum(snapshot?.roham_super_insurance_pa),
+    fara_super_balance:      safeNum(snapshot?.fara_super_balance),
+    fara_super_salary:       safeNum(snapshot?.fara_super_salary),
+    fara_employer_contrib:   safeNum(snapshot?.fara_employer_contrib),
+    fara_salary_sacrifice:   safeNum(snapshot?.fara_salary_sacrifice),
+    fara_super_growth_rate:  safeNum(snapshot?.fara_super_growth_rate),
+    fara_super_fee_pct:      safeNum(snapshot?.fara_super_fee_pct),
+    fara_super_insurance_pa: safeNum(snapshot?.fara_super_insurance_pa),
   }), [snapshot]);
 
   // ── 10-year net worth projection ───────────────────────────────────────────
@@ -243,8 +259,12 @@ export default function TimelinePage() {
   const finalYear = projection[projection.length - 1];
   const nwIn10y = finalYear?.endNetWorth ?? 0;
   const nwGrowth = nwIn10y - currentNW;
-  const cagr = currentNW > 0 ? (Math.pow(nwIn10y / currentNW, 1 / 10) - 1) * 100 : 0;
+  const cagr = finalYear?.cagr ?? (currentNW > 0 ? (Math.pow(nwIn10y / currentNW, 1 / 10) - 1) * 100 : 0);
   const monthlySurplus = snap.monthly_income - snap.monthly_expenses;
+  const totalSuper10y = finalYear?.totalSuper ?? 0;
+  const accessibleNW10y = finalYear?.accessibleNetWorth ?? 0;
+  // Expansion state for growth breakdown rows
+  const [expandedYear, setExpandedYear] = useState<number | null>(null);
 
   // ── Chart data ─────────────────────────────────────────────────────────────
   const nwChartData = projection.map(p => ({
@@ -287,13 +307,26 @@ export default function TimelinePage() {
 
     // Annual projection sheet
     const projHeaders = [
-      'Year', 'Start NW', 'Total Assets', 'Property Value', 'Property Equity',
-      'Stocks', 'Crypto', 'Cash', 'Total Liabilities', 'End NW', 'Growth', 'Growth %', 'Monthly CF'
+      'Year', 'Start NW',
+      'Prop Equity', 'Stocks', 'Crypto',
+      'Super Roham', 'Super Fara', 'Total Super',
+      'Cash', 'Total Liabilities',
+      'Accessible NW', 'Total NW incl Super',
+      'Growth', 'Growth %', 'CAGR %', 'Real Growth', 'Real Growth %',
+      'Savings', 'Prop Appreciation', 'Stock Appreciation', 'Crypto Appreciation', 'Debt Paydown', 'Super Growth',
+      'Monthly CF',
     ];
     const projRows = projection.map(p => [
-      p.year, p.startNetWorth, p.totalAssets, p.propertyValue, p.propertyEquity,
-      p.stockValue, p.cryptoValue, p.cash, p.totalLiabilities, p.endNetWorth,
-      p.growth, p.growthPct.toFixed(1) + '%', p.monthlyCashFlow,
+      p.year, p.startNetWorth,
+      p.propertyEquity, p.stockValue, p.cryptoValue,
+      p.superRoham, p.superFara, p.totalSuper,
+      p.cash, p.totalLiabilities,
+      p.accessibleNetWorth, p.endNetWorth,
+      p.growth, p.growthPct.toFixed(1) + '%', p.cagr.toFixed(1) + '%', p.realGrowth, p.realGrowthPct.toFixed(1) + '%',
+      p.growthBreakdown.savings, p.growthBreakdown.propertyAppreciation,
+      p.growthBreakdown.stockAppreciation, p.growthBreakdown.cryptoAppreciation,
+      p.growthBreakdown.debtPaydown, p.growthBreakdown.superGrowth,
+      p.monthlyCashFlow,
     ]);
     const projSheet = XLSX.utils.aoa_to_sheet([projHeaders, ...projRows]);
     XLSX.utils.book_append_sheet(wb, projSheet, 'Annual Projection');
@@ -503,6 +536,34 @@ export default function TimelinePage() {
         )}
       </div>
 
+      {/* Super summary KPI strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard
+          label="10-yr Total Super"
+          value={formatCurrency(totalSuper10y, true)}
+          sub="Roham + Fara combined"
+          color="text-violet-400"
+        />
+        <StatCard
+          label="Accessible NW (2035)"
+          value={formatCurrency(accessibleNW10y, true)}
+          sub="Excl. super (liquid)"
+          color="text-cyan-400"
+        />
+        <StatCard
+          label="CAGR"
+          value={`${cagr.toFixed(1)}% p.a.`}
+          sub="Compound annual growth"
+          color="text-emerald-400"
+        />
+        <StatCard
+          label="Real Growth (inflation-adj)"
+          value={formatCurrency(finalYear?.realGrowth ?? 0, true)}
+          sub={`${(finalYear?.realGrowthPct ?? 0).toFixed(1)}% real return`}
+          color={(finalYear?.realGrowth ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}
+        />
+      </div>
+
       {/* Year-by-year table */}
       <div className="rounded-xl border border-border bg-card p-5">
         <div className="flex items-center justify-between mb-4">
@@ -511,7 +572,6 @@ export default function TimelinePage() {
             <p className="text-sm font-bold">Year-by-Year Projection</p>
           </div>
           <div className="flex items-center gap-3">
-            {/* Per-property detail toggle */}
             {projection[0]?.propertyDetails?.length > 0 && (
               <button
                 className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border transition-all ${
@@ -528,7 +588,7 @@ export default function TimelinePage() {
             )}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Info className="w-3.5 h-3.5" />
-              <span>{fa.flat.property_growth}% PPOR, {fa.flat.super_return}% super, {fa.flat.inflation}% inflation — {fa.mode === 'year-by-year' ? 'Year-by-Year' : fa.mode === 'monte-carlo' ? 'Monte Carlo' : `Profile: ${fa.profile}`}</span>
+              <span>{fa.flat.property_growth}% PPOR · {fa.flat.super_return}% super · {fa.flat.inflation}% inflation · {fa.mode === 'year-by-year' ? 'Year-by-Year' : fa.mode === 'monte-carlo' ? 'Monte Carlo' : `Profile: ${fa.profile}`}</span>
             </div>
           </div>
         </div>
@@ -537,14 +597,13 @@ export default function TimelinePage() {
             <thead>
               <tr className="border-b border-border">
                 {[
-                  'Year', 'Start NW', 'Total Assets', 'Prop Value', 'Prop Equity',
-                  ...(showPropertyDetail
-                    ? (projection[0]?.propertyDetails ?? []).flatMap((d: PropertyYearDetail) => [
-                        `${d.name} Value`, `${d.name} Loan`, `${d.name} Equity`, `${d.name} CF/yr`
-                      ])
-                    : []
-                  ),
-                  'Stocks', 'Crypto', 'Forecast Cash', 'Total Liab.', 'End NW', 'Growth', 'Monthly CF'
+                  'Year', 'Start NW',
+                  'Prop Equity', 'Stocks', 'Crypto',
+                  'Super Roham', 'Super Fara', 'Total Super',
+                  'Cash', 'Liabilities',
+                  'Accessible NW', 'Total NW',
+                  'Growth', 'CAGR', 'Real Growth',
+                  'Monthly CF',
                 ].map(h => (
                   <th key={h} className="text-left pb-2 pr-3 text-muted-foreground font-medium whitespace-nowrap">{h}</th>
                 ))}
@@ -554,70 +613,102 @@ export default function TimelinePage() {
               {projection.map((p, i) => {
                 const isLast = i === projection.length - 1;
                 const isCurrent = p.year === new Date().getFullYear() + 1;
-                const growthPositive = p.growth >= 0;
+                const growthPos = p.growth >= 0;
+                const realGrowthPos = p.realGrowth >= 0;
+                const isExpanded = expandedYear === p.year;
+                const bd = p.growthBreakdown;
 
                 return (
-                  <tr
-                    key={p.year}
-                    className={`border-b border-border/50 transition-colors hover:bg-secondary/30 ${isLast ? 'font-bold' : ''} ${isCurrent ? 'bg-primary/5' : ''}`}
-                  >
-                    <td className={`py-2 pr-3 font-semibold ${isLast ? 'text-primary' : ''}`}>{p.year}</td>
-                    <td className="py-2 pr-3 num-display text-muted-foreground">{formatCurrency(p.startNetWorth, true)}</td>
-                    <td className="py-2 pr-3 num-display text-emerald-400">{formatCurrency(p.totalAssets, true)}</td>
-                    <td className="py-2 pr-3 num-display">{formatCurrency(p.propertyValue, true)}</td>
-                    <td className="py-2 pr-3 num-display text-primary">{formatCurrency(p.propertyEquity, true)}</td>
-                    {/* Per-property detail columns */}
-                    {showPropertyDetail && (p.propertyDetails ?? []).map((d: PropertyYearDetail) => (
-                      <>
-                        <td key={`${d.id}-val`} className="py-2 pr-3 num-display text-amber-300/80">{formatCurrency(d.value, true)}</td>
-                        <td key={`${d.id}-loan`} className="py-2 pr-3 num-display text-red-400/70">{formatCurrency(d.loanBalance, true)}</td>
-                        <td key={`${d.id}-eq`} className="py-2 pr-3 num-display text-cyan-400">{formatCurrency(d.equity, true)}</td>
-                        <td key={`${d.id}-cf`} className={`py-2 pr-3 num-display ${d.annualCashFlow >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{formatCurrency(d.annualCashFlow, true)}</td>
-                      </>
-                    ))}
-                    <td className="py-2 pr-3 num-display">{formatCurrency(p.stockValue, true)}</td>
-                    <td className="py-2 pr-3 num-display">{formatCurrency(p.cryptoValue, true)}</td>
-                    <td className="py-2 pr-3 num-display">{formatCurrency(p.cash, true)}</td>
-                    <td className="py-2 pr-3 num-display text-red-400">{formatCurrency(p.totalLiabilities, true)}</td>
-                    <td className={`py-2 pr-3 num-display font-bold ${isLast ? 'text-primary' : 'text-foreground'}`}>
-                      {formatCurrency(p.endNetWorth, true)}
-                    </td>
-                    <td className={`py-2 pr-3 num-display ${growthPositive ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {growthPositive ? '+' : ''}{formatCurrency(p.growth, true)}
-                      <span className="text-muted-foreground ml-1">({p.growthPct.toFixed(0)}%)</span>
-                    </td>
-                    <td className={`py-2 num-display ${p.monthlyCashFlow >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {formatCurrency(p.monthlyCashFlow)}/mo
-                    </td>
-                  </tr>
+                  <>
+                    <tr
+                      key={p.year}
+                      className={`border-b border-border/40 transition-colors hover:bg-secondary/30 cursor-pointer ${
+                        isLast ? 'font-bold' : ''
+                      } ${isCurrent ? 'bg-primary/5' : ''} ${isExpanded ? 'bg-secondary/20' : ''}`}
+                      onClick={() => setExpandedYear(isExpanded ? null : p.year)}
+                    >
+                      <td className={`py-2 pr-3 font-semibold flex items-center gap-1 ${
+                        isLast ? 'text-primary' : ''
+                      }`}>
+                        {isExpanded
+                          ? <ChevronDown className="w-3 h-3 text-muted-foreground" />
+                          : <ChevronRight className="w-3 h-3 text-muted-foreground" />
+                        }
+                        {p.year}
+                      </td>
+                      <td className="py-2 pr-3 num-display text-muted-foreground">{formatCurrency(p.startNetWorth, true)}</td>
+                      <td className="py-2 pr-3 num-display text-amber-400">{formatCurrency(p.propertyEquity, true)}</td>
+                      <td className="py-2 pr-3 num-display text-blue-400">{formatCurrency(p.stockValue, true)}</td>
+                      <td className="py-2 pr-3 num-display text-orange-400">{formatCurrency(p.cryptoValue, true)}</td>
+                      <td className="py-2 pr-3 num-display text-violet-400">{formatCurrency(p.superRoham, true)}</td>
+                      <td className="py-2 pr-3 num-display text-violet-300">{formatCurrency(p.superFara, true)}</td>
+                      <td className="py-2 pr-3 num-display text-violet-500 font-semibold">{formatCurrency(p.totalSuper, true)}</td>
+                      <td className="py-2 pr-3 num-display text-emerald-300">{formatCurrency(p.cash, true)}</td>
+                      <td className="py-2 pr-3 num-display text-red-400">{formatCurrency(p.totalLiabilities, true)}</td>
+                      <td className="py-2 pr-3 num-display text-cyan-400 font-semibold">{formatCurrency(p.accessibleNetWorth, true)}</td>
+                      <td className={`py-2 pr-3 num-display font-bold ${isLast ? 'text-primary' : 'text-foreground'}`}>
+                        {formatCurrency(p.endNetWorth, true)}
+                      </td>
+                      <td className={`py-2 pr-3 num-display ${growthPos ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {growthPos ? '+' : ''}{formatCurrency(p.growth, true)}
+                        <span className="text-muted-foreground/70 ml-1">({p.growthPct.toFixed(0)}%)</span>
+                      </td>
+                      <td className="py-2 pr-3 num-display text-emerald-300">{p.cagr.toFixed(1)}%</td>
+                      <td className={`py-2 pr-3 num-display ${realGrowthPos ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {realGrowthPos ? '+' : ''}{formatCurrency(p.realGrowth, true)}
+                      </td>
+                      <td className={`py-2 num-display ${p.monthlyCashFlow >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {formatCurrency(p.monthlyCashFlow)}/mo
+                      </td>
+                    </tr>
+                    {/* Growth breakdown expansion row */}
+                    {isExpanded && (
+                      <tr key={`${p.year}-breakdown`} className="bg-secondary/30 border-b border-border/30">
+                        <td colSpan={16} className="py-3 px-4">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                            {([
+                              { label: 'Savings', val: bd.savings,              icon: '💰', color: 'text-emerald-400' },
+                              { label: 'Property Appreciation', val: bd.propertyAppreciation, icon: '🏠', color: 'text-amber-400' },
+                              { label: 'Stock Appreciation',    val: bd.stockAppreciation,    icon: '📈', color: 'text-blue-400'  },
+                              { label: 'Crypto Appreciation',   val: bd.cryptoAppreciation,   icon: '₿',  color: 'text-orange-400'},
+                              { label: 'Debt Paydown',          val: bd.debtPaydown,          icon: '🔽', color: 'text-teal-400' },
+                              { label: 'Super Growth',          val: bd.superGrowth,          icon: '🛡', color: 'text-violet-400'},
+                            ] as { label: string; val: number; icon: string; color: string }[]).map(item => (
+                              <div key={item.label} className="rounded-lg bg-card border border-border/50 p-2.5">
+                                <p className="text-muted-foreground text-[10px] mb-0.5">{item.icon} {item.label}</p>
+                                <p className={`num-display font-semibold text-xs ${item.color}`}>
+                                  {item.val >= 0 ? '+' : ''}{formatCurrency(item.val, true)}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="text-muted-foreground text-[10px] mt-2 italic">
+                            Total: {formatCurrency(bd.total, true)} · Real (inflation-adj): {formatCurrency(p.realGrowth, true)} ({p.realGrowthPct.toFixed(1)}%) · CAGR from start: {p.cagr.toFixed(1)}%
+                          </p>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 );
               })}
             </tbody>
-            {/* Totals row */}
             {projection.length > 0 && (
               <tfoot>
                 <tr className="border-t border-border">
-                  <td className="pt-3 text-xs text-muted-foreground font-medium">Summary</td>
+                  <td className="pt-3 text-xs text-muted-foreground font-medium" colSpan={2}>10-yr Summary</td>
                   <td className="pt-3 pr-3" />
                   <td className="pt-3 pr-3" />
                   <td className="pt-3 pr-3" />
                   <td className="pt-3 pr-3" />
-                  {showPropertyDetail && (projection[0]?.propertyDetails ?? []).flatMap((_: PropertyYearDetail) => [
-                    <td className="pt-3 pr-3" />,
-                    <td className="pt-3 pr-3" />,
-                    <td className="pt-3 pr-3" />,
-                    <td className="pt-3 pr-3" />,
-                  ])}
+                  <td className="pt-3 pr-3" />
+                  <td className="pt-3 pr-3 text-violet-400 font-bold num-display">{formatCurrency(totalSuper10y, true)}</td>
                   <td className="pt-3 pr-3" />
                   <td className="pt-3 pr-3" />
+                  <td className="pt-3 pr-3 text-cyan-400 font-bold num-display">{formatCurrency(accessibleNW10y, true)}</td>
+                  <td className="pt-3 pr-3 text-primary font-bold num-display">{formatCurrency(finalYear?.endNetWorth ?? 0, true)}</td>
+                  <td className="pt-3 pr-3 text-emerald-400 font-bold num-display">+{formatCurrency(nwGrowth, true)}</td>
+                  <td className="pt-3 pr-3 text-emerald-300 font-bold">{cagr.toFixed(1)}% CAGR</td>
                   <td className="pt-3 pr-3" />
-                  <td className="pt-3 pr-3" />
-                  <td className="pt-3 pr-3 text-primary font-bold num-display">
-                    {formatCurrency(finalYear?.endNetWorth ?? 0, true)}
-                  </td>
-                  <td className="pt-3 pr-3 text-emerald-400 font-bold num-display">
-                    +{formatCurrency(nwGrowth, true)}
-                  </td>
                   <td className="pt-3" />
                 </tr>
               </tfoot>
@@ -639,7 +730,8 @@ export default function TimelinePage() {
               <li>Expenses: {fa.flat.expense_growth}% annual inflation</li>
               <li>Income: {fa.flat.income_growth}% annual growth</li>
               <li>Mortgage: {fa.flat.interest_rate}% rate, 30-year term (from snapshot balance)</li>
-              <li>50% of annual surplus added to cash savings</li>
+              <li>Super: Australian SG rate 11.5% p.a. · employer contributions + optional salary sacrifice · tracked separately from cash</li>
+              <li>Super is locked retirement wealth — excluded from monthly spendable cashflow and Accessible NW</li>
               <li>Past months use actual expense records where available</li>
             </ul>
             <p className="mt-1 italic">This is a projection only. Actual outcomes will vary based on market conditions, lifestyle changes, and other factors.</p>

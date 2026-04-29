@@ -180,25 +180,50 @@ export interface PropertyYearDetail {
   annualCashFlow: number; // rental income minus loan repayments
 }
 
+export interface GrowthBreakdown {
+  savings:              number;  // net income surplus added to assets
+  propertyAppreciation: number;  // value gain on all properties (PPOR + investment)
+  stockAppreciation:    number;  // market gain on stocks
+  cryptoAppreciation:   number;  // market gain on crypto
+  debtPaydown:          number;  // reduction in total liabilities
+  superGrowth:          number;  // investment return inside super (both persons)
+  total:                number;  // sum of all components = endNW - startNW
+}
+
 export interface YearlyProjection {
   year: number;
-  startNetWorth: number;
+  startNetWorth: number;         // previous year's endNetWorth (consistent baseline)
   income: number;
   expenses: number;
+  netCashflow: number;           // income - expenses (savings contribution)
   propertyValue: number;
   propertyLoans: number;
   propertyEquity: number;
-  propertyDetails: PropertyYearDetail[]; // per-property breakdown
+  propertyDetails: PropertyYearDetail[];
   stockValue: number;
   cryptoValue: number;
   cash: number;
-  totalAssets: number;
+  // Super — tracked separately, never inside cash
+  superRoham: number;
+  superFara: number;
+  totalSuper: number;
+  // Net worth splits
+  totalAssets: number;           // includes super
   totalLiabilities: number;
-  endNetWorth: number;
-  growth: number;
-  growthPct: number;
-  passiveIncome: number;
-  monthlyCashFlow: number;
+  accessibleNetWorth: number;    // endNetWorth EXCLUDING super (liquid/accessible)
+  endNetWorth: number;           // total incl. super
+  // Growth
+  growth: number;                // endNW - startNW
+  growthPct: number;             // % growth on startNW
+  growthBreakdown: GrowthBreakdown;
+  // CAGR (compounded from year 0 — populated at call-site)
+  cagr: number;
+  // Real (inflation-adjusted) growth
+  realGrowth: number;            // growth - (startNW * inflation%)
+  realGrowthPct: number;
+  // Other
+  passiveIncome: number;         // net rent + dividends + crypto yield
+  monthlyCashFlow: number;       // income + passive - expenses - repayments
 }
 
 export function projectNetWorth(params: {
@@ -206,6 +231,21 @@ export function projectNetWorth(params: {
     ppor: number; cash: number; super_balance: number; stocks: number; crypto: number;
     cars: number; iran_property: number; mortgage: number; other_debts: number;
     monthly_income: number; monthly_expenses: number;
+    // Per-person super fields (optional — fall back to super_balance split 50/50)
+    roham_super_balance?:    number;
+    roham_super_salary?:     number;
+    roham_employer_contrib?: number;  // % e.g. 11.5
+    roham_salary_sacrifice?: number;  // $/year
+    roham_super_growth_rate?:number;  // % p.a.
+    roham_super_fee_pct?:    number;  // % p.a.
+    roham_super_insurance_pa?:number; // $/year
+    fara_super_balance?:     number;
+    fara_super_salary?:      number;
+    fara_employer_contrib?:  number;
+    fara_salary_sacrifice?:  number;
+    fara_super_growth_rate?: number;
+    fara_super_fee_pct?:     number;
+    fara_super_insurance_pa?:number;
   };
   properties: any[];
   stocks: any[];
@@ -232,24 +272,20 @@ export function projectNetWorth(params: {
   ngAnnualBenefit?: number;
   annualSalaryIncome?: number;
 }): YearlyProjection[] {
-  const years = params.years || 10;
+  const years   = params.years    || 10;
   const inflation = params.inflation || 3;
   const pporGrowth = params.ppor_growth || 6;
   const s = params.snapshot;
-
-  const results: YearlyProjection[] = [];
   const currentYear = new Date().getFullYear();
 
-  // ── Real Cash Balance via buildCashFlowSeries (event-driven monthly engine) ──
-  // Replaces the old "annualSurplus * 0.5" shortcut. No circular dependency:
-  // buildCashFlowSeries lives in this same file.
+  // ── Real Cash Balance via buildCashFlowSeries ─────────────────────────────
   const _cashSeries = buildCashFlowSeries({
     snapshot: {
-      monthly_income:   safeNum(params.snapshot.monthly_income),
-      monthly_expenses: safeNum(params.snapshot.monthly_expenses),
-      mortgage:         safeNum(params.snapshot.mortgage),
-      other_debts:      safeNum(params.snapshot.other_debts),
-      cash:             safeNum(params.snapshot.cash),
+      monthly_income:   safeNum(s.monthly_income),
+      monthly_expenses: safeNum(s.monthly_expenses),
+      mortgage:         safeNum(s.mortgage),
+      other_debts:      safeNum(s.other_debts),
+      cash:             safeNum(s.cash),
     },
     expenses:            params.expenses            ?? [],
     properties:          params.properties          as any[],
@@ -268,124 +304,165 @@ export function projectNetWorth(params: {
   });
   const _cashByYear = new Map<number, number>();
   for (const m of _cashSeries) {
-    _cashByYear.set(m.year, m.cumulativeBalance); // last month of year wins
+    _cashByYear.set(m.year, m.cumulativeBalance);
   }
 
-  // Guard every field — if snapshot came back with undefined/NaN fields
-  // (e.g. field name mismatch), calculations silently use 0 instead of NaN.
-  let ppor           = safeNum(s.ppor);
-  let cash           = safeNum(s.cash);
-  let superBal       = safeNum(s.super_balance);
-  let stockVal       = safeNum(s.stocks);
-  let cryptoVal      = safeNum(s.crypto);
-  let mortgage       = safeNum(s.mortgage);
-  let otherDebts     = safeNum(s.other_debts);
-  let monthlyIncome  = safeNum(s.monthly_income);
+  // ── Initialise mutable state ──────────────────────────────────────────────
+  let ppor          = safeNum(s.ppor);
+  let cash          = safeNum(s.cash);
+  let stockVal      = safeNum(s.stocks);
+  let cryptoVal     = safeNum(s.crypto);
+  let mortgage      = safeNum(s.mortgage);
+  let otherDebts    = safeNum(s.other_debts);
+  let monthlyIncome = safeNum(s.monthly_income);
   let monthlyExpenses = safeNum(s.monthly_expenses);
-  const cars         = safeNum(s.cars);
-  const iranProp     = safeNum(s.iran_property);
+  const cars        = safeNum(s.cars);
+  const iranProp    = safeNum(s.iran_property);
 
-  // Track previous year's endNW so startNW is always consistent with endNW
-  // (same asset set — includes investment property equity). Year 0 baseline
-  // is computed once here using today's snapshot including investment props.
+  // ── Super — per-person, tracked separately from cash ─────────────────────
+  // If per-person fields are present, use them; otherwise split legacy super_balance 50/50.
+  const legacySuper = safeNum(s.super_balance);
+  let superRoham = safeNum(s.roham_super_balance) || legacySuper * 0.6;
+  let superFara  = safeNum(s.fara_super_balance)  || legacySuper * 0.4;
+
+  const rohamSalary       = safeNum(s.roham_super_salary)      || safeNum(s.monthly_income) * 12 * 0.7;
+  const rohamEmplContrib  = safeNum(s.roham_employer_contrib)  || 11.5;  // SG rate 2024-25
+  const rohamSalarySac    = safeNum(s.roham_salary_sacrifice)  || 0;
+  const rohamGrowth       = safeNum(s.roham_super_growth_rate) || 8.0;   // High Growth default
+  const rohamFee          = safeNum(s.roham_super_fee_pct)     || 0.5;
+  const rohamInsurance    = safeNum(s.roham_super_insurance_pa)|| 0;
+
+  const faraSalary        = safeNum(s.fara_super_salary)       || safeNum(s.monthly_income) * 12 * 0.3;
+  const faraEmplContrib   = safeNum(s.fara_employer_contrib)   || 11.5;
+  const faraSalarySac     = safeNum(s.fara_salary_sacrifice)   || 0;
+  const faraGrowth        = safeNum(s.fara_super_growth_rate)  || 8.0;
+  const faraFee           = safeNum(s.fara_super_fee_pct)      || 0.5;
+  const faraInsurance     = safeNum(s.fara_super_insurance_pa) || 0;
+
+  // ── Consistent startNW baseline — includes investment property equity ──────
   const _initPropEquity = params.properties
     .filter((p: any) => p.type !== 'ppor')
     .reduce((sum: number, p: any) => {
       const v = safeNum(p.current_value) || safeNum(p.purchase_price);
       const l = safeNum(p.loan_amount);
-      return sum + v - l;
+      return sum + Math.max(0, v - l);
     }, 0);
-  let prevEndNW = (ppor + cash + superBal + stockVal + cryptoVal + cars * 0.8 + iranProp + _initPropEquity) - (mortgage + otherDebts);
+  let prevEndNW = (
+    ppor + cash + superRoham + superFara + stockVal + cryptoVal + cars * 0.8 + iranProp + _initPropEquity
+  ) - (mortgage + otherDebts);
+  const year0NW = prevEndNW; // for CAGR base
+
+  // Previous-year values for growth breakdown (initialised to year-0 snapshot)
+  let prevPpor    = ppor;
+  let prevPropVal = _initPropEquity; // investment prop equity as proxy for value
+  let prevStocks  = stockVal;
+  let prevCrypto  = cryptoVal;
+  let prevLiab    = mortgage + otherDebts;
+  let prevSuperTotal = superRoham + superFara;
+
+  const results: YearlyProjection[] = [];
 
   for (let y = 1; y <= years; y++) {
     const year = currentYear + y;
     const startNW = prevEndNW;
 
-    // Resolve per-year assumptions if available
+    // ── Per-year assumption resolution ───────────────────────────────────────
     const yAss = params.yearlyAssumptions?.find(a => a.year === year);
-    const effectivePporGrowth  = yAss ? yAss.property_growth : pporGrowth;
-    const effectiveInflation   = yAss ? yAss.inflation        : inflation;
-    const effectiveIncomeGrowth = yAss ? yAss.income_growth   : 3.5;
-    const effectiveSuperReturn  = yAss ? yAss.super_return    : 10;
-    const effectiveInterestRate = yAss ? yAss.interest_rate   : 6.5;
+    const effectivePporGrowth   = yAss?.property_growth ?? pporGrowth;
+    const effectiveInflation    = yAss?.inflation        ?? inflation;
+    const effectiveIncomeGrowth = yAss?.income_growth    ?? 3.5;
+    const effectiveSuperReturn  = yAss?.super_return     ?? 8.0;
+    const effectiveInterestRate = yAss?.interest_rate    ?? 6.5;
 
-    // PPOR growth
+    // ── PPOR appreciation ─────────────────────────────────────────────────────
+    const pporBefore = ppor;
     ppor *= (1 + effectivePporGrowth / 100);
-    // Mortgage reduction
+    const pporAppreciation = ppor - pporBefore;
+
+    // ── Mortgage reduction ────────────────────────────────────────────────────
+    const prevMortgage = mortgage;
     mortgage = Math.max(0, calcLoanBalance(s.mortgage, effectiveInterestRate, 30, y * 12));
 
-    // Super growth
-    superBal *= (1 + effectiveSuperReturn / 100);
-
-    // Income/expense changes
+    // ── Income / expenses ─────────────────────────────────────────────────────
     monthlyIncome    *= (1 + effectiveIncomeGrowth / 100);
     monthlyExpenses  *= (1 + effectiveInflation    / 100);
+    const annualIncome   = monthlyIncome * 12;
+    const annualExpenses = monthlyExpenses * 12;
+    const netCashflow    = annualIncome - annualExpenses;
 
-    // Property portfolio — only include investment properties that have settled by this year
+    // ── Super projection — Australian logic ───────────────────────────────────
+    // Opening balance + contributions - fees + growth = closing balance
+    // Super is NOT part of cash — never deducted from spendable income here.
+    const superRohamBefore = superRoham;
+    const rohamContribAnnual = rohamSalary * (rohamEmplContrib / 100) + rohamSalarySac;
+    const rohamFeeAnnual     = superRoham * (rohamFee / 100) + rohamInsurance;
+    const rohamGrowthAmt     = (superRoham + rohamContribAnnual - rohamFeeAnnual) * (rohamGrowth / 100);
+    superRoham = superRoham + rohamContribAnnual - rohamFeeAnnual + rohamGrowthAmt;
+
+    const superFaraBefore = superFara;
+    const faraContribAnnual  = faraSalary  * (faraEmplContrib  / 100) + faraSalarySac;
+    const faraFeeAnnual      = superFara   * (faraFee   / 100) + faraInsurance;
+    const faraGrowthAmt      = (superFara + faraContribAnnual - faraFeeAnnual) * (faraGrowth / 100);
+    superFara  = superFara  + faraContribAnnual  - faraFeeAnnual  + faraGrowthAmt;
+
+    const totalSuperNow = superRoham + superFara;
+    const superGrowthThis = totalSuperNow - prevSuperTotal;
+
+    // ── Investment property portfolio ─────────────────────────────────────────
     let propValue = 0; let propLoans = 0; let propRent = 0;
     const propertyDetails: PropertyYearDetail[] = [];
-    const todayYear = new Date().getFullYear();
+    const todayYear = currentYear;
     for (const prop of params.properties) {
-      if (prop.type === 'ppor') continue; // PPOR already in snapshot
-
-      // Determine settlement year
+      if (prop.type === 'ppor') continue;
       const settleDateStr = prop.settlement_date || prop.purchase_date;
-      const settleYear = settleDateStr
-        ? new Date(settleDateStr).getFullYear()
-        : todayYear; // if no date, assume already settled
+      const settleYear = settleDateStr ? new Date(settleDateStr).getFullYear() : todayYear;
+      if (year < settleYear) continue;
 
-      if (year < settleYear) continue; // not yet purchased
-
-      // Years since settlement for this projection year
       const yearsSinceSettle = year - settleYear;
       const startValue = safeNum(prop.purchase_price) || safeNum(prop.current_value);
       const growthRate = (safeNum(prop.capital_growth) || 6) / 100;
-      const projValue = startValue * Math.pow(1 + growthRate, yearsSinceSettle + 1);
-
-      const loanBal = Math.max(0, calcLoanBalance(
+      const projValue  = startValue * Math.pow(1 + growthRate, yearsSinceSettle + 1);
+      const loanBal    = Math.max(0, calcLoanBalance(
         safeNum(prop.loan_amount),
         safeNum(prop.interest_rate) || 6.5,
-        safeNum(prop.loan_term) || 30,
+        safeNum(prop.loan_term)     || 30,
         (yearsSinceSettle + 1) * 12
       ));
 
       propValue += projValue;
       propLoans += loanBal;
 
-      // Rental income only if settled and rental started
       let annualRent = 0;
-      const rentalStartStr = prop.rental_start_date;
-      const rentalStartYear = rentalStartStr
-        ? new Date(rentalStartStr).getFullYear()
+      const rentalStartYear = prop.rental_start_date
+        ? new Date(prop.rental_start_date).getFullYear()
         : settleYear;
       if (year >= rentalStartYear) {
         const yearsSinceRental = year - rentalStartYear;
         annualRent = safeNum(prop.weekly_rent) * 52
-          * (1 - safeNum(prop.vacancy_rate) / 100)
-          * (1 - safeNum(prop.management_fee) / 100)
+          * (1 - safeNum(prop.vacancy_rate)    / 100)
+          * (1 - safeNum(prop.management_fee)  / 100)
           * Math.pow(1 + (safeNum(prop.rental_growth) || 3) / 100, yearsSinceRental);
         propRent += annualRent;
       }
-
-      // Annual loan repayment for this property
       const annualLoanRepayment = calcMonthlyRepayment(
-        safeNum(prop.loan_amount),
-        safeNum(prop.interest_rate) || 6.5,
-        safeNum(prop.loan_term) || 30
+        safeNum(prop.loan_amount), safeNum(prop.interest_rate) || 6.5, safeNum(prop.loan_term) || 30
       ) * 12;
-
       propertyDetails.push({
-        id: prop.id,
+        id:   prop.id,
         name: prop.name || prop.address || `Property ${prop.id}`,
-        value: Math.round(projValue),
+        value:       Math.round(projValue),
         loanBalance: Math.round(loanBal),
-        equity: Math.round(projValue - loanBal),
+        equity:      Math.round(projValue - loanBal),
         annualCashFlow: Math.round(annualRent - annualLoanRepayment),
       });
     }
 
-    // Stocks projection
-    let stocksTotal = stockVal;
+    // ── Stocks projection ─────────────────────────────────────────────────────
+    let stocksBefore = stockVal;
+    let stocksTotal  = 0;  // reset each year — we project from scratch each iteration
+    const avgStockReturn = params.stocks?.length > 0
+      ? params.stocks.reduce((acc, st) => acc + safeNum(st.expected_return), 0) / params.stocks.length
+      : 10;
     for (const stock of params.stocks) {
       const val = stock.current_holding * stock.current_price;
       if (val > 0) {
@@ -393,9 +470,49 @@ export function projectNetWorth(params: {
         stocksTotal += proj[y - 1]?.value || 0;
       }
     }
+    // DCA schedules (additive to per-stock monthly_dca)
+    const dcaYear = year;
+    let totalStockDCAMonthly = 0;
+    for (const dca of (params.stockDCASchedules ?? [])) {
+      if (!dca.enabled) continue;
+      const dcaStartYear = new Date(dca.start_date).getFullYear();
+      const dcaEndYear   = dca.end_date ? new Date(dca.end_date).getFullYear() : 9999;
+      if (dcaYear >= dcaStartYear && dcaYear <= dcaEndYear)
+        totalStockDCAMonthly += dcaMonthlyEquiv(dca.amount, dca.frequency);
+    }
+    if (totalStockDCAMonthly > 0) {
+      const monthlyStockRate = avgStockReturn / 100 / 12;
+      let dcaStockGrowth = 0;
+      for (let m = 0; m < 12; m++)
+        dcaStockGrowth = (dcaStockGrowth + totalStockDCAMonthly) * (1 + monthlyStockRate);
+      stockVal += dcaStockGrowth;
+      stocksTotal += dcaStockGrowth;
+    }
+    // Planned buy orders (one-off)
+    for (const o of (params.plannedStockOrders ?? [])) {
+      if (o.status !== 'planned') continue;
+      const oYear = new Date(o.planned_date).getFullYear();
+      if (oYear !== dcaYear) continue;
+      if (o.action === 'buy')  { stockVal += safeNum(o.amount_aud); stocksTotal += safeNum(o.amount_aud); }
+      if (o.action === 'sell') { stockVal -= safeNum(o.amount_aud); stocksTotal -= safeNum(o.amount_aud); }
+    }
+    for (const tx of (params.stockTransactions ?? [])) {
+      if (tx.status !== 'planned') continue;
+      const txYear = new Date(tx.transaction_date).getFullYear();
+      if (year < txYear) continue;
+      const yearsGrowing = year - txYear;
+      const txReturn = avgStockReturn / 100;
+      if (tx.transaction_type === 'buy')
+        stocksTotal += safeNum(tx.total_amount) * Math.pow(1 + txReturn, yearsGrowing + 1);
+    }
+    stocksBefore = prevStocks; // use prev-year value for appreciation calc
 
-    // Crypto projection
-    let cryptoTotal = cryptoVal;
+    // ── Crypto projection ─────────────────────────────────────────────────────
+    let cryptoBefore = prevCrypto;
+    let cryptoTotal  = 0;
+    const avgCryptoReturn = params.cryptos?.length > 0
+      ? params.cryptos.reduce((acc, c) => acc + safeNum(c.expected_return), 0) / params.cryptos.length
+      : 20;
     for (const c of params.cryptos) {
       const val = c.current_holding * c.current_price;
       if (val > 0) {
@@ -403,123 +520,128 @@ export function projectNetWorth(params: {
         cryptoTotal += proj[y - 1]?.value || 0;
       }
     }
-
-    // Add planned stock/crypto buys to portfolio value from that year onward
-    const stockTxYear = params.stockTransactions ?? [];
-    const cryptoTxYear = params.cryptoTransactions ?? [];
-
-    for (const tx of stockTxYear) {
-      if (tx.status !== 'planned') continue;
-      const txYear = new Date(tx.transaction_date).getFullYear();
-      if (year < txYear) continue; // not yet
-      const yearsGrowing = year - txYear;
-      const txReturn = (params.stocks?.[0]?.expected_return ?? 10) / 100;
-      if (tx.transaction_type === 'buy') {
-        stocksTotal += safeNum(tx.total_amount) * Math.pow(1 + txReturn, yearsGrowing + 1);
-      }
-      // sells reduce value — handled via cash impact in cashflow
-    }
-
-    for (const tx of cryptoTxYear) {
-      if (tx.status !== 'planned') continue;
-      const txYear = new Date(tx.transaction_date).getFullYear();
-      if (year < txYear) continue;
-      const yearsGrowing = year - txYear;
-      const txReturn = (params.cryptos?.[0]?.expected_return ?? 20) / 100;
-      if (tx.transaction_type === 'buy') {
-        cryptoTotal += safeNum(tx.total_amount) * Math.pow(1 + txReturn, yearsGrowing + 1);
-      }
-    }
-
-    // ── DCA schedule impact on net worth ──
-    // DCA cash goes from cash account → investment value (net zero for NW, but shifts asset class)
-    // The actual growth impact is already handled by projectInvestment on individual stocks/cryptos via monthly_dca.
-    // Here we also account for DCA schedules from the dedicated DCA tables (additive to per-stock monthly_dca).
-    const dcaYear = currentYear + y;
-    let totalStockDCAMonthly = 0;
-    for (const dca of (params.stockDCASchedules ?? [])) {
-      if (!dca.enabled) continue;
-      const dcaStartYear = new Date(dca.start_date).getFullYear();
-      const dcaEndYear = dca.end_date ? new Date(dca.end_date).getFullYear() : 9999;
-      if (dcaYear >= dcaStartYear && dcaYear <= dcaEndYear) {
-        totalStockDCAMonthly += dcaMonthlyEquiv(dca.amount, dca.frequency);
-      }
-    }
     let totalCryptoDCAMonthly = 0;
     for (const dca of (params.cryptoDCASchedules ?? [])) {
       if (!dca.enabled) continue;
       const dcaStartYear = new Date(dca.start_date).getFullYear();
-      const dcaEndYear = dca.end_date ? new Date(dca.end_date).getFullYear() : 9999;
-      if (dcaYear >= dcaStartYear && dcaYear <= dcaEndYear) {
+      const dcaEndYear   = dca.end_date ? new Date(dca.end_date).getFullYear() : 9999;
+      if (dcaYear >= dcaStartYear && dcaYear <= dcaEndYear)
         totalCryptoDCAMonthly += dcaMonthlyEquiv(dca.amount, dca.frequency);
-      }
     }
-    // DCA amounts boost investment values (compounded at avg return rate)
-    const avgStockReturn = params.stocks?.length > 0
-      ? params.stocks.reduce((s, st) => s + safeNum(st.expected_return), 0) / params.stocks.length
-      : 10;
-    const avgCryptoReturn = params.cryptos?.length > 0
-      ? params.cryptos.reduce((s, c) => s + safeNum(c.expected_return), 0) / params.cryptos.length
-      : 20;
-    // Compound 12 months of DCA at the avg annual return
-    const monthlyStockRate = avgStockReturn / 100 / 12;
-    const monthlyCryptoRate = avgCryptoReturn / 100 / 12;
-    let dcaStockGrowth = 0;
-    let dcaCryptoGrowth = 0;
-    for (let m = 0; m < 12; m++) {
-      dcaStockGrowth = (dcaStockGrowth + totalStockDCAMonthly) * (1 + monthlyStockRate);
-      dcaCryptoGrowth = (dcaCryptoGrowth + totalCryptoDCAMonthly) * (1 + monthlyCryptoRate);
-    }
-    stockVal += dcaStockGrowth;
-    cryptoVal += dcaCryptoGrowth;
-
-    // ── Planned orders impact on net worth ──
-    for (const o of (params.plannedStockOrders ?? [])) {
-      if (o.status !== 'planned') continue;
-      const oYear = new Date(o.planned_date).getFullYear();
-      if (oYear !== dcaYear) continue;
-      const yearsGrowing = 0; // added this year, grows from next year
-      if (o.action === 'buy') stockVal += safeNum(o.amount_aud);
-      if (o.action === 'sell') stockVal -= safeNum(o.amount_aud);
+    if (totalCryptoDCAMonthly > 0) {
+      const monthlyCryptoRate = avgCryptoReturn / 100 / 12;
+      let dcaCryptoGrowth = 0;
+      for (let m = 0; m < 12; m++)
+        dcaCryptoGrowth = (dcaCryptoGrowth + totalCryptoDCAMonthly) * (1 + monthlyCryptoRate);
+      cryptoVal += dcaCryptoGrowth;
+      cryptoTotal += dcaCryptoGrowth;
     }
     for (const o of (params.plannedCryptoOrders ?? [])) {
       if (o.status !== 'planned') continue;
       const oYear = new Date(o.planned_date).getFullYear();
       if (oYear !== dcaYear) continue;
-      if (o.action === 'buy') cryptoVal += safeNum(o.amount_aud);
-      if (o.action === 'sell') cryptoVal -= safeNum(o.amount_aud);
+      if (o.action === 'buy')  { cryptoVal += safeNum(o.amount_aud); cryptoTotal += safeNum(o.amount_aud); }
+      if (o.action === 'sell') { cryptoVal -= safeNum(o.amount_aud); cryptoTotal -= safeNum(o.amount_aud); }
     }
+    for (const tx of (params.cryptoTransactions ?? [])) {
+      if (tx.status !== 'planned') continue;
+      const txYear = new Date(tx.transaction_date).getFullYear();
+      if (year < txYear) continue;
+      const yearsGrowing = year - txYear;
+      const txReturn = avgCryptoReturn / 100;
+      if (tx.transaction_type === 'buy')
+        cryptoTotal += safeNum(tx.total_amount) * Math.pow(1 + txReturn, yearsGrowing + 1);
+    }
+    cryptoBefore = prevCrypto;
 
-    // Cash balance from central monthly engine (real projected ending balance for this year)
+    // ── Cash balance from central monthly engine ──────────────────────────────
     cash = _cashByYear.get(year) ?? cash;
 
-    // Calculate totals
-    const totalAssets = ppor + cash + superBal + stocksTotal + cryptoTotal + cars * 0.8 + iranProp + propValue;
+    // ── Totals ────────────────────────────────────────────────────────────────
+    // Super is included in totalAssets but tracked separately
+    const totalAssets      = ppor + cash + superRoham + superFara + stocksTotal + cryptoTotal + cars * 0.8 + iranProp + propValue;
     const totalLiabilities = mortgage + otherDebts * Math.max(0, 1 - y * 0.1) + propLoans;
-    const endNW = totalAssets - totalLiabilities;
-    prevEndNW = endNW; // carry forward as next year's startNW
+    const endNW            = totalAssets - totalLiabilities;
+    const accessibleNW     = totalAssets - totalSuperNow - totalLiabilities; // excl. super
+
+    // ── Growth breakdown ──────────────────────────────────────────────────────
+    const propTotalValue      = ppor + propValue;
+    const prevPropTotalValue  = prevPpor + prevPropVal;
+    const propAppreciation    = propTotalValue - prevPropTotalValue;
+    const stockAppreciation   = stocksTotal - stocksBefore;
+    const cryptoAppreciation  = cryptoTotal  - cryptoBefore;
+    const liabNow             = totalLiabilities;
+    const debtPaydown         = prevLiab - liabNow;  // positive = debt reduced
+    // Savings: net cashflow that landed in cash or investments (approximated as netCashflow)
+    const savingsContrib      = netCashflow;
+    const growthTotal         = endNW - startNW;
+
+    const growthBreakdown: GrowthBreakdown = {
+      savings:              Math.round(savingsContrib),
+      propertyAppreciation: Math.round(propAppreciation),
+      stockAppreciation:    Math.round(stockAppreciation),
+      cryptoAppreciation:   Math.round(cryptoAppreciation),
+      debtPaydown:          Math.round(debtPaydown),
+      superGrowth:          Math.round(superGrowthThis),
+      total:                Math.round(growthTotal),
+    };
+
+    // ── CAGR (from year 0) ────────────────────────────────────────────────────
+    const cagr = year0NW > 0 ? (Math.pow(endNW / year0NW, 1 / y) - 1) * 100 : 0;
+
+    // ── Real growth (inflation-adjusted) ─────────────────────────────────────
+    const inflationDrag  = startNW * (effectiveInflation / 100);
+    const realGrowth     = growthTotal - inflationDrag;
+    const realGrowthPct  = startNW > 0 ? (realGrowth / Math.abs(startNW)) * 100 : 0;
+
+    // ── Passive income ────────────────────────────────────────────────────────
+    // Net rental income + estimated dividends (2% yield) + crypto yield (1%)
+    // Super contributions and growth are NOT included — they are locked wealth
     const passiveIncome = propRent + stocksTotal * 0.02 + cryptoTotal * 0.01;
-    const monthlyCF = monthlyIncome - monthlyExpenses + passiveIncome / 12;
+
+    // ── Monthly cash flow ─────────────────────────────────────────────────────
+    // Real spendable: income + passive - expenses - mortgage repayment
+    // Super contributions are deducted by employer before take-home (not here)
+    const monthlyMortgageRepayment = calcMonthlyRepayment(s.mortgage, effectiveInterestRate, 30);
+    const monthlyCF = monthlyIncome + passiveIncome / 12 - monthlyExpenses - monthlyMortgageRepayment;
+
+    // ── Carry forward ─────────────────────────────────────────────────────────
+    prevEndNW      = endNW;
+    prevPpor       = ppor;
+    prevPropVal    = propValue;
+    prevStocks     = stocksTotal;
+    prevCrypto     = cryptoTotal;
+    prevLiab       = liabNow;
+    prevSuperTotal = totalSuperNow;
 
     results.push({
       year,
-      startNetWorth: Math.round(startNW),
-      income: Math.round(monthlyIncome * 12),
-      expenses: Math.round(monthlyExpenses * 12),
-      propertyValue: Math.round(ppor + propValue),
-      propertyLoans: Math.round(mortgage + propLoans),
-      propertyEquity: Math.round(ppor + propValue - mortgage - propLoans),
+      startNetWorth:      Math.round(startNW),
+      income:             Math.round(annualIncome),
+      expenses:           Math.round(annualExpenses),
+      netCashflow:        Math.round(netCashflow),
+      propertyValue:      Math.round(ppor + propValue),
+      propertyLoans:      Math.round(mortgage + propLoans),
+      propertyEquity:     Math.round(ppor + propValue - mortgage - propLoans),
       propertyDetails,
-      stockValue: Math.round(stocksTotal),
-      cryptoValue: Math.round(cryptoTotal),
-      cash: Math.round(cash),
-      totalAssets: Math.round(totalAssets),
-      totalLiabilities: Math.round(totalLiabilities),
-      endNetWorth: Math.round(endNW),
-      growth: Math.round(endNW - startNW),
-      growthPct: startNW > 0 ? ((endNW - startNW) / Math.abs(startNW)) * 100 : 0,
-      passiveIncome: Math.round(passiveIncome),
-      monthlyCashFlow: Math.round(monthlyCF),
+      stockValue:         Math.round(stocksTotal),
+      cryptoValue:        Math.round(cryptoTotal),
+      cash:               Math.round(cash),
+      superRoham:         Math.round(superRoham),
+      superFara:          Math.round(superFara),
+      totalSuper:         Math.round(totalSuperNow),
+      totalAssets:        Math.round(totalAssets),
+      totalLiabilities:   Math.round(totalLiabilities),
+      accessibleNetWorth: Math.round(accessibleNW),
+      endNetWorth:        Math.round(endNW),
+      growth:             Math.round(growthTotal),
+      growthPct:          startNW > 0 ? (growthTotal / Math.abs(startNW)) * 100 : 0,
+      growthBreakdown,
+      cagr:               parseFloat(cagr.toFixed(2)),
+      realGrowth:         Math.round(realGrowth),
+      realGrowthPct:      parseFloat(realGrowthPct.toFixed(2)),
+      passiveIncome:      Math.round(passiveIncome),
+      monthlyCashFlow:    Math.round(monthlyCF),
     });
   }
 
