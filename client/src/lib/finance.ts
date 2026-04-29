@@ -508,7 +508,7 @@ export interface CashFlowMonth {
   isActual: boolean;    // true = driven by real expense records
 
   // Income
-  income: number;       // gross monthly income
+  income: number;       // gross monthly income (salary)
 
   // Expenses
   actualExpenses: number;   // sum of tracked expense rows for this month
@@ -516,12 +516,18 @@ export interface CashFlowMonth {
   totalExpenses: number;    // whichever is used
 
   // Property
-  rentalIncome: number;     // net rental income from investment props
-  mortgageRepayment: number; // PPOR mortgage repayment
-  investmentLoanRepayment: number; // investment property loan repayments
+  rentalIncome: number;              // net rental income from investment props
+  mortgageRepayment: number;         // PPOR mortgage repayment
+  investmentLoanRepayment: number;   // investment property loan repayments
+  propertyExpenses: number;          // deductible running costs (rates, insurance, maintenance)
+
+  // Tax
+  taxPayable: number;        // estimated tax payable (income tax, simplified)
+  ngTaxBenefit: number;      // negative gearing refund (lump-sum: Aug only; PAYG: every month)
+  ngBenefitSpread: number;   // PAYG monthly benefit amount (same as ngTaxBenefit in PAYG mode)
 
   // Summary
-  netCashFlow: number;       // income + rental - expenses - mortgages
+  netCashFlow: number;       // income + rental + ngTaxBenefit - expenses - mortgages - tax
   cumulativeBalance: number; // running cumulative
 }
 
@@ -572,6 +578,10 @@ export function buildCashFlowSeries(params: {
   plannedCryptoOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
   // Recurring bills — monthly outflows (insurance, subscriptions, utilities not in expenses)
   bills?: Array<{ amount: number; frequency: string; next_due_date?: string; is_active?: boolean; }>;
+  // Australian negative gearing options
+  ngRefundMode?: 'lump-sum' | 'payg'; // default 'lump-sum'
+  ngAnnualBenefit?: number;            // pre-calculated total NG refund per year (from calcNegativeGearing)
+  annualSalaryIncome?: number;         // gross annual salary for tax calc display
 }): CashFlowMonth[] {
   const START_YEAR = 2025;
   const START_MONTH = 1;
@@ -581,6 +591,13 @@ export function buildCashFlowSeries(params: {
   const inflationRate = (params.inflationRate ?? 3) / 100;
   const incomeGrowthRate = (params.incomeGrowthRate ?? 3.5) / 100;
   const s = params.snapshot;
+
+  // ─ NG refund parameters ─
+  const ngRefundMode   = params.ngRefundMode   ?? 'lump-sum';
+  const ngAnnualBenefit = safeNum(params.ngAnnualBenefit); // $0 if not provided
+  const ngMonthlyBenefit = ngAnnualBenefit / 12;           // for PAYG mode
+  // Australian FY ends 30 June; tax return / refund lands in August (month 8)
+  const NG_REFUND_MONTH = 8; // August
 
   const snap_income   = safeNum(s.monthly_income) || 22000;
   const snap_expenses = safeNum(s.monthly_expenses) || 14540;
@@ -646,6 +663,7 @@ export function buildCashFlowSeries(params: {
       // ── Investment Properties ──
       let rentalIncome = 0;
       let investmentLoanRepayment = 0;
+      let propDeductibleExpenses = 0; // running costs for NG calc display
       const monthDate = new Date(year, month - 1, 1);
 
       // Track one-time cash outflows for this month
@@ -705,6 +723,13 @@ export function buildCashFlowSeries(params: {
             * (1 - safeNum(prop.management_fee) / 100)
             * Math.pow(1 + (safeNum(prop.rental_growth) || 3) / 100, yearsSinceRental);
           rentalIncome += annualRent / 12;
+
+          // Track deductible expenses per month for this property
+          propDeductibleExpenses += (
+            safeNum(prop.council_rates) + safeNum(prop.insurance) +
+            safeNum(prop.maintenance) + safeNum((prop as any).water_rates) +
+            safeNum((prop as any).body_corporate) + safeNum((prop as any).land_tax)
+          ) / 12;
         }
       }
 
@@ -785,10 +810,36 @@ export function buildCashFlowSeries(params: {
         }
       }
 
+      // ── Negative Gearing Tax Benefit ──
+      // PAYG mode: monthly benefit spread evenly throughout the year (employer variation)
+      // Lump-sum mode: ATO refund received in August (month 8) for prior FY
+      // Only apply to forecast months (actual months already have correct tax withheld)
+      let ngTaxBenefit  = 0;
+      let ngBenefitSpread = 0;
+      if (!isActual && ngAnnualBenefit > 0) {
+        if (ngRefundMode === 'payg') {
+          // PAYG withholding variation: benefit spread every month
+          ngTaxBenefit   = ngMonthlyBenefit;
+          ngBenefitSpread = ngMonthlyBenefit;
+        } else {
+          // Lump-sum: refund arrives in August (month 8)
+          // We credit the previous FY's refund — so Aug 2026 gets FY2025–26 refund, etc.
+          if (month === NG_REFUND_MONTH && year > 2025) {
+            ngTaxBenefit = ngAnnualBenefit;
+          }
+        }
+      }
+
+      // Simplified annual tax payable estimate (for display line only — does NOT reduce cash)
+      // Tax is withheld from salary by employer; we show it as informational only
+      const annualSalary = safeNum(params.annualSalaryIncome) || income * 12;
+      const taxPayable = auTaxPayable(annualSalary) / 12;
+
       // ── Net Cash Flow ──
-      // income + rental - expenses (actuals or forecast) - mortgage - invest loans
+      // income + rental + ngTaxBenefit - expenses (actuals or forecast) - mortgage - invest loans
       // Note: when actuals are used and they include mortgage, mortgageRepayment=0 so no double count
-      const netCashFlow = income + rentalIncome - totalExpenses - mortgageRepayment - investmentLoanRepayment
+      // Tax is already withheld by employer so not subtracted here (salary is post-tax at source)
+      const netCashFlow = income + rentalIncome + ngTaxBenefit - totalExpenses - mortgageRepayment - investmentLoanRepayment
         - oneTimeCashOutflow + plannedStockCashDelta + plannedCryptoCashDelta
         - stockDCAOutflow - cryptoDCAOutflow
         + plannedStockOrderDelta + plannedCryptoOrderDelta
@@ -809,6 +860,10 @@ export function buildCashFlowSeries(params: {
         rentalIncome: Math.round(rentalIncome),
         mortgageRepayment: Math.round(mortgageRepayment),
         investmentLoanRepayment: Math.round(investmentLoanRepayment),
+        propertyExpenses: Math.round(propDeductibleExpenses),
+        taxPayable: Math.round(taxPayable),
+        ngTaxBenefit: Math.round(ngTaxBenefit),
+        ngBenefitSpread: Math.round(ngBenefitSpread),
         netCashFlow: Math.round(netCashFlow),
         cumulativeBalance: Math.round(cumulativeBalance),
       });
@@ -820,6 +875,209 @@ export function buildCashFlowSeries(params: {
   return results;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// AUSTRALIAN TAX ENGINE — Negative Gearing + PAYG/EOFY Refund
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Australian 2024-25 individual income tax brackets (resident, excluding Medicare levy).
+ * We add 2% Medicare levy on top for a realistic marginal effective rate.
+ *
+ * Brackets: https://www.ato.gov.au/tax-rates-and-codes/tax-rates-australian-residents
+ *   $0       – $18,200   : 0%
+ *   $18,201  – $45,000   : 19%
+ *   $45,001  – $120,000  : 32.5%
+ *   $120,001 – $180,000  : 37%
+ *   $180,001+            : 45%
+ * Medicare levy: 2% on top (approximation — full threshold logic omitted for simplicity)
+ */
+export function auMarginalRate(annualIncome: number): number {
+  const income = Math.max(0, annualIncome);
+  if (income <= 18_200) return 0;
+  if (income <= 45_000) return 0.19 + 0.02; // 21%
+  if (income <= 120_000) return 0.325 + 0.02; // 34.5%
+  if (income <= 180_000) return 0.37 + 0.02; // 39%
+  return 0.45 + 0.02; // 47%
+}
+
+/**
+ * Calculate tax payable at each bracket (for display purposes only).
+ */
+export function auTaxPayable(annualIncome: number): number {
+  const income = Math.max(0, annualIncome);
+  if (income <= 18_200) return 0;
+  if (income <= 45_000) return (income - 18_200) * 0.19;
+  if (income <= 120_000) return 5_092 + (income - 45_000) * 0.325;
+  if (income <= 180_000) return 29_467 + (income - 120_000) * 0.37;
+  return 51_667 + (income - 180_000) * 0.45;
+}
+
+/**
+ * Per-property negative gearing analysis.
+ *
+ * Taxable rental loss (ATO method):
+ *   rental income (net of vacancy + mgmt fee)
+ *   − loan interest (interest-only portion of repayment)
+ *   − deductible property expenses (council, insurance, maintenance, water, body corp, land tax)
+ *   − depreciation estimate (if enabled)
+ *
+ * NOTE: principal repayments are NOT tax-deductible.
+ * NOTE: capital works / building depreciation is approximated at 2.5% of
+ *       purchase price per year (Div 43 at standard rate).
+ */
+export interface NGAnalysis {
+  propertyId: number;
+  propertyName: string;
+  annualRentalIncome: number;     // net (after vacancy + mgmt fee)
+  annualInterest: number;         // interest-only portion of loan repayments
+  annualDeductibleExpenses: number; // rates + insurance + maintenance etc.
+  annualDepreciation: number;     // Div 43 estimate
+  taxableRentalResult: number;    // income - interest - expenses - depreciation  (negative = loss)
+  isNegativelyGeared: boolean;
+  annualTaxBenefit: number;       // marginalRate × |loss|  (positive = $ refund)
+  monthlyTaxBenefit: number;      // annualTaxBenefit / 12  (for PAYG spread)
+  monthlyCashLoss: number;        // net rental income − full loan repayment − expenses/12
+  netAfterTaxMonthlyCost: number; // monthlyCashLoss + monthlyTaxBenefit
+  ownershipShare: number;         // 0–1
+}
+
+export interface NGSummary {
+  properties: NGAnalysis[];
+  totalAnnualTaxBenefit: number;
+  totalMonthlyCashLoss: number;
+  totalNetAfterTaxMonthlyCost: number;
+  totalTaxableRentalResult: number;
+  marginalRate: number;
+  refundMode: 'lump-sum' | 'payg';
+}
+
+export function calcNegativeGearing(params: {
+  properties: Array<{
+    id: number;
+    name?: string;
+    address?: string;
+    type: string;
+    loan_amount: number;
+    interest_rate: number;
+    loan_type: string;
+    loan_term: number;
+    weekly_rent: number;
+    vacancy_rate: number;
+    management_fee: number;
+    council_rates: number;
+    insurance: number;
+    maintenance: number;
+    water_rates?: number;
+    body_corporate?: number;
+    land_tax?: number;
+    purchase_price?: number;
+    current_value?: number;
+    ownership_share?: number; // 0–1, default 1.0
+    depreciation_enabled?: boolean;
+    settlement_date?: string;
+    purchase_date?: string;
+    rental_start_date?: string;
+  }>;
+  annualSalaryIncome: number; // combined household gross salary
+  refundMode?: 'lump-sum' | 'payg';
+  jointOwnership?: boolean;    // if true, income split 50/50 before bracket calc
+}): NGSummary {
+  const mode = params.refundMode ?? 'lump-sum';
+  const salaryForBracket = params.jointOwnership
+    ? params.annualSalaryIncome / 2
+    : params.annualSalaryIncome;
+
+  const investmentProps = params.properties.filter(p => p.type !== 'ppor');
+
+  const analyses: NGAnalysis[] = investmentProps.map(prop => {
+    const loanAmount    = safeNum(prop.loan_amount);
+    const interestRate  = safeNum(prop.interest_rate) || 6.5;
+    const loanTerm      = safeNum(prop.loan_term) || 30;
+    const isIO          = prop.loan_type === 'IO';
+    const weeklyRent    = safeNum(prop.weekly_rent);
+    const ownerShare    = safeNum(prop.ownership_share) || 1.0;
+    const purchasePrice = safeNum(prop.purchase_price) || safeNum(prop.current_value);
+
+    // Annual rental income (net of vacancy + management fee)
+    const grossAnnualRent = weeklyRent * 52 * (1 - safeNum(prop.vacancy_rate) / 100);
+    const annualRentalIncome = grossAnnualRent * (1 - safeNum(prop.management_fee) / 100) * ownerShare;
+
+    // Annual interest (deductible portion)
+    // IO loan: entire repayment is interest
+    // PI loan: interest portion = outstanding balance × rate (approximated at year 1)
+    const annualInterest = isIO
+      ? loanAmount * (interestRate / 100) * ownerShare
+      : loanAmount * (interestRate / 100) * ownerShare; // conservative: use full interest rate × principal (slightly overstates early, understates late — good enough for forecast)
+
+    // Deductible running expenses (excl. principal)
+    const annualDeductibleExpenses = (
+      safeNum(prop.council_rates) +
+      safeNum(prop.insurance) +
+      safeNum(prop.maintenance) +
+      safeNum(prop.water_rates) +
+      safeNum(prop.body_corporate) +
+      safeNum(prop.land_tax)
+    ) * ownerShare;
+
+    // Div 43 building depreciation estimate (2.5% of purchase price, if enabled)
+    const annualDepreciation = prop.depreciation_enabled !== false && purchasePrice > 0
+      ? purchasePrice * 0.025 * ownerShare
+      : 0;
+
+    // Taxable rental result
+    const taxableRentalResult = annualRentalIncome - annualInterest - annualDeductibleExpenses - annualDepreciation;
+    const isNegativelyGeared = taxableRentalResult < 0;
+
+    // Tax benefit: marginal rate on the loss, calculated at combined income bracket
+    // The rental loss offsets salary income → refund = loss × marginalRate
+    const effectiveIncome = salaryForBracket + Math.max(0, taxableRentalResult); // add profit if positive; 0 if loss (ATO offsets)
+    const marginalRate = auMarginalRate(effectiveIncome);
+    const annualTaxBenefit = isNegativelyGeared
+      ? Math.abs(taxableRentalResult) * marginalRate
+      : 0;
+
+    // Actual monthly cash loss (before tax benefit) — uses full loan repayment (principal + interest)
+    const fullMonthlyLoanRepayment = isIO
+      ? loanAmount * (interestRate / 100) / 12
+      : calcMonthlyRepayment(loanAmount, interestRate, loanTerm);
+    const monthlyCashLoss = annualRentalIncome / 12
+      - fullMonthlyLoanRepayment * ownerShare
+      - annualDeductibleExpenses / 12;
+
+    return {
+      propertyId:               prop.id,
+      propertyName:             prop.name || prop.address || `Property ${prop.id}`,
+      annualRentalIncome:       Math.round(annualRentalIncome),
+      annualInterest:           Math.round(annualInterest),
+      annualDeductibleExpenses: Math.round(annualDeductibleExpenses),
+      annualDepreciation:       Math.round(annualDepreciation),
+      taxableRentalResult:      Math.round(taxableRentalResult),
+      isNegativelyGeared,
+      annualTaxBenefit:         Math.round(annualTaxBenefit),
+      monthlyTaxBenefit:        Math.round(annualTaxBenefit / 12),
+      monthlyCashLoss:          Math.round(monthlyCashLoss),
+      netAfterTaxMonthlyCost:   Math.round(monthlyCashLoss + annualTaxBenefit / 12),
+      ownershipShare:           ownerShare,
+    };
+  });
+
+  const totalAnnualTaxBenefit        = analyses.reduce((s, a) => s + a.annualTaxBenefit, 0);
+  const totalMonthlyCashLoss         = analyses.reduce((s, a) => s + a.monthlyCashLoss, 0);
+  const totalNetAfterTaxMonthlyCost  = analyses.reduce((s, a) => s + a.netAfterTaxMonthlyCost, 0);
+  const totalTaxableRentalResult     = analyses.reduce((s, a) => s + a.taxableRentalResult, 0);
+  const marginalRate                 = auMarginalRate(salaryForBracket);
+
+  return {
+    properties: analyses,
+    totalAnnualTaxBenefit,
+    totalMonthlyCashLoss,
+    totalNetAfterTaxMonthlyCost,
+    totalTaxableRentalResult,
+    marginalRate,
+    refundMode: mode,
+  };
+}
+
 // ─── Aggregate cash flow to annual totals ─────────────────────────────
 export interface CashFlowYear {
   year: number;
@@ -828,6 +1086,9 @@ export interface CashFlowYear {
   rentalIncome: number;
   mortgageRepayment: number;
   investmentLoanRepayment: number;
+  // NG fields
+  ngTaxBenefit: number;     // NG refund received this year (Aug lump-sum or 0)
+  ngBenefitSpread: number;  // NG benefit included via PAYG spread (monthly total)
   netCashFlow: number;
   endingBalance: number;
   hasActualMonths: number; // count of months with actual data
@@ -841,6 +1102,7 @@ export function aggregateCashFlowToAnnual(monthly: CashFlowMonth[]): CashFlowYea
         year: m.year,
         income: 0, totalExpenses: 0, rentalIncome: 0,
         mortgageRepayment: 0, investmentLoanRepayment: 0,
+        ngTaxBenefit: 0, ngBenefitSpread: 0,
         netCashFlow: 0, endingBalance: 0, hasActualMonths: 0,
       });
     }
@@ -850,6 +1112,8 @@ export function aggregateCashFlowToAnnual(monthly: CashFlowMonth[]): CashFlowYea
     yr.rentalIncome += m.rentalIncome;
     yr.mortgageRepayment += m.mortgageRepayment;
     yr.investmentLoanRepayment += m.investmentLoanRepayment;
+    yr.ngTaxBenefit   += m.ngTaxBenefit ?? 0;
+    yr.ngBenefitSpread += m.ngBenefitSpread ?? 0;
     yr.netCashFlow += m.netCashFlow;
     yr.endingBalance = m.cumulativeBalance; // last month of year
     if (m.isActual) yr.hasActualMonths++;
