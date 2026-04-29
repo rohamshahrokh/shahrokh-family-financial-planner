@@ -60,6 +60,7 @@ import familyImg from "@assets/family.jpeg";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import { Link } from "wouter";
+import { useForecastStore } from "@/lib/forecastStore";
 
 // ─── Chart colours ────────────────────────────────────────────────────────────
 const COLORS = [
@@ -92,6 +93,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 export default function DashboardPage() {
   const qc = useQueryClient();
   const { chartView, privacyMode, togglePrivacy } = useAppStore();
+  const { forecastMode, profile, monteCarloResult } = useForecastStore();
 
   const [editSnap, setEditSnap] = useState(false);
   const [snapDraft, setSnapDraft] = useState<any>(null);
@@ -552,6 +554,36 @@ export default function DashboardPage() {
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6 pb-8">
+
+      {/* ─── Forecast Mode Banner ──────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Forecast mode:</span>
+          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+            forecastMode === 'monte-carlo'  ? 'bg-purple-900/40 text-purple-300 border border-purple-700/30' :
+            forecastMode === 'year-by-year' ? 'bg-blue-900/40 text-blue-300 border border-blue-700/30' :
+            'bg-primary/10 text-primary border border-primary/20'
+          }`}>
+            {forecastMode === 'monte-carlo'  ? 'Monte Carlo' :
+             forecastMode === 'year-by-year' ? 'Year-by-Year' :
+             `Profile — ${profile.charAt(0).toUpperCase() + profile.slice(1)}`}
+          </span>
+        </div>
+        {forecastMode === 'monte-carlo' && monteCarloResult && (
+          <>
+            <span className="text-xs text-muted-foreground">Median 2035:</span>
+            <span className="text-xs font-bold num-display text-emerald-400">{formatCurrency(monteCarloResult.median, true)}</span>
+            <span className="text-xs text-muted-foreground">Range:</span>
+            <span className="text-xs num-display text-muted-foreground">{formatCurrency(monteCarloResult.p10, true)} – {formatCurrency(monteCarloResult.p90, true)}</span>
+            <span className="px-2 py-0.5 rounded-full text-xs bg-amber-900/30 text-amber-300 border border-amber-700/30">
+              {monteCarloResult.prob_ff}% financial freedom
+            </span>
+          </>
+        )}
+        <Link href="/ai-forecast-engine" className="ml-auto text-xs text-primary hover:underline">
+          Configure →
+        </Link>
+      </div>
 
       {/* ─── Hero Section ─────────────────────────────────────────────────── */}
       <div
