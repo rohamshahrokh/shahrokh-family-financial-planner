@@ -333,9 +333,30 @@ export default function DashboardPage() {
 
   // ─── 10-year projection ───────────────────────────────────────────────────
   const projection = useMemo(
-    () => projectNetWorth({ snapshot: snap, properties, stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, years: 10, inflation: fa.flat.inflation, ppor_growth: fa.flat.property_growth, yearlyAssumptions: fa.yearly }),
+    () => projectNetWorth({
+      snapshot: snap,
+      properties,
+      stocks,
+      cryptos,
+      stockTransactions:   plannedStockTx,
+      cryptoTransactions:  plannedCryptoTx,
+      stockDCASchedules,
+      cryptoDCASchedules,
+      plannedStockOrders,
+      plannedCryptoOrders,
+      years:               10,
+      inflation:           fa.flat.inflation,
+      ppor_growth:         fa.flat.property_growth,
+      yearlyAssumptions:   fa.yearly,
+      // Central Cash Engine — real monthly cash balance replaces 50% shortcut
+      expenses:            expenses as any[],
+      bills:               billsRaw as any[],
+      ngRefundMode,
+      ngAnnualBenefit:     ngSummary.totalAnnualTaxBenefit,
+      annualSalaryIncome:  safeNum(snap.monthly_income) * 12,
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa]
+    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngRefundMode, ngSummary.totalAnnualTaxBenefit]
   );
 
   const year10NW      = projection[9]?.endNetWorth || netWorth;
