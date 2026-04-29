@@ -19,7 +19,8 @@
  * Stale data is returned with a `stale: true` flag if live fetch fails.
  */
 
-import type { VercelRequest, VercelResponse } from "@vercel/node";
+type VercelRequest  = import("http").IncomingMessage & { body?: any; query: Record<string, string | string[]> };
+type VercelResponse = import("http").ServerResponse  & { status: (c: number) => VercelResponse; json: (b: any) => void; end: () => VercelResponse; setHeader: (k: string, v: string) => VercelResponse };
 
 // ─── In-process cache ─────────────────────────────────────────────────────────
 

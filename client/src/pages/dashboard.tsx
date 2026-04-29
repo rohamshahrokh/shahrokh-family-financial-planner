@@ -297,6 +297,7 @@ export default function DashboardPage() {
   const snap = {
     ppor:             safeNum(snapshot?.ppor)             || 1510000,
     cash:             safeNum(snapshot?.cash)             || 220000,
+    offset_balance:   safeNum(snapshot?.offset_balance),   // mortgage offset account
     super_balance:    safeNum(snapshot?.super_balance)    || 85000,
     stocks:           safeNum(snapshot?.stocks),
     crypto:           safeNum(snapshot?.crypto),
@@ -309,33 +310,58 @@ export default function DashboardPage() {
       : safeNum(snapshot?.monthly_income)   || 22000,
     monthly_expenses: safeNum(snapshot?.monthly_expenses) || 14540,
     // ── Super per-person fields (passed through to finance engine) ──
-    roham_super_balance:     safeNum(snapshot?.roham_super_balance),
-    roham_super_salary:      safeNum(snapshot?.roham_super_salary),
-    roham_employer_contrib:  safeNum(snapshot?.roham_employer_contrib)  || 11.5,
-    roham_salary_sacrifice:  safeNum(snapshot?.roham_salary_sacrifice),
-    roham_super_growth_rate: safeNum(snapshot?.roham_super_growth_rate) || 8.0,
-    roham_super_fee_pct:     safeNum(snapshot?.roham_super_fee_pct)     || 0.5,
-    roham_super_insurance_pa:safeNum(snapshot?.roham_super_insurance_pa),
-    fara_super_balance:      safeNum(snapshot?.fara_super_balance),
-    fara_super_salary:       safeNum(snapshot?.fara_super_salary),
-    fara_employer_contrib:   safeNum(snapshot?.fara_employer_contrib)   || 11.5,
-    fara_salary_sacrifice:   safeNum(snapshot?.fara_salary_sacrifice),
-    fara_super_growth_rate:  safeNum(snapshot?.fara_super_growth_rate)  || 8.0,
-    fara_super_fee_pct:      safeNum(snapshot?.fara_super_fee_pct)      || 0.5,
-    fara_super_insurance_pa: safeNum(snapshot?.fara_super_insurance_pa),
+    roham_super_balance:          safeNum(snapshot?.roham_super_balance),
+    roham_super_salary:           safeNum(snapshot?.roham_super_salary),
+    roham_employer_contrib:       safeNum(snapshot?.roham_employer_contrib)       || 11.5,
+    roham_salary_sacrifice:       safeNum(snapshot?.roham_salary_sacrifice),
+    roham_super_personal_contrib: safeNum(snapshot?.roham_super_personal_contrib),
+    roham_super_annual_topup:     safeNum(snapshot?.roham_super_annual_topup),
+    roham_super_growth_rate:      safeNum(snapshot?.roham_super_growth_rate)      || 8.0,
+    roham_super_fee_pct:          safeNum(snapshot?.roham_super_fee_pct)          || 0.5,
+    roham_super_insurance_pa:     safeNum(snapshot?.roham_super_insurance_pa),
+    roham_super_option:           (snapshot?.roham_super_option  as string)       || 'High Growth',
+    roham_super_provider:         (snapshot?.roham_super_provider as string)      || '',
+    roham_retirement_age:         safeNum(snapshot?.roham_retirement_age)         || 60,
+    fara_super_balance:           safeNum(snapshot?.fara_super_balance),
+    fara_super_salary:            safeNum(snapshot?.fara_super_salary),
+    fara_employer_contrib:        safeNum(snapshot?.fara_employer_contrib)        || 11.5,
+    fara_salary_sacrifice:        safeNum(snapshot?.fara_salary_sacrifice),
+    fara_super_personal_contrib:  safeNum(snapshot?.fara_super_personal_contrib),
+    fara_super_annual_topup:      safeNum(snapshot?.fara_super_annual_topup),
+    fara_super_growth_rate:       safeNum(snapshot?.fara_super_growth_rate)       || 8.0,
+    fara_super_fee_pct:           safeNum(snapshot?.fara_super_fee_pct)           || 0.5,
+    fara_super_insurance_pa:      safeNum(snapshot?.fara_super_insurance_pa),
+    fara_super_option:            (snapshot?.fara_super_option  as string)        || 'High Growth',
+    fara_super_provider:          (snapshot?.fara_super_provider as string)       || '',
+    fara_retirement_age:          safeNum(snapshot?.fara_retirement_age)          || 60,
   };
 
   // ─── Derived values ───────────────────────────────────────────────────────
-  const totalAssets      = snap.ppor + snap.cash + snap.super_balance + snap.stocks + snap.crypto + snap.cars + snap.iran_property;
-  const totalLiabilities = snap.mortgage + snap.other_debts;
-  const netWorth         = totalAssets - totalLiabilities;
-  const surplus          = snap.monthly_income - snap.monthly_expenses;
-  const savingsRate      = calcSavingsRate(snap.monthly_income, snap.monthly_expenses);
-  const propertyEquity   = snap.ppor - snap.mortgage;
-
   const stocksTotal    = stocks.reduce((s: number, st: any) => s + safeNum(st.current_holding) * safeNum(st.current_price), 0);
   const cryptoTotal    = cryptos.reduce((s: number, c: any) => s + safeNum(c.current_holding) * safeNum(c.current_price), 0);
   const totalInvestments = stocksTotal + cryptoTotal;
+
+  // Use live holdings for stocks/crypto (from DB), add offset_balance alongside cash.
+  // snap.stocks / snap.crypto are snapshot fallbacks — do NOT add both or you double-count.
+  const liveStocks  = stocksTotal  > 0 ? stocksTotal  : snap.stocks;
+  const liveCrypto  = cryptoTotal  > 0 ? cryptoTotal  : snap.crypto;
+
+  // Super: use per-person balances if entered, else fall back to legacy super_balance field.
+  // NOTE: currentTotalSuper is also declared below (line ~421) from the same logic —
+  // we use a single constant here so totalAssets is computed before the projection block.
+  const _superRohamNow = snap.roham_super_balance > 0 ? snap.roham_super_balance : snap.super_balance * 0.6;
+  const _superFaraNow  = snap.fara_super_balance  > 0 ? snap.fara_super_balance  : snap.super_balance * 0.4;
+  const _totalSuperNow = _superRohamNow + _superFaraNow;
+
+  const totalAssets      = snap.ppor + snap.cash + snap.offset_balance + _totalSuperNow + liveStocks + liveCrypto + snap.cars + snap.iran_property;
+  const totalLiabilities = snap.mortgage + snap.other_debts;
+  const netWorth         = totalAssets - totalLiabilities;
+  // Accessible vs Locked wealth split
+  const lockedWealth     = _totalSuperNow;            // super is locked until preservation age
+  const accessibleWealth = netWorth - lockedWealth;   // total NW excluding super
+  const surplus          = snap.monthly_income - snap.monthly_expenses;
+  const savingsRate      = calcSavingsRate(snap.monthly_income, snap.monthly_expenses);
+  const propertyEquity   = snap.ppor - snap.mortgage;
 
   // Planned transactions only — actuals are already counted in expenses
   const plannedStockTx = useMemo(
@@ -495,12 +521,12 @@ export default function DashboardPage() {
   // ─── Chart data ───────────────────────────────────────────────────────────
   const assetData = [
     { name: "PPOR",          value: snap.ppor },
-    { name: "Cash",          value: snap.cash },
+    { name: "Cash",          value: snap.cash + snap.offset_balance },
     { name: "Super",         value: snap.super_balance },
     { name: "Cars",          value: snap.cars },
     { name: "Iran Property", value: snap.iran_property },
-    { name: "Stocks",        value: stocksTotal + snap.stocks },
-    { name: "Crypto",        value: cryptoTotal + snap.crypto },
+    { name: "Stocks",        value: liveStocks },
+    { name: "Crypto",        value: liveCrypto },
   ].filter((d) => d.value > 0);
 
   const cashFlowData = [
@@ -561,8 +587,8 @@ export default function DashboardPage() {
 
   // ─── Wealth Strategy Summary Cards ───────────────────────────────────────
   const wealthCards = useMemo(() => {
-    // FIRE progress
-    const currentInvestable = snap.cash + snap.super_balance + snap.stocks + snap.crypto + stocksTotal + cryptoTotal;
+    // FIRE progress — use liveStocks/liveCrypto (no double-count), include offset_balance
+    const currentInvestable = snap.cash + snap.offset_balance + snap.super_balance + liveStocks + liveCrypto;
     const requiredFIRE = (10000 * 12) / 0.04; // default: $10k/mo at 4% SWR
     const fireProgress = Math.min(100, Math.round((currentInvestable / requiredFIRE) * 100));
 
@@ -580,10 +606,10 @@ export default function DashboardPage() {
     // Property readiness (rough)
     const targetIP = 750000;
     const depositNeeded = targetIP * 0.2 + targetIP * 0.035; // 20% + stamp duty
-    const depositReady = Math.min(100, Math.round((snap.cash * 0.7 / depositNeeded) * 100));
+    const depositReady = Math.min(100, Math.round(((snap.cash + snap.offset_balance) * 0.7 / depositNeeded) * 100));
 
     // Retirement age estimate (rough)
-    const currentInvestable2 = snap.cash + snap.super_balance + snap.stocks + snap.crypto + stocksTotal + cryptoTotal;
+    const currentInvestable2 = snap.cash + snap.offset_balance + snap.super_balance + liveStocks + liveCrypto;
     const targetFIRE = (8000 * 12) / 0.04;
     const monthlySaving = Math.max(surplus, 100);
     const r = 0.07 / 12;
@@ -686,6 +712,7 @@ export default function DashboardPage() {
   const snapFields = [
     { label: "PPOR",             key: "ppor",             group: "asset" },
     { label: "Cash",             key: "cash",             group: "asset" },
+    { label: "Offset Balance",   key: "offset_balance",   group: "asset" },
     { label: "Super",            key: "super_balance",    group: "asset" },
     { label: "Cars",             key: "cars",             group: "asset" },
     { label: "Iran Property",    key: "iran_property",    group: "asset" },
@@ -829,7 +856,7 @@ export default function DashboardPage() {
         <KpiCard
           label="Net Worth"
           value={maskValue(formatCurrency(netWorth, true), privacyMode, "currency")}
-          subValue={maskValue(`${savingsRate.toFixed(0)}% savings rate`, privacyMode, "pct")}
+          subValue={maskValue(`Accessible: ${formatCurrency(accessibleWealth, true)}`, privacyMode, "currency")}
           trend={1}
           icon={<DollarSign />}
         />
@@ -906,6 +933,31 @@ export default function DashboardPage() {
         />
       </div>
 
+
+      {/* ─── Accessible vs Locked Wealth Split ──────────────────────────────── */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/20 p-4">
+          <p className="text-xs text-emerald-400/80 font-medium mb-1">Accessible Wealth</p>
+          <p className="text-lg font-bold num-display text-emerald-400">
+            {maskValue(formatCurrency(accessibleWealth, true), privacyMode, "currency")}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">Available now (ex-super)</p>
+        </div>
+        <div className="rounded-xl border border-purple-800/40 bg-purple-950/20 p-4">
+          <p className="text-xs text-purple-300/80 font-medium mb-1">Locked Retirement Wealth</p>
+          <p className="text-lg font-bold num-display text-purple-300">
+            {maskValue(formatCurrency(lockedWealth, true), privacyMode, "currency")}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">Superannuation — access at 60</p>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <p className="text-xs text-muted-foreground font-medium mb-1">Total Net Worth</p>
+          <p className="text-lg font-bold num-display" style={{ color: 'hsl(43,85%,65%)' }}>
+            {maskValue(formatCurrency(netWorth, true), privacyMode, "currency")}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">Accessible + Super combined</p>
+        </div>
+      </div>
 
       {/* ─── Cash Engine KPI Cards ─────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-1">
