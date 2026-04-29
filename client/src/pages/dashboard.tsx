@@ -7,6 +7,8 @@ import {
   projectNetWorth,
   buildCashFlowSeries,
   aggregateCashFlowToAnnual,
+  calcNegativeGearing,
+  type NGSummary,
 } from "@/lib/finance";
 import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
@@ -90,6 +92,39 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
+// ─── Cashflow tooltip with NG refund line ───────────────────────────────────
+const CashflowTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  const d = payload[0]?.payload ?? {};
+  const rows: Array<{ label: string; value: number; color: string }> = [
+    { label: 'Salary / Income',            value: d.income   ?? 0, color: 'hsl(142,60%,45%)' },
+    { label: 'Rental Income',              value: d.rental   ?? 0, color: 'hsl(188,60%,48%)' },
+    { label: 'Living Expenses',            value: -(d.expenses ?? 0), color: 'hsl(0,72%,51%)' },
+    { label: 'Mortgage / Loan Repayments', value: -(d.mortgage ?? 0), color: 'hsl(20,80%,55%)' },
+    { label: 'NG Tax Refund',              value: d.ngRefund  ?? 0, color: 'hsl(43,85%,55%)' },
+    { label: 'Net Cashflow',               value: d.netCF    ?? 0, color: (d.netCF ?? 0) >= 0 ? 'hsl(142,60%,45%)' : 'hsl(0,72%,51%)' },
+    { label: 'Ending Cash Balance',        value: d.balance  ?? 0, color: 'hsl(270,60%,60%)' },
+  ].filter(r => r.value !== 0);
+  return (
+    <div className="bg-card border border-border rounded-lg px-3 py-2.5 shadow-xl text-xs min-w-[220px]">
+      <p className="text-muted-foreground font-semibold mb-2">{label}</p>
+      {rows.map((r, i) => (
+        <div key={i} className="flex justify-between gap-4">
+          <span style={{ color: r.color }}>{r.label}</span>
+          <span style={{ color: r.color }} className="font-mono tabular-nums">
+            {r.value >= 0 ? '+' : ''}{formatCurrency(r.value, true)}
+          </span>
+        </div>
+      ))}
+      {(d.ngRefund ?? 0) > 0 && (
+        <p className="text-yellow-400 text-[10px] mt-1.5 border-t border-border pt-1">
+          ✓ Negative Gearing Tax Refund
+        </p>
+      )}
+    </div>
+  );
+};
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const qc = useQueryClient();
@@ -101,6 +136,7 @@ export default function DashboardPage() {
   const [snapDraft, setSnapDraft] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(getLastSync);
+  const [ngRefundMode, setNgRefundMode] = useState<'lump-sum' | 'payg'>('lump-sum');
   // Wire cash flow chart to global chartView from the header toggle
   const cashFlowView = chartView;
 
@@ -410,15 +446,40 @@ export default function DashboardPage() {
     { month: "Surplus",  value: surplus,               fill: "hsl(43,85%,55%)" },
   ];
 
+
+  // ─── Negative Gearing Analysis ────────────────────────────────────────────
+  const ngSummary = useMemo<NGSummary>(() =>
+    calcNegativeGearing({
+      properties: properties as any[],
+      annualSalaryIncome: safeNum(snap.monthly_income) * 12,
+      refundMode: ngRefundMode,
+    }),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [properties, snap.monthly_income, ngRefundMode]);
+
   // ─── Master Cash Flow Series (2025 → 2035) ────────────────────────────────
   const cashFlowSeries = useMemo(
-    () => buildCashFlowSeries({ snapshot: snap, expenses: expenses as any[], properties: properties as any[], stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, inflationRate: fa.flat.inflation, incomeGrowthRate: fa.flat.income_growth }),
+    () => buildCashFlowSeries({
+      snapshot: snap,
+      expenses: expenses as any[],
+      properties: properties as any[],
+      stockTransactions: plannedStockTx,
+      cryptoTransactions: plannedCryptoTx,
+      stockDCASchedules,
+      cryptoDCASchedules,
+      plannedStockOrders,
+      plannedCryptoOrders,
+      inflationRate: fa.flat.inflation,
+      incomeGrowthRate: fa.flat.income_growth,
+      ngRefundMode,
+      ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
+      annualSalaryIncome: safeNum(snap.monthly_income) * 12,
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa]
+    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]
   );
 
   const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
-
   // ─── Wealth Strategy Summary Cards ───────────────────────────────────────
   const wealthCards = useMemo(() => {
     // FIRE progress
@@ -491,24 +552,26 @@ export default function DashboardPage() {
   const masterCFData = useMemo(() => {
     if (cashFlowView === "annual") {
       return cashFlowAnnual.map((y) => ({
-        label:     y.year.toString(),
-        income:    y.income,
-        expenses:  y.totalExpenses,
-        mortgage:  y.mortgageRepayment,
-        rental:    y.rentalIncome,
-        netCF:     y.netCashFlow,
-        balance:   y.endingBalance,
+        label:      y.year.toString(),
+        income:     y.income,
+        expenses:   y.totalExpenses,
+        mortgage:   y.mortgageRepayment,
+        rental:     y.rentalIncome,
+        ngRefund:   y.ngTaxBenefit,
+        netCF:      y.netCashFlow,
+        balance:    y.endingBalance,
         hasActuals: y.hasActualMonths > 0,
       }));
     } else {
       return cashFlowSeries.map((m) => ({
-        label:     m.label,
-        income:    m.income,
-        expenses:  m.totalExpenses,
-        mortgage:  m.mortgageRepayment,
-        rental:    m.rentalIncome,
-        netCF:     m.netCashFlow,
-        balance:   m.cumulativeBalance,
+        label:      m.label,
+        income:     m.income,
+        expenses:   m.totalExpenses,
+        mortgage:   m.mortgageRepayment,
+        rental:     m.rentalIncome,
+        ngRefund:   m.ngTaxBenefit,
+        netCF:      m.netCashFlow,
+        balance:    m.cumulativeBalance,
         hasActuals: m.isActual,
       }));
     }
@@ -1147,10 +1210,52 @@ export default function DashboardPage() {
               Actual expenses (tracked) + forecast (snapshot) · 2025 – 2035
             </p>
           </div>
-          <span className="text-xs text-muted-foreground px-2 py-1 rounded-lg bg-secondary capitalize">
-            {cashFlowView} view · toggle in header
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-muted-foreground px-2 py-1 rounded-lg bg-secondary capitalize">
+              {cashFlowView} view · toggle in header
+            </span>
+          </div>
         </div>
+
+        {/* ─ Negative Gearing Banner ─ */}
+        {ngSummary.totalAnnualTaxBenefit > 0 && (
+          <div className="rounded-lg border border-yellow-700/40 bg-yellow-900/20 px-4 py-3 mb-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <p className="text-xs font-bold text-yellow-400">Australian Negative Gearing Active</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {ngSummary.properties.filter(p => p.isNegativelyGeared).length} negatively geared {ngSummary.properties.filter(p => p.isNegativelyGeared).length === 1 ? 'property' : 'properties'}
+                  &nbsp;·&nbsp;Marginal rate: {Math.round(ngSummary.marginalRate * 100)}%
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-4 text-xs">
+                <div>
+                  <p className="text-muted-foreground">Monthly Cash Loss</p>
+                  <p className="font-bold text-red-400 num-display">{maskValue(formatCurrency(ngSummary.totalMonthlyCashLoss, true), privacyMode, 'currency')}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Est. Annual Tax Refund</p>
+                  <p className="font-bold text-yellow-400 num-display">+{maskValue(formatCurrency(ngSummary.totalAnnualTaxBenefit, true), privacyMode, 'currency')}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Net After-Tax Cost/mo</p>
+                  <p className={`font-bold num-display ${ngSummary.totalNetAfterTaxMonthlyCost >= 0 ? 'text-emerald-400' : 'text-orange-400'}`}>
+                    {maskValue(formatCurrency(ngSummary.totalNetAfterTaxMonthlyCost, true), privacyMode, 'currency')}
+                  </p>
+                </div>
+                <div>
+                  <button
+                    onClick={() => setNgRefundMode(m => m === 'lump-sum' ? 'payg' : 'lump-sum')}
+                    className="px-2.5 py-1 rounded-md border border-yellow-700/50 text-yellow-300 text-[11px] bg-yellow-900/30 hover:bg-yellow-900/50 transition-colors"
+                  >
+                    {ngRefundMode === 'lump-sum' ? 'Lump-sum (Aug)' : 'PAYG Monthly'}
+                  </button>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">click to toggle mode</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Legend */}
         <div className="flex gap-4 mb-3 flex-wrap">
@@ -1159,6 +1264,7 @@ export default function DashboardPage() {
             { color: "hsl(0,72%,51%)",   label: "Expenses" },
             { color: "hsl(43,85%,55%)",  label: "Net CF" },
             { color: "hsl(188,60%,48%)", label: "Balance (right axis)", dashed: true },
+            ...(ngSummary.totalAnnualTaxBenefit > 0 ? [{ color: "hsl(55,95%,55%)", label: "NG Refund", dashed: true }] : []),
           ].map((l) => (
             <div key={l.label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <div className="w-2.5 h-2.5 rounded-sm" style={{ background: l.color, opacity: (l as any).dashed ? 0.7 : 1 }} />
@@ -1211,17 +1317,32 @@ export default function DashboardPage() {
               content={({ active, payload, label }) => {
                 if (!active || !payload?.length) return null;
                 const ann = settlementAnnotations.find(a => a.label === label);
+                const d = payload[0]?.payload ?? {};
                 return (
-                  <div className="bg-card border border-border rounded-lg px-3 py-2 text-xs shadow-xl max-w-[220px]">
-                    <p className="text-muted-foreground mb-1 font-semibold">{label}</p>
+                  <div className="bg-card border border-border rounded-lg px-3 py-2.5 text-xs shadow-xl min-w-[220px]">
+                    <p className="text-muted-foreground mb-1.5 font-semibold">{label}</p>
                     {ann && (
                       <p className="text-amber-400 mb-1 font-semibold">🏠 {ann.name} settlement{ann.amount > 0 ? ` (${formatCurrency(ann.amount, true)})` : ''}</p>
                     )}
-                    {payload.map((p: any, i: number) => (
-                      <p key={i} style={{ color: p.color }}>
-                        {p.name}: {formatCurrency(p.value, true)}
-                      </p>
+                    {[
+                      { name: 'Salary / Income',            value: d.income   ?? 0, color: 'hsl(142,60%,45%)' },
+                      { name: 'Rental Income',              value: d.rental   ?? 0, color: 'hsl(188,60%,48%)' },
+                      { name: 'Living Expenses',            value: -(d.expenses ?? 0), color: 'hsl(0,72%,51%)' },
+                      { name: 'Mortgage / Loans',           value: -(d.mortgage ?? 0), color: 'hsl(20,80%,55%)' },
+                      { name: 'NG Tax Refund',              value: d.ngRefund ?? 0, color: 'hsl(43,85%,55%)' },
+                      { name: 'Net Cashflow',               value: d.netCF ?? 0, color: (d.netCF ?? 0) >= 0 ? 'hsl(142,60%,45%)' : 'hsl(0,72%,51%)' },
+                      { name: 'Ending Balance',             value: d.balance ?? 0, color: 'hsl(270,60%,60%)' },
+                    ].filter(r => r.value !== 0).map((r, i) => (
+                      <div key={i} className="flex justify-between gap-4">
+                        <span style={{ color: r.color }}>{r.name}</span>
+                        <span style={{ color: r.color }} className="font-mono">
+                          {r.value >= 0 ? '+' : ''}{formatCurrency(r.value, true)}
+                        </span>
+                      </div>
                     ))}
+                    {(d.ngRefund ?? 0) > 0 && (
+                      <p className="text-yellow-400 text-[10px] mt-1.5 border-t border-border pt-1">✓ Negative Gearing Tax Refund</p>
+                    )}
                   </div>
                 );
               }}
@@ -1259,6 +1380,13 @@ export default function DashboardPage() {
               type="monotone" dataKey="netCF"
               stroke="hsl(43,85%,55%)" strokeWidth={2} dot={false} name="Net CF"
             />
+            {ngSummary.totalAnnualTaxBenefit > 0 && (
+              <Line
+                yAxisId="left"
+                type="monotone" dataKey="ngRefund"
+                stroke="hsl(55,95%,55%)" strokeWidth={1.5} strokeDasharray="3 2" dot={false} name="NG Refund"
+              />
+            )}
             <Line
               yAxisId="right"
               type="monotone" dataKey="balance"
