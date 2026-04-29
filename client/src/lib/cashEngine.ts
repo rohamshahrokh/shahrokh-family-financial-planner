@@ -47,7 +47,7 @@ import {
   type LiquidityReport,
 } from './liquidityRules';
 
-import { safeNum } from './finance';
+import { safeNum } from './mathUtils';
 
 // ─── Public input type ────────────────────────────────────────────────────────
 
