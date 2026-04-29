@@ -326,19 +326,23 @@ export function projectNetWorth(params: {
   let superRoham = safeNum(s.roham_super_balance) || legacySuper * 0.6;
   let superFara  = safeNum(s.fara_super_balance)  || legacySuper * 0.4;
 
-  const rohamSalary       = safeNum(s.roham_super_salary)      || safeNum(s.monthly_income) * 12 * 0.7;
-  const rohamEmplContrib  = safeNum(s.roham_employer_contrib)  || 11.5;  // SG rate 2024-25
-  const rohamSalarySac    = safeNum(s.roham_salary_sacrifice)  || 0;
-  const rohamGrowth       = safeNum(s.roham_super_growth_rate) || 8.0;   // High Growth default
-  const rohamFee          = safeNum(s.roham_super_fee_pct)     || 0.5;
-  const rohamInsurance    = safeNum(s.roham_super_insurance_pa)|| 0;
+  const rohamSalary           = safeNum(s.roham_super_salary)           || safeNum(s.monthly_income) * 12 * 0.7;
+  const rohamEmplContrib      = safeNum(s.roham_employer_contrib)       || 11.5;  // SG rate 2024-25
+  const rohamSalarySac        = safeNum(s.roham_salary_sacrifice)       || 0;     // annual concessional extra
+  const rohamPersonalContrib  = safeNum(s.roham_super_personal_contrib) || 0;     // annual non-concessional
+  const rohamAnnualTopup      = safeNum(s.roham_super_annual_topup)     || 0;     // one-off annual top-up
+  const rohamGrowth           = safeNum(s.roham_super_growth_rate)      || 8.0;   // High Growth default
+  const rohamFee              = safeNum(s.roham_super_fee_pct)          || 0.5;
+  const rohamInsurance        = safeNum(s.roham_super_insurance_pa)     || 0;
 
-  const faraSalary        = safeNum(s.fara_super_salary)       || safeNum(s.monthly_income) * 12 * 0.3;
-  const faraEmplContrib   = safeNum(s.fara_employer_contrib)   || 11.5;
-  const faraSalarySac     = safeNum(s.fara_salary_sacrifice)   || 0;
-  const faraGrowth        = safeNum(s.fara_super_growth_rate)  || 8.0;
-  const faraFee           = safeNum(s.fara_super_fee_pct)      || 0.5;
-  const faraInsurance     = safeNum(s.fara_super_insurance_pa) || 0;
+  const faraSalary            = safeNum(s.fara_super_salary)            || safeNum(s.monthly_income) * 12 * 0.3;
+  const faraEmplContrib       = safeNum(s.fara_employer_contrib)        || 11.5;
+  const faraSalarySac         = safeNum(s.fara_salary_sacrifice)        || 0;
+  const faraPersonalContrib   = safeNum(s.fara_super_personal_contrib)  || 0;
+  const faraAnnualTopup       = safeNum(s.fara_super_annual_topup)      || 0;
+  const faraGrowth            = safeNum(s.fara_super_growth_rate)       || 8.0;
+  const faraFee               = safeNum(s.fara_super_fee_pct)           || 0.5;
+  const faraInsurance         = safeNum(s.fara_super_insurance_pa)      || 0;
 
   // ── Consistent startNW baseline — includes investment property equity ──────
   const _initPropEquity = params.properties
@@ -404,14 +408,25 @@ export function projectNetWorth(params: {
     // ── Super projection — Australian logic ───────────────────────────────────
     // Opening balance + contributions - fees + growth = closing balance
     // Super is NOT part of cash — never deducted from spendable income here.
-    const superRohamBefore = superRoham;
-    const rohamContribAnnual = rohamSalary * (rohamEmplContrib / 100) + rohamSalarySac;
+    // ── Super formula (per person, per year): ────────────────────────────────
+    // Opening + Employer SG + Salary Sacrifice + Personal + Top-up
+    //   - Fees (% of balance) - Insurance (flat $)
+    //   + Growth (% applied to net balance after contributions and fees)
+    // = Closing balance
+    const superRohamBefore   = superRoham;
+    const rohamContribAnnual = rohamSalary * (rohamEmplContrib / 100)
+                             + rohamSalarySac
+                             + rohamPersonalContrib
+                             + rohamAnnualTopup;
     const rohamFeeAnnual     = superRoham * (rohamFee / 100) + rohamInsurance;
     const rohamGrowthAmt     = (superRoham + rohamContribAnnual - rohamFeeAnnual) * (rohamGrowth / 100);
     superRoham = superRoham + rohamContribAnnual - rohamFeeAnnual + rohamGrowthAmt;
 
-    const superFaraBefore = superFara;
-    const faraContribAnnual  = faraSalary  * (faraEmplContrib  / 100) + faraSalarySac;
+    const superFaraBefore    = superFara;
+    const faraContribAnnual  = faraSalary  * (faraEmplContrib  / 100)
+                             + faraSalarySac
+                             + faraPersonalContrib
+                             + faraAnnualTopup;
     const faraFeeAnnual      = superFara   * (faraFee   / 100) + faraInsurance;
     const faraGrowthAmt      = (superFara + faraContribAnnual - faraFeeAnnual) * (faraGrowth / 100);
     superFara  = superFara  + faraContribAnnual  - faraFeeAnnual  + faraGrowthAmt;
