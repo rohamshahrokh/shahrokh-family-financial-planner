@@ -21,7 +21,8 @@ import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import {
   formatCurrency, safeNum,
   projectNetWorth, buildCashFlowSeries, aggregateCashFlowToAnnual,
-  type YearlyProjection, type PropertyYearDetail,
+  calcNegativeGearing,
+  type YearlyProjection, type PropertyYearDetail, type NGSummary,
 } from "@/lib/finance";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -120,6 +121,11 @@ export default function TimelinePage() {
     queryFn: () => apiRequest('GET', '/api/planned-investments?module=crypto').then(r => r.json()),
     staleTime: 0,
   });
+  const { data: billsRaw = [] } = useQuery<any[]>({
+    queryKey: ['/api/bills'],
+    queryFn: () => apiRequest('GET', '/api/bills').then(r => r.json()),
+    staleTime: 0,
+  });
 
   // ── Snapshot with safe defaults ────────────────────────────────────────────
   const snap = useMemo(() => ({
@@ -142,9 +148,42 @@ export default function TimelinePage() {
   const plannedStockTx = useMemo(() => stockTransactions.filter((t: any) => t.status === 'planned'), [stockTransactions]);
   const plannedCryptoTx = useMemo(() => cryptoTransactions.filter((t: any) => t.status === 'planned'), [cryptoTransactions]);
 
+  // ── NG summary for real cash engine
+  const ngSummary = useMemo<NGSummary>(() =>
+    calcNegativeGearing({
+      properties: properties as any[],
+      annualSalaryIncome: safeNum(snap.monthly_income) * 12,
+      refundMode: 'lump-sum',
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [properties, snap.monthly_income]
+  );
+
   const projection: YearlyProjection[] = useMemo(() =>
-    projectNetWorth({ snapshot: snap, properties, stocks: stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, years: 10, inflation: fa.flat.inflation, ppor_growth: fa.flat.property_growth, yearlyAssumptions: fa.yearly }),
-    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa]
+    projectNetWorth({
+      snapshot: snap,
+      properties,
+      stocks,
+      cryptos,
+      stockTransactions:   plannedStockTx,
+      cryptoTransactions:  plannedCryptoTx,
+      stockDCASchedules,
+      cryptoDCASchedules,
+      plannedStockOrders,
+      plannedCryptoOrders,
+      years:               10,
+      inflation:           fa.flat.inflation,
+      ppor_growth:         fa.flat.property_growth,
+      yearlyAssumptions:   fa.yearly,
+      // Central Cash Engine — real monthly cash balance replaces 50% shortcut
+      expenses:            expenses as any[],
+      bills:               billsRaw as any[],
+      ngRefundMode:        'lump-sum',
+      ngAnnualBenefit:     ngSummary.totalAnnualTaxBenefit,
+      annualSalaryIncome:  safeNum(snap.monthly_income) * 12,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngSummary.totalAnnualTaxBenefit]
   );
 
   // ── Monthly cash flow series ───────────────────────────────────────────────
@@ -159,10 +198,15 @@ export default function TimelinePage() {
       cryptoDCASchedules,
       plannedStockOrders,
       plannedCryptoOrders,
+      bills: billsRaw as any[],
       inflationRate: fa.flat.inflation,
       incomeGrowthRate: fa.flat.income_growth,
+      ngRefundMode: 'lump-sum',
+      ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
+      annualSalaryIncome: safeNum(snap.monthly_income) * 12,
     }),
-    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, billsRaw, ngSummary.totalAnnualTaxBenefit]
   );
 
   const annualSeries = useMemo(() =>
