@@ -15,7 +15,7 @@
  * This is the "one true source" for every page that displays cash.
  */
 
-import { safeNum } from './finance';
+import { safeNum } from './mathUtils';
 import type { CashEvent, CashEventType } from './eventProcessor';
 
 // ─── Ledger row (one per calendar month) ─────────────────────────────────────
