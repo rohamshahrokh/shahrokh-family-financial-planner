@@ -582,6 +582,22 @@ export default function ExpensesPage() {
   const [incomeFilterMember, setIncomeFilterMember] = useState('all');
   const [incomePage, setIncomePage] = useState(1);
 
+  // ── Sort state — expenses ────────────────────────────────────────────────────
+  const [expSortField, setExpSortField] = useState<'date'|'amount'|'category'|'description'>('date');
+  const [expSortDir,   setExpSortDir]   = useState<'desc'|'asc'>('desc');
+  const toggleExpSort = (field: typeof expSortField) => {
+    if (expSortField === field) setExpSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setExpSortField(field); setExpSortDir('desc'); }
+  };
+
+  // ── Sort state — income ──────────────────────────────────────────────────────
+  const [incSortField, setIncSortField] = useState<'date'|'amount'|'source'|'description'>('date');
+  const [incSortDir,   setIncSortDir]   = useState<'desc'|'asc'>('desc');
+  const toggleIncSort = (field: typeof incSortField) => {
+    if (incSortField === field) setIncSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setIncSortField(field); setIncSortDir('desc'); }
+  };
+
   // ── Cash flow filter state ────────────────────────────────────────────────────
   const [cfYear, setCfYear] = useState(String(CURRENT_YEAR));
   const [cfMonth, setCfMonth] = useState('all');
@@ -750,7 +766,22 @@ export default function ExpensesPage() {
   }), [expenses, filterYear, filterMonth, filterWeek, filterDateFrom, filterDateTo,
       filterCategory, filterSourceCode, filterSubcat, filterMember, filterPayment, search]);
 
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const sortedExpenses = useMemo(() => {
+    const arr = [...filtered];
+    arr.sort((a: any, b: any) => {
+      let av: any, bv: any;
+      if (expSortField === 'date')        { av = a.date || '';        bv = b.date || ''; }
+      else if (expSortField === 'amount') { av = Number(a.amount)||0; bv = Number(b.amount)||0; }
+      else if (expSortField === 'category') { av = a.category||'';   bv = b.category||''; }
+      else                                { av = a.description||'';  bv = b.description||''; }
+      if (av < bv) return expSortDir === 'asc' ? -1 : 1;
+      if (av > bv) return expSortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return arr;
+  }, [filtered, expSortField, expSortDir]);
+
+  const paginated = sortedExpenses.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // ── Income filter logic ───────────────────────────────────────────────────────
   const filteredIncome = useMemo(() => incomeRecords.filter((r: any) => {
@@ -766,7 +797,22 @@ export default function ExpensesPage() {
     return true;
   }), [incomeRecords, incomeFilterYear, incomeFilterMonth, incomeFilterSource, incomeFilterMember, incomeSearch]);
 
-  const paginatedIncome = filteredIncome.slice((incomePage - 1) * PAGE_SIZE, incomePage * PAGE_SIZE);
+  const sortedIncome = useMemo(() => {
+    const arr = [...filteredIncome];
+    arr.sort((a: any, b: any) => {
+      let av: any, bv: any;
+      if (incSortField === 'date')        { av = a.date || '';        bv = b.date || ''; }
+      else if (incSortField === 'amount') { av = Number(a.amount)||0; bv = Number(b.amount)||0; }
+      else if (incSortField === 'source') { av = a.source||'';        bv = b.source||''; }
+      else                                { av = a.description||'';   bv = b.description||''; }
+      if (av < bv) return incSortDir === 'asc' ? -1 : 1;
+      if (av > bv) return incSortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return arr;
+  }, [filteredIncome, incSortField, incSortDir]);
+
+  const paginatedIncome = sortedIncome.slice((incomePage - 1) * PAGE_SIZE, incomePage * PAGE_SIZE);
 
   // ── Filtered income totals (react instantly to filters) ─────────────────────
   const filteredIncomeTotals = useMemo(() => {
@@ -1803,8 +1849,37 @@ export default function ExpensesPage() {
                         {allPageSelected ? <CheckSquare className="w-3.5 h-3.5 text-primary" /> : <Square className="w-3.5 h-3.5" />}
                       </button>
                     </th>
-                    {['Date', 'Amount', 'Category', 'Source Code', 'Sub-cat', 'Description', 'Payment', 'Member', 'Recurring', 'Actions'].map(h => (
-                      <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                    {(
+                      [
+                        { label: 'Date',        field: 'date'        as const },
+                        { label: 'Amount',      field: 'amount'      as const },
+                        { label: 'Category',    field: 'category'    as const },
+                        { label: 'Source Code', field: null },
+                        { label: 'Sub-cat',     field: null },
+                        { label: 'Description', field: 'description' as const },
+                        { label: 'Payment',     field: null },
+                        { label: 'Member',      field: null },
+                        { label: 'Recurring',   field: null },
+                        { label: 'Actions',     field: null },
+                      ] as { label: string; field: 'date'|'amount'|'category'|'description'|null }[]
+                    ).map(({ label, field }) => (
+                      <th
+                        key={label}
+                        onClick={field ? () => toggleExpSort(field) : undefined}
+                        className={`text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap ${
+                          field ? 'cursor-pointer hover:text-foreground select-none' : ''
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          {label}
+                          {field && expSortField === field && (
+                            <span className="text-primary">{expSortDir === 'asc' ? '↑' : '↓'}</span>
+                          )}
+                          {field && expSortField !== field && (
+                            <span className="opacity-20">↕</span>
+                          )}
+                        </span>
+                      </th>
                     ))}
                   </tr>
                 </thead>
@@ -2089,8 +2164,37 @@ export default function ExpensesPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border bg-secondary/30">
-                    {['Date', 'Amount', 'Monthly Equiv', 'Source', 'Description', 'Member', 'Frequency', 'Recurring', 'Notes', 'Actions'].map(h => (
-                      <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                    {(
+                      [
+                        { label: 'Date',          field: 'date'        as const },
+                        { label: 'Amount',         field: 'amount'      as const },
+                        { label: 'Monthly Equiv',  field: null },
+                        { label: 'Source',         field: 'source'      as const },
+                        { label: 'Description',    field: 'description' as const },
+                        { label: 'Member',         field: null },
+                        { label: 'Frequency',      field: null },
+                        { label: 'Recurring',      field: null },
+                        { label: 'Notes',          field: null },
+                        { label: 'Actions',        field: null },
+                      ] as { label: string; field: 'date'|'amount'|'source'|'description'|null }[]
+                    ).map(({ label, field }) => (
+                      <th
+                        key={label}
+                        onClick={field ? () => toggleIncSort(field) : undefined}
+                        className={`text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap ${
+                          field ? 'cursor-pointer hover:text-foreground select-none' : ''
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          {label}
+                          {field && incSortField === field && (
+                            <span className="text-primary">{incSortDir === 'asc' ? '↑' : '↓'}</span>
+                          )}
+                          {field && incSortField !== field && (
+                            <span className="opacity-20">↕</span>
+                          )}
+                        </span>
+                      </th>
                     ))}
                   </tr>
                 </thead>
