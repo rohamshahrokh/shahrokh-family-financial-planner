@@ -61,6 +61,7 @@ import AIInsightsCard from "@/components/AIInsightsCard";
 import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import { Link } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
+import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 
 // ─── Chart colours ────────────────────────────────────────────────────────────
 const COLORS = [
@@ -94,6 +95,7 @@ export default function DashboardPage() {
   const qc = useQueryClient();
   const { chartView, privacyMode, togglePrivacy } = useAppStore();
   const { forecastMode, profile, monteCarloResult } = useForecastStore();
+  const fa = useForecastAssumptions();
 
   const [editSnap, setEditSnap] = useState(false);
   const [snapDraft, setSnapDraft] = useState<any>(null);
@@ -295,9 +297,9 @@ export default function DashboardPage() {
 
   // ─── 10-year projection ───────────────────────────────────────────────────
   const projection = useMemo(
-    () => projectNetWorth({ snapshot: snap, properties, stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, years: 10 }),
+    () => projectNetWorth({ snapshot: snap, properties, stocks, cryptos, stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, years: 10, inflation: fa.flat.inflation, ppor_growth: fa.flat.property_growth, yearlyAssumptions: fa.yearly }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders]
+    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa]
   );
 
   const year10NW      = projection[9]?.endNetWorth || netWorth;
@@ -410,9 +412,9 @@ export default function DashboardPage() {
 
   // ─── Master Cash Flow Series (2025 → 2035) ────────────────────────────────
   const cashFlowSeries = useMemo(
-    () => buildCashFlowSeries({ snapshot: snap, expenses: expenses as any[], properties: properties as any[], stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders }),
+    () => buildCashFlowSeries({ snapshot: snap, expenses: expenses as any[], properties: properties as any[], stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, inflationRate: fa.flat.inflation, incomeGrowthRate: fa.flat.income_growth }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders]
+    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa]
   );
 
   const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
