@@ -332,6 +332,16 @@ export default function DashboardPage() {
     [cryptoTransactionsRaw]
   );
 
+  // ─── Negative Gearing Analysis (must come before projection — used in its deps) ────
+  const ngSummary = useMemo<NGSummary>(() =>
+    calcNegativeGearing({
+      properties: properties as any[],
+      annualSalaryIncome: safeNum(snap.monthly_income) * 12,
+      refundMode: ngRefundMode,
+    }),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [properties, snap.monthly_income, ngRefundMode]);
+
   // ─── 10-year projection ───────────────────────────────────────────────────
   const projection = useMemo(
     () => projectNetWorth({
@@ -468,16 +478,6 @@ export default function DashboardPage() {
     { month: "Surplus",  value: surplus,               fill: "hsl(43,85%,55%)" },
   ];
 
-
-  // ─── Negative Gearing Analysis ────────────────────────────────────────────
-  const ngSummary = useMemo<NGSummary>(() =>
-    calcNegativeGearing({
-      properties: properties as any[],
-      annualSalaryIncome: safeNum(snap.monthly_income) * 12,
-      refundMode: ngRefundMode,
-    }),
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  [properties, snap.monthly_income, ngRefundMode]);
 
   // ─── Master Cash Flow Series (2025 → 2035) ────────────────────────────────
   const cashFlowSeries = useMemo(
