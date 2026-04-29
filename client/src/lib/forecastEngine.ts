@@ -141,6 +141,12 @@ export function buildForecast(input: ForecastInput): ForecastOutput {
     ppor_growth:         firstYearAss.ppor_growth,
     // Pass full yearly array — projectNetWorth will use per-year values when available
     yearlyAssumptions:   yearlyAssumptions ?? [],
+    // Central Cash Engine params — pass through so projectNetWorth uses real cash balances
+    expenses:            expenses          ?? [],
+    bills:               bills             ?? [],
+    ngRefundMode:        input.ngRefundMode,
+    ngAnnualBenefit:     input.ngAnnualBenefit,
+    annualSalaryIncome:  input.annualSalaryIncome,
   });
 
   return { monthly, annual, netWorth };
