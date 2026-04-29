@@ -275,16 +275,19 @@ function CryptoBulkImportModal({ onImport, onClose }: { onImport: (rows: CryptoI
 }
 
 // ─── Crypto DCA helpers ───────────────────────────────────────────────────────
-function emptyCryptoDCAForm(symbols: string[]): Omit<CryptoDCASchedule, 'id'|'created_at'|'updated_at'> {
+// Default crypto symbols — always available in DCA selector even if holdings table is empty
+const DEFAULT_CRYPTO_SYMBOLS = ['BTC', 'ETH'];
+
+function emptyCryptoDCAForm(extraSymbols: string[] = []): Omit<CryptoDCASchedule, 'id'|'created_at'|'updated_at'> {
   return {
-    symbol: symbols[0] ?? "",
-    asset_name: "",
+    symbol: DEFAULT_CRYPTO_SYMBOLS[0], // always default to BTC
+    asset_name: '',
     amount: 0,
-    frequency: "monthly",
-    start_date: new Date().toISOString().split("T")[0],
+    frequency: 'monthly',
+    start_date: new Date().toISOString().split('T')[0],
     end_date: null,
     enabled: true,
-    notes: "",
+    notes: '',
   };
 }
 function cryptoDcaMonthlyEquiv(amount: number, freq: string): number {
@@ -908,6 +911,7 @@ export default function CryptoPage() {
       setShowAdd(false);
       setDraft({ name: "", symbol: "", current_price: "", current_holding: "", expected_return: 25, monthly_dca: 0, lump_sum_amount: 0, projection_years: 10 });
     },
+    onError: (err: any) => toast({ title: 'Save failed', description: String(err?.message || err), variant: 'destructive' }),
   });
 
   const updateMut = useMutation({
@@ -1929,12 +1933,26 @@ export default function CryptoPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Coin Symbol</label>
-                    <select value={dcaDraft.symbol} onChange={e => setDcaDraft((p: any) => ({ ...p, symbol: e.target.value }))}
+                    <select value={dcaDraft.symbol} onChange={e => setDcaDraft((p: any) => ({ ...p, symbol: e.target.value, asset_name: e.target.value === '' ? p.asset_name : '' }))}
                       className="w-full h-8 text-xs bg-secondary border border-border rounded px-2 text-foreground">
-                      {cryptos.map((c: any) => <option key={c.symbol} value={c.symbol}>{c.symbol} — {c.name}</option>)}
+                      {/* Always show BTC and ETH first */}
+                      {DEFAULT_CRYPTO_SYMBOLS.map(sym => (
+                        <option key={sym} value={sym}>{sym}</option>
+                      ))}
+                      {/* Any portfolio coins not already in defaults */}
+                      {cryptos
+                        .filter((c: any) => !DEFAULT_CRYPTO_SYMBOLS.includes(c.symbol))
+                        .map((c: any) => <option key={c.symbol} value={c.symbol}>{c.symbol} — {c.name}</option>)
+                      }
                       <option value="">Custom...</option>
                     </select>
                   </div>
+                  {dcaDraft.symbol === '' && (
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Custom Symbol</label>
+                      <Input type="text" value={dcaDraft.asset_name} onChange={e => setDcaDraft((p: any) => ({ ...p, asset_name: e.target.value }))} className="h-8 text-xs" placeholder="e.g. SOL" />
+                    </div>
+                  )}
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Amount (AUD)</label>
                     <Input type="number" step="50" value={dcaDraft.amount} onChange={e => setDcaDraft((p: any) => ({ ...p, amount: parseFloat(e.target.value) || 0 }))} className="h-8 text-xs" />
@@ -1967,7 +1985,12 @@ export default function CryptoPage() {
                   </div>
                 </div>
                 <div className="flex gap-2 mt-5">
-                  <Button onClick={() => editingDCAId ? updateDCAMut.mutate({ id: editingDCAId, data: dcaDraft }) : createDCAMut.mutate(dcaDraft)}
+                  <Button onClick={() => {
+                      // When custom symbol selected, use asset_name as the symbol value
+                      const payload = { ...dcaDraft, symbol: dcaDraft.symbol || dcaDraft.asset_name };
+                      if (!payload.symbol) { toast({ title: 'Symbol required', description: 'Enter a coin symbol.', variant: 'destructive' }); return; }
+                      editingDCAId ? updateDCAMut.mutate({ id: editingDCAId, data: payload }) : createDCAMut.mutate(payload);
+                    }}
                     disabled={createDCAMut.isPending || updateDCAMut.isPending}
                     style={{ background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))", color: "hsl(224,40%,8%)", border: "none" }}
                     className="text-xs h-8">
