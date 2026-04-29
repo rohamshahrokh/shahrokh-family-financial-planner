@@ -4,6 +4,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum, projectInvestment, calcCAGR } from "@/lib/finance";
 import { maskValue } from "@/components/PrivacyMask";
 import { useAppStore } from "@/lib/store";
+import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
@@ -734,6 +735,7 @@ export default function CryptoPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const { privacyMode, chartView } = useAppStore();
+  const fa = useForecastAssumptions();
 
   // Holdings state
   const [showAdd, setShowAdd] = useState(false);
@@ -910,6 +912,7 @@ export default function CryptoPage() {
       qc.invalidateQueries({ queryKey: ["/api/crypto"] });
       setShowAdd(false);
       setDraft({ name: "", symbol: "", current_price: "", current_holding: "", expected_return: 25, monthly_dca: 0, lump_sum_amount: 0, projection_years: 10 });
+      toast({ title: "Asset saved", description: "Crypto added to portfolio." });
     },
     onError: (err: any) => toast({ title: 'Save failed', description: String(err?.message || err), variant: 'destructive' }),
   });
@@ -933,12 +936,19 @@ export default function CryptoPage() {
   const createTxMut = useMutation({
     mutationFn: (data: Partial<CryptoTransaction>) =>
       apiRequest("POST", "/api/crypto-transactions", data).then(r => r.json()),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/crypto-transactions"] });
+    onSuccess: async (saved: any) => {
       setShowTxForm(false);
       setEditingTxId(null);
       setTxDraft(emptyTxForm());
-      toast({ title: "Transaction saved", description: "Crypto transaction recorded." });
+      // Refetch from Supabase to confirm the row is visible
+      await qc.refetchQueries({ queryKey: ["/api/crypto-transactions"] });
+      const current = qc.getQueryData<CryptoTransaction[]>(["/api/crypto-transactions"]) ?? [];
+      const found = current.some((t: any) => t.id === saved?.id);
+      if (found) {
+        toast({ title: "Transaction saved", description: "Crypto transaction recorded." });
+      } else {
+        toast({ title: "Saved to database but not visible — table/filter mismatch", variant: "destructive" });
+      }
     },
     onError: (err) => {
       toast({ title: "Error saving transaction", description: String(err), variant: "destructive" });
@@ -1052,7 +1062,9 @@ export default function CryptoPage() {
           .filter((d: CryptoDCASchedule) => d.enabled && d.symbol === c.symbol)
           .reduce((s: number, d: CryptoDCASchedule) => s + cryptoDcaMonthlyEquiv(d.amount, d.frequency), 0);
 
-        const proj = projectInvestment(initVal + plannedBuyExtra, c.expected_return, (c.monthly_dca || 0) + dcaForCoin, y);
+        // Use per-asset expected_return if set; otherwise fall back to global forecast rate
+        const effectiveReturn = safeNum(c.expected_return) > 0 ? safeNum(c.expected_return) : fa.flat.crypto_return;
+        const proj = projectInvestment(initVal + plannedBuyExtra, effectiveReturn, (c.monthly_dca || 0) + dcaForCoin, y);
         const last = proj[y - 1];
         if (last) { totalVal += last.value; totalInv += last.totalInvested; }
       }
@@ -1064,7 +1076,7 @@ export default function CryptoPage() {
       });
     }
     return result;
-  }, [cryptos, transactions, dcaSchedules]);
+  }, [cryptos, transactions, dcaSchedules, fa]);
 
   const assetProjections = useMemo(() => {
     const years = 10;
@@ -1073,13 +1085,14 @@ export default function CryptoPage() {
       const row: any = { year: (new Date().getFullYear() + y).toString() };
       for (const c of cryptos) {
         const initVal = safeNum(c.current_holding) * safeNum(c.current_price);
-        const proj = projectInvestment(initVal, c.expected_return, c.monthly_dca || 0, y);
+        const effectiveReturn = safeNum(c.expected_return) > 0 ? safeNum(c.expected_return) : fa.flat.crypto_return;
+        const proj = projectInvestment(initVal, effectiveReturn, c.monthly_dca || 0, y);
         row[c.symbol] = proj[y - 1]?.value || 0;
       }
       result.push(row);
     }
     return result;
-  }, [cryptos]);
+  }, [cryptos, fa]);
 
   const year10Val = combinedProjection[9]?.value || 0;
   const cagr = calcCAGR(totalCurrentValue || 1, year10Val || 1, 10);
@@ -1232,7 +1245,7 @@ export default function CryptoPage() {
             <Upload className="w-3.5 h-3.5" /> Import
           </Button>
           <Button
-            onClick={() => setShowAdd(true)}
+            onClick={() => { setShowAdd(true); setActiveTab('portfolio'); }}
             variant="outline"
             size="sm"
             className="gap-2 text-xs"
