@@ -23,7 +23,7 @@
 
 import {
   sbSnapshot, sbExpenses, sbProperties, sbStocks, sbCrypto, sbTimeline, sbScenarios,
-  sbStockTx, sbCryptoTx, sbIncome,
+  sbStockTx, sbCryptoTx, sbIncome, sbStockDCA, sbCryptoDCA,
 } from "./supabaseClient";
 
 // ─── Safe number helper ───────────────────────────────────────────────────────
@@ -129,6 +129,36 @@ export interface IncomeRecord {
   updated_at: string;
 }
 
+// ─── DCA Schedule Types ───────────────────────────────────────────────────────
+
+export interface StockDCASchedule {
+  id: number;
+  ticker: string;
+  asset_name: string;
+  amount: number;
+  frequency: 'weekly' | 'fortnightly' | 'monthly' | 'quarterly';
+  start_date: string;   // YYYY-MM-DD
+  end_date: string | null;
+  enabled: boolean;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CryptoDCASchedule {
+  id: number;
+  symbol: string;
+  asset_name: string;
+  amount: number;
+  frequency: 'weekly' | 'fortnightly' | 'monthly' | 'quarterly';
+  start_date: string;   // YYYY-MM-DD
+  end_date: string | null;
+  enabled: boolean;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CryptoTransaction {
   id: number;
   created_at: string;
@@ -189,6 +219,8 @@ const KEYS = {
   stockTx:    "sf_stock_tx_v1",
   cryptoTx:   "sf_crypto_tx_v1",
   income:     "sf_income_v1",
+  stockDCA:   "sf_stock_dca_v1",
+  cryptoDCA:  "sf_crypto_dca_v1",
 };
 
 // ─── Last sync timestamp (shown in UI) ───────────────────────────────────────
@@ -457,18 +489,12 @@ export const localStore = {
   },
 
   async createStock(data: Omit<Stock, "id" | "created_at">): Promise<Stock> {
+    // throws on Supabase failure — no silent localStorage fallback
     const saved = await sbStocks.create(data);
-    if (saved) {
-      const items = lsGet<Stock[]>(KEYS.stocks) ?? [];
-      lsSet(KEYS.stocks, [...items, saved]);
-      console.log("[SF] Saved to Supabase: stock created", saved.id);
-      return saved;
-    }
     const items = lsGet<Stock[]>(KEYS.stocks) ?? [];
-    const item: Stock = { ...data, id: nextId(items), created_at: new Date().toISOString() } as Stock;
-    lsSet(KEYS.stocks, [...items, item]);
-    console.log("[SF] Fallback to local cache: stock created locally", item.id);
-    return item;
+    lsSet(KEYS.stocks, [...items, saved]);
+    console.log("[SF] Saved to Supabase: stock created", saved.id);
+    return saved;
   },
 
   async updateStock(id: number, data: Partial<Stock>): Promise<Stock> {
@@ -500,18 +526,12 @@ export const localStore = {
   },
 
   async createCrypto(data: Omit<Crypto, "id" | "created_at">): Promise<Crypto> {
+    // throws on Supabase failure — no silent localStorage fallback
     const saved = await sbCrypto.create(data);
-    if (saved) {
-      const items = lsGet<Crypto[]>(KEYS.crypto) ?? [];
-      lsSet(KEYS.crypto, [...items, saved]);
-      console.log("[SF] Saved to Supabase: crypto created", saved.id);
-      return saved;
-    }
     const items = lsGet<Crypto[]>(KEYS.crypto) ?? [];
-    const item: Crypto = { ...data, id: nextId(items), created_at: new Date().toISOString() } as Crypto;
-    lsSet(KEYS.crypto, [...items, item]);
-    console.log("[SF] Fallback to local cache: crypto created locally", item.id);
-    return item;
+    lsSet(KEYS.crypto, [...items, saved]);
+    console.log("[SF] Saved to Supabase: crypto created", saved.id);
+    return saved;
   },
 
   async updateCrypto(id: number, data: Partial<Crypto>): Promise<Crypto> {
@@ -734,19 +754,12 @@ export const localStore = {
   },
 
   async createIncomeRecord(data: Omit<IncomeRecord, "id" | "created_at" | "updated_at">): Promise<IncomeRecord> {
+    // throws on Supabase failure — no silent localStorage fallback
     const saved = await sbIncome.create(data);
-    if (saved) {
-      const items = lsGet<IncomeRecord[]>(KEYS.income) ?? [];
-      lsSet(KEYS.income, [saved, ...items]);
-      console.log("[SF] Saved to Supabase: income record created", saved.id);
-      return saved;
-    }
     const items = lsGet<IncomeRecord[]>(KEYS.income) ?? [];
-    const now = new Date().toISOString();
-    const item: IncomeRecord = { ...data, id: nextId(items), created_at: now, updated_at: now } as IncomeRecord;
-    lsSet(KEYS.income, [item, ...items]);
-    console.log("[SF] Fallback to local cache: income record created locally", item.id);
-    return item;
+    lsSet(KEYS.income, [saved, ...items]);
+    console.log("[SF] Saved to Supabase: income record created", saved.id);
+    return saved;
   },
 
   async updateIncomeRecord(id: number, data: Partial<IncomeRecord>): Promise<IncomeRecord> {
@@ -763,6 +776,82 @@ export const localStore = {
     await sbIncome.delete(id);
     lsSet(KEYS.income, (lsGet<IncomeRecord[]>(KEYS.income) ?? []).filter((i) => i.id !== id));
     console.log("[SF] Saved to Supabase: income record deleted", id);
+  },
+
+  // ── Stock DCA Schedules ───────────────────────────────────────────────────
+
+  async getStockDCASchedules(): Promise<StockDCASchedule[]> {
+    try {
+      const rows = await sbStockDCA.getAll();
+      lsSet(KEYS.stockDCA, rows);
+      console.log("[SF] Loaded from Supabase: stock DCA schedules", rows.length, "rows");
+      return rows;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: stock DCA", err);
+      return lsGet<StockDCASchedule[]>(KEYS.stockDCA) ?? [];
+    }
+  },
+
+  async createStockDCASchedule(data: Omit<StockDCASchedule, "id" | "created_at" | "updated_at">): Promise<StockDCASchedule> {
+    // throws on Supabase failure — no silent localStorage fallback
+    const saved = await sbStockDCA.create(data);
+    const items = lsGet<StockDCASchedule[]>(KEYS.stockDCA) ?? [];
+    lsSet(KEYS.stockDCA, [...items, saved]);
+    console.log("[SF] Saved to Supabase: stock DCA created", saved.id);
+    return saved;
+  },
+
+  async updateStockDCASchedule(id: number, data: Partial<StockDCASchedule>): Promise<StockDCASchedule> {
+    const saved = await sbStockDCA.update(id, data);
+    const items = (lsGet<StockDCASchedule[]>(KEYS.stockDCA) ?? []).map(
+      (i) => (i.id === id ? { ...i, ...(saved ?? data) } : i)
+    );
+    lsSet(KEYS.stockDCA, items);
+    return items.find((i) => i.id === id)!;
+  },
+
+  async deleteStockDCASchedule(id: number): Promise<void> {
+    await sbStockDCA.delete(id);
+    lsSet(KEYS.stockDCA, (lsGet<StockDCASchedule[]>(KEYS.stockDCA) ?? []).filter((i) => i.id !== id));
+    console.log("[SF] Saved to Supabase: stock DCA deleted", id);
+  },
+
+  // ── Crypto DCA Schedules ──────────────────────────────────────────────────
+
+  async getCryptoDCASchedules(): Promise<CryptoDCASchedule[]> {
+    try {
+      const rows = await sbCryptoDCA.getAll();
+      lsSet(KEYS.cryptoDCA, rows);
+      console.log("[SF] Loaded from Supabase: crypto DCA schedules", rows.length, "rows");
+      return rows;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: crypto DCA", err);
+      return lsGet<CryptoDCASchedule[]>(KEYS.cryptoDCA) ?? [];
+    }
+  },
+
+  async createCryptoDCASchedule(data: Omit<CryptoDCASchedule, "id" | "created_at" | "updated_at">): Promise<CryptoDCASchedule> {
+    // throws on Supabase failure — no silent localStorage fallback
+    const saved = await sbCryptoDCA.create(data);
+    const items = lsGet<CryptoDCASchedule[]>(KEYS.cryptoDCA) ?? [];
+    lsSet(KEYS.cryptoDCA, [...items, saved]);
+    console.log("[SF] Saved to Supabase: crypto DCA created", saved.id);
+    return saved;
+  },
+
+  async updateCryptoDCASchedule(id: number, data: Partial<CryptoDCASchedule>): Promise<CryptoDCASchedule> {
+    const saved = await sbCryptoDCA.update(id, data);
+    const items = (lsGet<CryptoDCASchedule[]>(KEYS.cryptoDCA) ?? []).map(
+      (i) => (i.id === id ? { ...i, ...(saved ?? data) } : i)
+    );
+    lsSet(KEYS.cryptoDCA, items);
+    return items.find((i) => i.id === id)!;
+  },
+
+  async deleteCryptoDCASchedule(id: number): Promise<void> {
+    await sbCryptoDCA.delete(id);
+    lsSet(KEYS.cryptoDCA, (lsGet<CryptoDCASchedule[]>(KEYS.cryptoDCA) ?? []).filter((i) => i.id !== id));
+    console.log("[SF] Saved to Supabase: crypto DCA deleted", id);
   },
 
   async bulkCreateIncomeRecords(rows: Omit<IncomeRecord, "id" | "created_at" | "updated_at">[]): Promise<IncomeRecord[]> {
