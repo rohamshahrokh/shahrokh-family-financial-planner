@@ -1,5 +1,4 @@
 // ─── Financial Calculation Engine ───────────────────────────────────
-import { runCashEngine } from './cashEngine';
 
 /**
  * safeNum — converts any value to a finite number.
@@ -241,18 +240,19 @@ export function projectNetWorth(params: {
   const results: YearlyProjection[] = [];
   const currentYear = new Date().getFullYear();
 
-  // ── Central Cash Engine (runCashEngine) — event-driven monthly ledger ──
-  // Replaces the old "annualSurplus * 0.5" shortcut entirely.
-  // cashByYear gives the real December closing cash for each year.
-  const _engineOut = runCashEngine({
+  // ── Real Cash Balance via buildCashFlowSeries (event-driven monthly engine) ──
+  // Replaces the old "annualSurplus * 0.5" shortcut. No circular dependency:
+  // buildCashFlowSeries lives in this same file.
+  const _cashSeries = buildCashFlowSeries({
     snapshot: {
-      cash:             safeNum(params.snapshot.cash),
       monthly_income:   safeNum(params.snapshot.monthly_income),
       monthly_expenses: safeNum(params.snapshot.monthly_expenses),
       mortgage:         safeNum(params.snapshot.mortgage),
       other_debts:      safeNum(params.snapshot.other_debts),
+      cash:             safeNum(params.snapshot.cash),
     },
-    properties:          params.properties,
+    expenses:            params.expenses            ?? [],
+    properties:          params.properties          as any[],
     stockTransactions:   params.stockTransactions   ?? [],
     cryptoTransactions:  params.cryptoTransactions  ?? [],
     stockDCASchedules:   params.stockDCASchedules   ?? [],
@@ -260,14 +260,16 @@ export function projectNetWorth(params: {
     plannedStockOrders:  params.plannedStockOrders  ?? [],
     plannedCryptoOrders: params.plannedCryptoOrders ?? [],
     bills:               params.bills               ?? [],
-    expenses:            params.expenses            ?? [],
     ngRefundMode:        params.ngRefundMode,
     ngAnnualBenefit:     params.ngAnnualBenefit,
     annualSalaryIncome:  params.annualSalaryIncome,
     inflationRate:       params.inflation,
     incomeGrowthRate:    params.yearlyAssumptions?.[0]?.income_growth,
   });
-  const _cashByYear = _engineOut.cashByYear;
+  const _cashByYear = new Map<number, number>();
+  for (const m of _cashSeries) {
+    _cashByYear.set(m.year, m.cumulativeBalance); // last month of year wins
+  }
 
   // Guard every field — if snapshot came back with undefined/NaN fields
   // (e.g. field name mismatch), calculations silently use 0 instead of NaN.
