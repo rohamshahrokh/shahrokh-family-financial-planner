@@ -213,6 +213,12 @@ export function projectNetWorth(params: {
   years?: number;
   inflation?: number;
   ppor_growth?: number;
+  // Per-year assumption overrides — when provided, growth rates come from here
+  yearlyAssumptions?: Array<{
+    year: number; property_growth: number; stocks_return: number; crypto_return: number;
+    super_return: number; inflation: number; income_growth: number; expense_growth: number;
+    interest_rate: number; rent_growth: number;
+  }>;
   stockTransactions?: Array<{ transaction_type: string; status: string; transaction_date: string; total_amount: number; }>;
   cryptoTransactions?: Array<{ transaction_type: string; status: string; transaction_date: string; total_amount: number; }>;
   stockDCASchedules?: Array<{ enabled: boolean; amount: number; frequency: string; start_date: string; end_date?: string | null; }>;
@@ -246,18 +252,25 @@ export function projectNetWorth(params: {
     const year = currentYear + y;
     const startNW = (ppor + cash + superBal + stockVal + cryptoVal + cars + iranProp) - (mortgage + otherDebts);
 
+    // Resolve per-year assumptions if available
+    const yAss = params.yearlyAssumptions?.find(a => a.year === year);
+    const effectivePporGrowth  = yAss ? yAss.property_growth : pporGrowth;
+    const effectiveInflation   = yAss ? yAss.inflation        : inflation;
+    const effectiveIncomeGrowth = yAss ? yAss.income_growth   : 3.5;
+    const effectiveSuperReturn  = yAss ? yAss.super_return    : 10;
+    const effectiveInterestRate = yAss ? yAss.interest_rate   : 6.5;
+
     // PPOR growth
-    ppor *= (1 + pporGrowth / 100);
+    ppor *= (1 + effectivePporGrowth / 100);
     // Mortgage reduction
-    const monthlyPmt = calcMonthlyRepayment(s.mortgage, 6.5, 30);
-    mortgage = Math.max(0, calcLoanBalance(s.mortgage, 6.5, 30, y * 12));
+    mortgage = Math.max(0, calcLoanBalance(s.mortgage, effectiveInterestRate, 30, y * 12));
 
-    // Super growth (10% pa)
-    superBal *= 1.10;
+    // Super growth
+    superBal *= (1 + effectiveSuperReturn / 100);
 
-    // Income/expense changes (inflation)
-    monthlyIncome *= (1 + 3.5 / 100);
-    monthlyExpenses *= (1 + inflation / 100);
+    // Income/expense changes
+    monthlyIncome    *= (1 + effectiveIncomeGrowth / 100);
+    monthlyExpenses  *= (1 + effectiveInflation    / 100);
 
     // Property portfolio — only include investment properties that have settled by this year
     let propValue = 0; let propLoans = 0; let propRent = 0;
