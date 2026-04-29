@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
   formatCurrency, safeNum, calcMonthlyRepayment, projectProperty,
+  calcNegativeGearing, auMarginalRate,
 } from "@/lib/finance";
 import { maskValue } from "@/components/PrivacyMask";
 import { useAppStore } from "@/lib/store";
@@ -169,6 +170,53 @@ function deriveCalcs(d: any) {
   const taxableGain = heldOver12Months ? capitalGain * 0.5 : capitalGain;
   const cgtEstimate = Math.max(0, taxableGain * 0.39); // ~39% marginal rate
 
+  // ─ Negative Gearing (investment properties only) ─
+  const isInvestment = d.type !== 'ppor' && d.type !== 'PPOR';
+  let ngAnalysis = null as null | {
+    annualRentalIncome: number;
+    annualInterest: number;
+    annualDeductibleExpenses: number;
+    annualDepreciation: number;
+    taxableRentalResult: number;
+    isNegativelyGeared: boolean;
+    annualTaxBenefit: number;
+    monthlyTaxBenefit: number;
+    monthlyCashLoss: number;
+    netAfterTaxMonthlyCost: number;
+    marginalRate: number;
+  };
+  if (isInvestment) {
+    const grossAnnualRent = safeNum(d.weekly_rent) * 52 * (1 - safeNum(d.vacancy_rate) / 100);
+    const annualRentalIncome = grossAnnualRent * (1 - safeNum(d.management_fee) / 100);
+    const annualInterest = loanAmount * (safeNum(d.interest_rate) / 100);
+    const annualDeductibleExpenses =
+      safeNum(d.council_rates) + safeNum(d.insurance) + safeNum(d.maintenance) +
+      safeNum(d.water_rates) + safeNum(d.body_corporate) + safeNum(d.land_tax);
+    const annualDepreciation = (safeNum(d.purchase_price) || safeNum(d.current_value)) * 0.025;
+    const taxableRentalResult = annualRentalIncome - annualInterest - annualDeductibleExpenses - annualDepreciation;
+    const isNeg = taxableRentalResult < 0;
+    // Use a rough $200k income bracket as default (user may not have snapshot here)
+    const marginalRate = auMarginalRate(200_000);
+    const annualTaxBenefit = isNeg ? Math.abs(taxableRentalResult) * marginalRate : 0;
+    const fullMonthlyLoan = d.loan_type === 'IO'
+      ? loanAmount * (safeNum(d.interest_rate) / 100) / 12
+      : monthly;
+    const monthlyCashLoss = annualRentalIncome / 12 - fullMonthlyLoan - annualDeductibleExpenses / 12;
+    ngAnalysis = {
+      annualRentalIncome:       Math.round(annualRentalIncome),
+      annualInterest:           Math.round(annualInterest),
+      annualDeductibleExpenses: Math.round(annualDeductibleExpenses),
+      annualDepreciation:       Math.round(annualDepreciation),
+      taxableRentalResult:      Math.round(taxableRentalResult),
+      isNegativelyGeared:       isNeg,
+      annualTaxBenefit:         Math.round(annualTaxBenefit),
+      monthlyTaxBenefit:        Math.round(annualTaxBenefit / 12),
+      monthlyCashLoss:          Math.round(monthlyCashLoss),
+      netAfterTaxMonthlyCost:   Math.round(monthlyCashLoss + annualTaxBenefit / 12),
+      marginalRate,
+    };
+  }
+
   return {
     loanAmount,
     stampDuty,
@@ -187,6 +235,7 @@ function deriveCalcs(d: any) {
     taxableGain,
     cgtEstimate,
     heldOver12Months,
+    ngAnalysis,
   };
 }
 
@@ -661,6 +710,71 @@ function PropertyCard({ prop, onDelete, selected, onToggleSelect, privacyMode }:
               <p className={`text-xs font-bold num-display mt-0.5 ${s.color}`}>{s.value}</p>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ─ Negative Gearing Holding Cost Card (investment properties only) ─ */}
+      {!editing && calcs.ngAnalysis && (
+        <div className={`mx-0 px-4 py-3 border-t border-border ${
+          calcs.ngAnalysis.isNegativelyGeared
+            ? 'bg-yellow-900/10 border-l-2 border-l-yellow-600/50'
+            : 'bg-emerald-900/10 border-l-2 border-l-emerald-600/50'
+        }`}>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <p className="text-xs font-bold text-yellow-300">
+                {calcs.ngAnalysis.isNegativelyGeared ? 'Negatively Geared' : 'Positively Geared'}
+                <span className="ml-2 text-muted-foreground font-normal">
+                  · {Math.round(calcs.ngAnalysis.marginalRate * 100)}% marginal rate
+                </span>
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Taxable result: {formatCurrency(calcs.ngAnalysis.taxableRentalResult, true)}/yr
+                {calcs.ngAnalysis.isNegativelyGeared && ` → loss offsets salary tax`}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-5 text-xs">
+              <div>
+                <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Monthly Holding Cost</p>
+                <p className={`font-bold num-display ${
+                  calcs.ngAnalysis.monthlyCashLoss >= 0 ? 'text-emerald-400' : 'text-red-400'
+                }`}>{mv(formatCurrency(calcs.ngAnalysis.monthlyCashLoss, true))}</p>
+              </div>
+              {calcs.ngAnalysis.isNegativelyGeared && (
+                <>
+                  <div>
+                    <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Est. Annual Tax Refund</p>
+                    <p className="font-bold text-yellow-400 num-display">+{mv(formatCurrency(calcs.ngAnalysis.annualTaxBenefit, true))}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Net After-Tax Cost/mo</p>
+                    <p className={`font-bold num-display ${
+                      calcs.ngAnalysis.netAfterTaxMonthlyCost >= 0 ? 'text-emerald-400' : 'text-orange-400'
+                    }`}>{mv(formatCurrency(calcs.ngAnalysis.netAfterTaxMonthlyCost, true))}</p>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+          {calcs.ngAnalysis.isNegativelyGeared && (
+            <div className="mt-2.5 pt-2 border-t border-border/50">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                {[
+                  { label: 'Net Rental Income', value: calcs.ngAnalysis.annualRentalIncome, color: 'text-emerald-400' },
+                  { label: 'Loan Interest (deductible)', value: -calcs.ngAnalysis.annualInterest, color: 'text-red-400' },
+                  { label: 'Running Expenses (deductible)', value: -calcs.ngAnalysis.annualDeductibleExpenses, color: 'text-red-400' },
+                  { label: 'Depreciation (Div 43 est.)', value: -calcs.ngAnalysis.annualDepreciation, color: 'text-orange-400' },
+                ].map(r => (
+                  <div key={r.label}>
+                    <p className="text-muted-foreground">{r.label}</p>
+                    <p className={`font-semibold num-display ${r.color}`}>
+                      {r.value >= 0 ? '+' : ''}{formatCurrency(r.value, true)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
