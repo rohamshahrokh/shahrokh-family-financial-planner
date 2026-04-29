@@ -19,6 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum } from "@/lib/finance";
 import { useAppStore } from "@/lib/store";
+import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend, LineChart, Line, Cell,
@@ -262,6 +263,7 @@ const DEBT_COLORS = ['hsl(43,85%,55%)', 'hsl(188,60%,48%)', 'hsl(142,60%,45%)', 
 export default function DebtStrategyPage() {
   const { toast } = useToast();
   const { privacyMode } = useAppStore();
+  const fa = useForecastAssumptions();
 
   // ── Fetch snapshot for mortgage + other_debts ──────────────────────────────
   const { data: snapshot } = useQuery<any>({
@@ -280,7 +282,7 @@ export default function DebtStrategyPage() {
         id: 'mortgage',
         name: 'Home Mortgage',
         balance: snapMortgage,
-        rate: 6.5,
+        rate: fa.flat.interest_rate,
         minPayment: Math.round(snapMortgage * 0.006),  // ~0.6% of balance as rough est.
       });
     }
