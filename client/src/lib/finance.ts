@@ -1,4 +1,5 @@
-// ─── Financial Calculation Engine ────────────────────────────────────
+// ─── Financial Calculation Engine ───────────────────────────────────
+import { runCashEngine } from './cashEngine';
 
 /**
  * safeNum — converts any value to a finite number.
@@ -240,19 +241,18 @@ export function projectNetWorth(params: {
   const results: YearlyProjection[] = [];
   const currentYear = new Date().getFullYear();
 
-  // ── Central Cash Engine: run buildCashFlowSeries to get real annual cash balances ──
-  // This replaces the old "annualSurplus * 0.5" shortcut.
-  // We build a Map<year, endingCashBalance> from the monthly engine.
-  const _cashSeries = buildCashFlowSeries({
+  // ── Central Cash Engine (runCashEngine) — event-driven monthly ledger ──
+  // Replaces the old "annualSurplus * 0.5" shortcut entirely.
+  // cashByYear gives the real December closing cash for each year.
+  const _engineOut = runCashEngine({
     snapshot: {
+      cash:             safeNum(params.snapshot.cash),
       monthly_income:   safeNum(params.snapshot.monthly_income),
       monthly_expenses: safeNum(params.snapshot.monthly_expenses),
       mortgage:         safeNum(params.snapshot.mortgage),
       other_debts:      safeNum(params.snapshot.other_debts),
-      cash:             safeNum(params.snapshot.cash),
     },
-    expenses:            params.expenses            ?? [],
-    properties:          params.properties          as any[],
+    properties:          params.properties,
     stockTransactions:   params.stockTransactions   ?? [],
     cryptoTransactions:  params.cryptoTransactions  ?? [],
     stockDCASchedules:   params.stockDCASchedules   ?? [],
@@ -260,18 +260,14 @@ export function projectNetWorth(params: {
     plannedStockOrders:  params.plannedStockOrders  ?? [],
     plannedCryptoOrders: params.plannedCryptoOrders ?? [],
     bills:               params.bills               ?? [],
+    expenses:            params.expenses            ?? [],
     ngRefundMode:        params.ngRefundMode,
     ngAnnualBenefit:     params.ngAnnualBenefit,
     annualSalaryIncome:  params.annualSalaryIncome,
     inflationRate:       params.inflation,
     incomeGrowthRate:    params.yearlyAssumptions?.[0]?.income_growth,
   });
-  // Build year → ending cash balance map (last December of each year, or last month available)
-  const _cashByYear = new Map<number, number>();
-  for (const m of _cashSeries) {
-    // Always overwrite — last month of each year wins (Dec, or whatever is latest)
-    _cashByYear.set(m.year, m.cumulativeBalance);
-  }
+  const _cashByYear = _engineOut.cashByYear;
 
   // Guard every field — if snapshot came back with undefined/NaN fields
   // (e.g. field name mismatch), calculations silently use 0 instead of NaN.
