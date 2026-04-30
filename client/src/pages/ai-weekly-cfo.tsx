@@ -370,7 +370,7 @@ export default function AIWeeklyCFOPage() {
   const displayRow = selectedId
     ? rows.find((r: any) => r.id === selectedId)
     : rows[0];
-  const report: CFOReport | null = displayRow?.report_json ?? null;
+  const report: CFOReport | null = displayRow?.json_payload ?? null;
 
   const handleGenerate = useCallback(async () => {
     setGenerating(true);
@@ -450,7 +450,7 @@ export default function AIWeeklyCFOPage() {
               </div>
               <div className="space-y-1">
                 {rows.map((row: any) => {
-                  const r: CFOReport | null = row.report_json;
+                  const r: CFOReport | null = row.json_payload;
                   const score = r
                     ? Math.round((r.wealth_score + r.cashflow_score + r.risk_score + r.discipline_score) / 4)
                     : null;

@@ -196,7 +196,7 @@ export async function saveCFOReport(report: CFOReport, telegramSent: boolean): P
     fire_progress:    report.fire_progress,
     telegram_sent:    telegramSent,
     // Full bulletin stored in json_payload for in-app viewer
-    report_json:      report,
+    json_payload:      report,
   };
   await fetch(`${SUPABASE_URL}/rest/v1/sf_cfo_reports`, {
     method: 'POST',
@@ -454,8 +454,8 @@ export async function generateCFOReport(
   const cashflowNext14 = incomeExpected - billsDueTotal;
 
   // ── 6. Investment update ─────────────────────────────────────────────────────
-  const prevStocks = safeNum(prevReport?.report_json?.investment?.stocks_value ?? prevReport?.portfolio_value);
-  const prevCrypto = safeNum(prevReport?.report_json?.investment?.crypto_value);
+  const prevStocks = safeNum(prevReport?.json_payload?.investment?.stocks_value ?? prevReport?.portfolio_value);
+  const prevCrypto = safeNum(prevReport?.json_payload?.investment?.crypto_value);
   const stocksChange = prevStocks ? stocksValue - prevStocks : 0;
   const cryptoChange = prevCrypto ? cryptoValue - prevCrypto : 0;
 

@@ -89,7 +89,7 @@ export default function CFODashboardWidget() {
     setError(null);
     try {
       const rows = await getCFOReports(1);
-      setReport(rows?.[0]?.report_json as CFOReport ?? null);
+      setReport(rows?.[0]?.json_payload as CFOReport ?? null);
     } catch {
       setError("Could not load bulletin.");
     } finally {
