@@ -1035,36 +1035,106 @@ export default function CryptoPage() {
   );
 
   // ── Combined projection ────────────────────────────────────────────────────
+  // Includes: current holdings + planned orders (sf_planned_investments) + DCA schedules.
+  // Works even if holdings table is empty — planned orders create virtual entries.
   const combinedProjection = useMemo(() => {
     const years = 10;
     const result = [];
     const currentYear = new Date().getFullYear();
+    const defaultReturn = fa.flat.crypto_return || 20;
 
     for (let y = 1; y <= years; y++) {
       let totalVal = 0;
       let totalInv = 0;
       const projYear = currentYear + y;
 
+      // ── Step 1: project each existing holding ──────────────────────────────
       for (const c of cryptos) {
         const initVal = safeNum(c.current_holding) * safeNum(c.current_price);
 
-        // Add planned buys for this symbol up to this projection year
+        // Legacy planned transactions (from crypto-transactions table)
         const plannedBuysForAsset = transactions.filter(t =>
           t.status === "planned" &&
           t.transaction_type === "buy" &&
           t.symbol === c.symbol &&
           new Date(t.transaction_date).getFullYear() <= projYear
         );
-        const plannedBuyExtra = plannedBuysForAsset.reduce((sum, t) => sum + safeNum(t.total_amount), 0);
+        const legacyBuyExtra = plannedBuysForAsset.reduce((sum, t) => sum + safeNum(t.total_amount), 0);
 
-        // Add DCA monthly contribution for this coin
+        // NEW: planned orders (sf_planned_investments) for this symbol
+        const orderBuysForAsset = plannedOrders.filter((o: any) =>
+          o.status === 'planned' &&
+          o.action === 'buy' &&
+          (o.ticker === c.symbol || !o.ticker) &&
+          new Date(o.planned_date).getFullYear() <= projYear
+        );
+        const orderBuyExtra = orderBuysForAsset.reduce((sum: number, o: any) => sum + safeNum(o.amount_aud), 0);
+
+        // DCA schedules from sf_crypto_dca for this symbol (date-range aware)
         const dcaForCoin = dcaSchedules
-          .filter((d: CryptoDCASchedule) => d.enabled && d.symbol === c.symbol)
+          .filter((d: CryptoDCASchedule) => {
+            if (!d.enabled) return false;
+            const dcaStart = new Date(d.start_date).getFullYear();
+            const dcaEnd   = d.end_date ? new Date(d.end_date).getFullYear() : 9999;
+            return projYear >= dcaStart && projYear <= dcaEnd &&
+              (d.symbol === c.symbol || !d.symbol);
+          })
           .reduce((s: number, d: CryptoDCASchedule) => s + cryptoDcaMonthlyEquiv(d.amount, d.frequency), 0);
 
-        // Use per-asset expected_return if set; otherwise fall back to global forecast rate
-        const effectiveReturn = safeNum(c.expected_return) > 0 ? safeNum(c.expected_return) : fa.flat.crypto_return;
-        const proj = projectInvestment(initVal + plannedBuyExtra, effectiveReturn, (c.monthly_dca || 0) + dcaForCoin, y);
+        const holdingDCA = safeNum(c.monthly_dca);
+        const effectiveReturn = safeNum(c.expected_return) > 0 ? safeNum(c.expected_return) : defaultReturn;
+        const proj = projectInvestment(
+          initVal + legacyBuyExtra + orderBuyExtra,
+          effectiveReturn,
+          holdingDCA + dcaForCoin,
+          y
+        );
+        const last = proj[y - 1];
+        if (last) { totalVal += last.value; totalInv += last.totalInvested; }
+      }
+
+      // ── Step 2: planned orders for symbols NOT in holdings table ────────────
+      // e.g. user plans to buy BTC $40K but has no BTC holding yet
+      const holdingSymbols = new Set(cryptos.map((c: any) => c.symbol));
+      const orphanOrders = plannedOrders.filter((o: any) =>
+        o.status === 'planned' &&
+        o.action === 'buy' &&
+        o.ticker &&
+        !holdingSymbols.has(o.ticker) &&
+        new Date(o.planned_date).getFullYear() <= projYear
+      );
+      const orphanBySymbol = new Map<string, number>();
+      for (const o of orphanOrders) {
+        const amt = safeNum(o.amount_aud);
+        orphanBySymbol.set(o.ticker, (orphanBySymbol.get(o.ticker) || 0) + amt);
+      }
+      // Orders with no ticker field (amount only)
+      const noTickerOrders = plannedOrders.filter((o: any) =>
+        o.status === 'planned' &&
+        o.action === 'buy' &&
+        !o.ticker &&
+        new Date(o.planned_date).getFullYear() <= projYear
+      );
+      const noTickerAmt = noTickerOrders.reduce((s: number, o: any) => s + safeNum(o.amount_aud), 0);
+      if (noTickerAmt > 0) orphanBySymbol.set('__unknown__', noTickerAmt);
+
+      for (const [, amount] of orphanBySymbol) {
+        if (amount <= 0) continue;
+        const proj = projectInvestment(amount, defaultReturn, 0, y);
+        const last = proj[y - 1];
+        if (last) { totalVal += last.value; totalInv += last.totalInvested; }
+      }
+
+      // ── Step 3: DCA schedules for symbols NOT in holdings ──────────────────
+      const orphanDCA = dcaSchedules.filter((d: CryptoDCASchedule) => {
+        if (!d.enabled || !d.symbol) return false;
+        const dcaStart = new Date(d.start_date).getFullYear();
+        const dcaEnd   = d.end_date ? new Date(d.end_date).getFullYear() : 9999;
+        return projYear >= dcaStart && projYear <= dcaEnd && !holdingSymbols.has(d.symbol);
+      });
+      if (orphanDCA.length > 0) {
+        const orphanDCAMonthly = orphanDCA.reduce((s: number, d: CryptoDCASchedule) => s + cryptoDcaMonthlyEquiv(d.amount, d.frequency), 0);
+        const proj = projectInvestment(0, defaultReturn, orphanDCAMonthly, y);
         const last = proj[y - 1];
         if (last) { totalVal += last.value; totalInv += last.totalInvested; }
       }
@@ -1076,7 +1146,7 @@ export default function CryptoPage() {
       });
     }
     return result;
-  }, [cryptos, transactions, dcaSchedules, fa]);
+  }, [cryptos, transactions, plannedOrders, dcaSchedules, fa]);
 
   const assetProjections = useMemo(() => {
     const years = 10;
@@ -1296,19 +1366,21 @@ export default function CryptoPage() {
               color: totalGLPct >= 0 ? "text-emerald-400" : "text-red-400",
             },
             {
+              // Combines legacy transactions (planned status) + new planned orders table
               label: "Planned Buys",
-              value: mv(formatCurrency(plannedBuyTotal, true)),
+              value: mv(formatCurrency(plannedBuyTotal + orderBuyTotal, true)),
               color: "text-emerald-400",
             },
             {
               label: "Planned Sells",
-              value: mv(formatCurrency(plannedSellTotal, true)),
+              value: mv(formatCurrency(plannedSellTotal + orderSellTotal, true)),
               color: "text-red-400",
             },
             {
+              // Net cash impact = sells - buys (across both tables)
               label: "Net Cash Impact",
-              value: mv(`${netCashImpact >= 0 ? "+" : ""}${formatCurrency(netCashImpact, true)}`),
-              color: netCashImpact >= 0 ? "text-emerald-400" : "text-red-400",
+              value: mv(`${(plannedSellTotal + orderSellTotal - plannedBuyTotal - orderBuyTotal) >= 0 ? "+" : ""}${formatCurrency(plannedSellTotal + orderSellTotal - plannedBuyTotal - orderBuyTotal, true)}`),
+              color: (plannedSellTotal + orderSellTotal - plannedBuyTotal - orderBuyTotal) >= 0 ? "text-emerald-400" : "text-red-400",
             },
           ].map(s => (
             <div key={s.label} className="bg-card border border-border rounded-xl p-4">

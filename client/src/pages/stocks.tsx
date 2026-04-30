@@ -1070,31 +1070,110 @@ export default function StocksPage() {
   const netCashImpact = plannedSellTotal - plannedBuyTotal;
 
   // ── Combined projection ────────────────────────────────────────────────────
+  // Includes: current holdings + planned orders (new table) + DCA schedules.
+  // Works even if holdings table is empty — planned orders create virtual entries.
   const combinedProjection = useMemo(() => {
     const years = 10;
     const result = [];
     const currentYear = new Date().getFullYear();
+    const defaultReturn = fa.flat.stocks_return || 10;
 
     for (let y = 1; y <= years; y++) {
       let totalVal = 0;
       let totalInv = 0;
       const projYear = currentYear + y;
 
+      // ── Step 1: project each existing holding ──────────────────────────────
       for (const s of stocks) {
         const initVal = safeNum(s.current_holding) * safeNum(s.current_price);
 
-        // Add planned buys for this ticker up to this projection year
+        // Legacy planned transactions for this ticker (from stock-transactions table)
         const plannedBuysForStock = transactions.filter(t =>
           t.status === "planned" &&
           t.transaction_type === "buy" &&
           t.ticker === s.ticker &&
           new Date(t.transaction_date).getFullYear() <= projYear
         );
-        const plannedBuyExtra = plannedBuysForStock.reduce((sum, t) => sum + safeNum(t.total_amount), 0);
+        const legacyBuyExtra = plannedBuysForStock.reduce((sum, t) => sum + safeNum(t.total_amount), 0);
 
-        // Use per-asset expected_return if set; otherwise fall back to global forecast rate
-        const effectiveReturn = safeNum(s.expected_return) > 0 ? safeNum(s.expected_return) : fa.flat.stocks_return;
-        const proj = projectInvestment(initVal + plannedBuyExtra, effectiveReturn, s.monthly_dca || 0, y);
+        // NEW: planned orders (sf_planned_investments) for this ticker
+        const orderBuysForStock = plannedOrders.filter((o: any) =>
+          o.status === 'planned' &&
+          o.action === 'buy' &&
+          (o.ticker === s.ticker || !o.ticker) &&
+          new Date(o.planned_date).getFullYear() <= projYear
+        );
+        const orderBuyExtra = orderBuysForStock.reduce((sum: number, o: any) => sum + safeNum(o.amount_aud), 0);
+
+        // DCA schedules from sf_stock_dca for this ticker
+        const dcaForTicker = dcaSchedules
+          .filter((d: StockDCASchedule) => {
+            if (!d.enabled) return false;
+            const dcaStart = new Date(d.start_date).getFullYear();
+            const dcaEnd   = d.end_date ? new Date(d.end_date).getFullYear() : 9999;
+            return projYear >= dcaStart && projYear <= dcaEnd &&
+              (d.ticker === s.ticker || !d.ticker);
+          })
+          .reduce((sum: number, d: StockDCASchedule) => sum + dcaMonthlyEquiv(d.amount, d.frequency), 0);
+
+        // Per-holding monthly_dca (legacy field on holding row)
+        const holdingDCA = safeNum(s.monthly_dca);
+
+        const effectiveReturn = safeNum(s.expected_return) > 0 ? safeNum(s.expected_return) : defaultReturn;
+        const proj = projectInvestment(
+          initVal + legacyBuyExtra + orderBuyExtra,
+          effectiveReturn,
+          holdingDCA + dcaForTicker,
+          y
+        );
+        const last = proj[y - 1];
+        if (last) { totalVal += last.value; totalInv += last.totalInvested; }
+      }
+
+      // ── Step 2: planned orders for tickers NOT in holdings table ────────────
+      // e.g. user plans to buy AAPL $40K but has no AAPL holding yet
+      const holdingTickers = new Set(stocks.map((s: any) => s.ticker));
+      const orphanOrders = plannedOrders.filter((o: any) =>
+        o.status === 'planned' &&
+        o.action === 'buy' &&
+        o.ticker &&
+        !holdingTickers.has(o.ticker) &&
+        new Date(o.planned_date).getFullYear() <= projYear
+      );
+      // Group orphan orders by ticker so each virtual asset is projected once
+      const orphanByTicker = new Map<string, number>();
+      for (const o of orphanOrders) {
+        const amt = safeNum(o.amount_aud);
+        orphanByTicker.set(o.ticker, (orphanByTicker.get(o.ticker) || 0) + amt);
+      }
+      // Also handle orphan orders with no ticker (amount only — use default return)
+      const noTickerOrders = plannedOrders.filter((o: any) =>
+        o.status === 'planned' &&
+        o.action === 'buy' &&
+        !o.ticker &&
+        !holdingTickers.has('') &&
+        new Date(o.planned_date).getFullYear() <= projYear
+      );
+      const noTickerAmt = noTickerOrders.reduce((s: number, o: any) => s + safeNum(o.amount_aud), 0);
+      if (noTickerAmt > 0) orphanByTicker.set('__unknown__', noTickerAmt);
+
+      for (const [, amount] of orphanByTicker) {
+        if (amount <= 0) continue;
+        const proj = projectInvestment(amount, defaultReturn, 0, y);
+        const last = proj[y - 1];
+        if (last) { totalVal += last.value; totalInv += last.totalInvested; }
+      }
+
+      // ── Step 3: DCA schedules for tickers NOT in holdings ──────────────────
+      const orphanDCA = dcaSchedules.filter((d: StockDCASchedule) => {
+        if (!d.enabled || !d.ticker) return false;
+        const dcaStart = new Date(d.start_date).getFullYear();
+        const dcaEnd   = d.end_date ? new Date(d.end_date).getFullYear() : 9999;
+        return projYear >= dcaStart && projYear <= dcaEnd && !holdingTickers.has(d.ticker);
+      });
+      if (orphanDCA.length > 0) {
+        const orphanDCAMonthly = orphanDCA.reduce((s: number, d: StockDCASchedule) => s + dcaMonthlyEquiv(d.amount, d.frequency), 0);
+        const proj = projectInvestment(0, defaultReturn, orphanDCAMonthly, y);
         const last = proj[y - 1];
         if (last) { totalVal += last.value; totalInv += last.totalInvested; }
       }
@@ -1106,7 +1185,7 @@ export default function StocksPage() {
       });
     }
     return result;
-  }, [stocks, transactions, fa]);
+  }, [stocks, transactions, plannedOrders, dcaSchedules, fa]);
 
   const year10Val = combinedProjection[9]?.value || 0;
   const cagr = calcCAGR(totalCurrentValue || 1, year10Val || 1, 10);
@@ -1334,19 +1413,21 @@ export default function StocksPage() {
                 color: totalGLPct >= 0 ? "text-emerald-400" : "text-red-400",
               },
               {
+                // Combines legacy transactions (planned status) + new planned orders table
                 label: "Planned Buys",
-                value: mv(formatCurrency(plannedBuyTotal, true)),
+                value: mv(formatCurrency(plannedBuyTotal + orderBuyTotal, true)),
                 color: "text-emerald-400",
               },
               {
                 label: "Planned Sells",
-                value: mv(formatCurrency(plannedSellTotal, true)),
+                value: mv(formatCurrency(plannedSellTotal + orderSellTotal, true)),
                 color: "text-red-400",
               },
               {
+                // Net cash impact = sells - buys (across both tables)
                 label: "Net Cash Impact",
-                value: mv(`${netCashImpact >= 0 ? "+" : ""}${formatCurrency(netCashImpact, true)}`),
-                color: netCashImpact >= 0 ? "text-emerald-400" : "text-red-400",
+                value: mv(`${(plannedSellTotal + orderSellTotal - plannedBuyTotal - orderBuyTotal) >= 0 ? "+" : ""}${formatCurrency(plannedSellTotal + orderSellTotal - plannedBuyTotal - orderBuyTotal, true)}`),
+                color: (plannedSellTotal + orderSellTotal - plannedBuyTotal - orderBuyTotal) >= 0 ? "text-emerald-400" : "text-red-400",
               },
             ].map(s => (
               <div key={s.label} className="bg-card border border-border rounded-xl p-4">

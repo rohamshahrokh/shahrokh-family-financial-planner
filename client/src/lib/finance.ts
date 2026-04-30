@@ -265,6 +265,10 @@ export function projectNetWorth(params: {
   cryptoDCASchedules?: Array<{ enabled: boolean; amount: number; frequency: string; start_date: string; end_date?: string | null; }>;
   plannedStockOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
   plannedCryptoOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
+  // Override starting stock/crypto value with live holdings sum (from holdings table)
+  // so the projection base = actual portfolio, not snapshot field (which may be stale/zero)
+  liveStocksValue?: number;
+  liveCryptoValue?: number;
   // Central Cash Engine params (for real cash balance vs. 50% shortcut)
   expenses?: Array<{ date: string; amount: number; category: string }>;
   bills?: Array<{ amount: number; frequency: string; next_due_date?: string; is_active?: boolean; }>;
@@ -311,8 +315,14 @@ export function projectNetWorth(params: {
   let ppor          = safeNum(s.ppor);
   // Include offset_balance in starting cash so year-0 NW and projections are correct.
   let cash          = safeNum(s.cash) + safeNum(s.offset_balance);
-  let stockVal      = safeNum(s.stocks);
-  let cryptoVal     = safeNum(s.crypto);
+  // Use live holdings sum when provided — it reflects actual portfolio value.
+  // Fall back to snapshot field (manual entry) if holdings table is empty.
+  let stockVal      = params.liveStocksValue != null && params.liveStocksValue >= 0
+    ? params.liveStocksValue
+    : safeNum(s.stocks);
+  let cryptoVal     = params.liveCryptoValue != null && params.liveCryptoValue >= 0
+    ? params.liveCryptoValue
+    : safeNum(s.crypto);
   let mortgage      = safeNum(s.mortgage);
   let otherDebts    = safeNum(s.other_debts);
   let monthlyIncome = safeNum(s.monthly_income);

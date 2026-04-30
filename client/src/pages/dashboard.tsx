@@ -390,6 +390,10 @@ export default function DashboardPage() {
       properties,
       stocks,
       cryptos,
+      // Pass live holdings values so projection starts from actual portfolio,
+      // not the potentially-stale snapshot.stocks / snapshot.crypto field.
+      liveStocksValue: liveStocks,
+      liveCryptoValue: liveCrypto,
       stockTransactions:   plannedStockTx,
       cryptoTransactions:  plannedCryptoTx,
       stockDCASchedules,
