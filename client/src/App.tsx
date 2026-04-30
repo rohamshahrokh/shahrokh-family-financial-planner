@@ -180,28 +180,40 @@ export default function App() {
     document.documentElement.classList.toggle("light", theme === "light");
   }, [theme]);
 
-  // ─── Family message dispatcher + bill reminders — fire on app mount ──────────
+  // ─── Notification scheduler ─────────────────────────────────────────────────────────────
+  // Runs once on mount + every 5 minutes while the tab is visible.
+  // Dedup is server-side (Supabase last_sent_at columns) so repeated calls are
+  // safe: dispatchFamilyMessages() only sends if the slot has NOT been sent in
+  // the last 20 hours — regardless of how many times this fires or on how many
+  // devices/browsers the app is open on simultaneously.
   useEffect(() => {
-    // Import is dynamic to avoid blocking initial render.
-    // checkUpcomingBills fetches bills from Supabase directly—no prop needed.
-    import("./lib/notifications").then(async ({ dispatchFamilyMessages, checkUpcomingBills }) => {
-      // 1. Family motivational messages
-      dispatchFamilyMessages().catch(() => {/* silent */});
+    const SB_URL = 'https://uoraduyyxhtzixcsaidg.supabase.co';
+    const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVvcmFkdXl5eGh0eml4Y3NhaWRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTgsImV4cCI6MjA5MjY5NzAxOH0.qNrqDlG4j0lfGKDsmGyywP8DZeMurB02UWv4bdevW7c';
 
-      // 2. Bill due reminders — fetch bills from Supabase, then check
-      try {
-        const SB_URL  = 'https://uoraduyyxhtzixcsaidg.supabase.co';
-        const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVvcmFkdXl5eGh0eml4Y3NhaWRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTgsImV4cCI6MjA5MjY5NzAxOH0.qNrqDlG4j0lfGKDsmGyywP8DZeMurB02UWv4bdevW7c';
-        const res = await fetch(
-          `${SB_URL}/rest/v1/sf_recurring_bills?active=eq.true&select=bill_name,amount,next_due_date,reminder_days_before,active`,
-          { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
-        );
-        if (res.ok) {
-          const bills = await res.json();
-          checkUpcomingBills(bills).catch(() => {/* silent */});
-        }
-      } catch {/* silent */}
-    }).catch(() => {/* silent */});
+    const runChecks = () => {
+      // Only run when tab is visible — prevents firing on hidden background tabs.
+      if (document.hidden) return;
+      import("./lib/notifications").then(async ({ dispatchFamilyMessages, checkUpcomingBills }) => {
+        // 1. Family motivational messages (Supabase-deduped, 20hr cooldown)
+        dispatchFamilyMessages().catch(() => {/* silent */});
+        // 2. Bill due reminders
+        try {
+          const res = await fetch(
+            `${SB_URL}/rest/v1/sf_recurring_bills?active=eq.true&select=bill_name,amount,next_due_date,reminder_days_before,active`,
+            { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
+          );
+          if (res.ok) {
+            const bills = await res.json();
+            checkUpcomingBills(bills).catch(() => {/* silent */});
+          }
+        } catch {/* silent */}
+      }).catch(() => {/* silent */});
+    };
+
+    runChecks(); // Run once immediately on mount
+    // Re-check every 5 minutes (safe — server dedup prevents duplicate sends)
+    const interval = setInterval(runChecks, 5 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   return (

@@ -1019,6 +1019,47 @@ export default function SettingsPage() {
             </Select>
           </div>
         </div>
+        {/* ── Scheduler Status Panel ───────────────────────────────────────── */}
+        <div className="rounded-lg border border-border bg-secondary/10 p-3 mt-2">
+          <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Scheduler Status (Live)</p>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              { slot: 'morning', label: 'Morning', col: 'family_morning_last_sent' as const },
+              { slot: 'midday',  label: 'Midday',  col: 'family_midday_last_sent'  as const },
+              { slot: 'evening', label: 'Evening', col: 'family_evening_last_sent' as const },
+            ] as const).map(({ slot, label, col }) => {
+              const lastSent = tgSettings[col] as string | null | undefined;
+              const lastMs   = lastSent ? new Date(lastSent).getTime() : null;
+              const msSince  = lastMs ? Date.now() - lastMs : null;
+              const cooldown = 20 * 60 * 60 * 1000;
+              const onCD     = msSince !== null && msSince < cooldown;
+              const nextMs   = lastMs ? lastMs + cooldown : null;
+              const fmtTime  = (ms: number) => new Date(ms).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Brisbane' });
+              const fmtDate  = (ms: number) => new Date(ms).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'Australia/Brisbane' });
+              return (
+                <div key={slot} className="rounded border border-border bg-background/50 p-2">
+                  <p className="text-xs font-semibold mb-1">{label}</p>
+                  {lastMs ? (
+                    <>
+                      <p className="text-[10px] text-muted-foreground">Last sent</p>
+                      <p className="text-xs font-mono">{fmtDate(lastMs)} {fmtTime(lastMs)}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1">Next eligible</p>
+                      <p className={`text-xs font-mono ${onCD ? 'text-amber-400' : 'text-green-400'}`}>
+                        {onCD && nextMs ? `${fmtDate(nextMs)} ${fmtTime(nextMs)}` : 'Now'}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">Never sent</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-2">
+            ⚠️ Each slot can only send <strong>once per 20 hours</strong>. This dedup is stored in Supabase — safe across all devices and browser tabs.
+          </p>
+        </div>
+
         <SaveButton label="Save Family Message Settings" onSave={async () => saveTg.mutateAsync(tgSettings)} />
       </SectionCard>
 

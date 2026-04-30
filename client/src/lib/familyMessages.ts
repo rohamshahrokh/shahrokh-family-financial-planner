@@ -227,50 +227,26 @@ export function pickFamilyMessage(
   return text.replace(/\{name\}/g, name);
 }
 
-// ─── Daily scheduler check ────────────────────────────────────────────────────
-// Called on app load. Returns pending time slots if they haven't been sent today.
+// ─── getPendingTimeSlots / markSlotSent REMOVED ──────────────────────────────
+// Slot dedup now handled in notifications.ts via Supabase last_sent_at columns.
+// localStorage-based tracking was per-device only and caused duplicate sends
+// whenever a different browser/device loaded the app after the scheduled time.
+// ─────────────────────────────────────────────────────────────────────────────
 
-export function getPendingTimeSlots(settings: {
-  morning: boolean;
-  midday: boolean;
-  evening: boolean;
-  morningTime: string; // 'HH:MM'
-  middayTime: string;
-  eveningTime: string;
+/** Returns which time slots are past their scheduled time right now (AEST). */
+export function getPendingSlotsByTime(settings: {
+  morning: boolean; morningTime: string;
+  midday:  boolean; middayTime:  string;
+  evening: boolean; eveningTime: string;
 }): Array<'morning' | 'midday' | 'evening'> {
-  const sentKey = 'sf_family_sent_today';
-  const today = new Date().toISOString().split('T')[0];
-  let sent: Record<string, string[]> = {};
-  try {
-    const raw = localStorage.getItem(sentKey);
-    sent = raw ? JSON.parse(raw) : {};
-  } catch {}
-
-  const alreadySentToday: string[] = sent[today] || [];
+  const parseTime = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  // Use Australia/Brisbane timezone (UTC+10, no DST)
   const now = new Date();
-  const nowMins = now.getHours() * 60 + now.getMinutes();
-
-  const parseTime = (t: string) => {
-    const [h, m] = t.split(':').map(Number);
-    return h * 60 + m;
-  };
-
+  const brisbane = new Date(now.toLocaleString('en-US', { timeZone: 'Australia/Brisbane' }));
+  const nowMins = brisbane.getHours() * 60 + brisbane.getMinutes();
   const pending: Array<'morning' | 'midday' | 'evening'> = [];
-  if (settings.morning && !alreadySentToday.includes('morning') && nowMins >= parseTime(settings.morningTime)) pending.push('morning');
-  if (settings.midday  && !alreadySentToday.includes('midday')  && nowMins >= parseTime(settings.middayTime))  pending.push('midday');
-  if (settings.evening && !alreadySentToday.includes('evening') && nowMins >= parseTime(settings.eveningTime)) pending.push('evening');
-
+  if (settings.morning && nowMins >= parseTime(settings.morningTime)) pending.push('morning');
+  if (settings.midday  && nowMins >= parseTime(settings.middayTime))  pending.push('midday');
+  if (settings.evening && nowMins >= parseTime(settings.eveningTime)) pending.push('evening');
   return pending;
-}
-
-export function markSlotSent(slot: 'morning' | 'midday' | 'evening') {
-  const sentKey = 'sf_family_sent_today';
-  const today = new Date().toISOString().split('T')[0];
-  let sent: Record<string, string[]> = {};
-  try {
-    const raw = localStorage.getItem(sentKey);
-    sent = raw ? JSON.parse(raw) : {};
-  } catch {}
-  sent[today] = [...(sent[today] || []), slot];
-  try { localStorage.setItem(sentKey, JSON.stringify(sent)); } catch {}
 }
