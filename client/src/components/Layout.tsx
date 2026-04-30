@@ -15,6 +15,7 @@ const ALL_NAV_ITEMS = [
   { href: "/",              label: "Dashboard",       icon: LayoutDashboard, adminOnly: false },
   { href: "/expenses",      label: "Expenses",         icon: Receipt,         adminOnly: false },
   { href: "/property",      label: "Property",         icon: Home,            adminOnly: false },
+  { href: "/property-buy-analysis", label: "Buy vs Wait", icon: Calculator,     adminOnly: false },
   { href: "/stocks",        label: "Stocks",           icon: TrendingUp,      adminOnly: false },
   { href: "/crypto",        label: "Crypto",           icon: Bitcoin,         adminOnly: false },
   { href: "/reports",       label: "Reports",          icon: FileText,        adminOnly: false },

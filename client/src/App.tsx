@@ -41,7 +41,8 @@ import RecurringBillsPage   from "./pages/recurring-bills";
 import BudgetPage           from "./pages/budget";
 import MarketNewsPage       from "./pages/market-news";
 import AIForecastEnginePage from "./pages/ai-forecast-engine";
-import AIWeeklyCFOPage      from "./pages/ai-weekly-cfo";
+import AIWeeklyCFOPage         from "./pages/ai-weekly-cfo";
+import PropertyBuyAnalysisPage from "./pages/property-buy-analysis";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -165,6 +166,9 @@ function AppRouter() {
         </Route>
         <Route path="/ai-weekly-cfo">
           <ProtectedRoute component={AIWeeklyCFOPage} title="AI Weekly CFO" />
+        </Route>
+        <Route path="/property-buy-analysis">
+          <ProtectedRoute component={PropertyBuyAnalysisPage} title="Property Buy vs Wait" />
         </Route>
 
         {/* 404 */}

@@ -10,6 +10,7 @@
 
 import { safeNum } from './finance';
 import { computeBestMove, type BestMoveResult } from './bestMoveEngine';
+import { computeAllScenarios, defaultScenarioInputs } from './propertyBuyEngine';
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 const SB_URL  = 'https://uoraduyyxhtzixcsaidg.supabase.co';
@@ -329,7 +330,7 @@ export async function generateCFOReport(
     stockRows, cryptoRows, dcaStockRows, dcaCryptoRows,
     plannedRows, prevReportRows, incomeRows,
     bestMoveResult,
-  ] = await Promise.all([
+  ] = await Promise.all([ // NOTE: propertyBuyResult computed below after snap is known
     sb('sf_snapshot?id=eq.shahrokh-family-main'),
     sb('sf_expenses?order=date.desc&limit=300'),
     sb('sf_recurring_bills?active=eq.true'),
@@ -346,6 +347,19 @@ export async function generateCFOReport(
 
   const snap = snapRows?.[0] ?? {};
   const prevReport = prevReportRows?.[1];
+
+  // Property Buy vs Wait — runs after snap is available (fast, pure calc)
+  const propertyBuyResult = (() => {
+    try {
+      const inp = defaultScenarioInputs({
+        monthly_income: safeNum(snap.monthly_income),
+        cash: safeNum(snap.cash),
+        offset_balance: safeNum(snap.offset_balance),
+        mortgage: safeNum(snap.mortgage),
+      });
+      return computeAllScenarios(inp);
+    } catch { return null; }
+  })();
   const allExp  = Array.isArray(expRows)  ? expRows  : [];
   const allBills = Array.isArray(billRows) ? billRows : [];
   const now = new Date();
@@ -937,6 +951,14 @@ export async function generateCFOReport(
     risk_alerts:       riskAlerts.slice(0, 4),
     fire,
     tax_alpha:         taxAlpha,
+    property_buy_signal: propertyBuyResult ? {
+      best_label:  propertyBuyResult.best_label,
+      best_scenario: propertyBuyResult.best_scenario,
+      confidence:  propertyBuyResult.confidence,
+      key_insight: propertyBuyResult.key_insight,
+      buy_now_irr: propertyBuyResult.buy_now.irr,
+      wait_6m_irr: propertyBuyResult.wait_6m.irr,
+    } : null,
     best_move: bestMoveResult ? {
       action:         bestMoveResult.best.action,
       reason:         bestMoveResult.best.reason,
@@ -1031,6 +1053,14 @@ export function formatCFOTelegram(report: CFOBulletin): string {
       msg += `\n`;
     }
     msg += `\n`;
+  }
+
+  // Property Buy vs Wait summary
+  if ((report as any).property_buy_signal) {
+    const pb = (report as any).property_buy_signal;
+    msg += `🏠 <b>Property: Buy vs Wait</b>\n`;
+    msg += `Recommendation: <b>${pb.best_label}</b>\n`;
+    msg += `<i>${pb.key_insight.slice(0, 180)}</i>\n\n`;
   }
 
   if (risk_alerts.length > 0) {
