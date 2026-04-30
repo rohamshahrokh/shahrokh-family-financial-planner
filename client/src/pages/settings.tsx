@@ -722,7 +722,7 @@ function CFOSettingsSection() {
       await saveCFOSettings(draft);
       await qc.refetchQueries({ queryKey: ['/api/cfo-settings'] });
       setDraft(null);
-      toast({ title: 'Saved Successfully', description: 'AI Weekly CFO settings saved.' });
+      toast({ title: 'Saved Successfully', description: 'Saturday Morning Bulletin settings saved.' });
     } catch (err: any) {
       toast({ title: 'Save Failed', description: err?.message ?? 'Error', variant: 'destructive' });
     }
@@ -732,25 +732,25 @@ function CFOSettingsSection() {
 
   return (
     <SectionCard
-      title="AI Weekly CFO"
-      subtitle="Automated weekly financial intelligence briefing"
+      title="Saturday Morning Bulletin"
+      subtitle="Automated weekly financial briefing — every Saturday 8:00 AM AEST"
       icon={<BrainCircuit className="w-4 h-4 text-violet-400" />}
     >
       <ToggleRow
-        label="Enable AI Weekly CFO"
-        desc="Generate and send a weekly CFO briefing automatically"
+        label="Enable Saturday Morning Bulletin"
+        desc="Automatically generate and send your weekly financial briefing"
         checked={settings.enabled ?? true}
         onChange={v => handleChange('enabled', v)}
       />
       <ToggleRow
         label="Telegram Delivery"
-        desc="Send report via Telegram to configured chat ID(s)"
+        desc="Send compact bulletin via Telegram to configured chat ID(s)"
         checked={settings.telegram_enabled ?? true}
         onChange={v => handleChange('telegram_enabled', v)}
       />
       <ToggleRow
         label="Email Delivery"
-        desc="Send HTML report to email address below"
+        desc="Send branded HTML bulletin to email address below"
         checked={settings.email_enabled ?? false}
         onChange={v => handleChange('email_enabled', v)}
       />
@@ -780,7 +780,7 @@ function CFOSettingsSection() {
           </select>
         </div>
         <div>
-          <label className="text-xs text-muted-foreground">Delivery Time (AEST)</label>
+          <label className="text-xs text-muted-foreground">Delivery Time (Brisbane AEST)</label>
           <input
             type="time"
             value={settings.delivery_time ?? '08:00'}
@@ -795,32 +795,22 @@ function CFOSettingsSection() {
             onChange={e => handleChange('tone', e.target.value)}
             className="w-full mt-1 px-3 py-2 rounded-lg border border-border bg-background text-sm"
           >
-            <option value="Conservative">Conservative</option>
-            <option value="Balanced">Balanced</option>
-            <option value="Aggressive">Aggressive</option>
+            <option value="Conservative">Conservative (3% SWR)</option>
+            <option value="Balanced">Balanced (4% SWR)</option>
+            <option value="Aggressive">Aggressive (5% SWR)</option>
           </select>
         </div>
-        <div>
-          <label className="text-xs text-muted-foreground">Detail Level</label>
-          <select
-            value={settings.detail_level ?? 'Full'}
-            onChange={e => handleChange('detail_level', e.target.value)}
-            className="w-full mt-1 px-3 py-2 rounded-lg border border-border bg-background text-sm"
-          >
-            <option value="Short">Short (Telegram only)</option>
-            <option value="Full">Full (All sections)</option>
-          </select>
-        </div>
+
       </div>
       {settings.last_run_at && (
         <p className="text-xs text-muted-foreground mt-2">
-          Last run: {new Date(settings.last_run_at).toLocaleDateString('en-AU', {
+          Last bulletin sent: {new Date(settings.last_run_at).toLocaleDateString('en-AU', {
             day: 'numeric', month: 'short', year: 'numeric',
             hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Brisbane',
           })} AEST
         </p>
       )}
-      <SaveButton label="Save CFO Settings" onSave={handleSave} />
+      <SaveButton label="Save Bulletin Settings" onSave={handleSave} />
     </SectionCard>
   );
 }

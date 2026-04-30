@@ -220,7 +220,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // ─── AI Weekly CFO scheduler ───────────────────────────────────────────────
+  // ─── Saturday Morning Bulletin scheduler ───────────────────────────────────────────────
   // Runs every 30 minutes. The engine itself checks:
   //   1. Is it the right day + time? (Saturday 8:00 AM AEST)
   //   2. Has it already run this week? (6-day cooldown in Supabase)
