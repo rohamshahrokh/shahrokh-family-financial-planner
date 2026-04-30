@@ -522,11 +522,15 @@ export function projectNetWorth(params: {
       stocksTotal += dcaStockGrowth;
     }
 
-    // Step 3: planned one-off buy/sell orders in this calendar year
+    // Step 3: planned one-off buy/sell orders in this calendar year.
+    // Orders dated <= currentYear (e.g. 2026) are applied in y=1 (the first
+    // projection row) because the loop starts at year = currentYear+1.
+    // Orders dated in future years match their exact dcaYear.
     for (const o of (params.plannedStockOrders ?? [])) {
       if (o.status !== 'planned') continue;
       const oYear = new Date(o.planned_date).getFullYear();
-      if (oYear !== dcaYear) continue;
+      const appliesThisYear = oYear === dcaYear || (oYear <= currentYear && y === 1);
+      if (!appliesThisYear) continue;
       if (o.action === 'buy')  stocksTotal += safeNum(o.amount_aud);
       if (o.action === 'sell') stocksTotal -= safeNum(o.amount_aud);
     }
@@ -534,7 +538,8 @@ export function projectNetWorth(params: {
     for (const tx of (params.stockTransactions ?? [])) {
       if (tx.status !== 'planned') continue;
       const txYear = new Date(tx.transaction_date).getFullYear();
-      if (txYear !== dcaYear) continue;  // only add in the purchase year, not every year
+      const appliesThisYear = txYear === dcaYear || (txYear <= currentYear && y === 1);
+      if (!appliesThisYear) continue;
       if (tx.transaction_type === 'buy')  stocksTotal += safeNum(tx.total_amount);
       if (tx.transaction_type === 'sell') stocksTotal -= safeNum(tx.total_amount);
     }
@@ -568,14 +573,16 @@ export function projectNetWorth(params: {
     for (const o of (params.plannedCryptoOrders ?? [])) {
       if (o.status !== 'planned') continue;
       const oYear = new Date(o.planned_date).getFullYear();
-      if (oYear !== dcaYear) continue;
+      const appliesThisYearC = oYear === dcaYear || (oYear <= currentYear && y === 1);
+      if (!appliesThisYearC) continue;
       if (o.action === 'buy')  cryptoTotal += safeNum(o.amount_aud);
       if (o.action === 'sell') cryptoTotal -= safeNum(o.amount_aud);
     }
     for (const tx of (params.cryptoTransactions ?? [])) {
       if (tx.status !== 'planned') continue;
       const txYear = new Date(tx.transaction_date).getFullYear();
-      if (txYear !== dcaYear) continue;  // only add in purchase year
+      const appliesThisYearC = txYear === dcaYear || (txYear <= currentYear && y === 1);
+      if (!appliesThisYearC) continue;
       if (tx.transaction_type === 'buy')  cryptoTotal += safeNum(tx.total_amount);
       if (tx.transaction_type === 'sell') cryptoTotal -= safeNum(tx.total_amount);
     }
