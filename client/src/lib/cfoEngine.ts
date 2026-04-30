@@ -410,11 +410,23 @@ export async function generateCFOReport(
   };
   let incomeTrackerMonthly = 0;
   if (Array.isArray(incomeRows) && incomeRows.length > 0) {
-    // Sum active recurring streams from recent 60 records
-    incomeRows.forEach((r: any) => {
-      if (r.recurring !== false) {
-        incomeTrackerMonthly += safeNum(r.amount) * (FREQ_MULT[r.frequency] ?? 1);
-      }
+    // FIX: sf_income is a TRANSACTION LOG — each payslip is a separate row.
+    // Summing all 60 rows multiplied by frequency = catastrophic double-counting
+    // (e.g. 17 Fara payslip rows × fortnightly multiplier = $170K/month from one stream).
+    //
+    // Correct approach: deduplicate to ONE row per unique income stream
+    // (identified by description + member), keeping the MOST RECENT row for each.
+    // Sort newest-first so the first occurrence we encounter is the most recent.
+    const sorted = [...incomeRows].sort((a: any, b: any) =>
+      new Date(b.date ?? b.created_at ?? 0).getTime() - new Date(a.date ?? a.created_at ?? 0).getTime()
+    );
+    const seen = new Set<string>();
+    sorted.forEach((r: any) => {
+      if (r.recurring === false) return; // skip explicitly non-recurring
+      const key = `${(r.description ?? '').trim().toLowerCase()}|${(r.member ?? '').trim().toLowerCase()}`;
+      if (seen.has(key)) return; // already counted this stream — skip historical duplicates
+      seen.add(key);
+      incomeTrackerMonthly += safeNum(r.amount) * (FREQ_MULT[r.frequency] ?? 1);
     });
   }
   const monthlyIncome   = incomeTrackerMonthly > 0
@@ -553,10 +565,17 @@ export async function generateCFOReport(
   if (monthlySurplus < 0) {
     smartAction = `Reduce monthly outflows by at least ${fmt(Math.abs(monthlySurplus))} — cashflow is negative`;
     smartActionValue = `${fmt(Math.abs(monthlySurplus * 12))} annual deficit to close`;
-  } else if (idleCash > 20000) {
+  } else if (idleCash > 20000 && offsetBal > 0) {
+    // Offset account exists and has a balance — recommend topping it up
     const saving = idleCash * mortgageRate;
     smartAction = `Move ${fmt(Math.round(idleCash / 10000) * 10000)} idle cash to mortgage offset`;
     smartActionValue = `Saves ~${fmt(saving)}/year in mortgage interest (guaranteed ${pct(mortgageRate * 100, 2)} return)`;
+  } else if (idleCash > 20000 && offsetBal === 0 && safeNum(snap.mortgage) > 0) {
+    // FIX: user has idle cash but offset_balance=0 in DB — this means offset account
+    // balance hasn’t been entered in Settings yet. Don’t recommend moving to an
+    // account that shows $0 — instead prompt user to configure their offset balance.
+    smartAction = `Set up your offset account balance in Settings to unlock cash optimisation`;
+    smartActionValue = `You have ${fmt(liquidCash)} in liquid cash — linking your offset could save ${fmt(liquidCash * mortgageRate)}/year in mortgage interest`;
   } else if (safeNum(snap.other_debts) > 10000) {
     const debtSaving = safeNum(snap.other_debts) * 0.09;
     smartAction = `Pay down personal debts totalling ${fmt(safeNum(snap.other_debts))}`;
@@ -585,8 +604,11 @@ export async function generateCFOReport(
   const hasSavedDeposit = liquidCash + offsetBal;
   const targetDeposit   = safeNum(snap.ppor) * 0.20; // 20% of PPOR as proxy
   const depositReadiness = Math.min(100, (hasSavedDeposit / Math.max(targetDeposit, 1)) * 100);
-  // Borrowing power: rough (income × 6) - existing mortgage
-  const borrowingPower = Math.max(0, monthlyIncome * 12 * 6 - safeNum(snap.mortgage));
+  // FIX: Borrowing power formula (income × 72 − mortgage) is too crude to display.
+  // Even with correct income it produces unreliable estimates that are not from a bank
+  // serviceability model. Mark as -1 to signal "needs setup" in the UI layer.
+  // The display component should show "Needs setup" when borrowingPower === -1.
+  const borrowingPower = -1; // Hidden — not reliable without bank serviceability model
   // Buy/wait scores based on cashflow health
   const surplusRatio = monthlyIncome > 0 ? monthlySurplus / monthlyIncome : 0;
   const buyScore  = Math.max(1, Math.min(10, Math.round(
@@ -729,8 +751,21 @@ export async function generateCFOReport(
   // ═══════════════════════════════════════════════════════════════════════════
   const annualIncome = monthlyIncome * 12;
   const superConcessionalCap = 30000;
-  const superContribYTD = (safeNum(snap.roham_employer_contrib) + safeNum(snap.roham_salary_sacrifice)) * (annualIncome / 12);
-  const superRoom = Math.max(0, superConcessionalCap - superContribYTD);
+  // FIX: snap.roham_employer_contrib and snap.roham_salary_sacrifice store RATE fields
+  // (e.g. 11.5 for 11.5%), NOT dollar amounts. Using them as-is gave ~0 contribution YTD.
+  // Correct approach: employer SG = 11.5% of gross salary. Salary sacrifice from snap field.
+  // If fields not set, we cannot reliably calculate room — show "Needs setup".
+  const rohamAnnualGross  = safeNum(snap.monthly_income) * 12; // use snap directly, not incomeTracker
+  const employerSGRate    = safeNum(snap.roham_employer_contrib) > 0
+    ? safeNum(snap.roham_employer_contrib) / 100  // stored as percent e.g. 11.5
+    : 0.115; // AUS default SG rate 2025-26
+  const salarySacrificeAnn = safeNum(snap.roham_salary_sacrifice) * 12;
+  const superContribYTD   = rohamAnnualGross * employerSGRate + salarySacrificeAnn;
+  // Only show super room tip if we have a reasonable income figure to base it on
+  const superDataReliable = safeNum(snap.monthly_income) > 0;
+  const superRoom = superDataReliable
+    ? Math.max(0, superConcessionalCap - superContribYTD)
+    : 0;
 
   const negGearBenefit = (propRows ?? []).reduce((s: number, p: any) => {
     const rentalAnn   = safeNum(p.weekly_rent) * 52;
@@ -742,15 +777,21 @@ export async function generateCFOReport(
   }, 0);
 
   const taxTips: string[] = [];
-  if (superRoom > 5000) taxTips.push(`${fmt(superRoom)} concessional super cap remaining — salary sacrifice before 30 June to save tax.`);
+  if (superDataReliable && superRoom > 5000) taxTips.push(`${fmt(superRoom)} concessional super cap remaining — salary sacrifice before 30 June to save tax.`);
   if (negGearBenefit > 0) taxTips.push(`Negative gearing benefit estimated at ${fmt(negGearBenefit)}/year — ensure claimed in tax return.`);
   if (safeNum(snap.other_debts) > 0) taxTips.push(`Review deductibility of investment-related borrowings — may reduce taxable income.`);
   if (month >= 9 && month <= 11) taxTips.push(`Q4 — ideal time to prepay interest on investment loans for this financial year deduction.`);
+  // FIX: if no actionable tips found AND data is thin, be explicit rather than showing false "clean"
+  const taxTipsFinal = taxTips.length > 0
+    ? taxTips
+    : (!superDataReliable
+        ? ['Super contribution data needs setup in Settings to calculate your concessional cap remaining.']
+        : ['No immediate tax alpha detected — your tax position looks clean.']);
   const taxAlpha: CFOTaxAlpha = {
     neg_gearing_benefit:  negGearBenefit,
     super_room_remaining: superRoom,
     estimated_refund:     negGearBenefit > 0 ? fmt(negGearBenefit * 0.8) : 'Review with accountant',
-    tips: taxTips.length > 0 ? taxTips : ['No immediate tax alpha detected — your tax position looks clean.'],
+    tips: taxTipsFinal,
   };
 
   // ═══════════════════════════════════════════════════════════════════════════

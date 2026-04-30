@@ -514,7 +514,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
           </div>
           <div className="rounded-xl bg-white/[0.04] border border-white/[0.05] p-3">
             <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Borrowing Power</div>
-            <div className="text-base font-bold text-white">{mv(fmt(pw.borrowing_power))}</div>
+            <div className="text-base font-bold text-slate-400">{pw.borrowing_power === -1 ? 'Needs setup' : mv(fmt(pw.borrowing_power))}</div>
           </div>
           <div className="rounded-xl bg-white/[0.04] border border-white/[0.05] p-3">
             <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Deposit Readiness</div>
