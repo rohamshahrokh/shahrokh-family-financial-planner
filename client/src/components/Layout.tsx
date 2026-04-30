@@ -143,7 +143,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top bar */}
-        <header className="h-13 border-b border-border bg-card/80 backdrop-blur-sm flex items-center px-4 gap-3 sticky top-0 z-30">
+        <header
+          className="border-b border-border bg-card/80 backdrop-blur-sm flex items-center px-4 gap-3 sticky top-0 z-30"
+          style={{
+            paddingTop: 'max(env(safe-area-inset-top), 0px)',
+            minHeight: 'calc(3.25rem + env(safe-area-inset-top))',
+          }}
+        >
           <Button variant="ghost" size="icon" className="lg:hidden w-8 h-8" onClick={() => setMobileOpen(true)}>
             <Menu className="w-4 h-4" />
           </Button>

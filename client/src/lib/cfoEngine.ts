@@ -47,6 +47,9 @@ export interface CFOSnapshot {
   offset_balance:    number;
   liquid_cash:       number;       // all cash accounts combined
   offset_interest_saving: number;  // annual interest saved by offset
+  // Income/expense — stored so surplus tooltip can show breakdown
+  monthly_income:    number;
+  monthly_expenses:  number;
   // Other
   monthly_surplus:   number;
   debt_ratio:        number;       // total_debt / total_assets
@@ -358,19 +361,28 @@ export async function generateCFOReport(
   const liveCrypto  = cryptoFromRows  > 0 ? cryptoFromRows  : safeNum(snap.crypto);
   const portfolioVal = liveStocks + liveCrypto;
 
-  // Cash breakdown (new fields fall back to 0 if not entered)
-  const cashEveryday  = safeNum(snap.cash);          // existing 'cash' field = everyday
-  const cashSavings   = safeNum(snap.savings_cash);
-  const cashEmergency = safeNum(snap.emergency_cash);
-  const cashOther     = safeNum(snap.other_cash);
+  // ── Cash breakdown (display only — breakdown fields are informational) ──────
+  // dashboard.tsx uses snap.cash (single field) + snap.offset_balance as the
+  // cash component of NW. savings_cash / emergency_cash / other_cash are
+  // displayed in the bulletin breakdown but do NOT change the NW total.
+  const cashEveryday  = safeNum(snap.cash);          // the "Cash" field in dashboard
+  const cashSavings   = safeNum(snap.savings_cash);  // display only
+  const cashEmergency = safeNum(snap.emergency_cash);// display only
+  const cashOther     = safeNum(snap.other_cash);    // display only
   const offsetBal     = safeNum(snap.offset_balance);
-  const liquidCash    = cashEveryday + cashSavings + cashEmergency + cashOther;
+  // liquidCash for display: if breakdown fields are populated use them, else just cash
+  const breakdownSum  = cashSavings + cashEmergency + cashOther;
+  const liquidCash    = breakdownSum > 0
+    ? cashEveryday + breakdownSum  // user has filled in breakdown
+    : cashEveryday;                // only everyday field filled — single cash value
 
-  // Core balance sheet (IDENTICAL to dashboard.tsx line 357-359)
+  // Core balance sheet — IDENTICAL to dashboard.tsx lines 357-359
+  // totalAssets = ppor + cash + offset_balance + super + stocks + crypto + cars + iran_property
+  // NOTE: dashboard adds snap.cash + snap.offset_balance separately (both included)
   const totalAssets =
     safeNum(snap.ppor) +
-    liquidCash +            // cash = all accounts combined
-    offsetBal +
+    cashEveryday +          // snap.cash — matches dashboard exactly
+    offsetBal +             // snap.offset_balance — matches dashboard exactly
     superCombined +
     liveStocks +
     liveCrypto +
@@ -409,19 +421,21 @@ export async function generateCFOReport(
     : safeNum(snap.monthly_income) || 22000;
   const monthlyExpenses = safeNum(snap.monthly_expenses) || 8000;
 
-  // Bills monthly equivalent (for surplus calc)
+  // Bills monthly equivalent (for FIRE calc and cashflow display — NOT subtracted from surplus)
+  // IMPORTANT: dashboard surplus = income - expenses ONLY (line 363).
+  // monthly_expenses already includes bills in the user's budget.
+  // We keep billsMonthly for FIRE capital requirement and cashflow display.
+  const FREQ_BILLS: Record<string, number> = {
+    Weekly: 52/12, Fortnightly: 26/12, Monthly: 1,
+    Quarterly: 4/12, 'Semi-Annual': 2/12, Annual: 1/12,
+  };
   const billsMonthly = allBills.reduce((s: number, b: any) => {
     const freq = (b.frequency || 'Monthly').trim();
     const amt  = safeNum(b.amount);
-    if (freq === 'Weekly')      return s + amt * (52 / 12);
-    if (freq === 'Fortnightly') return s + amt * (26 / 12);
-    if (freq === 'Monthly')     return s + amt;
-    if (freq === 'Quarterly')   return s + amt / 3;
-    if (freq === 'Semi-Annual') return s + amt / 6;
-    if (freq === 'Annual')      return s + amt / 12;
-    return s + amt;
+    return s + amt * (FREQ_BILLS[freq] ?? 1);
   }, 0);
-  const monthlySurplus = monthlyIncome - monthlyExpenses - billsMonthly;
+  // Surplus = income - expenses (IDENTICAL to dashboard.tsx line 363)
+  const monthlySurplus = monthlyIncome - monthlyExpenses;
 
   // Current passive income estimate (dividends + rental)
   const rentalIncome = (Array.isArray(propRows) ? propRows : [])
@@ -449,13 +463,13 @@ export async function generateCFOReport(
   const fireOnTrack  = prevFireYear ? fireYear <= prevFireYear : true;
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // SECTION 3: TOP 3 EXPENSES (last 7 days)
+  // SECTION 3: TOP 6 EXPENSES (last 7 days)
   // ═══════════════════════════════════════════════════════════════════════════
   const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000).toISOString().split('T')[0];
   const weekExps = allExp.filter((e: any) => e.date >= sevenDaysAgo);
-  const top3: CFOExpense[] = [...weekExps]
+  const top6: CFOExpense[] = [...weekExps]
     .sort((a: any, b: any) => safeNum(b.amount) - safeNum(a.amount))
-    .slice(0, 3)
+    .slice(0, 6)
     .map((e: any) => ({
       amount:      safeNum(e.amount),
       category:    e.category    || 'Other',
@@ -523,12 +537,14 @@ export async function generateCFOReport(
     bills_total:     billsDueTotal7,
     net_cashflow:    netCashflow7,
     status:          cashflowStatus,
-    bills:           billsNext7.slice(0, 5),
+    bills:           billsNext7.slice(0, 6),
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
   // SECTION 5: SMART ACTION (highest ROI single action)
   // ═══════════════════════════════════════════════════════════════════════════
+  // idleCash: total liquid cash above a 3-month emergency buffer
+  // Uses full liquidCash (everyday + savings + emergency + other) not just cashEveryday
   const idleCash = liquidCash - monthlyExpenses * 3;
   let smartAction = '';
   let smartActionValue = '';
@@ -819,6 +835,8 @@ export async function generateCFOReport(
     offset_balance:     offsetBal,
     liquid_cash:        liquidCash,
     offset_interest_saving: offsetAnnualSaving,
+    monthly_income:     monthlyIncome,
+    monthly_expenses:   monthlyExpenses,
     monthly_surplus:    monthlySurplus,
     debt_ratio:         debtRatio,
     fire_progress_pct:  firePct,
@@ -849,7 +867,7 @@ export async function generateCFOReport(
     generated_at: now.toISOString(),
     scores,
     snapshot,
-    top_expenses:      top3,
+    top_expenses:      top6,
     spending_insight:  spendInsight,
     cashflow,
     smart_action:      smartAction,

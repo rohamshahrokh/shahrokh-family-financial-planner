@@ -715,16 +715,19 @@ export default function DashboardPage() {
 
   // ─── Snapshot field config ───────────────────────────────────────────────
   const snapFields = [
-    { label: "PPOR",             key: "ppor",             group: "asset" },
-    { label: "Cash",             key: "cash",             group: "asset" },
-    { label: "Offset Balance",   key: "offset_balance",   group: "asset" },
-    { label: "Super",            key: "super_balance",    group: "asset" },
-    { label: "Cars",             key: "cars",             group: "asset" },
-    { label: "Iran Property",    key: "iran_property",    group: "asset" },
-    { label: "Mortgage",         key: "mortgage",         group: "liability" },
-    { label: "Other Debts",      key: "other_debts",      group: "liability" },
-    { label: "Monthly Income",   key: "monthly_income",   group: "income" },
-    { label: "Monthly Expenses", key: "monthly_expenses", group: "expense" },
+    { label: "PPOR",                key: "ppor",             group: "asset" },
+    { label: "Cash (Everyday)",     key: "cash",             group: "asset" },
+    { label: "Cash (Savings)",      key: "savings_cash",     group: "cash_alloc" },
+    { label: "Cash (Emergency)",    key: "emergency_cash",   group: "cash_alloc" },
+    { label: "Cash (Other)",        key: "other_cash",       group: "cash_alloc" },
+    { label: "Offset Balance",      key: "offset_balance",   group: "asset" },
+    { label: "Super",               key: "super_balance",    group: "asset" },
+    { label: "Cars",                key: "cars",             group: "asset" },
+    { label: "Iran Property",       key: "iran_property",    group: "asset" },
+    { label: "Mortgage",            key: "mortgage",         group: "liability" },
+    { label: "Other Debts",         key: "other_debts",      group: "liability" },
+    { label: "Monthly Income",      key: "monthly_income",   group: "income" },
+    { label: "Monthly Expenses",    key: "monthly_expenses", group: "expense" },
   ] as const;
 
   // ─── Render ───────────────────────────────────────────────────────────────

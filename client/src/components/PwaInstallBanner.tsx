@@ -8,14 +8,13 @@ import { useEffect, useState } from "react";
 import { X, Download } from "lucide-react";
 
 const DISMISS_KEY = "fwl_pwa_banner_dismissed";
-const DISMISS_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+// "never" = permanently dismissed; any numeric timestamp = legacy 30-day TTL (ignored, always treated as permanent now)
+const NEVER = "never";
 
 function isDismissed(): boolean {
   try {
     const raw = localStorage.getItem(DISMISS_KEY);
-    if (!raw) return false;
-    const ts = parseInt(raw, 10);
-    return Date.now() - ts < DISMISS_TTL;
+    return raw !== null; // any stored value = dismissed permanently
   } catch {
     return false;
   }
@@ -62,7 +61,7 @@ export default function PwaInstallBanner() {
   }, []);
 
   function dismiss() {
-    try { localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch {}
+    try { localStorage.setItem(DISMISS_KEY, NEVER); } catch {}
     setVisible(false);
   }
 

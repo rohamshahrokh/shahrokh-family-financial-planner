@@ -699,6 +699,103 @@ function SuperSection({
 
 // ─── AI Weekly CFO Settings section ──────────────────────────────────────────
 
+// ─── Cash Allocation section ─────────────────────────────────────────────────
+function CashAllocationSection({
+  isAdmin, qc, toast,
+}: {
+  isAdmin: boolean;
+  qc: ReturnType<typeof useQueryClient>;
+  toast: ReturnType<typeof useToast>['toast'];
+}) {
+  const { data: snapshotRaw } = useQuery<any>({
+    queryKey: ['/api/snapshot'],
+    queryFn: () => apiRequest('GET', '/api/snapshot').then(r => r.json()),
+    staleTime: 0,
+  });
+
+  const DEFAULT_CASH = { savings_cash: 0, emergency_cash: 0, other_cash: 0 };
+  const [draft, setDraft] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+
+  const serverCash = snapshotRaw ? { ...DEFAULT_CASH, ...snapshotRaw } : DEFAULT_CASH;
+  const data = draft ?? serverCash;
+
+  const field = (key: string) => ({
+    value: data[key] ?? 0,
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+      setDraft({ ...(draft ?? serverCash), [key]: parseFloat(e.target.value) || 0 });
+    },
+  });
+
+  const handleSave = async () => {
+    if (!draft) { toast({ title: 'No changes to save' }); return; }
+    setSaving(true);
+    try {
+      const payload: Record<string, number> = {
+        savings_cash:   draft.savings_cash   ?? 0,
+        emergency_cash: draft.emergency_cash ?? 0,
+        other_cash:     draft.other_cash     ?? 0,
+      };
+      await apiRequest('PUT', '/api/snapshot', payload);
+      await qc.refetchQueries({ queryKey: ['/api/snapshot'] });
+      setDraft(null);
+      toast({ title: 'Saved Successfully', description: 'Cash allocation updated.' });
+    } catch (err: any) {
+      toast({ title: 'Save Failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!isAdmin) return null;
+
+  return (
+    <SectionCard title="Cash Allocation" icon={DollarSign} adminOnly isAdmin={isAdmin}>
+      <div className="rounded-lg bg-secondary/30 border border-border/50 p-3 text-xs text-muted-foreground space-y-1 mb-4">
+        <p>
+          Break down your cash across accounts. <strong className="text-foreground">Cash (Everyday)</strong> in the
+          Dashboard snapshot is used for Net Worth. These allocation fields appear in the Saturday Morning Bulletin’s Cash Breakdown panel.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1.5">Savings Account</label>
+          <Input type="number" className="h-9 text-sm" {...field('savings_cash')} />
+          <p className="text-[11px] text-muted-foreground mt-1">High-interest savings or term deposit</p>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1.5">Emergency Fund</label>
+          <Input type="number" className="h-9 text-sm" {...field('emergency_cash')} />
+          <p className="text-[11px] text-muted-foreground mt-1">Liquid emergency reserve (3–6 months expenses)</p>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1.5">Other Cash</label>
+          <Input type="number" className="h-9 text-sm" {...field('other_cash')} />
+          <p className="text-[11px] text-muted-foreground mt-1">Any other cash not counted above</p>
+        </div>
+      </div>
+      <div className="mt-4 flex items-center justify-between pt-3 border-t border-border/40">
+        <div className="text-xs text-muted-foreground">
+          Total breakdown: 
+          <span className="text-foreground font-semibold">
+            ${((data.savings_cash ?? 0) + (data.emergency_cash ?? 0) + (data.other_cash ?? 0)).toLocaleString('en-AU', { maximumFractionDigits: 0 })}
+          </span>
+        </div>
+        <div className="flex gap-2">
+          {draft && (
+            <Button variant="ghost" size="sm" onClick={() => setDraft(null)} disabled={saving}>
+              Cancel
+            </Button>
+          )}
+          <Button size="sm" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
 function CFOSettingsSection() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -1217,6 +1314,9 @@ export default function SettingsPage() {
         </div>
       </SectionCard>
 
+
+            {/* ── Cash Allocation ─────────────────────────────────────────────────── */}
+      <CashAllocationSection isAdmin={isAdmin} qc={qc} toast={toast} />
 
       {/* ── Superannuation Settings ──────────────────────────────────────── */}
       <SuperSection isAdmin={isAdmin} qc={qc} toast={toast} />

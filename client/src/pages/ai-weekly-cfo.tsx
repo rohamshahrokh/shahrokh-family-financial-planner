@@ -204,6 +204,7 @@ function ProgressBar({
 function BulletinViewer({ report }: { report: CFOBulletin }) {
   const { privacyMode } = useAppStore();
   const mv = (val: string) => maskValue(val, privacyMode, "currency");
+  const [showAllBills, setShowAllBills] = useState(false);
 
   const { scores, snapshot: snap, cashflow, investment, fire, property_watch: pw, tax_alpha, risk_alerts } = report;
   const nwUp     = snap.net_worth_delta >= 0;
@@ -260,35 +261,77 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
 
       {/* ── Section 1: Weekly Snapshot ───────────────────────────────────── */}
       <Section icon={<TrendingUp size={15} />} title="1. Weekly Snapshot" accent="cyan" defaultOpen>
+        {/* 8-KPI grid: Net Worth, Weekly Change, Liquid Cash, Offset Balance,
+            Monthly Surplus, Debt Ratio, FIRE %, Years to Freedom */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-4">
+          {/* KPI 1: Net Worth */}
           <KpiTile
             label="Net Worth"
             value={mv(fmt(snap.net_worth))}
-            sub={`${nwUp ? "▲" : "▼"} ${mv(fmt(Math.abs(snap.net_worth_delta)))} vs last bulletin`}
+            sub={`${nwUp ? "▲" : "▼"} ${mv(fmt(Math.abs(snap.net_worth_delta)))} vs last week`}
             color={nwUp ? "text-emerald-400" : "text-red-400"}
+            accent={nwUp ? "border-emerald-900/40" : "border-red-900/40"}
           />
+          {/* KPI 2: Weekly Change */}
           <KpiTile
-            label="Monthly Surplus"
-            value={mv(fmt(snap.monthly_surplus))}
-            color={surplusUp ? "text-emerald-400" : "text-red-400"}
-            sub={`Debt ratio: ${(snap.debt_ratio * 100).toFixed(0)}%`}
+            label="Weekly Change"
+            value={`${nwUp ? "+" : ""}${mv(fmt(snap.net_worth_delta))}`}
+            sub={snap.net_worth_delta !== 0
+              ? `${((Math.abs(snap.net_worth_delta) / Math.max(snap.net_worth - snap.net_worth_delta, 1)) * 100).toFixed(1)}% move`
+              : "No prior bulletin"}
+            color={nwUp ? "text-emerald-400" : snap.net_worth_delta === 0 ? "text-slate-400" : "text-red-400"}
           />
+          {/* KPI 3: Liquid Cash */}
           <KpiTile
-            label="Total Assets"
-            value={mv(fmt(snap.total_assets))}
-            sub={`Debt: ${mv(fmt(snap.total_debt))}`}
+            label="Liquid Cash"
+            value={mv(fmt(snap.liquid_cash))}
+            sub={`Everyday: ${mv(fmt(snap.cash_everyday))}`}
+            color="text-white"
           />
+          {/* KPI 4: Offset Balance */}
           <KpiTile
-            label="Portfolio (Stocks+Crypto)"
-            value={mv(fmt(snap.portfolio_value))}
-            sub={`Super: ${mv(fmt(snap.super_combined))}`}
-            color="text-violet-400"
+            label="Offset Balance"
+            value={mv(fmt(snap.offset_balance))}
+            sub={snap.offset_interest_saving > 0 ? `Saves ~${mv(fmt(snap.offset_interest_saving))}/yr` : "Offset account"}
+            color="text-cyan-400"
+            accent="border-cyan-900/40"
+          />
+          {/* KPI 5: Monthly Surplus — with income/expense breakdown as subtitle */}
+          <div className={`rounded-xl bg-white/[0.04] border p-3 ${surplusUp ? "border-emerald-900/40" : "border-red-900/40"}`}>
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Monthly Surplus</div>
+            <div className={`text-base font-bold ${surplusUp ? "text-emerald-400" : "text-red-400"}`}>
+              {mv(fmt(snap.monthly_surplus))}
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5 leading-snug" title="Income minus Expenses (matches Dashboard calculation)">
+              {mv(fmt(snap.monthly_income ?? 0))}&nbsp;in&nbsp;−&nbsp;{mv(fmt(snap.monthly_expenses ?? 0))}&nbsp;out
+            </div>
+          </div>
+          {/* KPI 6: Debt Ratio */}
+          <KpiTile
+            label="Debt Ratio"
+            value={`${(snap.debt_ratio * 100).toFixed(0)}%`}
+            sub={`${mv(fmt(snap.total_debt))} debt vs ${mv(fmt(snap.total_assets))} assets`}
+            color={snap.debt_ratio < 0.4 ? "text-emerald-400" : snap.debt_ratio < 0.6 ? "text-amber-400" : "text-red-400"}
+          />
+          {/* KPI 7: FIRE % */}
+          <KpiTile
+            label="FIRE Progress"
+            value={`${snap.fire_progress_pct.toFixed(0)}%`}
+            sub={`Target ${snap.fire_year}`}
+            color={snap.fire_progress_pct >= 75 ? "text-emerald-400" : snap.fire_progress_pct >= 40 ? "text-amber-400" : "text-orange-400"}
+          />
+          {/* KPI 8: Years to Freedom */}
+          <KpiTile
+            label="Years to Freedom"
+            value={snap.years_to_fire > 0 ? `${snap.years_to_fire.toFixed(1)}y` : "Achieved"}
+            sub={snap.years_to_fire > 0 ? `Est. FIRE in ${snap.fire_year}` : "FIRE target reached"}
+            color={snap.years_to_fire <= 5 ? "text-emerald-400" : snap.years_to_fire <= 15 ? "text-amber-400" : "text-white"}
           />
         </div>
 
         {/* Cash breakdown */}
         <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-3.5 mb-3">
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Cash Breakdown</div>
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Cash Allocation Breakdown</div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             {[
               { label: "Everyday", value: snap.cash_everyday },
@@ -405,7 +448,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
           <p className="text-slate-500 text-sm">No bills due in the next 7 days.</p>
         ) : (
           <div className="space-y-1.5">
-            {cashflow.bills.map((b, i) => (
+            {(showAllBills ? cashflow.bills : cashflow.bills.slice(0, 6)).map((b, i) => (
               <div
                 key={i}
                 className="flex items-center justify-between rounded-xl bg-white/[0.03] border border-white/[0.05] px-4 py-2.5"
@@ -428,6 +471,16 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                 <div className="text-sm font-semibold text-orange-400 shrink-0 ml-4">{mv(fmt(b.amount))}</div>
               </div>
             ))}
+            {cashflow.bills.length > 6 && (
+              <button
+                onClick={() => setShowAllBills(v => !v)}
+                className="w-full mt-1 py-2 text-xs text-slate-400 hover:text-white rounded-xl border border-white/[0.05] bg-white/[0.02] hover:bg-white/[0.05] transition-colors"
+              >
+                {showAllBills
+                  ? "Show less"
+                  : `Show ${cashflow.bills.length - 6} more bill${cashflow.bills.length - 6 !== 1 ? "s" : ""}`}
+              </button>
+            )}
           </div>
         )}
       </Section>
@@ -710,6 +763,8 @@ function normaliseBulletin(raw: any): CFOBulletin | null {
     offset_balance:         n(oldSnap.offset_balance),
     liquid_cash:            n(oldSnap.liquid_cash       ?? oldSnap.cash ?? raw.cash),
     offset_interest_saving: n(oldSnap.offset_interest_saving),
+    monthly_income:         n(oldSnap.monthly_income    ?? raw.monthly_income    ?? raw.networth_income),
+    monthly_expenses:       n(oldSnap.monthly_expenses  ?? raw.monthly_expenses  ?? raw.networth_expenses),
     monthly_surplus:        n(oldSnap.monthly_surplus   ?? raw.monthly_surplus),
     debt_ratio:             n(oldSnap.debt_ratio),
     fire_progress_pct:      n(oldSnap.fire_progress_pct ?? oldFire.progress_pct ?? raw.fire_progress),
