@@ -62,6 +62,7 @@ import { Button } from "@/components/ui/button";
 import familyImg from "@assets/family.jpeg";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
+import CFODashboardWidget from "@/components/CFODashboardWidget";
 import { Link } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
@@ -1745,6 +1746,9 @@ export default function DashboardPage() {
           </table>
         </div>
       </div>
+
+      {/* ─── AI Weekly CFO Widget ─────────────────────────────────────── */}
+      <CFODashboardWidget />
 
       {/* ─── Portfolio Live Return ──────────────────────────────────────── */}
       <PortfolioLiveReturn />
