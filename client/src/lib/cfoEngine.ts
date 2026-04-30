@@ -9,6 +9,7 @@
  */
 
 import { safeNum } from './finance';
+import { computeBestMove, type BestMoveResult } from './bestMoveEngine';
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 const SB_URL  = 'https://uoraduyyxhtzixcsaidg.supabase.co';
@@ -130,6 +131,18 @@ export interface CFOTaxAlpha {
   tips:                  string[];
 }
 
+export interface CFOBestMove {
+  action:         string;
+  reason:         string;
+  annual_benefit: number;
+  benefit_label:  string;
+  risk:           'Low' | 'Med' | 'High';
+  cta:            string;
+  cta_route:      string;
+  alternatives:   Array<{ action: string; benefit_label: string; risk: 'Low' | 'Med' | 'High' }>;
+  summary:        string;
+}
+
 export interface CFOBulletin {
   // Metadata
   week_date:   string;
@@ -167,7 +180,10 @@ export interface CFOBulletin {
   // 10. Tax alpha
   tax_alpha:    CFOTaxAlpha;
 
-  // 11. Family CFO insight
+  // 11. Best Move Right Now
+  best_move:    CFOBestMove;
+
+  // 12. Family CFO insight
   cfo_insight:  string;
 
   // Legacy flat fields for DB columns
@@ -244,7 +260,7 @@ export async function saveCFOReport(report: CFOBulletin, telegramSent: boolean):
     summary:          report.summary,
     alerts:           report.alerts,
     opportunities:    report.opportunities,
-    best_move:        report.best_move,
+    best_move:        (report as any).best_move_text ?? '',  // DB column stores legacy flat string
     wealth_score:     report.wealth_score,
     cashflow_score:   report.cashflow_score,
     risk_score:       report.risk_score,
@@ -312,6 +328,7 @@ export async function generateCFOReport(
     snapRows, expRows, billRows, propRows,
     stockRows, cryptoRows, dcaStockRows, dcaCryptoRows,
     plannedRows, prevReportRows, incomeRows,
+    bestMoveResult,
   ] = await Promise.all([
     sb('sf_snapshot?id=eq.shahrokh-family-main'),
     sb('sf_expenses?order=date.desc&limit=300'),
@@ -324,6 +341,7 @@ export async function generateCFOReport(
     sb('sf_planned_investments'),
     sb('sf_cfo_reports?order=week_date.desc&limit=2'),
     sb('sf_income?order=date.desc&limit=60'),
+    computeBestMove().catch(() => null),
   ]);
 
   const snap = snapRows?.[0] ?? {};
@@ -919,12 +937,30 @@ export async function generateCFOReport(
     risk_alerts:       riskAlerts.slice(0, 4),
     fire,
     tax_alpha:         taxAlpha,
+    best_move: bestMoveResult ? {
+      action:         bestMoveResult.best.action,
+      reason:         bestMoveResult.best.reason,
+      annual_benefit: bestMoveResult.best.annual_benefit,
+      benefit_label:  bestMoveResult.best.benefit_label,
+      risk:           bestMoveResult.best.risk,
+      cta:            bestMoveResult.best.cta,
+      cta_route:      bestMoveResult.best.cta_route,
+      alternatives:   bestMoveResult.alternatives.map(a => ({
+        action: a.action, benefit_label: a.benefit_label, risk: a.risk,
+      })),
+      summary:        bestMoveResult.summary,
+    } : {
+      action: 'Data unavailable', reason: '', annual_benefit: 0,
+      benefit_label: 'Needs setup', risk: 'Low' as const,
+      cta: 'Dashboard', cta_route: '/#/dashboard',
+      alternatives: [], summary: '',
+    },
     cfo_insight:       cfoInsight,
     // Legacy DB columns
     summary,
     alerts:            riskAlerts.slice(0, 2),
     opportunities,
-    best_move:         smartAction,
+    best_move_text:    smartAction,   // legacy flat column — renamed to avoid collision with CFOBestMove
     wealth_score:      scores.wealth,
     cashflow_score:    scores.cashflow,
     risk_score:        scores.risk,
@@ -944,7 +980,7 @@ export async function generateCFOReport(
 export function formatCFOTelegram(report: CFOBulletin): string {
   const { scores, snapshot: s, top_expenses, spending_insight,
           cashflow, smart_action, smart_action_value, risk_alerts,
-          fire, cfo_insight } = report;
+          fire, cfo_insight, best_move } = report;
   const f = fmt;
   const nwSign = s.net_worth_delta >= 0 ? '+' : '';
   const scoreEmoji = scores.overall >= 75 ? '🟢' : scores.overall >= 55 ? '🟡' : '🔴';
@@ -984,6 +1020,19 @@ export function formatCFOTelegram(report: CFOBulletin): string {
   msg += `${smart_action}\n`;
   if (smart_action_value) msg += `<i>${smart_action_value}</i>\n\n`;
 
+  // Best Move Right Now
+  if (best_move?.action && best_move.action !== 'Data unavailable') {
+    msg += `⚡ <b>Best Move Right Now</b>\n`;
+    msg += `${best_move.action}\n`;
+    msg += `<i>${best_move.benefit_label} · Risk: ${best_move.risk}</i>\n`;
+    if (best_move.alternatives.length > 0) {
+      msg += `<b>Alternatives:</b> `;
+      msg += best_move.alternatives.slice(0, 3).map(a => a.action).join(' | ');
+      msg += `\n`;
+    }
+    msg += `\n`;
+  }
+
   if (risk_alerts.length > 0) {
     msg += `🚨 <b>Risk Radar</b>\n`;
     risk_alerts.slice(0, 2).forEach(a => { msg += `• ${a}\n`; });
@@ -1000,7 +1049,7 @@ export function formatCFOTelegram(report: CFOBulletin): string {
 export function formatCFOEmail(report: CFOBulletin): { subject: string; html: string } {
   const { scores, snapshot: s, top_expenses, spending_insight,
           cashflow, smart_action, smart_action_value, investment,
-          risk_alerts, fire, tax_alpha, cfo_insight } = report;
+          risk_alerts, fire, tax_alpha, cfo_insight, best_move } = report;
   const f = fmt;
   const nwUp = s.net_worth_delta >= 0;
   const subject = `🏦 Saturday Morning CFO Bulletin — ${report.week_date}`;
@@ -1077,6 +1126,23 @@ export function formatCFOEmail(report: CFOBulletin): { subject: string; html: st
   <p style="margin:0 0 6px;font-size:15px;font-weight:600;color:#fff;">${smart_action}</p>
   ${smart_action_value ? `<p style="margin:0;font-size:13px;color:#94a3b8;font-style:italic;">${smart_action_value}</p>` : ''}
 </div>
+
+${best_move?.action && best_move.action !== 'Data unavailable' ? `
+<!-- Best Move Right Now -->
+<div style="background:linear-gradient(135deg,#f59e0b20,#f97316 20);border:1px solid #f59e0b50;border-radius:12px;padding:20px;margin-bottom:16px;">
+  <h2 style="margin:0 0 4px;font-size:15px;font-weight:700;color:#f59e0b;">⚡ Best Move Right Now</h2>
+  <p style="margin:0 0 6px;font-size:15px;font-weight:600;color:#fff;">${best_move.action}</p>
+  <p style="margin:0 0 8px;font-size:13px;color:#94a3b8;">${best_move.reason}</p>
+  <div style="display:inline-block;background:#10b98130;border:1px solid #10b98160;border-radius:20px;padding:3px 12px;margin-bottom:8px;">
+    <span style="color:#10b981;font-size:12px;font-weight:700;">${best_move.benefit_label}</span>
+    <span style="color:#64748b;font-size:12px;"> &middot; Risk: ${best_move.risk}</span>
+  </div>
+  ${best_move.alternatives.length > 0 ? `
+  <p style="margin:4px 0 2px;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.06em;">Alternatives</p>
+  ${best_move.alternatives.slice(0,3).map(a =>
+    `<p style="margin:0 0 2px;font-size:12px;color:#94a3b8;">&#8250; ${a.action} &mdash; ${a.benefit_label} &middot; <span style="color:${a.risk==='Low'?'#10b981':a.risk==='Med'?'#f59e0b':'#ef4444'}">${a.risk}</span></p>`
+  ).join('')}` : ''}
+</div>` : ''}
 
 <!-- Top Expenses -->
 ${top_expenses.length > 0 ? `

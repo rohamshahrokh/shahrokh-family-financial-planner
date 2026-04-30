@@ -501,6 +501,43 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
         <p className="text-[11px] text-slate-600 mt-2">Highest-ROI single action for your household this week.</p>
       </Section>
 
+      {/* ── Section 4b: Best Move Right Now ───────────────────────────────── */}
+      {(report as any).best_move?.action && (report as any).best_move.action !== 'Data unavailable' && (
+        <Section icon={<span className="text-amber-400">⚡</span>} title="Best Move Right Now" accent="amber" defaultOpen>
+          <div className="rounded-xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 px-4 py-4">
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <p className="text-sm font-bold text-white leading-snug flex-1">{(report as any).best_move.action}</p>
+              <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide border ${
+                (report as any).best_move.risk === 'Low' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                : (report as any).best_move.risk === 'Med' ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                : 'bg-red-500/15 text-red-400 border-red-500/30'
+              }`}>{(report as any).best_move.risk} Risk</span>
+            </div>
+            <div className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-3 py-0.5 mb-3">
+              <span className="text-xs font-semibold text-emerald-400 font-mono">{mv((report as any).best_move.benefit_label)}</span>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">{(report as any).best_move.reason}</p>
+            {(report as any).best_move.alternatives?.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-white/[0.05]">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-2">Alternative options</p>
+                {(report as any).best_move.alternatives.slice(0, 3).map((alt: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0">
+                    <span className="text-xs text-slate-300">{alt.action}</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[11px] font-mono text-emerald-400">{mv(alt.benefit_label)}</span>
+                      <span className={`text-[10px] font-semibold ${
+                        alt.risk === 'Low' ? 'text-emerald-400' : alt.risk === 'Med' ? 'text-amber-400' : 'text-red-400'
+                      }`}>{alt.risk}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-600 mt-2">Ranked by risk-adjusted annual benefit across 8 action types.</p>
+        </Section>
+      )}
+
       {/* ── Section 5: Property Watch ────────────────────────────────────── */}
       <Section icon={<Home size={15} />} title="5. Property Watch" accent="green" defaultOpen={false}>
         <div className="grid grid-cols-2 gap-2.5 mb-3">

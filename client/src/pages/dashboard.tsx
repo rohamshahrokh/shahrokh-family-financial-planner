@@ -63,6 +63,7 @@ import familyImg from "@assets/family.jpeg";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import CFODashboardWidget from "@/components/CFODashboardWidget";
+import BestMoveCard from "@/components/BestMoveCard";
 import { Link } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
@@ -1752,6 +1753,9 @@ export default function DashboardPage() {
 
       {/* ─── AI Weekly CFO Widget ─────────────────────────────────────── */}
       <CFODashboardWidget />
+
+      {/* ─── Best Move Right Now ─────────────────────────────────────────── */}
+      <BestMoveCard />
 
       {/* ─── Portfolio Live Return ──────────────────────────────────────── */}
       <PortfolioLiveReturn />
