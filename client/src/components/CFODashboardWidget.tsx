@@ -86,6 +86,77 @@ function ScoreRing({
   );
 }
 
+// ─── Legacy row normaliser ─────────────────────────────────────────────────────
+function normaliseBulletin(raw: any): CFOBulletin | null {
+  if (!raw) return null;
+  if (raw.scores && typeof raw.scores.overall === 'number') return raw as CFOBulletin;
+  // Legacy flat format
+  const legacy: CFOBulletin = {
+    ...raw,
+    week_date:    raw.week_date    ?? new Date().toISOString().split('T')[0],
+    generated_at: raw.generated_at ?? raw.week_date ?? new Date().toISOString(),
+    scores: {
+      wealth:      raw.wealth_score      ?? 0,
+      cashflow:    raw.cashflow_score    ?? 0,
+      risk:        raw.risk_score        ?? 0,
+      discipline:  raw.discipline_score  ?? 0,
+      opportunity: 0,
+      overall: Math.round(((raw.wealth_score ?? 0) + (raw.cashflow_score ?? 0) + (raw.risk_score ?? 0) + (raw.discipline_score ?? 0)) / 4),
+    },
+    snapshot: raw.snapshot ?? {
+      net_worth:          raw.networth         ?? 0,
+      net_worth_delta:    raw.networth_delta   ?? 0,
+      cash_everyday:      raw.cash             ?? 0,
+      cash_savings:       0, cash_emergency: 0, cash_other: 0,
+      offset_balance:     0,
+      liquid_cash:        raw.cash             ?? 0,
+      offset_interest_saving: 0,
+      monthly_surplus:    raw.monthly_surplus  ?? 0,
+      debt_ratio:         0,
+      fire_progress_pct:  raw.fire_progress    ?? 0,
+      years_to_fire:      0,
+      fire_year:          raw.fire_year        ?? 0,
+      fire_on_track:      true,
+      total_assets:       0,
+      total_debt:         raw.debt_total       ?? 0,
+      portfolio_value:    raw.portfolio_value  ?? 0,
+      super_combined:     0,
+    },
+    cashflow: raw.cashflow ?? {
+      income_expected: 0, bills_total: 0,
+      net_cashflow: raw.cashflow_next14 ?? 0,
+      status: 'green' as const,
+      bills: raw.bills_ahead ?? [],
+    },
+    investment: raw.investment ?? {
+      stocks_value: 0, stocks_delta: 0, stocks_delta_pct: 0,
+      best_stock: '', worst_stock: '',
+      crypto_value: 0, crypto_delta: 0, crypto_delta_pct: 0,
+      dca_active: [], planned_buys: [], portfolio_total: raw.portfolio_value ?? 0,
+    },
+    fire: raw.fire ?? {
+      target_passive_income: 0, current_passive_income: 0,
+      years_remaining: 0, progress_pct: raw.fire_progress ?? 0,
+      fire_year: raw.fire_year ?? 0, semi_fire_year: 0,
+      target_capital: 0, investable: 0, on_track: true, accelerator: '',
+    },
+    property_watch: raw.property_watch ?? {
+      buy_score: 5, wait_score: 5, borrowing_power: 0, deposit_ready: 0, market_summary: '',
+    },
+    tax_alpha: raw.tax_alpha ?? {
+      neg_gearing_benefit: 0, super_room_remaining: 0, estimated_refund: 'N/A', tips: [],
+    },
+    risk_alerts:        raw.risk_alerts       ?? raw.alerts ?? [],
+    top_expenses:       raw.top_expenses      ?? [],
+    spending_insight:   raw.spending_insight  ?? '',
+    smart_action:       raw.smart_action      ?? raw.best_move ?? '',
+    smart_action_value: raw.smart_action_value ?? '',
+    cfo_insight:        raw.cfo_insight       ?? raw.summary ?? '',
+    opportunities:      raw.opportunities     ?? [],
+  };
+  return legacy;
+}
+
 // ─── Traffic dot ──────────────────────────────────────────────────────────────
 function TrafficDot({ status }: { status: "green" | "amber" | "red" }) {
   const cls = status === "green" ? "bg-emerald-400" : status === "amber" ? "bg-amber-400" : "bg-red-400";
@@ -107,7 +178,7 @@ export default function CFODashboardWidget() {
     setError(null);
     try {
       const rows = await getCFOReports(1);
-      setReport((rows?.[0]?.json_payload as CFOBulletin) ?? null);
+      setReport(normaliseBulletin(rows?.[0]?.json_payload));
     } catch {
       setError("Could not load bulletin.");
     } finally {
