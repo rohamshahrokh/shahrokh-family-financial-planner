@@ -199,7 +199,7 @@ export async function computeBestMove(): Promise<BestMoveResult> {
       benefit_label: `Avoids up to ${fmt(shortfall * PERSONAL_DEBT_RATE)}/yr in emergency borrowing cost`,
       risk: 'Low',
       cta: 'Go to Settings',
-      cta_route: '/#/settings',
+      cta_route: '/settings',
       data_reliable: monthlyIncome > 0 && totalExpenses > 0,
     });
   }
@@ -219,7 +219,7 @@ export async function computeBestMove(): Promise<BestMoveResult> {
       benefit_label: `${fmt(debtBenefit)}/yr guaranteed (${(PERSONAL_DEBT_RATE * 100).toFixed(0)}% rate)`,
       risk: 'Low',
       cta: 'View Debt Strategy',
-      cta_route: '/#/debt-strategy',
+      cta_route: '/debt-strategy',
       data_reliable: otherDebts > 0,
     });
   }
@@ -238,7 +238,7 @@ export async function computeBestMove(): Promise<BestMoveResult> {
       benefit_label: `${fmt(saving)}/yr guaranteed (offset interest saving)`,
       risk: 'Low',
       cta: 'Update Offset Balance',
-      cta_route: '/#/settings',
+      cta_route: '/settings',
       data_reliable: offsetBal > 0 && mortgage > 0,
     });
   } else if (idleCash > 5_000 && mortgage > 0 && offsetBal === 0) {
@@ -254,7 +254,7 @@ export async function computeBestMove(): Promise<BestMoveResult> {
       benefit_label: `Up to ${fmt(saving)}/yr (once offset is configured)`,
       risk: 'Low',
       cta: 'Configure Offset',
-      cta_route: '/#/settings',
+      cta_route: '/settings',
       data_reliable: false,  // can't confirm offset exists
     });
   }
@@ -276,7 +276,7 @@ export async function computeBestMove(): Promise<BestMoveResult> {
       benefit_label: `${fmt(effectiveTaxSaving)}/yr tax saving (salary sacrifice)`,
       risk: 'Low',
       cta: 'Super Settings',
-      cta_route: '/#/settings',
+      cta_route: '/settings',
       data_reliable: snapMonthlyIncome > 0 && superRoom > 0,
     });
   }
@@ -295,7 +295,7 @@ export async function computeBestMove(): Promise<BestMoveResult> {
       benefit_label: `~${fmt(expectedGain)}/yr expected (9.5% long-run, not guaranteed)`,
       risk: 'Med',
       cta: 'Go to Stocks',
-      cta_route: '/#/stocks',
+      cta_route: '/stocks',
       data_reliable: true,
     });
   }
@@ -315,7 +315,7 @@ export async function computeBestMove(): Promise<BestMoveResult> {
       benefit_label: `~${fmt(expectedCryptoGain)}/yr expected (20%, HIGH volatility)`,
       risk: 'High',
       cta: 'Go to Crypto',
-      cta_route: '/#/crypto',
+      cta_route: '/crypto',
       data_reliable: true,
     });
   }
@@ -332,7 +332,7 @@ export async function computeBestMove(): Promise<BestMoveResult> {
     benefit_label: `${fmt(liquidCash * 0.05)}/yr at ~5% HISA rate`,
     risk: 'Low',
     cta: 'View Dashboard',
-    cta_route: '/#/dashboard',
+    cta_route: '/dashboard',
     data_reliable: true,
   });
 
@@ -357,7 +357,7 @@ export async function computeBestMove(): Promise<BestMoveResult> {
       benefit_label: `~${fmt(propertyBenefit * depositReady)}/yr (equity growth, varies)`,
       risk: 'Med',
       cta: 'Go to Property',
-      cta_route: '/#/property',
+      cta_route: '/property',
       data_reliable: depositReady >= 0.5,
     });
   }
