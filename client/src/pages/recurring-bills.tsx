@@ -687,13 +687,13 @@ export default function RecurringBillsPage() {
             <div className="flex items-center gap-2 mb-2">
               <Clock className="w-4 h-4 text-emerald-400" />
               <span className="text-xs text-zinc-400 font-medium uppercase tracking-wide">
-                Monthly Fixed
+                Budget Equivalent
               </span>
             </div>
             <div className="text-2xl font-bold text-white tabular-nums">
               {mask(kpis.totalMonthly)}
             </div>
-            <div className="text-xs text-zinc-500 mt-1">Total recurring / month</div>
+            <div className="text-xs text-zinc-500 mt-1">Monthly average for budgeting only</div>
           </div>
 
           {/* Due This Week */}
@@ -832,8 +832,14 @@ export default function RecurringBillsPage() {
                           )}
                         </td>
                         <td className="px-4 py-3 text-zinc-300">{bill.category}</td>
-                        <td className="px-4 py-3 text-right font-semibold text-emerald-300 tabular-nums">
-                          {mask(safeNum(bill.amount))}
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          <span className="font-semibold text-emerald-300">{mask(safeNum(bill.amount))}</span>
+                          {/* Show budget equivalent per month for non-monthly bills */}
+                          {bill.frequency !== 'Monthly' && bill.frequency !== 'Weekly' && bill.frequency !== 'Fortnightly' && (
+                            <div className="text-[10px] text-zinc-500 mt-0.5">
+                              {mask(toMonthly(safeNum(bill.amount), bill.frequency))}/mo budget
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-zinc-400">{bill.frequency}</td>
                         <td className="px-4 py-3 text-zinc-300">
@@ -939,7 +945,7 @@ export default function RecurringBillsPage() {
                       Category
                     </th>
                     <th className="text-right px-3 py-2 text-xs text-zinc-400 font-semibold uppercase tracking-wide">
-                      Monthly Equiv.
+                      Budget Equiv./mo
                     </th>
                     <th className="text-right px-3 py-2 text-xs text-zinc-400 font-semibold uppercase tracking-wide">
                       % of Total

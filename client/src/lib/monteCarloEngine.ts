@@ -18,7 +18,7 @@
  * Volatility and event parameters are now user-configurable via MCVolatilityParams.
  */
 
-import { safeNum, calcMonthlyRepayment, calcLoanBalance, dcaMonthlyEquiv } from './finance';
+import { safeNum, calcMonthlyRepayment, calcLoanBalance, dcaMonthlyEquiv, billActualOutflow } from './finance';
 import type { YearAssumptions, MonteCarloResult, MonteCarloFanPoint, MCVolatilityParams } from './forecastStore';
 import { DEFAULT_MC_VOLATILITY } from './forecastStore';
 
@@ -177,11 +177,18 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
     dcaPerMonth[mi] = tot;
   }
 
-  // ── Recurring bills monthly ──
-  const billsMonthly = input.bills.reduce((sum, b) => {
-    if (b.is_active === false || b.active === false) return sum;
-    return sum + dcaMonthlyEquiv(safeNum(b.amount), b.frequency || 'monthly');
-  }, 0);
+  // ── Recurring bills ──
+  // FIXED: bill outflows are now computed per-month using billActualOutflow().
+  // Quarterly/Semi-Annual/Annual bills only appear in the months they are due,
+  // not as a flat monthly equivalent every single month.
+  // activeBills is memoised once; per-month cost is computed inside the sim loop.
+  const activeBills = input.bills.filter(b => b.is_active !== false && (b as any).active !== false);
+
+  function billsForMonth(mi: number): number {
+    const yr  = START_YR + Math.floor(mi / 12);
+    const mo  = (mi % 12) + 1; // 1-based
+    return activeBills.reduce((sum, b) => sum + billActualOutflow(b, yr, mo), 0);
+  }
 
   // ── Assumptions lookup ──
   function getAss(mi: number): YearAssumptions {
@@ -385,7 +392,7 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
       // ── Net monthly cashflow ──
       const grossCF = income + propRent + cashInterest + ngCashflow
         - expenses - pporMonthlyActual - propLoanRepay - propMaintCost
-        - dcaPerMonth[mi] - billsMonthly
+        - dcaPerMonth[mi] - billsForMonth(mi)  // actual due-date bill outflows
         + deterministicDeltas[mi];
 
       // DCA capital moves from cash to investments (split 50/50 stocks/crypto)

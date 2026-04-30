@@ -1112,9 +1112,9 @@ export default function DashboardPage() {
               {maskValue(formatCurrency(cashAfterBills), privacyMode, "currency")}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {maskValue(formatCurrency(billMonthlyTotal), privacyMode, "currency")} fixed/mo
+              {maskValue(formatCurrency(billMonthlyTotal), privacyMode, "currency")} budget equiv/mo
             </p>
-            <p className="text-xs text-muted-foreground mt-0.5">from recurring bills</p>
+            <p className="text-xs text-muted-foreground mt-0.5">from recurring bills (actual varies by due date)</p>
           </div>
         </Link>
       </div>

@@ -42,6 +42,109 @@ export function dcaMonthlyEquiv(amount: number, frequency: string): number {
   }
 }
 
+// ─── Recurring Bill — Actual Due-Date Cashflow Logic ─────────────────────────
+//
+// Rules:
+//   Weekly:      applies every week  → ~4.33 occurrences/month → amount * (52/12)
+//   Fortnightly: applies every 2wks  → ~2.17 occurrences/month → amount * (26/12)
+//   Monthly:     applies once per month (every month)
+//   Quarterly:   applies only in the 3 months when it is due (Mar/Jun/Sep/Dec pattern
+//                derived from next_due_date, then shifted +3 months each time)
+//   Semi-Annual: applies only in the 2 months when it is due
+//   Annual:      applies only in the 1 month when it is due
+//
+// For non-monthly bills we compute the ACTUAL month it falls due based on
+// the bill's next_due_date, then step forward by the cycle interval.
+// If next_due_date is not set we fall back to the monthly equivalent (safe).
+
+type BillForCashflow = {
+  amount: number;
+  frequency: string;
+  next_due_date?: string | null;
+  is_active?: boolean;
+  active?: boolean;
+};
+
+/**
+ * Returns true if this bill should create a cash outflow in the given
+ * calendar year/month combination.
+ *
+ * For sub-monthly bills (Weekly/Fortnightly) always returns true and
+ * billActualOutflow() returns the monthly equivalent.
+ *
+ * For infrequent bills (Quarterly/Semi-Annual/Annual) returns true only
+ * in the specific months the payment is actually due.
+ */
+export function billDueInMonth(
+  bill: BillForCashflow,
+  year: number,
+  month: number,   // 1-based
+): boolean {
+  const freq = (bill.frequency ?? 'Monthly').trim();
+
+  // Sub-monthly: always applies (weighted monthly equivalent)
+  if (freq === 'Weekly' || freq === 'Fortnightly') return true;
+  // Monthly: always applies
+  if (freq === 'Monthly') return true;
+
+  // For infrequent bills we need the next_due_date anchor
+  if (!bill.next_due_date) {
+    // No anchor date — conservative fallback: treat as monthly so nothing is missed
+    return true;
+  }
+
+  const anchor = new Date(bill.next_due_date);
+  if (isNaN(anchor.getTime())) return true; // malformed date — safe fallback
+
+  const anchorYear  = anchor.getFullYear();
+  const anchorMonth = anchor.getMonth() + 1; // 1-based
+
+  let intervalMonths: number;
+  switch (freq) {
+    case 'Quarterly':    intervalMonths = 3;  break;
+    case 'Semi-Annual':  intervalMonths = 6;  break;
+    case 'Annual':       intervalMonths = 12; break;
+    default: return true; // unknown frequency — safe fallback
+  }
+
+  // Convert both anchor and target to "months since epoch" for modulo arithmetic
+  const anchorIndex  = anchorYear  * 12 + (anchorMonth  - 1);
+  const targetIndex  = year        * 12 + (month        - 1);
+
+  // The bill is due when the target is at or after the anchor AND
+  // the offset is a multiple of intervalMonths.
+  if (targetIndex < anchorIndex) return false;
+  return (targetIndex - anchorIndex) % intervalMonths === 0;
+}
+
+/**
+ * Returns the actual cash outflow for a bill in a given month.
+ * For Weekly/Fortnightly: returns the monthly-weighted amount (consistent with budget display).
+ * For Monthly: returns the bill amount.
+ * For Quarterly/Semi-Annual/Annual: returns the full bill amount only in the due month, else 0.
+ */
+export function billActualOutflow(
+  bill: BillForCashflow,
+  year: number,
+  month: number,
+): number {
+  if (bill.is_active === false || (bill as any).active === false) return 0;
+  if (!billDueInMonth(bill, year, month)) return 0;
+
+  const freq = (bill.frequency ?? 'Monthly').trim();
+  const amt  = safeNum(bill.amount);
+
+  switch (freq) {
+    case 'Weekly':      return amt * (52 / 12); // weighted monthly equivalent
+    case 'Fortnightly': return amt * (26 / 12);
+    case 'Monthly':     return amt;
+    case 'Quarterly':   return amt;   // full amount — due once this month
+    case 'Semi-Annual': return amt;
+    case 'Annual':      return amt;
+    default:            return amt;
+  }
+}
+
 // ─── Mortgage Calculator ───────────────────────────────────────────────
 export function calcMonthlyRepayment(principal: number, annualRate: number, termYears: number): number {
   const r = annualRate / 100 / 12;
@@ -271,7 +374,7 @@ export function projectNetWorth(params: {
   liveCryptoValue?: number;
   // Central Cash Engine params (for real cash balance vs. 50% shortcut)
   expenses?: Array<{ date: string; amount: number; category: string }>;
-  bills?: Array<{ amount: number; frequency: string; next_due_date?: string; is_active?: boolean; }>;
+  bills?: Array<{ amount: number; frequency: string; next_due_date?: string | null; is_active?: boolean; active?: boolean; }>;
   ngRefundMode?: 'lump-sum' | 'payg';
   ngAnnualBenefit?: number;
   annualSalaryIncome?: number;
@@ -787,7 +890,7 @@ export function buildCashFlowSeries(params: {
   plannedStockOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
   plannedCryptoOrders?: Array<{ action: string; amount_aud: number; planned_date: string; status: string; }>;
   // Recurring bills — monthly outflows (insurance, subscriptions, utilities not in expenses)
-  bills?: Array<{ amount: number; frequency: string; next_due_date?: string; is_active?: boolean; }>;
+  bills?: Array<{ amount: number; frequency: string; next_due_date?: string | null; is_active?: boolean; active?: boolean; }>;
   // Australian negative gearing options
   ngRefundMode?: 'lump-sum' | 'payg'; // default 'lump-sum'
   ngAnnualBenefit?: number;            // pre-calculated total NG refund per year (from calcNegativeGearing)
@@ -1011,12 +1114,15 @@ export function buildCashFlowSeries(params: {
       }
 
       // ── Recurring bills outflow ──
-      // Only apply to forecast months (not actual months — bills are already in tracked expenses)
+      // Only apply to forecast months (not actual months — bills are already in tracked expenses).
+      // CRITICAL FIX: use billActualOutflow() which respects the bill's next_due_date and
+      // frequency so that Quarterly/Semi-Annual/Annual bills only appear in the months
+      // they are actually due, not spread as a monthly equivalent every month.
       let billsOutflow = 0;
       if (!isActual) {
         for (const bill of (params.bills ?? [])) {
-          if (bill.is_active === false) continue;
-          billsOutflow += dcaMonthlyEquiv(safeNum(bill.amount), bill.frequency || 'monthly');
+          if (bill.is_active === false || bill.active === false) continue;
+          billsOutflow += billActualOutflow(bill, year, month);
         }
       }
 
