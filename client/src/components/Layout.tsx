@@ -25,6 +25,7 @@ const ALL_NAV_ITEMS = [
   { href: "/recurring-bills",label: "Recurring Bills", icon: Receipt,         adminOnly: false },
   { href: "/budget",        label: "Monthly Budget",   icon: Target,          adminOnly: false },
   { href: "/market-news",   label: "Market News",      icon: Newspaper,       adminOnly: false },
+  { href: "/ai-weekly-cfo",  label: "AI Weekly CFO",   icon: BrainCircuit,    adminOnly: true  },
   { href: "/ai-forecast-engine", label: "AI Forecast Engine", icon: BrainCircuit, adminOnly: true  },
   { href: "/ai-insights",   label: "AI Insights",      icon: Sparkles,        adminOnly: true  },
   { href: "/data-health",   label: "Data Health",      icon: Activity,        adminOnly: true  },

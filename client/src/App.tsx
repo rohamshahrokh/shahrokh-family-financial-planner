@@ -41,6 +41,7 @@ import RecurringBillsPage   from "./pages/recurring-bills";
 import BudgetPage           from "./pages/budget";
 import MarketNewsPage       from "./pages/market-news";
 import AIForecastEnginePage from "./pages/ai-forecast-engine";
+import AIWeeklyCFOPage      from "./pages/ai-weekly-cfo";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -162,6 +163,9 @@ function AppRouter() {
         <Route path="/ai-forecast-engine">
           <ProtectedRoute component={AIForecastEnginePage} title="AI Forecast Engine" />
         </Route>
+        <Route path="/ai-weekly-cfo">
+          <ProtectedRoute component={AIWeeklyCFOPage} title="AI Weekly CFO" />
+        </Route>
 
         {/* 404 */}
         <Route component={NotFound} />
@@ -214,6 +218,23 @@ export default function App() {
     // Re-check every 5 minutes (safe — server dedup prevents duplicate sends)
     const interval = setInterval(runChecks, 5 * 60 * 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  // ─── AI Weekly CFO scheduler ───────────────────────────────────────────────
+  // Runs every 30 minutes. The engine itself checks:
+  //   1. Is it the right day + time? (Saturday 8:00 AM AEST)
+  //   2. Has it already run this week? (6-day cooldown in Supabase)
+  // Only fires when both conditions are true, so running every 30min is safe.
+  useEffect(() => {
+    const runCFO = () => {
+      if (document.hidden) return;
+      import('./lib/notifications').then(({ dispatchWeeklyCFO }) => {
+        dispatchWeeklyCFO().catch(() => {/* silent */});
+      }).catch(() => {/* silent */});
+    };
+    runCFO();
+    const cfoInterval = setInterval(runCFO, 30 * 60 * 1000);
+    return () => clearInterval(cfoInterval);
   }, []);
 
   return (

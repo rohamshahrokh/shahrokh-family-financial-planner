@@ -480,3 +480,56 @@ export async function checkUpcomingBills(bills: Array<{
     }
   }
 }
+
+// ─── AI Weekly CFO dispatch ───────────────────────────────────────────────────
+// Called from App.tsx scheduler. Generates report, sends Telegram, saves to DB.
+// Protected by 6-day cooldown stored in sf_cfo_settings.last_run_at.
+
+export async function dispatchWeeklyCFO(): Promise<void> {
+  // Lazy import to avoid bundling cfoEngine unless needed
+  const {
+    getCFOSettings, generateCFOReport, saveCFOReport,
+    formatCFOTelegram, cfoAlreadyRanThisWeek, isCFOScheduleTime,
+  } = await import('./cfoEngine');
+
+  const settings = await getCFOSettings();
+  if (!settings.enabled) return;
+  if (await cfoAlreadyRanThisWeek()) return;
+  if (!isCFOScheduleTime(settings.delivery_day, settings.delivery_time)) return;
+
+  // Generate report
+  const report = await generateCFOReport(settings.tone);
+
+  // Telegram delivery
+  let telegramSent = false;
+  if (settings.telegram_enabled) {
+    const tgSettings = await getTelegramSettings();
+    if (tgSettings?.enabled && tgSettings.bot_token) {
+      const msg = formatCFOTelegram(report);
+      const chatIds: string[] = [];
+      if (tgSettings.roham_chat_id) chatIds.push(tgSettings.roham_chat_id);
+      if (tgSettings.fara_chat_id)  chatIds.push(tgSettings.fara_chat_id);
+      for (const chatId of chatIds) {
+        try {
+          const res = await fetch(
+            `https://api.telegram.org/bot${tgSettings.bot_token}/sendMessage`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id:    chatId,
+                text:       msg,
+                parse_mode: 'HTML',
+                disable_web_page_preview: true,
+              }),
+            }
+          );
+          if (res.ok) telegramSent = true;
+        } catch {}
+      }
+    }
+  }
+
+  // Save to sf_cfo_reports (also updates last_run_at — dedup guard)
+  await saveCFOReport(report, telegramSent);
+}

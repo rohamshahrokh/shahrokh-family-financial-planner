@@ -12,7 +12,7 @@ import {
   Send, Bell, BellOff, CheckCircle2, XCircle, MessageSquare, Heart, Clock,
   Zap, TrendingDown, AlertTriangle, CreditCard, DollarSign, BarChart2, Lock,
   UserPlus, KeyRound, UserCheck, UserX, ChevronDown, ChevronUp, Eye, EyeOff,
-  Briefcase, TrendingUp, Info,
+  Briefcase, TrendingUp, Info, BrainCircuit,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { sendTestMessage, sendBrowserPush, invalidateSettingsCache } from "@/lib/notifications";
@@ -696,6 +696,135 @@ function SuperSection({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+
+// ─── AI Weekly CFO Settings section ──────────────────────────────────────────
+
+function CFOSettingsSection() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: cfoSettings, isLoading } = useQuery({
+    queryKey: ['/api/cfo-settings'],
+    queryFn: () => import('../lib/cfoEngine').then(m => m.getCFOSettings()),
+  });
+
+  const [draft, setDraft] = useState<any>(null);
+  const settings = draft ?? cfoSettings ?? {};
+
+  const handleChange = (key: string, val: any) => {
+    setDraft((prev: any) => ({ ...(prev ?? cfoSettings ?? {}), [key]: val }));
+  };
+
+  const handleSave = async () => {
+    if (!draft) { toast({ title: 'No changes to save' }); return; }
+    try {
+      const { saveCFOSettings } = await import('../lib/cfoEngine');
+      await saveCFOSettings(draft);
+      await qc.refetchQueries({ queryKey: ['/api/cfo-settings'] });
+      setDraft(null);
+      toast({ title: 'Saved Successfully', description: 'AI Weekly CFO settings saved.' });
+    } catch (err: any) {
+      toast({ title: 'Save Failed', description: err?.message ?? 'Error', variant: 'destructive' });
+    }
+  };
+
+  if (isLoading) return null;
+
+  return (
+    <SectionCard
+      title="AI Weekly CFO"
+      subtitle="Automated weekly financial intelligence briefing"
+      icon={<BrainCircuit className="w-4 h-4 text-violet-400" />}
+    >
+      <ToggleRow
+        label="Enable AI Weekly CFO"
+        desc="Generate and send a weekly CFO briefing automatically"
+        checked={settings.enabled ?? true}
+        onChange={v => handleChange('enabled', v)}
+      />
+      <ToggleRow
+        label="Telegram Delivery"
+        desc="Send report via Telegram to configured chat ID(s)"
+        checked={settings.telegram_enabled ?? true}
+        onChange={v => handleChange('telegram_enabled', v)}
+      />
+      <ToggleRow
+        label="Email Delivery"
+        desc="Send HTML report to email address below"
+        checked={settings.email_enabled ?? false}
+        onChange={v => handleChange('email_enabled', v)}
+      />
+      {settings.email_enabled && (
+        <div className="ml-2">
+          <label className="text-xs text-muted-foreground">Email Address</label>
+          <input
+            type="email"
+            value={settings.email_address ?? ''}
+            onChange={e => handleChange('email_address', e.target.value)}
+            placeholder="your@email.com"
+            className="w-full mt-1 px-3 py-2 rounded-lg border border-border bg-background text-sm"
+          />
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-4 mt-2">
+        <div>
+          <label className="text-xs text-muted-foreground">Delivery Day</label>
+          <select
+            value={settings.delivery_day ?? 'Saturday'}
+            onChange={e => handleChange('delivery_day', e.target.value)}
+            className="w-full mt-1 px-3 py-2 rounded-lg border border-border bg-background text-sm"
+          >
+            {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Delivery Time (AEST)</label>
+          <input
+            type="time"
+            value={settings.delivery_time ?? '08:00'}
+            onChange={e => handleChange('delivery_time', e.target.value)}
+            className="w-full mt-1 px-3 py-2 rounded-lg border border-border bg-background text-sm"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Analysis Tone</label>
+          <select
+            value={settings.tone ?? 'Balanced'}
+            onChange={e => handleChange('tone', e.target.value)}
+            className="w-full mt-1 px-3 py-2 rounded-lg border border-border bg-background text-sm"
+          >
+            <option value="Conservative">Conservative</option>
+            <option value="Balanced">Balanced</option>
+            <option value="Aggressive">Aggressive</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Detail Level</label>
+          <select
+            value={settings.detail_level ?? 'Full'}
+            onChange={e => handleChange('detail_level', e.target.value)}
+            className="w-full mt-1 px-3 py-2 rounded-lg border border-border bg-background text-sm"
+          >
+            <option value="Short">Short (Telegram only)</option>
+            <option value="Full">Full (All sections)</option>
+          </select>
+        </div>
+      </div>
+      {settings.last_run_at && (
+        <p className="text-xs text-muted-foreground mt-2">
+          Last run: {new Date(settings.last_run_at).toLocaleDateString('en-AU', {
+            day: 'numeric', month: 'short', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Brisbane',
+          })} AEST
+        </p>
+      )}
+      <SaveButton label="Save CFO Settings" onSave={handleSave} />
+    </SectionCard>
+  );
+}
+
 export default function SettingsPage() {
   const { toast } = useToast();
   const { theme, toggleTheme, role } = useAppStore();
@@ -1210,4 +1339,7 @@ export default function SettingsPage() {
       </div>
     </div>
   );
-}
+}      {/* ── AI Weekly CFO Settings ────────────────────────────────────── */}
+      <CFOSettingsSection />
+
+      
