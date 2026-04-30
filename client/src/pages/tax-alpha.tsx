@@ -188,7 +188,7 @@ export default function TaxAlphaPage() {
   const privacyMode = useAppStore(s => s.privacyMode);
   const mv = (v: string) => maskValue(v, privacyMode);
 
-  const { data: snap } = useQuery<any>({ queryKey: ['/api/snapshots/latest'] });
+  const { data: snap } = useQuery<any>({ queryKey: ['/api/snapshot'] });
   const { data: properties = [] } = useQuery<any[]>({ queryKey: ['/api/properties'] });
 
   if (!snap) {

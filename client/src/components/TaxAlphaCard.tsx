@@ -59,7 +59,7 @@ export default function TaxAlphaCard() {
   const mv = (v: string) => maskValue(v, privacyMode);
 
   // Fetch snapshot + properties
-  const { data: snap } = useQuery<any>({ queryKey: ['/api/snapshots/latest'] });
+  const { data: snap } = useQuery<any>({ queryKey: ['/api/snapshot'] });
   const { data: properties = [] } = useQuery<any[]>({ queryKey: ['/api/properties'] });
 
   if (!snap) {
