@@ -9,6 +9,7 @@
  */
 
 import { safeNum } from './finance';
+import { computeTaxAlpha, buildTaxAlphaInput, type TaxAlphaResult } from './taxAlphaEngine';
 import { computeBestMove, type BestMoveResult } from './bestMoveEngine';
 import { computeAllScenarios, defaultScenarioInputs } from './propertyBuyEngine';
 
@@ -130,6 +131,11 @@ export interface CFOTaxAlpha {
   super_room_remaining:  number;
   estimated_refund:      string;
   tips:                  string[];
+  // Extended Tax Alpha fields
+  total_annual_saving:   number;
+  total_saving_label:    string;
+  household_tax_now:     number;
+  top_strategies:        Array<{ title: string; action: string; annual_saving: number; annual_saving_label: string; risk: string }>;
 }
 
 export interface CFOBestMove {
@@ -779,51 +785,36 @@ export async function generateCFOReport(
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // SECTION 10: TAX ALPHA
+  // SECTION 10: TAX ALPHA — powered by taxAlphaEngine.ts
   // ═══════════════════════════════════════════════════════════════════════════
-  const annualIncome = monthlyIncome * 12;
-  const superConcessionalCap = 30000;
-  // FIX: snap.roham_employer_contrib and snap.roham_salary_sacrifice store RATE fields
-  // (e.g. 11.5 for 11.5%), NOT dollar amounts. Using them as-is gave ~0 contribution YTD.
-  // Correct approach: employer SG = 11.5% of gross salary. Salary sacrifice from snap field.
-  // If fields not set, we cannot reliably calculate room — show "Needs setup".
-  const rohamAnnualGross  = safeNum(snap.monthly_income) * 12; // use snap directly, not incomeTracker
-  const employerSGRate    = safeNum(snap.roham_employer_contrib) > 0
-    ? safeNum(snap.roham_employer_contrib) / 100  // stored as percent e.g. 11.5
-    : 0.115; // AUS default SG rate 2025-26
-  const salarySacrificeAnn = safeNum(snap.roham_salary_sacrifice) * 12;
-  const superContribYTD   = rohamAnnualGross * employerSGRate + salarySacrificeAnn;
-  // Only show super room tip if we have a reasonable income figure to base it on
-  const superDataReliable = safeNum(snap.monthly_income) > 0;
-  const superRoom = superDataReliable
-    ? Math.max(0, superConcessionalCap - superContribYTD)
-    : 0;
+  const taxAlphaInput  = buildTaxAlphaInput(snap, propRows ?? []);
+  const taxAlphaResult = computeTaxAlpha(taxAlphaInput);
 
-  const negGearBenefit = (propRows ?? []).reduce((s: number, p: any) => {
-    const rentalAnn   = safeNum(p.weekly_rent) * 52;
-    const interestAnn = safeNum(p.loan_amount  || p.mortgage_balance || 0) * (safeNum(p.interest_rate) || 6.5) / 100;
-    const costsAnn    = (safeNum(p.management_fee) / 100 * rentalAnn) + safeNum(p.council_rates) + safeNum(p.insurance) + safeNum(p.maintenance) + safeNum(p.body_corporate);
-    const ngLoss = interestAnn + costsAnn - rentalAnn;
-    const marginalRate = annualIncome > 135000 ? 0.47 : annualIncome > 45000 ? 0.325 : 0.19;
-    return s + Math.max(0, ngLoss * marginalRate);
-  }, 0);
+  // Legacy fields (keep for backward compat with bulletin HTML template)
+  const negGearStrategy = taxAlphaResult.strategies.find(s => s.id === 'negative_gearing');
+  const superStrategy   = taxAlphaResult.strategies.find(s => s.id === 'super_concessional_roham');
+  const negGearBenefit  = negGearStrategy?.annual_saving ?? 0;
+  const superRoom       = superStrategy?.annual_saving   ?? 0;
 
-  const taxTips: string[] = [];
-  if (superDataReliable && superRoom > 5000) taxTips.push(`${fmt(superRoom)} concessional super cap remaining — salary sacrifice before 30 June to save tax.`);
-  if (negGearBenefit > 0) taxTips.push(`Negative gearing benefit estimated at ${fmt(negGearBenefit)}/year — ensure claimed in tax return.`);
-  if (safeNum(snap.other_debts) > 0) taxTips.push(`Review deductibility of investment-related borrowings — may reduce taxable income.`);
-  if (month >= 9 && month <= 11) taxTips.push(`Q4 — ideal time to prepay interest on investment loans for this financial year deduction.`);
-  // FIX: if no actionable tips found AND data is thin, be explicit rather than showing false "clean"
-  const taxTipsFinal = taxTips.length > 0
-    ? taxTips
-    : (!superDataReliable
-        ? ['Super contribution data needs setup in Settings to calculate your concessional cap remaining.']
-        : ['No immediate tax alpha detected — your tax position looks clean.']);
+  const taxTipsFinal = taxAlphaResult.top3.length > 0
+    ? taxAlphaResult.top3.map(s => `${s.action} — ${s.annual_saving_label}`)
+    : ['Set up income data in Settings to detect tax savings opportunities.'];
+
   const taxAlpha: CFOTaxAlpha = {
     neg_gearing_benefit:  negGearBenefit,
     super_room_remaining: superRoom,
-    estimated_refund:     negGearBenefit > 0 ? fmt(negGearBenefit * 0.8) : 'Review with accountant',
-    tips: taxTipsFinal,
+    estimated_refund:     taxAlphaResult.total_annual_saving > 0 ? fmt(taxAlphaResult.total_annual_saving) : 'Review with accountant',
+    tips:                 taxTipsFinal,
+    total_annual_saving:  taxAlphaResult.total_annual_saving,
+    total_saving_label:   taxAlphaResult.total_saving_label,
+    household_tax_now:    taxAlphaResult.household_tax_now,
+    top_strategies:       taxAlphaResult.top3.map(s => ({
+      title:               s.title,
+      action:              s.action,
+      annual_saving:       s.annual_saving,
+      annual_saving_label: s.annual_saving_label,
+      risk:                s.risk,
+    })),
   };
 
   // ═══════════════════════════════════════════════════════════════════════════

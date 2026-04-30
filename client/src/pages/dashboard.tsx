@@ -64,6 +64,7 @@ import AIInsightsCard from "@/components/AIInsightsCard";
 import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import CFODashboardWidget from "@/components/CFODashboardWidget";
 import BestMoveCard from "@/components/BestMoveCard";
+import TaxAlphaCard from "@/components/TaxAlphaCard";
 import { Link } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
@@ -1756,6 +1757,9 @@ export default function DashboardPage() {
 
       {/* ─── Best Move Right Now ─────────────────────────────────────────── */}
       <BestMoveCard />
+
+      {/* ─── Tax Alpha Card ───────────────────────────────────── */}
+      <TaxAlphaCard />
 
       {/* ─── Portfolio Live Return ──────────────────────────────────────── */}
       <PortfolioLiveReturn />

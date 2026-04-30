@@ -18,6 +18,7 @@
  */
 
 import { useState, useMemo } from "react";
+import TaxAlphaPage from "./tax-alpha";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum } from "@/lib/finance";
@@ -385,6 +386,7 @@ export default function Tax() {
     DEFAULT_PERSON("Fara", 0)
   );
 
+  const [pageTab, setPageTab] = useState<'calculator' | 'alpha'>('calculator');
   const [activeTab, setActiveTab] = useState<"roham" | "fara" | "household">("roham");
   const [chartPeriod, setChartPeriod] = useState<"annual" | "monthly">("monthly");
 
@@ -449,7 +451,7 @@ export default function Tax() {
         <div>
           <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
             <Calculator className="w-5 h-5 text-primary" />
-            Tax Calculator
+            Tax
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
             2025–26 ATO rates · Stage 3 cuts · LITO · Medicare · MLS · HELP
@@ -460,6 +462,32 @@ export default function Tax() {
           <span className="text-xs text-emerald-400 font-medium">ATO Verified</span>
         </div>
       </div>
+
+      {/* ── Page tab switcher (Calculator vs Tax Alpha) ── */}
+      <div className="flex gap-1 p-1 rounded-xl bg-secondary/60 border border-border w-full sm:w-auto">
+        {([
+          { key: 'calculator', label: 'Tax Calculator' },
+          { key: 'alpha',      label: 'Tax Alpha ⚡ (Savings)' },
+        ] as const).map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setPageTab(key)}
+            className={`flex-1 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              pageTab === key
+                ? 'bg-card text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tax Alpha tab ── */}
+      {pageTab === 'alpha' && <TaxAlphaPage />}
+
+      {/* ── Calculator tab ── */}
+      {pageTab === 'calculator' && <>
 
       {/* ── Accuracy notice ── */}
       <div className="flex items-start gap-2 p-3 bg-blue-950/30 border border-blue-800/30 rounded-lg">
@@ -757,6 +785,8 @@ export default function Tax() {
           <div><span className="text-foreground font-semibold">MLS:</span> 1–1.5% without hospital cover</div>
         </div>
       </div>
+
+      </>} {/* end calculator tab */}
 
     </div>
   );

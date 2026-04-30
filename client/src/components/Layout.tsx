@@ -18,7 +18,7 @@ const ALL_NAV_ITEMS = [
   { href: "/stocks",        label: "Stocks",           icon: TrendingUp,      adminOnly: false },
   { href: "/crypto",        label: "Crypto",           icon: Bitcoin,         adminOnly: false },
   { href: "/reports",       label: "Reports",          icon: FileText,        adminOnly: false },
-  { href: "/tax",           label: "Tax Calculator",   icon: Calculator,      adminOnly: false },
+  { href: "/tax",           label: "Tax & Alpha",      icon: Calculator,      adminOnly: false },
   { href: "/timeline",      label: "Net Worth Timeline",icon: TrendingUp,     adminOnly: false },
   { href: "/wealth-strategy",label: "Wealth Strategy", icon: Briefcase,       adminOnly: false },
   { href: "/debt-strategy", label: "Debt Strategy",    icon: CreditCard,      adminOnly: false },

@@ -708,7 +708,18 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
 
       {/* ── Section 9: Tax Alpha ─────────────────────────────────────────── */}
       <Section icon={<FileText size={15} />} title="9. Tax Alpha (AUS)" accent="green" defaultOpen={false}>
+        {/* Summary KPIs */}
         <div className="grid grid-cols-2 gap-2.5 mb-3">
+          <KpiTile
+            label="Total Potential Saving"
+            value={mv(tax_alpha.total_saving_label ?? tax_alpha.estimated_refund)}
+            color="text-emerald-400"
+          />
+          <KpiTile
+            label="Household Tax Now"
+            value={mv(fmt(tax_alpha.household_tax_now ?? 0)) + '/yr'}
+            sub="PAYG + Medicare"
+          />
           {tax_alpha.neg_gearing_benefit > 0 && (
             <KpiTile
               label="Neg. Gearing Benefit"
@@ -721,21 +732,33 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
               label="Super Cap Remaining"
               value={mv(fmt(tax_alpha.super_room_remaining))}
               sub="Concessional ($30K cap)"
-              color="text-cyan-400"
+              color="text-violet-400"
             />
           )}
-          <KpiTile
-            label="Est. Tax Benefit"
-            value={mv(tax_alpha.estimated_refund)}
-          />
         </div>
-        {tax_alpha.tips.length > 0 && (
+        {/* Top strategies */}
+        {(tax_alpha.top_strategies ?? []).length > 0 && (
+          <div className="space-y-2 mb-3">
+            <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Top Actions</p>
+            {(tax_alpha.top_strategies ?? []).map((s: any, i: number) => (
+              <div key={i} className="flex items-start justify-between gap-3 rounded-xl bg-emerald-500/[0.07] border border-emerald-500/20 px-3 py-2.5">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide">{s.title}</p>
+                  <p className="text-xs text-slate-200 leading-snug mt-0.5">{s.action}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-black text-emerald-400">{mv(s.annual_saving_label)}</p>
+                  <p className="text-[9px] text-slate-500">{s.risk} risk</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Legacy tips fallback */}
+        {(tax_alpha.top_strategies ?? []).length === 0 && tax_alpha.tips.length > 0 && (
           <div className="space-y-1.5">
-            {tax_alpha.tips.map((tip, i) => (
-              <div
-                key={i}
-                className="flex gap-2 rounded-xl bg-emerald-500/[0.07] border border-emerald-500/20 px-4 py-3"
-              >
+            {tax_alpha.tips.map((tip: string, i: number) => (
+              <div key={i} className="flex gap-2 rounded-xl bg-emerald-500/[0.07] border border-emerald-500/20 px-4 py-3">
                 <Lightbulb size={12} className="text-emerald-400 mt-0.5 shrink-0" />
                 <p className="text-xs text-slate-200 leading-relaxed">{tip}</p>
               </div>
@@ -893,7 +916,12 @@ function normaliseBulletin(raw: any): CFOBulletin | null {
     neg_gearing_benefit:  n(oldTA.neg_gearing_benefit),
     super_room_remaining: n(oldTA.super_room_remaining),
     estimated_refund:     s(oldTA.estimated_refund) || 'N/A',
-    tips: Array.isArray(oldTA.tips) ? oldTA.tips : [],
+    tips:                 Array.isArray(oldTA.tips) ? oldTA.tips : [],
+    // Extended Tax Alpha fields (may not exist in older saved reports)
+    total_annual_saving:  n(oldTA.total_annual_saving),
+    total_saving_label:   s(oldTA.total_saving_label) || s(oldTA.estimated_refund) || 'N/A',
+    household_tax_now:    n(oldTA.household_tax_now),
+    top_strategies:       Array.isArray(oldTA.top_strategies) ? oldTA.top_strategies : [],
   };
 
   const wS = n(raw.wealth_score      ?? raw.scores?.wealth);
