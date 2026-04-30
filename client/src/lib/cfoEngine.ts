@@ -10,6 +10,7 @@
 
 import { safeNum } from './finance';
 import { computeTaxAlpha, buildTaxAlphaInput, type TaxAlphaResult } from './taxAlphaEngine';
+import { computeRiskRadar, buildRiskInput } from './riskEngine';
 import { computeBestMove, type BestMoveResult } from './bestMoveEngine';
 import { computeAllScenarios, defaultScenarioInputs } from './propertyBuyEngine';
 
@@ -180,6 +181,15 @@ export interface CFOBulletin {
 
   // 8. Risk radar
   risk_alerts:  string[];
+  risk_radar: {
+    overall_score:   number;
+    overall_level:   'green' | 'amber' | 'red';
+    overall_label:   string;
+    fragility_index: number;
+    categories: Array<{ id: string; label: string; icon: string; score: number; level: 'green' | 'amber' | 'red'; summary: string }>;
+    top_risks: Array<{ label: string; value: string; finding: string; action: string; level: 'green' | 'amber' | 'red' }>;
+    top_mitigations: string[];
+  };
 
   // 9. FIRE tracker
   fire:         CFOFireTracker;
@@ -730,13 +740,41 @@ export async function generateCFOReport(
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // SECTION 8: RISK RADAR
+  // SECTION 8: RISK RADAR — powered by riskEngine.ts
   // ═══════════════════════════════════════════════════════════════════════════
-  const riskAlerts: string[] = [];
-  const monthsCash = (monthlyExpenses + billsMonthly) > 0 ? liquidCash / (monthlyExpenses + billsMonthly) : 99;
-  if (monthsCash < 1)   riskAlerts.push(`🔴 Cash critically low — ${fmt(liquidCash)} covers only ${monthsCash.toFixed(1)} months. Immediate action needed.`);
-  else if (monthsCash < 3) riskAlerts.push(`Cash buffer is thin at ${monthsCash.toFixed(1)} months — target minimum is 3 months.`);
-  if (!cashEmergency && !cashSavings) riskAlerts.push(`No emergency fund detected — aim for ${fmt(monthlyExpenses * 6)} (6 months of expenses).`);
+  // Build big-bills amount for riskEngine input
+  const bigBills = allBills.filter((b: any) => {
+    if (!b.next_due_date) return false;
+    const daysOut = Math.round((new Date(b.next_due_date).getTime() - now.getTime()) / 86400000);
+    return daysOut >= 0 && daysOut <= 30 && safeNum(b.amount) > 500;
+  });
+  const bigBillsAmt = bigBills.reduce((s: number, b: any) => s + safeNum(b.amount), 0);
+
+  // Compute risk using full engine
+  const riskSnapForEngine = { ...snap, big_bills_next30: bigBillsAmt };
+  const riskEngineInput   = buildRiskInput(riskSnapForEngine, propRows ?? [], allExp ?? []);
+  // Inject computed values not in snap directly
+  riskEngineInput.big_bills_next30   = bigBillsAmt;
+  riskEngineInput.monthly_expenses   = monthlyExpenses;
+  riskEngineInput.stocks             = liveStocks;
+  riskEngineInput.crypto             = liveCrypto;
+  riskEngineInput.super_combined     = superCombined;
+  riskEngineInput.total_assets       = totalAssets;
+  riskEngineInput.total_debt         = totalDebt;
+  const riskResult = computeRiskRadar(riskEngineInput);
+
+  // Build legacy riskAlerts array for backward compat with bulletin
+  const riskAlerts: string[] = [
+    ...riskResult.alerts
+      .filter(a => a.severity === 'critical' || a.severity === 'high')
+      .map(a => `${a.severity === 'critical' ? '🔴 ' : ''}${a.message}`),
+  ];
+  // Always include FY deadline if applicable
+  const month = now.getMonth();
+  if (month === 4 || month === 5) riskAlerts.push(`🗓️ Financial year ends 30 June — check concessional super contribution cap before deadline.`);
+  if (!fireOnTrack && prevFireYear) riskAlerts.push(`FIRE timeline slipped — target moved from ${prevFireYear} → ${fireYear}.`);
+
+  const cryptoPct = portfolioVal > 0 ? (liveCrypto / portfolioVal) * 100 : 0;
   const spendSpike30 = (() => {
     const c30 = new Date(now.getTime() - 30 * 86400000);
     const c60 = new Date(now.getTime() - 60 * 86400000);
@@ -744,24 +782,11 @@ export async function generateCFOReport(
     const p30 = allExp.filter((e: any) => new Date(e.date) >= c60 && new Date(e.date) < c30).reduce((s: number, e: any) => s + safeNum(e.amount), 0);
     return p30 > 0 ? ((l30 - p30) / p30) * 100 : 0;
   })();
-  if (spendSpike30 > 20) riskAlerts.push(`Spending trend rising — up ${spendSpike30.toFixed(0)}% vs prior 30 days. Review recent discretionary spend.`);
-  const cryptoPct = portfolioVal > 0 ? (liveCrypto / portfolioVal) * 100 : 0;
-  if (cryptoPct > 40) riskAlerts.push(`Crypto concentration risk — ${cryptoPct.toFixed(0)}% of portfolio. Recommended max is 30%.`);
-  if (debtRatio > 0.45) riskAlerts.push(`High leverage — debt-to-assets at ${pct(debtRatio * 100, 0)}. Consider accelerating debt repayments.`);
-  if (monthlySurplus < 0) riskAlerts.push(`🔴 Monthly cashflow negative — outflows exceed income by ${fmt(Math.abs(monthlySurplus))} per month.`);
-  // Upcoming large bills in 30 days
-  const bigBills = allBills.filter((b: any) => {
-    if (!b.next_due_date) return false;
-    const daysOut = Math.round((new Date(b.next_due_date).getTime() - now.getTime()) / 86400000);
-    return daysOut >= 0 && daysOut <= 30 && safeNum(b.amount) > 500;
-  });
+  if (spendSpike30 > 20) riskAlerts.push(`Spending up ${spendSpike30.toFixed(0)}% vs prior 30 days — ${riskResult.categories.find(c => c.id === 'cashflow')?.factors.find(f => f.id === 'surplus_ratio')?.finding ?? 'review discretionary spend'}.`);
   if (bigBills.length > 0) {
     const names = bigBills.slice(0, 2).map((b: any) => `${b.bill_name} (${fmt(safeNum(b.amount))})`).join(', ');
     riskAlerts.push(`Large bill${bigBills.length > 1 ? 's' : ''} within 30 days: ${names}.`);
   }
-  const month = now.getMonth();
-  if (month === 4 || month === 5) riskAlerts.push(`🗓️ Financial year ends 30 June — check concessional super contribution cap before deadline.`);
-  if (!fireOnTrack && prevFireYear) riskAlerts.push(`FIRE timeline slipped — target moved from ${prevFireYear} → ${fireYear}.`);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // SECTION 9: FIRE TRACKER
@@ -855,14 +880,8 @@ export async function generateCFOReport(
   if (monthsCash >= 3)   cashflowScore += 10;
   else if (monthsCash < 1) cashflowScore -= 20;
 
-  let riskScore = 70;
-  if (debtRatio > 0.5)  riskScore -= 20;
-  else if (debtRatio > 0.3) riskScore -= 10;
-  if (cryptoPct > 40)   riskScore -= 15;
-  else if (cryptoPct > 25) riskScore -= 8;
-  if (monthsCash < 3)   riskScore -= 10;
-  if (offsetBal > 50000) riskScore += 10;
-  if (!cashEmergency && !cashSavings) riskScore -= 10;
+  // Risk score sourced directly from riskEngine — no duplicate formula
+  const riskScore = riskResult.overall_score;
 
   let disciplineScore = 60;
   if (surplusRatio > 0.20) disciplineScore += 15;
@@ -940,6 +959,28 @@ export async function generateCFOReport(
     property_watch:    propertyWatch,
     investment,
     risk_alerts:       riskAlerts.slice(0, 4),
+    risk_radar: {
+      overall_score:   riskResult.overall_score,
+      overall_level:   riskResult.overall_level,
+      overall_label:   riskResult.overall_label,
+      fragility_index: riskResult.fragility_index,
+      categories:      riskResult.categories.map(c => ({
+        id:      c.id,
+        label:   c.label,
+        icon:    c.icon,
+        score:   c.score,
+        level:   c.level,
+        summary: c.summary,
+      })),
+      top_risks: riskResult.top_risks.map(r => ({
+        label:   r.label,
+        value:   r.value,
+        finding: r.finding,
+        action:  r.action,
+        level:   r.level,
+      })),
+      top_mitigations: riskResult.top_mitigations,
+    },
     fire,
     tax_alpha:         taxAlpha,
     property_buy_signal: propertyBuyResult ? {

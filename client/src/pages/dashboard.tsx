@@ -65,6 +65,7 @@ import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import CFODashboardWidget from "@/components/CFODashboardWidget";
 import BestMoveCard from "@/components/BestMoveCard";
 import TaxAlphaCard from "@/components/TaxAlphaCard";
+import RiskRadarCard from "@/components/RiskRadarCard";
 import { Link } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
@@ -1760,6 +1761,9 @@ export default function DashboardPage() {
 
       {/* ─── Tax Alpha Card ───────────────────────────────────── */}
       <TaxAlphaCard />
+
+      {/* ─── Risk Radar Card ───────────────────────────────────── */}
+      <RiskRadarCard />
 
       {/* ─── Portfolio Live Return ──────────────────────────────────────── */}
       <PortfolioLiveReturn />

@@ -5,7 +5,7 @@
  * Uses CFOBulletin type (new engine). Fields accessed via nested objects:
  *   report.scores.*        report.snapshot.*     report.cashflow.*
  *   report.investment.*    report.fire.*         report.property_watch.*
- *   report.tax_alpha.*     report.risk_alerts    report.top_expenses
+ *   report.tax_alpha.*     report.risk_alerts    report.risk_radar.*   report.top_expenses
  */
 
 import { useState, useCallback } from "react";
@@ -206,7 +206,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
   const mv = (val: string) => maskValue(val, privacyMode, "currency");
   const [showAllBills, setShowAllBills] = useState(false);
 
-  const { scores, snapshot: snap, cashflow, investment, fire, property_watch: pw, tax_alpha, risk_alerts } = report;
+  const { scores, snapshot: snap, cashflow, investment, fire, property_watch: pw, tax_alpha, risk_alerts, risk_radar } = report;
   const nwUp     = snap.net_worth_delta >= 0;
   const surplusUp = snap.monthly_surplus >= 0;
 
@@ -627,13 +627,125 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
 
       {/* ── Section 7: Risk Radar ────────────────────────────────────────── */}
       <Section
-        icon={<AlertCircle size={15} />}
+        icon={<ShieldCheck size={15} />}
         title="7. Risk Radar"
         accent="red"
-        badge={risk_alerts.length > 0 ? String(risk_alerts.length) : undefined}
-        defaultOpen={risk_alerts.length > 0}
+        badge={risk_radar?.overall_label ?? (risk_alerts.length > 0 ? String(risk_alerts.length) : undefined)}
+        defaultOpen={(risk_radar?.overall_level === 'red') || risk_alerts.length > 0}
       >
-        {risk_alerts.length === 0 ? (
+        {risk_radar ? (
+          <div className="space-y-4">
+            {/* Overall score row */}
+            <div className="flex items-center gap-3 py-2">
+              <div
+                className="flex items-center justify-center w-14 h-14 rounded-2xl font-bold text-xl shrink-0"
+                style={{
+                  background: risk_radar.overall_level === 'green'
+                    ? 'rgba(34,197,94,0.12)'
+                    : risk_radar.overall_level === 'amber'
+                    ? 'rgba(245,158,11,0.12)'
+                    : 'rgba(239,68,68,0.12)',
+                  color: risk_radar.overall_level === 'green' ? '#22c55e'
+                    : risk_radar.overall_level === 'amber' ? '#f59e0b' : '#ef4444',
+                  border: `1.5px solid ${risk_radar.overall_level === 'green' ? 'rgba(34,197,94,0.25)' : risk_radar.overall_level === 'amber' ? 'rgba(245,158,11,0.25)' : 'rgba(239,68,68,0.25)'}`,
+                }}
+              >
+                {risk_radar.overall_score}
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-100">{risk_radar.overall_label}</p>
+                <p className="text-[11px] text-slate-500">Fragility index: {risk_radar.fragility_index} / 100 · Lower is safer</p>
+              </div>
+            </div>
+
+            {/* Category score pills */}
+            <div className="grid grid-cols-2 gap-2">
+              {risk_radar.categories.map(cat => (
+                <div
+                  key={cat.id}
+                  className="rounded-xl px-3 py-2.5"
+                  style={{
+                    background: cat.level === 'green'
+                      ? 'rgba(34,197,94,0.07)'
+                      : cat.level === 'amber'
+                      ? 'rgba(245,158,11,0.07)'
+                      : 'rgba(239,68,68,0.07)',
+                    border: `1px solid ${cat.level === 'green' ? 'rgba(34,197,94,0.18)' : cat.level === 'amber' ? 'rgba(245,158,11,0.18)' : 'rgba(239,68,68,0.18)'}`,
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] text-slate-400">{cat.icon} {cat.label}</span>
+                    <span
+                      className="text-xs font-bold"
+                      style={{ color: cat.level === 'green' ? '#22c55e' : cat.level === 'amber' ? '#f59e0b' : '#ef4444' }}
+                    >
+                      {cat.score}
+                    </span>
+                  </div>
+                  {/* Score bar */}
+                  <div className="h-1 rounded-full bg-slate-700/50 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${cat.score}%`,
+                        background: cat.level === 'green' ? '#22c55e' : cat.level === 'amber' ? '#f59e0b' : '#ef4444',
+                      }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1 leading-snug line-clamp-2">{cat.summary}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Top 3 risks */}
+            {risk_radar.top_risks.length > 0 && (
+              <div>
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Top Risks</p>
+                <div className="space-y-2">
+                  {risk_radar.top_risks.map((r, i) => (
+                    <div
+                      key={i}
+                      className="rounded-xl px-3.5 py-3"
+                      style={{
+                        background: r.level === 'red'
+                          ? 'rgba(239,68,68,0.07)'
+                          : 'rgba(245,158,11,0.07)',
+                        border: `1px solid ${r.level === 'red' ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.2)'}`,
+                      }}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium text-slate-200">{r.label}</span>
+                        <span
+                          className="text-[11px] font-mono font-bold"
+                          style={{ color: r.level === 'red' ? '#ef4444' : '#f59e0b' }}
+                        >
+                          {mv(r.value)}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-snug">{r.finding}</p>
+                      <p className="text-[10px] text-slate-500 mt-1">→ {r.action}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Legacy alerts (extra context from spend spikes / bills) */}
+            {risk_alerts.filter(a => !risk_radar.top_risks.some(r => a.includes(r.label))).length > 0 && (
+              <div className="space-y-1.5">
+                {risk_alerts.filter(a => !risk_radar.top_risks.some(r => a.includes(r.label))).map((a, i) => (
+                  <div
+                    key={i}
+                    className="flex gap-2.5 rounded-xl bg-amber-500/[0.07] border border-amber-500/20 px-3.5 py-2.5"
+                  >
+                    <AlertCircle size={12} className="text-amber-400 mt-0.5 shrink-0" />
+                    <p className="text-[11px] text-slate-300 leading-relaxed">{a}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : risk_alerts.length === 0 ? (
           <div className="flex items-center gap-2 text-emerald-400 py-2">
             <ShieldCheck size={16} />
             <p className="text-sm">No urgent risks detected — all metrics look healthy.</p>
@@ -949,6 +1061,7 @@ function normaliseBulletin(raw: any): CFOBulletin | null {
     property_watch,
     tax_alpha,
     risk_alerts:        Array.isArray(raw.risk_alerts)  ? raw.risk_alerts  : (Array.isArray(raw.alerts) ? raw.alerts : []),
+    risk_radar:         raw.risk_radar ?? null,
     top_expenses:       Array.isArray(raw.top_expenses) ? raw.top_expenses : [],
     spending_insight:   s(raw.spending_insight),
     smart_action:       s(raw.smart_action      ?? raw.best_move),

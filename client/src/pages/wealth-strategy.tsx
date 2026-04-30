@@ -5,6 +5,7 @@
  */
 
 import SaveButton from "@/components/SaveButton";
+import RiskRadarPage from "./risk-radar";
 import { useState, useMemo, useCallback } from "react";
 import html2canvas from 'html2canvas';
 import { useQuery } from "@tanstack/react-query";
@@ -210,6 +211,7 @@ const TABS = [
   { id: "hidden", label: "Hidden Money", icon: Search },
   { id: "coach", label: "AI Coach", icon: Brain },
   { id: "action-plan", label: "Action Plan", icon: Zap },
+  { id: "risk-radar",  label: "Risk Radar",   icon: Shield },
 ];
 
 // ─── Month simulation helper ──────────────────────────────────────────────────
@@ -2802,6 +2804,8 @@ export default function WealthStrategyPage() {
           </div>
         );
       }
+      case "risk-radar":
+        return <RiskRadarPage />;
       default:
         return null;
     }
