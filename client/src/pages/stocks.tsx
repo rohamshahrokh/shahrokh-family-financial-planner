@@ -1070,118 +1070,100 @@ export default function StocksPage() {
   const netCashImpact = plannedSellTotal - plannedBuyTotal;
 
   // ── Combined projection ────────────────────────────────────────────────────
-  // Includes: current holdings + planned orders (new table) + DCA schedules.
-  // Works even if holdings table is empty — planned orders create virtual entries.
+  // Single stateful forward pass — each asset's running value is carried
+  // year-over-year so DCA ending does NOT cause a cliff/drop.
+  // Includes: current holdings + planned orders + DCA schedules.
   const combinedProjection = useMemo(() => {
     const years = 10;
-    const result = [];
     const currentYear = new Date().getFullYear();
     const defaultReturn = fa.flat.stocks_return || 10;
+    const holdingTickers = new Set(stocks.map((s: any) => s.ticker));
+
+    // Initialise per-asset running state (value + totalInvested)
+    // Key = ticker string (or '__unknown__' for no-ticker orders)
+    type AssetState = { running: number; invested: number; monthlyRate: number; };
+    const assetState = new Map<string, AssetState>();
+
+    // Seed from existing holdings
+    for (const s of stocks) {
+      const initVal = safeNum(s.current_holding) * safeNum(s.current_price);
+      const rate = (safeNum(s.expected_return) > 0 ? safeNum(s.expected_return) : defaultReturn) / 100 / 12;
+      assetState.set(s.ticker, { running: initVal, invested: initVal, monthlyRate: rate });
+    }
+
+    // Seed virtual assets from orphan planned orders (tickers not in holdings)
+    const orphanOrderTickers = new Set<string>();
+    for (const o of plannedOrders) {
+      const key = o.ticker || '__unknown__';
+      if (o.status === 'planned' && o.action === 'buy' && !holdingTickers.has(key)) {
+        orphanOrderTickers.add(key);
+        if (!assetState.has(key))
+          assetState.set(key, { running: 0, invested: 0, monthlyRate: defaultReturn / 100 / 12 });
+      }
+    }
+
+    // Seed virtual assets from orphan DCA schedules (tickers not in holdings)
+    for (const d of dcaSchedules) {
+      if (!d.enabled) continue;
+      const key = (d as any).ticker || '__dcaUnknown__';
+      if (!holdingTickers.has(key) && !assetState.has(key))
+        assetState.set(key, { running: 0, invested: 0, monthlyRate: defaultReturn / 100 / 12 });
+    }
+
+    const result: { year: string; value: number; invested: number; }[] = [];
 
     for (let y = 1; y <= years; y++) {
-      let totalVal = 0;
-      let totalInv = 0;
       const projYear = currentYear + y;
+      let yearTotalVal = 0;
+      let yearTotalInv = 0;
 
-      // ── Step 1: project each existing holding ──────────────────────────────
-      for (const s of stocks) {
-        const initVal = safeNum(s.current_holding) * safeNum(s.current_price);
+      for (const [key, state] of assetState) {
+        const isHolding = holdingTickers.has(key);
+        const holdingRow = isHolding ? stocks.find((s: any) => s.ticker === key) : null;
 
-        // Legacy planned transactions for this ticker (from stock-transactions table)
-        const plannedBuysForStock = transactions.filter(t =>
-          t.status === "planned" &&
-          t.transaction_type === "buy" &&
-          t.ticker === s.ticker &&
-          new Date(t.transaction_date).getFullYear() <= projYear
-        );
-        const legacyBuyExtra = plannedBuysForStock.reduce((sum, t) => sum + safeNum(t.total_amount), 0);
+        // ── One-time planned order injections this year ────────────────────
+        // Legacy transactions table
+        const legacyBuys = transactions
+          .filter(t => t.status === 'planned' && t.transaction_type === 'buy' &&
+            t.ticker === key && new Date(t.transaction_date).getFullYear() === projYear)
+          .reduce((s, t) => s + safeNum(t.total_amount), 0);
+        // New planned orders table
+        const orderBuys = plannedOrders
+          .filter((o: any) => o.status === 'planned' && o.action === 'buy' &&
+            (o.ticker === key || (!o.ticker && key === '__unknown__')) &&
+            new Date(o.planned_date).getFullYear() === projYear)
+          .reduce((s: number, o: any) => s + safeNum(o.amount_aud), 0);
+        const injectionThisYear = legacyBuys + orderBuys;
+        state.running  += injectionThisYear;
+        state.invested += injectionThisYear;
 
-        // NEW: planned orders (sf_planned_investments) for this ticker
-        const orderBuysForStock = plannedOrders.filter((o: any) =>
-          o.status === 'planned' &&
-          o.action === 'buy' &&
-          (o.ticker === s.ticker || !o.ticker) &&
-          new Date(o.planned_date).getFullYear() <= projYear
-        );
-        const orderBuyExtra = orderBuysForStock.reduce((sum: number, o: any) => sum + safeNum(o.amount_aud), 0);
-
-        // DCA schedules from sf_stock_dca for this ticker
-        const dcaForTicker = dcaSchedules
+        // ── Monthly DCA for this year (only months in DCA window) ─────────
+        const holdingDCA = holdingRow ? safeNum(holdingRow.monthly_dca) : 0;
+        const scheduleDCA = dcaSchedules
           .filter((d: StockDCASchedule) => {
             if (!d.enabled) return false;
             const dcaStart = new Date(d.start_date).getFullYear();
             const dcaEnd   = d.end_date ? new Date(d.end_date).getFullYear() : 9999;
             return projYear >= dcaStart && projYear <= dcaEnd &&
-              (d.ticker === s.ticker || !d.ticker);
+              ((d as any).ticker === key || !(d as any).ticker);
           })
-          .reduce((sum: number, d: StockDCASchedule) => sum + dcaMonthlyEquiv(d.amount, d.frequency), 0);
+          .reduce((s: number, d: StockDCASchedule) => s + dcaMonthlyEquiv(d.amount, d.frequency), 0);
+        const monthlyDCA = holdingDCA + scheduleDCA;
 
-        // Per-holding monthly_dca (legacy field on holding row)
-        const holdingDCA = safeNum(s.monthly_dca);
+        // ── Compound 12 months, adding DCA each month ────────────────────
+        for (let m = 0; m < 12; m++) {
+          state.running   = state.running * (1 + state.monthlyRate) + monthlyDCA;
+          state.invested += monthlyDCA;
+        }
 
-        const effectiveReturn = safeNum(s.expected_return) > 0 ? safeNum(s.expected_return) : defaultReturn;
-        const proj = projectInvestment(
-          initVal + legacyBuyExtra + orderBuyExtra,
-          effectiveReturn,
-          holdingDCA + dcaForTicker,
-          y
-        );
-        const last = proj[y - 1];
-        if (last) { totalVal += last.value; totalInv += last.totalInvested; }
-      }
-
-      // ── Step 2: planned orders for tickers NOT in holdings table ────────────
-      // e.g. user plans to buy AAPL $40K but has no AAPL holding yet
-      const holdingTickers = new Set(stocks.map((s: any) => s.ticker));
-      const orphanOrders = plannedOrders.filter((o: any) =>
-        o.status === 'planned' &&
-        o.action === 'buy' &&
-        o.ticker &&
-        !holdingTickers.has(o.ticker) &&
-        new Date(o.planned_date).getFullYear() <= projYear
-      );
-      // Group orphan orders by ticker so each virtual asset is projected once
-      const orphanByTicker = new Map<string, number>();
-      for (const o of orphanOrders) {
-        const amt = safeNum(o.amount_aud);
-        orphanByTicker.set(o.ticker, (orphanByTicker.get(o.ticker) || 0) + amt);
-      }
-      // Also handle orphan orders with no ticker (amount only — use default return)
-      const noTickerOrders = plannedOrders.filter((o: any) =>
-        o.status === 'planned' &&
-        o.action === 'buy' &&
-        !o.ticker &&
-        !holdingTickers.has('') &&
-        new Date(o.planned_date).getFullYear() <= projYear
-      );
-      const noTickerAmt = noTickerOrders.reduce((s: number, o: any) => s + safeNum(o.amount_aud), 0);
-      if (noTickerAmt > 0) orphanByTicker.set('__unknown__', noTickerAmt);
-
-      for (const [, amount] of orphanByTicker) {
-        if (amount <= 0) continue;
-        const proj = projectInvestment(amount, defaultReturn, 0, y);
-        const last = proj[y - 1];
-        if (last) { totalVal += last.value; totalInv += last.totalInvested; }
-      }
-
-      // ── Step 3: DCA schedules for tickers NOT in holdings ──────────────────
-      const orphanDCA = dcaSchedules.filter((d: StockDCASchedule) => {
-        if (!d.enabled || !d.ticker) return false;
-        const dcaStart = new Date(d.start_date).getFullYear();
-        const dcaEnd   = d.end_date ? new Date(d.end_date).getFullYear() : 9999;
-        return projYear >= dcaStart && projYear <= dcaEnd && !holdingTickers.has(d.ticker);
-      });
-      if (orphanDCA.length > 0) {
-        const orphanDCAMonthly = orphanDCA.reduce((s: number, d: StockDCASchedule) => s + dcaMonthlyEquiv(d.amount, d.frequency), 0);
-        const proj = projectInvestment(0, defaultReturn, orphanDCAMonthly, y);
-        const last = proj[y - 1];
-        if (last) { totalVal += last.value; totalInv += last.totalInvested; }
+        yearTotalVal += state.running;
+        yearTotalInv += state.invested;
       }
 
       result.push({
-        year: (currentYear + y).toString(),
-        value: Math.round(totalVal),
-        invested: Math.round(totalInv),
+        year: projYear.toString(),
+        value: Math.round(yearTotalVal),
+        invested: Math.round(yearTotalInv),
       });
     }
     return result;
