@@ -181,7 +181,10 @@ export default function RiskRadarCard() {
 
       {/* CTA */}
       <Link href="/wealth-strategy">
-        <button className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-secondary/60 hover:bg-secondary border border-border text-foreground text-xs font-semibold transition-all">
+        <button
+          className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-secondary/60 hover:bg-secondary border border-border text-foreground text-xs font-semibold transition-all"
+          onClick={() => sessionStorage.setItem('wealth-strategy-tab', 'risk-radar')}
+        >
           <Shield className="w-3.5 h-3.5" />
           Full Risk Breakdown
           <ChevronRight className="w-3.5 h-3.5" />

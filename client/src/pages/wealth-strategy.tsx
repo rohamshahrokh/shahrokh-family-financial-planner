@@ -2591,7 +2591,12 @@ function generateActionPlan(snap: any, properties: any[], expenses: any[]): Arra
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
 export default function WealthStrategyPage() {
-  const [activeTab, setActiveTab] = useState("fire");
+  const [activeTab, setActiveTab] = useState(() => {
+    // Check if a deep-link signal was set (e.g. from FIREPathCard or RiskRadarCard)
+    const signal = sessionStorage.getItem('wealth-strategy-tab');
+    if (signal) { sessionStorage.removeItem('wealth-strategy-tab'); return signal; }
+    return "fire";
+  });
 
   const { data: snapRaw } = useQuery({ queryKey: ["/api/snapshot"] });
   const { data: expensesRaw } = useQuery({ queryKey: ["/api/expenses"] });
