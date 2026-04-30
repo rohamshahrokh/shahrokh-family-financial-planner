@@ -147,8 +147,17 @@ export default function PropertyBuyWidget() {
           ))}
         </div>
 
-        <Link href="/property-buy-analysis">
-          <Button size="sm" className="w-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 h-8 text-xs font-semibold gap-1.5">
+        <Link href="/property">
+          <Button
+            size="sm"
+            className="w-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 h-8 text-xs font-semibold gap-1.5"
+            onClick={() => {
+              // Signal property page to open the Buy vs Wait tab
+              if (typeof window !== 'undefined') {
+                sessionStorage.setItem('property_open_tab', 'buy-vs-wait');
+              }
+            }}
+          >
             <TrendingUp className="w-3.5 h-3.5" />
             Full Analysis
             <ArrowRight className="w-3.5 h-3.5" />

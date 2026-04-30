@@ -64,7 +64,6 @@ import AIInsightsCard from "@/components/AIInsightsCard";
 import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import CFODashboardWidget from "@/components/CFODashboardWidget";
 import BestMoveCard from "@/components/BestMoveCard";
-import PropertyBuyWidget from "@/components/PropertyBuyWidget";
 import { Link } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
@@ -1757,9 +1756,6 @@ export default function DashboardPage() {
 
       {/* ─── Best Move Right Now ─────────────────────────────────────────── */}
       <BestMoveCard />
-
-      {/* ─── Property Buy vs Wait Widget ────────────────────────────────── */}
-      <PropertyBuyWidget />
 
       {/* ─── Portfolio Live Return ──────────────────────────────────────── */}
       <PortfolioLiveReturn />

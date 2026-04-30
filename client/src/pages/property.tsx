@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import PropertyBuyAnalysis from "./property-buy-analysis";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
@@ -917,6 +918,29 @@ export default function PropertyPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showBulkModal, setShowBulkModal] = useState(false);
 
+  // Tab state — detect sessionStorage signal OR #buy-vs-wait in URL hash
+  const [activeTab, setActiveTab] = useState<'portfolio' | 'buy-vs-wait'>(() => {
+    if (typeof window !== 'undefined') {
+      if (sessionStorage.getItem('property_open_tab') === 'buy-vs-wait') return 'buy-vs-wait';
+      if (window.location.hash.includes('buy-vs-wait')) return 'buy-vs-wait';
+    }
+    return 'portfolio';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      // Consume sessionStorage signal
+      if (sessionStorage.getItem('property_open_tab') === 'buy-vs-wait') {
+        setActiveTab('buy-vs-wait');
+        sessionStorage.removeItem('property_open_tab');
+      }
+      // Consume URL hash signal
+      if (window.location.hash.includes('buy-vs-wait')) {
+        setActiveTab('buy-vs-wait');
+        history.replaceState(null, '', window.location.href.replace(/#buy-vs-wait.*$/, ''));
+      }
+    }
+  }, []);
+
   const handleDraftChange = useCallback((d: any) => setDraft(d), []);
 
   const { data: properties = [] } = useQuery<any[]>({
@@ -1039,6 +1063,32 @@ export default function PropertyPage() {
           <Plus className="w-4 h-4" /> Add Property
         </Button>
       </div>
+
+      {/* ─── Tab switcher ────────────────────────────────────────────────── */}
+      <div className="flex gap-1 p-1 rounded-xl bg-secondary/60 border border-border w-full sm:w-auto inline-flex">
+        {[
+          { key: 'portfolio', label: 'Portfolio Overview' },
+          { key: 'buy-vs-wait', label: 'Buy vs Wait Analysis' },
+        ].map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key as 'portfolio' | 'buy-vs-wait')}
+            className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              activeTab === key
+                ? 'bg-card text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ─── Buy vs Wait tab ────────────────────────────────────────────────── */}
+      {activeTab === 'buy-vs-wait' && <PropertyBuyAnalysis />}
+
+      {/* ─── Portfolio tab content ─────────────────────────────────────────── */}
+      {activeTab === 'portfolio' && <>
 
       {/* Portfolio Summary KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -1184,6 +1234,8 @@ export default function PropertyPage() {
         return { properties: properties.map((p: any) => ({ name: p.name, value: p.value, loan: p.loan_balance, lvr: p.lvr, rentalYield: p.rental_yield, weeklyRent: p.weekly_rent })) };
       }}
       />
+
+      </>} {/* end portfolio tab */}
     </div>
   );
 }
