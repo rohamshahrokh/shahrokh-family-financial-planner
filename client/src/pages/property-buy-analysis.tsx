@@ -36,6 +36,7 @@ import {
   STATE_LABELS, type PropertyScenarioInput, type ScenarioResult,
   type PropertyBuyResult,
 } from '@/lib/propertyBuyEngine';
+import { calcMarginalRate } from '@/lib/australianTax';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(n: number): string {
@@ -337,7 +338,7 @@ export default function PropertyBuyAnalysisPage() {
 
         <h3 className="text-xs font-semibold text-slate-400 mb-3">Tax & Depreciation</h3>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-          <NumField label="Annual Salary (gross)" value={inp.annual_salary} onChange={v => set('annual_salary', v)} hint={`Marginal rate: ${(require('./australianTax') ? '32%' : '32%')}`} />
+          <NumField label="Annual Salary (gross)" value={inp.annual_salary} onChange={v => set('annual_salary', v)} hint={`Marginal rate: ${(calcMarginalRate(inp.annual_salary) * 100).toFixed(0)}%`} />
           <div>
             <label className="block text-[10px] text-slate-500 uppercase tracking-wider mb-1">Depreciation Schedule</label>
             <Select
