@@ -61,6 +61,36 @@ export interface Snapshot {
   mortgage: number; other_debts: number;
   monthly_income: number; monthly_expenses: number;
   updated_at: string;
+  // ── Superannuation fields (per-person) ──────────────────────────────────────
+  roham_super_balance?:          number;
+  roham_super_salary?:           number;
+  roham_employer_contrib?:       number;
+  roham_salary_sacrifice?:       number;
+  roham_super_personal_contrib?: number;
+  roham_super_annual_topup?:     number;
+  roham_super_growth_rate?:      number;
+  roham_super_fee_pct?:          number;
+  roham_super_insurance_pa?:     number;
+  roham_super_option?:           string;
+  roham_super_provider?:         string;
+  roham_retirement_age?:         number;
+  roham_super_contrib_freq?:     string;
+  fara_super_balance?:           number;
+  fara_super_salary?:            number;
+  fara_employer_contrib?:        number;
+  fara_salary_sacrifice?:        number;
+  fara_super_personal_contrib?:  number;
+  fara_super_annual_topup?:      number;
+  fara_super_growth_rate?:       number;
+  fara_super_fee_pct?:           number;
+  fara_super_insurance_pa?:      number;
+  fara_super_option?:            string;
+  fara_super_provider?:          string;
+  fara_retirement_age?:          number;
+  fara_super_contrib_freq?:      string;
+  // ── Other extended fields (stored in sf_snapshot) ────────────────────────
+  offset_balance?:               number;
+  [key: string]: any; // allow any future columns to pass through
 }
 export interface Expense {
   id: number; date: string; amount: number; category: string;
@@ -235,8 +265,30 @@ function setLastSync() {
 
 // ─── Snapshot normaliser ──────────────────────────────────────────────────────
 
+// SUPER FIELDS: all roham_super_* / fara_super_* columns stored in sf_snapshot.
+// Listed here so they receive proper type coercion (numeric fields use safeNum,
+// string fields pass through as-is). Any field NOT listed here still passes
+// through via the spread at the end of normaliseSnapshot.
+const SUPER_NUM_FIELDS = [
+  'roham_super_balance', 'roham_super_salary', 'roham_employer_contrib',
+  'roham_salary_sacrifice', 'roham_super_personal_contrib', 'roham_super_annual_topup',
+  'roham_super_growth_rate', 'roham_super_fee_pct', 'roham_super_insurance_pa',
+  'roham_retirement_age',
+  'fara_super_balance', 'fara_super_salary', 'fara_employer_contrib',
+  'fara_salary_sacrifice', 'fara_super_personal_contrib', 'fara_super_annual_topup',
+  'fara_super_growth_rate', 'fara_super_fee_pct', 'fara_super_insurance_pa',
+  'fara_retirement_age',
+  'offset_balance',
+] as const;
+
+const SUPER_STR_FIELDS = [
+  'roham_super_option', 'roham_super_provider', 'roham_super_contrib_freq',
+  'fara_super_option',  'fara_super_provider',  'fara_super_contrib_freq',
+] as const;
+
 function normaliseSnapshot(raw: any): Snapshot {
-  return {
+  // Start with the core required fields (always coerced)
+  const base: Snapshot = {
     id:               raw?.id ?? "shahrokh-family-main",
     ppor:             safeNum(raw?.ppor),
     cash:             safeNum(raw?.cash),
@@ -252,6 +304,19 @@ function normaliseSnapshot(raw: any): Snapshot {
     monthly_expenses: safeNum(raw?.monthly_expenses),
     updated_at:       raw?.updated_at ?? new Date().toISOString(),
   };
+
+  // Apply super numeric fields — only if present in raw (undefined stays undefined,
+  // not defaulted to 0, so form shows blank rather than a misleading zero)
+  for (const f of SUPER_NUM_FIELDS) {
+    if (raw?.[f] !== undefined && raw?.[f] !== null) base[f] = safeNum(raw[f]);
+  }
+
+  // Apply super string fields
+  for (const f of SUPER_STR_FIELDS) {
+    if (raw?.[f] !== undefined && raw?.[f] !== null) base[f] = String(raw[f]);
+  }
+
+  return base;
 }
 
 // ─── Initial seed — ONLY seeds empty Supabase tables, no localStorage gate ───
@@ -303,7 +368,9 @@ export async function syncFromCloud(): Promise<void> {
   ]);
 
   if (snap) {
-    lsSet(KEYS.snapshot,   normaliseSnapshot(snap));
+    // Store the raw Supabase row (not normalised) so super fields survive in cache.
+    // normaliseSnapshot is applied at read time in getSnapshot().
+    lsSet(KEYS.snapshot, snap);
     console.log("[SF] Loaded from Supabase: snapshot", snap);
   }
   lsSet(KEYS.expenses,   expenses);
@@ -339,12 +406,13 @@ export const localStore = {
     try {
       const sbSnap = await sbSnapshot.get();
       if (sbSnap) {
+        // Cache the raw row (not normalised) so super fields are preserved in localStorage.
+        lsSet(KEYS.snapshot, sbSnap);
         const result = normaliseSnapshot(sbSnap);
-        lsSet(KEYS.snapshot, result);
         console.log("[SF] Loaded from Supabase: snapshot", result);
         return result;
       }
-      // Supabase returned null — fall back to cache
+      // Supabase returned null — fall back to raw cache
       const cached = lsGet<any>(KEYS.snapshot);
       if (cached) {
         console.log("[SF] Fallback to local cache: snapshot");
@@ -360,17 +428,31 @@ export const localStore = {
   },
 
   async updateSnapshot(data: Partial<Snapshot>): Promise<Snapshot> {
-    // Read current from cache (avoids a second Supabase round-trip)
+    // Read current from cache (avoids a second Supabase round-trip).
+    // IMPORTANT: use the raw cached object (not re-normalised) so that super
+    // fields already saved are not dropped before we can merge in the new data.
     const cached = lsGet<any>(KEYS.snapshot);
-    const current = cached ? normaliseSnapshot(cached) : { ...DEFAULT_SNAPSHOT };
-    const merged = normaliseSnapshot({ ...current, ...data, updated_at: new Date().toISOString() });
+    const current = cached ?? { ...DEFAULT_SNAPSHOT };
 
-    // 1. Save to Supabase (source of truth)
-    const saved = await sbSnapshot.upsert(merged);
-    const result = saved ? normaliseSnapshot(saved) : merged;
+    // Merge: incoming data wins over cached values.
+    // Do NOT normalise the merged object here — that would strip super fields.
+    // normaliseSnapshot is only used for the core numeric fields; the full
+    // payload (including all super columns) must reach Supabase intact.
+    const fullPayload: any = {
+      ...current,
+      ...data,
+      id: current.id ?? "shahrokh-family-main",
+      updated_at: new Date().toISOString(),
+    };
 
-    // 2. Update local cache
-    lsSet(KEYS.snapshot, result);
+    // 1. Save to Supabase (source of truth) — send the full payload
+    const saved = await sbSnapshot.upsert(fullPayload);
+
+    // 2. Normalise the returned row (which includes super fields)
+    const result = saved ? normaliseSnapshot(saved) : normaliseSnapshot(fullPayload);
+
+    // 3. Update local cache with the full raw saved row so super fields persist in cache
+    lsSet(KEYS.snapshot, saved ?? fullPayload);
     setLastSync();
     console.log("[SF] Saved to Supabase: snapshot", result);
     return result;

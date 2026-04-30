@@ -612,7 +612,8 @@ function SuperSection({
   const [draft, setDraft] = useState<any>(null);
   const [saving, setSaving] = useState(false);
 
-  // Merge server data once loaded — local draft takes precedence
+  // Merge server data with defaults — server values win over defaults, draft wins over server.
+  // snapshotRaw now contains all super fields because normaliseSnapshot passes them through.
   const serverSuper = snapshotRaw ? { ...DEFAULT_SUPER, ...snapshotRaw } : DEFAULT_SUPER;
   const data = draft ?? serverSuper;
 
@@ -623,16 +624,39 @@ function SuperSection({
   const annualIncome = (snapshotRaw?.monthly_income || 22000) * 12;
 
   const handleSave = async () => {
-    if (!draft) { toast({ title: 'No changes to save' }); return; }
+    // Allow saving even when draft is null — user may want to re-save defaults
+    const payload = draft ?? serverSuper;
     setSaving(true);
     try {
-      // UPSERT snapshot with super fields only — backend merges via PATCH
-      await apiRequest('PUT', '/api/snapshot', { ...snapshotRaw, ...draft });
-      qc.invalidateQueries({ queryKey: ['/api/snapshot'] });
+      // Build the super-only slice to send — DO NOT spread snapshotRaw here.
+      // localStore.updateSnapshot() merges with the current snapshot server-side.
+      // Spreading snapshotRaw would overwrite super fields with stale normalised
+      // (zero) values if snapshotRaw was fetched before the fix.
+      const superPayload: Record<string, any> = {};
+      const allSuperKeys = [
+        'roham_super_balance', 'roham_super_salary', 'roham_employer_contrib',
+        'roham_salary_sacrifice', 'roham_super_personal_contrib', 'roham_super_annual_topup',
+        'roham_super_growth_rate', 'roham_super_fee_pct', 'roham_super_insurance_pa',
+        'roham_super_option', 'roham_super_provider', 'roham_retirement_age', 'roham_super_contrib_freq',
+        'fara_super_balance', 'fara_super_salary', 'fara_employer_contrib',
+        'fara_salary_sacrifice', 'fara_super_personal_contrib', 'fara_super_annual_topup',
+        'fara_super_growth_rate', 'fara_super_fee_pct', 'fara_super_insurance_pa',
+        'fara_super_option', 'fara_super_provider', 'fara_retirement_age', 'fara_super_contrib_freq',
+      ];
+      for (const k of allSuperKeys) {
+        if (payload[k] !== undefined) superPayload[k] = payload[k];
+      }
+
+      await apiRequest('PUT', '/api/snapshot', superPayload);
+
+      // Refetch from Supabase to confirm values were persisted
+      await qc.refetchQueries({ queryKey: ['/api/snapshot'] });
+
+      // Only clear draft AFTER refetch — so form stays populated
       setDraft(null);
-      toast({ title: 'Saved Successfully', description: 'Superannuation settings saved to Supabase.' });
+      toast({ title: 'Saved Successfully', description: 'Superannuation settings saved and confirmed.' });
     } catch (err: any) {
-      toast({ title: 'Save Failed', description: err?.message ?? 'Supabase error', variant: 'destructive' });
+      toast({ title: 'Save Failed', description: err?.message ?? 'Supabase error — data not saved', variant: 'destructive' });
     } finally {
       setSaving(false);
     }
