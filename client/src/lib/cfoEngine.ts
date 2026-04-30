@@ -834,8 +834,8 @@ export async function generateCFOReport(
   // ═══════════════════════════════════════════════════════════════════════════
   // SECTION 9b: FIRE FASTEST PATH — powered by firePathEngine.ts
   // ═══════════════════════════════════════════════════════════════════════════
-  const firePathInput  = buildFirePathInput(snap, billRows ?? []);
-  const firePathResult: FIREPathResult = computeFirePath(firePathInput);
+  const firePathInput  = buildFirePathInput(snap, billRows ?? [], null, [], []);
+  const firePathResult: FIREPathResult = computeFirePath(firePathInput, null);
 
   const firePath = {
     best_scenario:            firePathResult.best_scenario,

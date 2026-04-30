@@ -38,15 +38,25 @@ export default function FIREPathCard() {
   const { privacyMode } = useAppStore();
   const mv = (v: string) => maskValue(v, privacyMode, 'currency');
 
-  const { data: snapRaw  } = useQuery({ queryKey: ["/api/snapshot"] });
-  const { data: billsRaw } = useQuery({ queryKey: ["/api/bills"] });
+  const { data: snapRaw        } = useQuery({ queryKey: ["/api/snapshot"] });
+  const { data: billsRaw       } = useQuery({ queryKey: ["/api/bills"] });
+  const { data: settingsRaw    } = useQuery({ queryKey: ["/api/fire-settings"] });
+  const { data: scenarioCfgRaw } = useQuery({ queryKey: ["/api/fire-scenario-config"] });
+  const { data: yearAssumpRaw  } = useQuery({ queryKey: ["/api/fire-year-assumptions"] });
 
   const result = useMemo(() => {
-    const snap  = (snapRaw  as any)?.[0] ?? snapRaw  ?? {};
-    const bills = Array.isArray(billsRaw) ? billsRaw : [];
-    const input = buildFirePathInput(snap, bills);
-    return computeFirePath(input);
-  }, [snapRaw, billsRaw]);
+    const snap       = (snapRaw  as any)?.[0] ?? snapRaw  ?? {};
+    const bills      = Array.isArray(billsRaw)       ? billsRaw       : [];
+    const scenarioCfg = Array.isArray(scenarioCfgRaw) ? scenarioCfgRaw : [];
+    const yearAssump  = Array.isArray(yearAssumpRaw)  ? yearAssumpRaw  : [];
+    const input = buildFirePathInput(
+      snap, bills,
+      (settingsRaw as any) ?? null,
+      scenarioCfg,
+      yearAssump,
+    );
+    return computeFirePath(input, (settingsRaw as any) ?? null);
+  }, [snapRaw, billsRaw, settingsRaw, scenarioCfgRaw, yearAssumpRaw]);
 
   const best = result.scenarios.find(s => s.id === result.best_scenario)!;
   const fmt  = (n: number) => `$${n >= 1_000_000 ? (n / 1_000_000).toFixed(1) + 'M' : n >= 1000 ? (n / 1000).toFixed(0) + 'K' : n.toFixed(0)}`;

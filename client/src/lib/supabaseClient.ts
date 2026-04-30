@@ -574,3 +574,83 @@ export const sbUsers = {
     return match ? user : null;
   },
 };
+
+// ─── FIRE Settings ────────────────────────────────────────────────────────────
+
+const FIRE_SETTINGS_ID = "shahrokh-family-main";
+
+export const sbFireSettings = {
+  async get(): Promise<any | null> {
+    try {
+      const rows = await sbGet("sf_fire_settings", `id=eq.${FIRE_SETTINGS_ID}`);
+      return rows[0] ?? null;
+    } catch { return null; }
+  },
+  async upsert(data: object): Promise<any | null> {
+    try {
+      return await sbUpsert("sf_fire_settings", {
+        id: FIRE_SETTINGS_ID,
+        ...data,
+        updated_at: new Date().toISOString(),
+      });
+    } catch { return null; }
+  },
+};
+
+// ─── FIRE Scenario Config ─────────────────────────────────────────────────────
+
+export const sbFireScenarioConfig = {
+  async getAll(): Promise<any[]> {
+    try {
+      return await sbGet("sf_fire_scenario_config", `record_owner=eq.${FIRE_SETTINGS_ID}&order=id.asc`);
+    } catch { return []; }
+  },
+  async upsert(data: { scenario_id: string; [key: string]: any }): Promise<any | null> {
+    try {
+      return await sbUpsert("sf_fire_scenario_config", {
+        record_owner: FIRE_SETTINGS_ID,
+        ...data,
+        updated_at: new Date().toISOString(),
+      });
+    } catch { return null; }
+  },
+  async upsertAll(rows: any[]): Promise<void> {
+    try {
+      for (const row of rows) {
+        await sbUpsert("sf_fire_scenario_config", {
+          record_owner: FIRE_SETTINGS_ID,
+          ...row,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    } catch { /* swallow */ }
+  },
+};
+
+// ─── FIRE Year Assumptions ────────────────────────────────────────────────────
+
+export const sbFireYearAssumptions = {
+  async getAll(): Promise<any[]> {
+    try {
+      return await sbGet("sf_fire_year_assumptions", `record_owner=eq.${FIRE_SETTINGS_ID}&order=assumption_year.asc`);
+    } catch { return []; }
+  },
+  async upsert(data: { assumption_year: number; [key: string]: any }): Promise<any | null> {
+    try {
+      return await sbUpsert("sf_fire_year_assumptions", {
+        record_owner: FIRE_SETTINGS_ID,
+        ...data,
+      });
+    } catch { return null; }
+  },
+  async upsertAll(rows: any[]): Promise<void> {
+    try {
+      for (const row of rows) {
+        await sbUpsert("sf_fire_year_assumptions", {
+          record_owner: FIRE_SETTINGS_ID,
+          ...row,
+        });
+      }
+    } catch { /* swallow */ }
+  },
+};

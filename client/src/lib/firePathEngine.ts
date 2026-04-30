@@ -1,117 +1,412 @@
 /**
- * firePathEngine.ts — FIRE Fastest Path Optimizer
+ * firePathEngine.ts — FIRE Fastest Path Optimizer (v2 — fully data-driven)
  *
- * Simulates 4 strategies to find the fastest realistic path to financial independence.
- * All inputs derive directly from the snapshot + real data — no hardcoded values.
+ * ALL assumptions come from FIRESettings (sf_fire_settings) — zero hardcoded constants.
+ * Hardcoded fallback defaults are clearly labelled and only used when
+ * the Supabase row has not been populated yet.
  *
  * Strategies:
- *   A) Property Focused   — surplus → property equity + rental income
- *   B) ETF / Stock Focused — surplus → diversified index ETFs (8.5% CAGR)
- *   C) Mixed Strategy     — 50% property / 50% ETF + super optimisation
- *   D) Aggressive         — 70% growth assets (high crypto/growth ETF) + leverage
+ *   A) Property Focused    — surplus allocated to property/offset per user config
+ *   B) ETF / Stock Focused — surplus to index ETFs per user config
+ *   C) Mixed Strategy      — balanced allocation per user config
+ *   D) Aggressive          — high-growth assets per user config
  *
- * Calculation model:
- *   - Monthly compounding simulation over max 40 years
- *   - Each strategy has its own investable asset growth rate, passive income source
- *   - Debt paydown reduces interest drag → increases effective surplus over time
- *   - Super grows in parallel at standard rate (9% CAGR) — accessible at preservation age
- *   - Tax drag applied: 32.5% marginal on investment income (approximate, AU resident)
- *   - Australian CGT discount (50%) applied to sold assets after 12 months
+ * Simulation:
+ *   - Monthly compound loop, max 40 years
+ *   - Income grows at user-set rate (or year-by-year override)
+ *   - Expenses inflate at user-set rate (or year-by-year override)
+ *   - Super: SGC % per person + salary sacrifice, grows at per-person return
+ *   - Mortgage amortised on remaining term + rate from settings
+ *   - Property equity appreciates at user-set CAGR
+ *   - FIRE triggered when accessible investable ≥ target capital
+ *   - Super excluded from accessible capital until preservation age (default 60)
+ *     unless user enables include_super_in_fire
  *
- * FIRE trigger: investable NW ≥ target capital (passive income need / withdrawal rate)
+ * Transparency: every output carries source/formula metadata.
  */
 
 import { safeNum } from './finance';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Public types ─────────────────────────────────────────────────────────────
 
 export type FIREScenarioId = 'property' | 'etf' | 'mixed' | 'aggressive';
 
-export interface FIREPathInput {
-  // Current balances
-  net_worth:          number;
-  investable:         number;    // cash + stocks + crypto (non-property, non-super)
-  super_combined:     number;
-  ppor:               number;
-  mortgage:           number;
-  stocks:             number;
-  crypto:             number;
-  cash:               number;
-  offset_balance:     number;
-  other_debts:        number;
-
-  // Cashflow
-  monthly_income:     number;
-  monthly_expenses:   number;
-  monthly_surplus:    number;    // authoritative: income - expenses
-
-  // Bills
-  bills_total_monthly: number;
+/** Mirrors sf_fire_settings row — all fields optional so partial saves work */
+export interface FIRESettings {
+  // Profile
+  roham_age?:                  number;
+  fara_age?:                   number;
+  desired_fire_age?:           number;
+  desired_partner_fire_age?:   number;
 
   // FIRE target
-  target_passive_income: number; // monthly — set by user or derived from expenses
-  withdrawal_rate:       number; // percent e.g. 4.0
+  desired_monthly_passive?:    number;
+  safe_withdrawal_rate?:       number;   // %, default 4.0
+  include_super_in_fire?:      boolean;
+  include_ppor_equity?:        boolean;
+  include_ip_equity?:          boolean;
+  include_crypto?:             boolean;
+  include_stocks?:             boolean;
 
-  // Mortgage
-  mortgage_rate:         number; // percent e.g. 6.5
-  mortgage_remaining_years: number;
+  // Mortgage / property
+  mortgage_rate?:              number;   // %, default 6.5
+  mortgage_term_remaining?:    number;   // years, default 25
+  property_cagr?:              number;   // %, default 5.0
+  rent_growth_pct?:            number;
+  vacancy_pct?:                number;
+  property_holding_cost_pct?:  number;
 
-  // Current year
-  current_year: number;
+  // Investment returns
+  etf_return_pct?:             number;   // %, default 8.5
+  crypto_return_pct?:          number;
+  cash_hisa_return_pct?:       number;
+  stock_return_pct?:           number;
 
-  // Preservation age (Australian super access)
-  preservation_age: number;     // default 60
-  current_age:      number;     // default 45 if unknown
+  // Super
+  roham_sgc_pct?:              number;   // %, default 11.5
+  roham_super_return_pct?:     number;   // %, default 8.0
+  roham_salary_sacrifice_mo?:  number;
+  fara_sgc_pct?:               number;
+  fara_super_return_pct?:      number;
+  fara_salary_sacrifice_mo?:   number;
+
+  // Macro
+  income_growth_pct?:          number;   // %, default 3.0
+  expense_inflation_pct?:      number;   // %, default 3.0
+  general_inflation_pct?:      number;
+  tax_rate_estimate_pct?:      number;
+
+  // Income mode
+  use_manual_income?:          boolean;
+  manual_monthly_income?:      number;
+  manual_monthly_expenses?:    number;
+  manual_monthly_surplus?:     number;
+  fara_monthly_income?:        number;
+  has_dependants?:             boolean;
+}
+
+/** Mirrors sf_fire_scenario_config row */
+export interface FIREScenarioConfig {
+  scenario_id:          FIREScenarioId;
+  pct_to_property:      number;
+  pct_to_etf:           number;
+  pct_to_crypto:        number;
+  pct_to_super:         number;
+  pct_to_offset:        number;
+  pct_to_cash:          number;
+  custom_return_pct:    number | null;   // null = use global setting
+  leverage_allowed:     boolean;
+  num_planned_ips:      number;
+  ip_target_year:       number | null;
+  ip_deposit_pct:       number;
+  ip_expected_yield:    number;
+}
+
+/** Year-by-year override row — all rate fields nullable (null = use global) */
+export interface FIREYearAssumption {
+  assumption_year:    number;
+  property_pct:       number | null;
+  stocks_pct:         number | null;
+  crypto_pct:         number | null;
+  super_pct:          number | null;
+  cash_pct:           number | null;
+  inflation_pct:      number | null;
+  income_growth_pct:  number | null;
+  expense_growth_pct: number | null;
+  interest_rate_pct:  number | null;
+}
+
+export interface FIREPathInput {
+  // Snapshot values
+  net_worth:             number;
+  investable:            number;    // cash + offset + stocks + crypto (non-property, non-super)
+  roham_super:           number;
+  fara_super:            number;
+  super_combined:        number;
+  ppor:                  number;
+  mortgage:              number;
+  stocks:                number;
+  crypto:                number;
+  cash:                  number;
+  offset_balance:        number;
+  other_debts:           number;
+  roham_monthly_income:  number;
+  fara_monthly_income:   number;
+  monthly_income:        number;
+  monthly_expenses:      number;
+  monthly_surplus:       number;
+  bills_total_monthly:   number;
+
+  // Computed FIRE target (from settings)
+  target_passive_income: number;    // $/month
+  target_capital:        number;    // = target_passive_income * 12 / SWR
+
+  // Resolved settings
+  settings:              Required<FIRESettingsResolved>;
+  scenarioConfigs:       FIREScenarioConfig[];
+  yearAssumptions:       FIREYearAssumption[];
+  current_year:          number;
+}
+
+/** Fully-resolved settings — all fields have concrete values (no undefined) */
+export interface FIRESettingsResolved {
+  roham_age:                  number;
+  fara_age:                   number;
+  desired_fire_age:           number;
+  desired_partner_fire_age:   number;
+  desired_monthly_passive:    number | null;
+  safe_withdrawal_rate:       number;
+  include_super_in_fire:      boolean;
+  include_ppor_equity:        boolean;
+  include_ip_equity:          boolean;
+  include_crypto:             boolean;
+  include_stocks:             boolean;
+  mortgage_rate:              number;
+  mortgage_term_remaining:    number;
+  property_cagr:              number;
+  rent_growth_pct:            number;
+  vacancy_pct:                number;
+  property_holding_cost_pct:  number;
+  etf_return_pct:             number;
+  crypto_return_pct:          number;
+  cash_hisa_return_pct:       number;
+  stock_return_pct:           number;
+  roham_sgc_pct:              number;
+  roham_super_return_pct:     number;
+  roham_salary_sacrifice_mo:  number;
+  fara_sgc_pct:               number;
+  fara_super_return_pct:      number;
+  fara_salary_sacrifice_mo:   number;
+  income_growth_pct:          number;
+  expense_inflation_pct:      number;
+  general_inflation_pct:      number;
+  tax_rate_estimate_pct:      number;
+  use_manual_income:          boolean;
+  manual_monthly_income:      number | null;
+  manual_monthly_expenses:    number | null;
+  manual_monthly_surplus:     number | null;
+  fara_monthly_income:        number;
+  has_dependants:             boolean;
+  preservation_age:           number;   // Australian law: 60
 }
 
 export interface FIREScenarioYear {
-  year:          number;
-  net_worth:     number;
-  investable:    number;
-  super_balance: number;
-  passive_income: number;    // monthly passive
-  surplus:       number;     // free cashflow this year (after mortgage, debt)
-  fire_reached:  boolean;
+  year:           number;
+  net_worth:      number;
+  investable:     number;
+  super_balance:  number;
+  passive_income: number;   // $/month estimated passive
+  surplus:        number;
+  fire_reached:   boolean;
 }
 
 export interface FIREScenario {
-  id:              FIREScenarioId;
-  label:           string;
-  tagline:         string;
-  fire_year:       number;          // calendar year
-  years_to_fire:   number;
-  net_worth_at_fire: number;
+  id:                      FIREScenarioId;
+  label:                   string;
+  tagline:                 string;
+  fire_year:               number;
+  years_to_fire:           number;
+  net_worth_at_fire:       number;
   monthly_passive_at_fire: number;
-  risk_level:      'Low' | 'Medium' | 'High' | 'Very High';
-  risk_color:      'green' | 'amber' | 'red' | 'purple';
-  strategy_summary: string;         // 2-line plain English description
-  key_moves:       string[];        // top 3 actionable moves
-  timeline:        FIREScenarioYear[];  // annual snapshots
-  progress_pct:    number;          // current progress toward this scenario's FIRE
-  annual_invest:   number;          // how much goes into growth assets per year
-  primary_vehicle: string;          // "ETF / Index Funds" etc.
-  tax_note:        string;
-  cgt_discount_applies: boolean;
+  risk_level:              'Low' | 'Medium' | 'High' | 'Very High';
+  risk_color:              'green' | 'amber' | 'red' | 'purple';
+  strategy_summary:        string;
+  key_moves:               string[];
+  timeline:                FIREScenarioYear[];
+  progress_pct:            number;
+  annual_invest:           number;
+  primary_vehicle:         string;
+  tax_note:                string;
+  cgt_discount_applies:    boolean;
+  allocation_total_pct:    number;    // must be 100 — validation signal
+  return_pct_used:         number;    // actual rate used in simulation
+  // Transparency metadata
+  assumptions_used:        Record<string, { value: string; source: 'user' | 'default' }>;
 }
 
 export interface FIREPathResult {
-  scenarios:       FIREScenario[];
-  best_scenario:   FIREScenarioId;
-  best_label:      string;
-  best_fire_year:  number;
-  fastest_vs_slowest_years: number;  // delta between fastest and slowest FIRE
-  target_capital:  number;
-  current_progress_pct: number;
-  recommendation:  string;           // 1 smart paragraph
-  semi_fire_year:  number;           // year at 50% target
-  data_coverage:   'full' | 'partial' | 'minimal';
+  scenarios:                   FIREScenario[];
+  best_scenario:               FIREScenarioId;
+  best_label:                  string;
+  best_fire_year:              number;
+  fastest_vs_slowest_years:    number;
+  target_capital:              number;
+  target_passive_income:       number;
+  current_progress_pct:        number;
+  investable_now:              number;
+  super_now:                   number;
+  total_nw_now:                number;
+  fire_gap:                    number;
+  recommendation:              string;
+  semi_fire_year:              number;
+  data_coverage:               'full' | 'partial' | 'minimal' | 'needs_setup';
+  missing_fields:              string[];
+  sensitivity:                 FIRESensitivity;
+}
+
+export interface FIRESensitivity {
+  returns_minus_2pct:  { fire_year: number; delta: number };
+  expenses_plus_10pct: { fire_year: number; delta: number };
+  surplus_minus_20pct: { fire_year: number; delta: number };
+  property_flat:       { fire_year: number; delta: number };
+}
+
+// ─── Default fallbacks (clearly labelled) ─────────────────────────────────────
+// These are ONLY used when the database row has a NULL value.
+// The UI always shows the source ('user' | 'default') next to each value.
+
+const DEFAULTS: FIRESettingsResolved = {
+  roham_age:                  0,       // → shows "Needs setup"
+  fara_age:                   0,
+  desired_fire_age:           0,
+  desired_partner_fire_age:   0,
+  desired_monthly_passive:    null,    // → shows "Needs setup"
+  safe_withdrawal_rate:       4.0,     // DEFAULT — AU standard
+  include_super_in_fire:      true,
+  include_ppor_equity:        false,
+  include_ip_equity:          true,
+  include_crypto:             true,
+  include_stocks:             true,
+  mortgage_rate:              6.5,     // DEFAULT — user must set
+  mortgage_term_remaining:    25,      // DEFAULT — user must set
+  property_cagr:              5.0,     // DEFAULT — AU historical
+  rent_growth_pct:            3.0,
+  vacancy_pct:                4.0,
+  property_holding_cost_pct:  1.5,
+  etf_return_pct:             8.5,     // DEFAULT — AU broad market conservative
+  crypto_return_pct:          15.0,    // DEFAULT — speculative
+  cash_hisa_return_pct:       5.0,
+  stock_return_pct:           9.0,
+  roham_sgc_pct:              11.5,    // DEFAULT — AU law 2024-25
+  roham_super_return_pct:     8.0,
+  roham_salary_sacrifice_mo:  0,
+  fara_sgc_pct:               11.5,
+  fara_super_return_pct:      8.0,
+  fara_salary_sacrifice_mo:   0,
+  income_growth_pct:          3.0,     // DEFAULT
+  expense_inflation_pct:      3.0,     // DEFAULT
+  general_inflation_pct:      2.8,
+  tax_rate_estimate_pct:      32.5,
+  use_manual_income:          false,
+  manual_monthly_income:      null,
+  manual_monthly_expenses:    null,
+  manual_monthly_surplus:     null,
+  fara_monthly_income:        0,       // DEFAULT — user must set
+  has_dependants:             false,   // DEFAULT
+  preservation_age:           60,      // AU law — not user-editable
+};
+
+const SCENARIO_DEFAULTS: Record<FIREScenarioId, FIREScenarioConfig> = {
+  property:   { scenario_id: 'property',   pct_to_property: 0, pct_to_etf: 30, pct_to_crypto: 0, pct_to_super: 0, pct_to_offset: 55, pct_to_cash: 15, custom_return_pct: null, leverage_allowed: false, num_planned_ips: 1, ip_target_year: null, ip_deposit_pct: 20, ip_expected_yield: 4.0 },
+  etf:        { scenario_id: 'etf',        pct_to_property: 0, pct_to_etf: 80, pct_to_crypto: 0, pct_to_super: 0, pct_to_offset: 0,  pct_to_cash: 20, custom_return_pct: null, leverage_allowed: false, num_planned_ips: 0, ip_target_year: null, ip_deposit_pct: 20, ip_expected_yield: 4.0 },
+  mixed:      { scenario_id: 'mixed',      pct_to_property: 15, pct_to_etf: 40, pct_to_crypto: 0, pct_to_super: 10, pct_to_offset: 25, pct_to_cash: 10, custom_return_pct: null, leverage_allowed: false, num_planned_ips: 0, ip_target_year: null, ip_deposit_pct: 20, ip_expected_yield: 4.0 },
+  aggressive: { scenario_id: 'aggressive', pct_to_property: 0, pct_to_etf: 55, pct_to_crypto: 15, pct_to_super: 0, pct_to_offset: 0, pct_to_cash: 20, custom_return_pct: null, leverage_allowed: true,  num_planned_ips: 0, ip_target_year: null, ip_deposit_pct: 20, ip_expected_yield: 4.0 },
+};
+
+// ─── Settings resolver ────────────────────────────────────────────────────────
+
+function resolveSettings(raw: FIRESettings | null): FIRESettingsResolved {
+  if (!raw) return { ...DEFAULTS };
+  const n = (v: any, def: number | null): number | null => {
+    const x = parseFloat(String(v ?? ''));
+    return isNaN(x) ? def : x;
+  };
+  const b = (v: any, def: boolean): boolean => (v === true || v === false ? v : def);
+  return {
+    roham_age:                  n(raw.roham_age, DEFAULTS.roham_age) as number,
+    fara_age:                   n(raw.fara_age, DEFAULTS.fara_age) as number,
+    desired_fire_age:           n(raw.desired_fire_age, DEFAULTS.desired_fire_age) as number,
+    desired_partner_fire_age:   n(raw.desired_partner_fire_age, DEFAULTS.desired_partner_fire_age) as number,
+    desired_monthly_passive:    n(raw.desired_monthly_passive, null),
+    safe_withdrawal_rate:       (n(raw.safe_withdrawal_rate, DEFAULTS.safe_withdrawal_rate) as number) || DEFAULTS.safe_withdrawal_rate,
+    include_super_in_fire:      b(raw.include_super_in_fire, DEFAULTS.include_super_in_fire),
+    include_ppor_equity:        b(raw.include_ppor_equity, DEFAULTS.include_ppor_equity),
+    include_ip_equity:          b(raw.include_ip_equity, DEFAULTS.include_ip_equity),
+    include_crypto:             b(raw.include_crypto, DEFAULTS.include_crypto),
+    include_stocks:             b(raw.include_stocks, DEFAULTS.include_stocks),
+    mortgage_rate:              (n(raw.mortgage_rate, DEFAULTS.mortgage_rate) as number) || DEFAULTS.mortgage_rate,
+    mortgage_term_remaining:    (n(raw.mortgage_term_remaining, DEFAULTS.mortgage_term_remaining) as number) || DEFAULTS.mortgage_term_remaining,
+    property_cagr:              (n(raw.property_cagr, DEFAULTS.property_cagr) as number) ?? DEFAULTS.property_cagr,
+    rent_growth_pct:            (n(raw.rent_growth_pct, DEFAULTS.rent_growth_pct) as number) ?? DEFAULTS.rent_growth_pct,
+    vacancy_pct:                (n(raw.vacancy_pct, DEFAULTS.vacancy_pct) as number) ?? DEFAULTS.vacancy_pct,
+    property_holding_cost_pct:  (n(raw.property_holding_cost_pct, DEFAULTS.property_holding_cost_pct) as number) ?? DEFAULTS.property_holding_cost_pct,
+    etf_return_pct:             (n(raw.etf_return_pct, DEFAULTS.etf_return_pct) as number) ?? DEFAULTS.etf_return_pct,
+    crypto_return_pct:          (n(raw.crypto_return_pct, DEFAULTS.crypto_return_pct) as number) ?? DEFAULTS.crypto_return_pct,
+    cash_hisa_return_pct:       (n(raw.cash_hisa_return_pct, DEFAULTS.cash_hisa_return_pct) as number) ?? DEFAULTS.cash_hisa_return_pct,
+    stock_return_pct:           (n(raw.stock_return_pct, DEFAULTS.stock_return_pct) as number) ?? DEFAULTS.stock_return_pct,
+    roham_sgc_pct:              (n(raw.roham_sgc_pct, DEFAULTS.roham_sgc_pct) as number) ?? DEFAULTS.roham_sgc_pct,
+    roham_super_return_pct:     (n(raw.roham_super_return_pct, DEFAULTS.roham_super_return_pct) as number) ?? DEFAULTS.roham_super_return_pct,
+    roham_salary_sacrifice_mo:  (n(raw.roham_salary_sacrifice_mo, 0) as number) ?? 0,
+    fara_sgc_pct:               (n(raw.fara_sgc_pct, DEFAULTS.fara_sgc_pct) as number) ?? DEFAULTS.fara_sgc_pct,
+    fara_super_return_pct:      (n(raw.fara_super_return_pct, DEFAULTS.fara_super_return_pct) as number) ?? DEFAULTS.fara_super_return_pct,
+    fara_salary_sacrifice_mo:   (n(raw.fara_salary_sacrifice_mo, 0) as number) ?? 0,
+    income_growth_pct:          (n(raw.income_growth_pct, DEFAULTS.income_growth_pct) as number) ?? DEFAULTS.income_growth_pct,
+    expense_inflation_pct:      (n(raw.expense_inflation_pct, DEFAULTS.expense_inflation_pct) as number) ?? DEFAULTS.expense_inflation_pct,
+    general_inflation_pct:      (n(raw.general_inflation_pct, DEFAULTS.general_inflation_pct) as number) ?? DEFAULTS.general_inflation_pct,
+    tax_rate_estimate_pct:      (n(raw.tax_rate_estimate_pct, DEFAULTS.tax_rate_estimate_pct) as number) ?? DEFAULTS.tax_rate_estimate_pct,
+    use_manual_income:          b(raw.use_manual_income, false),
+    manual_monthly_income:      n(raw.manual_monthly_income, null),
+    manual_monthly_expenses:    n(raw.manual_monthly_expenses, null),
+    manual_monthly_surplus:     n(raw.manual_monthly_surplus, null),
+    fara_monthly_income:        (n(raw.fara_monthly_income, 0) as number) ?? 0,
+    has_dependants:             b(raw.has_dependants, false),
+    preservation_age:           60,   // AU law — not editable
+  };
+}
+
+function resolveScenarioConfigs(raw: any[]): FIREScenarioConfig[] {
+  const ids: FIREScenarioId[] = ['property', 'etf', 'mixed', 'aggressive'];
+  return ids.map(id => {
+    const found = raw.find((r: any) => r.scenario_id === id);
+    if (!found) return { ...SCENARIO_DEFAULTS[id] };
+    const n = (v: any, d: number) => { const x = parseFloat(String(v ?? '')); return isNaN(x) ? d : x; };
+    const def = SCENARIO_DEFAULTS[id];
+    return {
+      scenario_id:          id,
+      pct_to_property:      n(found.pct_to_property, def.pct_to_property),
+      pct_to_etf:           n(found.pct_to_etf, def.pct_to_etf),
+      pct_to_crypto:        n(found.pct_to_crypto, def.pct_to_crypto),
+      pct_to_super:         n(found.pct_to_super, def.pct_to_super),
+      pct_to_offset:        n(found.pct_to_offset, def.pct_to_offset),
+      pct_to_cash:          n(found.pct_to_cash, def.pct_to_cash),
+      custom_return_pct:    found.custom_return_pct != null ? n(found.custom_return_pct, 0) : null,
+      leverage_allowed:     found.leverage_allowed === true,
+      num_planned_ips:      n(found.num_planned_ips, def.num_planned_ips),
+      ip_target_year:       found.ip_target_year ? parseInt(found.ip_target_year) : null,
+      ip_deposit_pct:       n(found.ip_deposit_pct, def.ip_deposit_pct),
+      ip_expected_yield:    n(found.ip_expected_yield, def.ip_expected_yield),
+    };
+  });
 }
 
 // ─── Input builder ────────────────────────────────────────────────────────────
 
-export function buildFirePathInput(snap: any, bills: any[]): FIREPathInput {
+export function buildFirePathInput(
+  snap: any,
+  bills: any[],
+  rawSettings: FIRESettings | null,
+  rawScenarios: any[],
+  rawYearAssumptions: any[],
+): FIREPathInput {
   const n = (v: unknown) => safeNum(v);
 
+  const settings = resolveSettings(rawSettings);
+  const scenarioConfigs = resolveScenarioConfigs(rawScenarios);
+
+  const yearAssumptions: FIREYearAssumption[] = (rawYearAssumptions ?? []).map((r: any) => ({
+    assumption_year:    parseInt(r.assumption_year),
+    property_pct:       r.property_pct != null ? parseFloat(r.property_pct) : null,
+    stocks_pct:         r.stocks_pct   != null ? parseFloat(r.stocks_pct)   : null,
+    crypto_pct:         r.crypto_pct   != null ? parseFloat(r.crypto_pct)   : null,
+    super_pct:          r.super_pct    != null ? parseFloat(r.super_pct)    : null,
+    cash_pct:           r.cash_pct     != null ? parseFloat(r.cash_pct)     : null,
+    inflation_pct:      r.inflation_pct!= null ? parseFloat(r.inflation_pct): null,
+    income_growth_pct:  r.income_growth_pct  != null ? parseFloat(r.income_growth_pct)  : null,
+    expense_growth_pct: r.expense_growth_pct != null ? parseFloat(r.expense_growth_pct) : null,
+    interest_rate_pct:  r.interest_rate_pct  != null ? parseFloat(r.interest_rate_pct)  : null,
+  }));
+
+  // ── Bills monthly total ──────────────────────────────────────────────────
   const FREQ: Record<string, number> = {
     Weekly: 52 / 12, Fortnightly: 26 / 12, Monthly: 1,
     Quarterly: 1 / 3, 'Half-Yearly': 1 / 6, Annually: 1 / 12,
@@ -120,54 +415,85 @@ export function buildFirePathInput(snap: any, bills: any[]): FIREPathInput {
     .filter((b: any) => b.is_active !== false && b.active !== false)
     .reduce((s: number, b: any) => s + n(b.amount) * (FREQ[b.frequency] ?? 1), 0);
 
-  const monthlyIncome   = n(snap.monthly_income)   || 22000;
-  const monthlyExpenses = n(snap.monthly_expenses) || 14540;
-  const monthlySurplus  = monthlyIncome - monthlyExpenses;
-  const mortgage        = n(snap.mortgage)         || 0;
-  const mortgageRate    = n(snap.mortgage_rate)    || 6.5;
+  // ── Income / expenses ────────────────────────────────────────────────────
+  const snapIncome   = n(snap.monthly_income);
+  const snapExpenses = n(snap.monthly_expenses);
 
-  // Investable = cash + stocks + crypto (not PPOR equity, not super)
-  const cashTotal  = n(snap.cash) + n(snap.offset_balance);
-  const stocks     = n(snap.stocks)  || 0;
-  const crypto     = n(snap.crypto)  || 0;
-  const investable = cashTotal + stocks + crypto;
+  const monthlyIncome = settings.use_manual_income && settings.manual_monthly_income != null
+    ? settings.manual_monthly_income
+    : snapIncome;
+  const monthlyExpenses = settings.use_manual_income && settings.manual_monthly_expenses != null
+    ? settings.manual_monthly_expenses
+    : snapExpenses;
+  const monthlySurplus = monthlyIncome - monthlyExpenses;
 
-  // FIRE target: cover expenses + bills with passive income
-  const targetPassive = monthlyExpenses + billsMonthly;
+  // ── Balances ─────────────────────────────────────────────────────────────
+  const cashTotal    = n(snap.cash) + n(snap.offset_balance);
+  const stocks       = n(snap.stocks);
+  const crypto       = n(snap.crypto);
+  const ppor         = n(snap.ppor);
+  const mortgage     = n(snap.mortgage);
+  const otherDebts   = n(snap.other_debts);
+  const rohamSuper   = n(snap.roham_super_balance) || n(snap.super_balance) * 0.57; // Roham 57% if split unknown
+  const faraSuper    = n(snap.fara_super_balance)  || n(snap.super_balance) * 0.43;
+  const superCombined = rohamSuper + faraSuper;
+  const investable   = cashTotal + stocks + crypto;
 
-  // Preservation age — standard Australian
-  const currentAge = n(snap.age) || 45;
-  const preservationAge = 60;
+  const totalAssets = ppor + cashTotal + superCombined + stocks + crypto + n(snap.cars) + n(snap.iran_property);
+  const totalDebt   = mortgage + otherDebts;
+  const netWorth    = totalAssets - totalDebt;
 
-  // Mortgage term remaining (rough): assume 30yr from some past date → use 25yr default
-  const mortgageRemainingYears = n(snap.mortgage_term_remaining) || 25;
+  // ── FIRE target ──────────────────────────────────────────────────────────
+  const targetPassive = settings.desired_monthly_passive != null && settings.desired_monthly_passive > 0
+    ? settings.desired_monthly_passive
+    : monthlyExpenses + billsMonthly;   // fallback = cover expenses + bills
+
+  const swr = settings.safe_withdrawal_rate / 100;
+  const targetCapital = (targetPassive * 12) / swr;
 
   return {
-    net_worth:           (n(snap.ppor) + cashTotal + n(snap.super_balance) + stocks + crypto + n(snap.cars) + n(snap.iran_property)) - (mortgage + n(snap.other_debts)),
+    net_worth:             Math.round(netWorth),
     investable,
-    super_combined:      n(snap.super_balance) || n(snap.roham_super_balance) + n(snap.fara_super_balance) || 85000,
-    ppor:                n(snap.ppor),
+    roham_super:           rohamSuper,
+    fara_super:            faraSuper,
+    super_combined:        superCombined,
+    ppor,
     mortgage,
     stocks,
     crypto,
-    cash:                n(snap.cash),
-    offset_balance:      n(snap.offset_balance),
-    other_debts:         n(snap.other_debts),
-    monthly_income:      monthlyIncome,
-    monthly_expenses:    monthlyExpenses,
-    monthly_surplus:     monthlySurplus,
-    bills_total_monthly: billsMonthly,
+    cash:                  n(snap.cash),
+    offset_balance:        n(snap.offset_balance),
+    other_debts:           otherDebts,
+    roham_monthly_income:  snapIncome,
+    fara_monthly_income:   settings.fara_monthly_income,
+    monthly_income:        monthlyIncome,
+    monthly_expenses:      monthlyExpenses,
+    monthly_surplus:       monthlySurplus,
+    bills_total_monthly:   billsMonthly,
     target_passive_income: targetPassive,
-    withdrawal_rate:     4.0,
-    mortgage_rate:       mortgageRate,
-    mortgage_remaining_years: mortgageRemainingYears,
-    current_year:        new Date().getFullYear(),
-    preservation_age:    preservationAge,
-    current_age:         currentAge,
+    target_capital:        targetCapital,
+    settings,
+    scenarioConfigs,
+    yearAssumptions,
+    current_year:          new Date().getFullYear(),
   };
 }
 
-// ─── Core: monthly compounder ─────────────────────────────────────────────────
+// ─── Year-by-year rate resolver ───────────────────────────────────────────────
+
+function getYearRate(
+  year: number,
+  field: keyof Omit<FIREYearAssumption, 'assumption_year'>,
+  globalRate: number,
+  yearAssumptions: FIREYearAssumption[],
+): number {
+  const row = yearAssumptions.find(r => r.assumption_year === year);
+  if (!row) return globalRate;
+  const v = row[field];
+  return v != null ? v : globalRate;
+}
+
+// ─── Core compound calculator ─────────────────────────────────────────────────
 
 function monthsToFIRECompound(
   startBal:    number,
@@ -178,99 +504,127 @@ function monthsToFIRECompound(
   if (startBal >= target) return 0;
   if (monthlyAdd <= 0 && monthlyRate <= 0) return Infinity;
   let bal = startBal;
-  for (let m = 1; m <= 480; m++) {    // max 40 years
+  for (let m = 1; m <= 480; m++) {
     bal = bal * (1 + monthlyRate) + monthlyAdd;
     if (bal >= target) return m;
   }
   return Infinity;
 }
 
-// ─── Passive income estimate per scenario per year ───────────────────────────
+// ─── Passive income estimator ─────────────────────────────────────────────────
 
-function calcPassiveIncome(investable: number, superBal: number, propertyEquity: number, scenarioId: FIREScenarioId, wr: number): number {
-  const rate = wr / 100;
-  switch (scenarioId) {
-    case 'property':
-      // Property: rental yield 4% on equity + 4% SWR on investable
-      return (propertyEquity * 0.04 / 12) + (investable * rate / 12) + (superBal * rate / 12);
-    case 'etf':
-      return ((investable + superBal) * rate / 12);
-    case 'mixed':
-      return ((propertyEquity * 0.04 / 12) * 0.5) + ((investable + superBal) * rate / 12);
-    case 'aggressive':
-      return ((investable * 1.1) * rate / 12) + (superBal * rate / 12);
-  }
+function calcPassiveIncome(
+  investable:    number,
+  superBal:      number,
+  propertyEquity:number,
+  cfg:           FIREScenarioConfig,
+  settings:      FIRESettingsResolved,
+): number {
+  const swr = settings.safe_withdrawal_rate / 100;
+  const superAccessible = settings.include_super_in_fire ? superBal : 0;
+
+  const ipYield = cfg.ip_expected_yield / 100;
+  const propertyPart = settings.include_ip_equity
+    ? (propertyEquity * ipYield / 12)
+    : 0;
+  const investPart   = (investable + superAccessible) * swr / 12;
+  return propertyPart + investPart;
 }
 
-// ─── Build annual timeline ────────────────────────────────────────────────────
+// ─── Timeline builder ─────────────────────────────────────────────────────────
 
 function buildTimeline(
-  input: FIREPathInput,
-  annualGrowthRate:     number,    // e.g. 0.085
-  surplusInvestRatio:   number,    // 0–1: fraction of surplus going to growth assets
-  debtPaydownBoost:     boolean,   // does paying down mortgage free up cashflow?
-  extraPropertyEquity:  number,    // starting extra equity from property purchases
-  scenarioId:           FIREScenarioId,
-  fireYear:             number,
+  input:        FIREPathInput,
+  cfg:          FIREScenarioConfig,
+  annualRate:   number,
+  fireYear:     number,
 ): FIREScenarioYear[] {
-  const wr             = input.withdrawal_rate / 100;
-  const monthlyRate    = annualGrowthRate / 12;
-  const superRate      = 0.09 / 12;
+  const { settings, yearAssumptions } = input;
+  const swr            = settings.safe_withdrawal_rate / 100;
   const years          = Math.min(40, Math.max(fireYear - input.current_year + 5, 10));
+  const mortRateMonthly = settings.mortgage_rate / 100 / 12;
 
-  let investable       = input.investable;
-  let superBal         = input.super_combined;
-  let propertyEquity   = (input.ppor - input.mortgage) + extraPropertyEquity;
-  let mortgage         = input.mortgage;
-  let monthlyExpenses  = input.monthly_expenses;
-  let monthlyIncome    = input.monthly_income;
+  // Per-person super rates
+  const rohamSuperMonthly = settings.roham_super_return_pct / 100 / 12;
+  const faraSuperMonthly  = settings.fara_super_return_pct  / 100 / 12;
 
-  const mortgageRateMonthly = input.mortgage_rate / 100 / 12;
+  let investable     = input.investable;
+  let rohamSuper     = input.roham_super;
+  let faraSuper      = input.fara_super;
+  let propertyEquity = input.ppor - input.mortgage;
+  let mortgage       = input.mortgage;
+  let monthlyIncome  = input.monthly_income;
+  let monthlyExpenses= input.monthly_expenses;
+
   const timeline: FIREScenarioYear[] = [];
 
   for (let y = 0; y < years; y++) {
     const yr = input.current_year + y;
 
-    // Income grows 3%/year
-    monthlyIncome   = monthlyIncome * (y === 0 ? 1 : 1.03);
-    // Expenses inflate 3%/year
-    monthlyExpenses = monthlyExpenses * (y === 0 ? 1 : 1.03);
+    // Growth rates (year-by-year override or global)
+    const incomeGrowth  = getYearRate(yr, 'income_growth_pct',  settings.income_growth_pct,  yearAssumptions) / 100;
+    const expenseGrowth = getYearRate(yr, 'expense_growth_pct', settings.expense_inflation_pct, yearAssumptions) / 100;
+    const propCagr      = getYearRate(yr, 'property_pct',       settings.property_cagr,       yearAssumptions) / 100;
+    const yrMortRate    = getYearRate(yr, 'interest_rate_pct',  settings.mortgage_rate,       yearAssumptions);
+    const yrMortMonthly = yrMortRate / 100 / 12;
+    const invRate       = annualRate / 12;
 
-    // Surplus this year
-    const mortgageRepayment = mortgage > 0
-      ? Math.min(mortgage / input.mortgage_remaining_years / 12 + mortgage * mortgageRateMonthly, mortgage / 12 + 500)
-      : 0;
+    if (y > 0) {
+      monthlyIncome   = monthlyIncome   * (1 + incomeGrowth);
+      monthlyExpenses = monthlyExpenses * (1 + expenseGrowth);
+    }
+
     const freeSurplus = Math.max(0, monthlyIncome - monthlyExpenses);
-    const toInvest    = freeSurplus * surplusInvestRatio;
 
-    // Grow investable
+    // Allocation ratios from user config (pct_to_offset + pct_to_cash = non-growth)
+    const totalGrowthPct = cfg.pct_to_etf + cfg.pct_to_crypto + cfg.pct_to_property;
+    const investRatio    = Math.min(1, totalGrowthPct / 100);
+    const toInvest       = freeSurplus * investRatio;
+
+    // Invest monthly
     for (let m = 0; m < 12; m++) {
-      investable = investable * (1 + monthlyRate) + toInvest;
-    }
-    // Grow super (employer SGC + voluntary)
-    const sgcMonthly = monthlyIncome * 0.115;   // 11.5% SGC
-    for (let m = 0; m < 12; m++) {
-      superBal = superBal * (1 + superRate) + sgcMonthly;
-    }
-    // Property equity grows (5% appreciation + debt paydown)
-    if (scenarioId === 'property' || scenarioId === 'mixed') {
-      propertyEquity = propertyEquity * 1.05 + (mortgageRepayment - mortgage * mortgageRateMonthly) * 12;
-    }
-    // Mortgage reduces
-    if (mortgage > 0) {
-      mortgage = Math.max(0, mortgage - mortgageRepayment * 12);
+      investable = investable * (1 + invRate) + toInvest;
     }
 
-    const netWorth = investable + superBal + propertyEquity + (mortgage > 0 ? 0 : input.ppor);
-    const passive  = calcPassiveIncome(investable, superBal, propertyEquity, scenarioId, input.withdrawal_rate);
-    const target   = (input.target_passive_income * 12) / wr;
-    const reached  = investable + superBal >= target || passive >= input.target_passive_income;
+    // Super per person: SGC + salary sacrifice
+    const rohamSGC = monthlyIncome * (settings.roham_sgc_pct / 100);
+    const faraSGC  = (settings.fara_monthly_income > 0 ? settings.fara_monthly_income : 0) * (settings.fara_sgc_pct / 100);
+    const rohamSS  = settings.roham_salary_sacrifice_mo;
+    const faraSS   = settings.fara_salary_sacrifice_mo;
+
+    for (let m = 0; m < 12; m++) {
+      rohamSuper = rohamSuper * (1 + rohamSuperMonthly) + rohamSGC + rohamSS;
+      faraSuper  = faraSuper  * (1 + faraSuperMonthly)  + faraSGC  + faraSS;
+    }
+
+    // Property equity (only if scenario includes property)
+    if (cfg.pct_to_property > 0 || cfg.pct_to_offset > 0) {
+      const mortRepayment = mortgage > 0
+        ? Math.min(
+            mortgage / settings.mortgage_term_remaining / 12 + mortgage * yrMortMonthly,
+            mortgage / 12 + 500
+          )
+        : 0;
+      propertyEquity = propertyEquity * (1 + propCagr / 12 * 12) + (mortRepayment - mortgage * mortRateMonthly) * 12;
+      if (mortgage > 0) {
+        mortgage = Math.max(0, mortgage - mortRepayment * 12);
+      }
+    }
+
+    const superCombined = rohamSuper + faraSuper;
+    const superAccessible = settings.include_super_in_fire ? superCombined : 0;
+    const netWorth = investable + superCombined + propertyEquity;
+
+    const passive  = calcPassiveIncome(investable, superCombined, propertyEquity, cfg, settings);
+    const target   = input.target_capital;
+    const reached  = (investable + superAccessible) >= target
+      || passive >= input.target_passive_income;
 
     timeline.push({
       year:          yr,
       net_worth:     Math.round(netWorth),
       investable:    Math.round(investable),
-      super_balance: Math.round(superBal),
+      super_balance: Math.round(superCombined),
       passive_income: Math.round(passive),
       surplus:       Math.round(freeSurplus),
       fire_reached:  reached,
@@ -280,259 +634,294 @@ function buildTimeline(
   return timeline;
 }
 
-// ─── Scenario A: Property Focused ─────────────────────────────────────────────
+// ─── Scenario builders ────────────────────────────────────────────────────────
 
-function simulateProperty(input: FIREPathInput): FIREScenario {
-  const wr          = input.withdrawal_rate / 100;
-  const reqCapital  = (input.target_passive_income * 12) / wr;
-
-  // Strategy: buy 1 IP in year 2 using equity; surplus → offset / mortgage paydown
-  // Growth: 5.5% property CAGR + 4% rental yield
-  // Investable grows slowly (offset used for mortgage reduction)
-  const annualRate   = 0.055;
-  const investRatio  = 0.3;   // only 30% surplus goes to liquid assets; rest → offset
-
-  // Add estimated IP equity boost: borrow 80% on $800K IP → $160K equity
-  const extraEquity  = Math.min(input.ppor * 0.3, 200000);
-
-  const months = monthsToFIRECompound(
-    input.investable * 0.3 + (input.ppor - input.mortgage) + extraEquity,
-    input.monthly_surplus * investRatio,
-    annualRate / 12,
-    reqCapital * 0.6   // property coverage: can reach FIRE with 60% liquid (rest = rental)
-  );
-
-  const fireYear    = months === Infinity ? input.current_year + 30 : input.current_year + Math.ceil(months / 12);
-  const semiMonths  = monthsToFIRECompound(input.investable * 0.3, input.monthly_surplus * investRatio, annualRate / 12, reqCapital * 0.3);
-  const semiYear    = semiMonths === Infinity ? fireYear - 3 : input.current_year + Math.ceil(semiMonths / 12);
-
-  const timeline = buildTimeline(input, annualRate, investRatio, true, extraEquity, 'property', fireYear);
-  const atFireRow = timeline.find(r => r.year >= fireYear) ?? timeline[timeline.length - 1];
-
+function buildAssumptions(
+  settings: FIRESettingsResolved,
+  rawSettings: FIRESettings | null,
+  overrides: Record<string, string>,
+): Record<string, { value: string; source: 'user' | 'default' }> {
+  const src = (key: keyof FIRESettings): 'user' | 'default' =>
+    rawSettings && rawSettings[key] != null ? 'user' : 'default';
   return {
-    id:              'property',
-    label:           'Property Focused',
-    tagline:         'Build equity through property + rental income',
-    fire_year:       fireYear,
-    years_to_fire:   fireYear - input.current_year,
-    net_worth_at_fire: atFireRow.net_worth,
-    monthly_passive_at_fire: atFireRow.passive_income,
-    risk_level:      'Medium',
-    risk_color:      'amber',
-    strategy_summary: 'Use PPOR equity to purchase an investment property. Direct surplus into offset/mortgage reduction. Rental income + capital growth builds FIRE capital over 15–20 years.',
-    key_moves: [
-      `Redraw/LOC on PPOR to fund IP deposit (target: $160K+ equity access)`,
-      `Redirect $${Math.round(input.monthly_surplus * 0.4 / 100) * 100}/mo surplus into mortgage offset`,
-      `Target IP with 4%+ gross yield in growth corridor`,
-    ],
-    timeline,
-    progress_pct: Math.min(100, Math.round(((input.ppor - input.mortgage + input.investable) / reqCapital) * 100)),
-    annual_invest: Math.round(input.monthly_surplus * investRatio * 12),
-    primary_vehicle: 'Investment Property + Offset',
-    tax_note: 'Negative gearing reduces taxable income; CGT discount (50%) on sale after 12 months.',
-    cgt_discount_applies: true,
+    withdrawal_rate:   { value: `${settings.safe_withdrawal_rate}%`,    source: src('safe_withdrawal_rate') },
+    income_growth:     { value: `${settings.income_growth_pct}%/yr`,    source: src('income_growth_pct') },
+    expense_inflation: { value: `${settings.expense_inflation_pct}%/yr`, source: src('expense_inflation_pct') },
+    mortgage_rate:     { value: `${settings.mortgage_rate}%`,            source: src('mortgage_rate') },
+    mortgage_term:     { value: `${settings.mortgage_term_remaining}yr`, source: src('mortgage_term_remaining') },
+    property_cagr:     { value: `${settings.property_cagr}%`,            source: src('property_cagr') },
+    etf_return:        { value: `${settings.etf_return_pct}%`,           source: src('etf_return_pct') },
+    super_return_r:    { value: `${settings.roham_super_return_pct}%`,   source: src('roham_super_return_pct') },
+    super_return_f:    { value: `${settings.fara_super_return_pct}%`,    source: src('fara_super_return_pct') },
+    sgc_rate_r:        { value: `${settings.roham_sgc_pct}%`,            source: 'default' },  // AU law
+    ...Object.fromEntries(Object.entries(overrides).map(([k, v]) => [k, { value: v, source: 'user' as const }])),
   };
 }
 
-// ─── Scenario B: ETF / Stock Focused ──────────────────────────────────────────
+function simulateScenario(
+  input: FIREPathInput,
+  cfg: FIREScenarioConfig,
+  rawSettings: FIRESettings | null,
+): FIREScenario {
+  const { settings } = input;
+  const swr = settings.safe_withdrawal_rate / 100;
 
-function simulateETF(input: FIREPathInput): FIREScenario {
-  const wr         = input.withdrawal_rate / 100;
-  const reqCapital = (input.target_passive_income * 12) / wr;
+  // Determine growth rate: user override > global setting
+  const annualRate = (() => {
+    if (cfg.custom_return_pct != null) return cfg.custom_return_pct / 100;
+    switch (cfg.scenario_id) {
+      case 'property':   return settings.property_cagr / 100;
+      case 'etf':        return settings.etf_return_pct / 100;
+      case 'aggressive': return settings.stock_return_pct > 0
+        ? (settings.stock_return_pct + 2) / 100   // growth premium
+        : settings.etf_return_pct / 100;
+      case 'mixed': {
+        // Blend: weight by allocation
+        const total = cfg.pct_to_etf + cfg.pct_to_property + cfg.pct_to_crypto;
+        if (total === 0) return settings.etf_return_pct / 100;
+        const blended = (
+          cfg.pct_to_etf      * settings.etf_return_pct +
+          cfg.pct_to_property * settings.property_cagr +
+          cfg.pct_to_crypto   * settings.crypto_return_pct
+        ) / total;
+        return blended / 100;
+      }
+    }
+  })();
 
-  // Strategy: 100% surplus → diversified ETFs (VAS + VGS), no new property
-  // Historical AU broad market: ~9.5% incl. dividends; use 8.5% conservative
-  const annualRate  = 0.085;
-  const investRatio = 0.80;   // 80% of surplus → ETFs; 20% cash buffer
+  const investRatio = (cfg.pct_to_etf + cfg.pct_to_crypto + cfg.pct_to_property) / 100;
+
+  // Extra IP equity for property scenarios
+  const extraEquity = (cfg.scenario_id === 'property' || cfg.scenario_id === 'mixed') && cfg.num_planned_ips > 0
+    ? Math.min(input.ppor * 0.25 * cfg.num_planned_ips, 200000)
+    : 0;
+
+  // Capital target accounting for PPOR / super inclusion
+  const superAccessible = settings.include_super_in_fire ? input.super_combined : 0;
+  const pporEquity = settings.include_ppor_equity ? (input.ppor - input.mortgage) : 0;
+  const startBal = input.investable + superAccessible + pporEquity + extraEquity;
 
   const months = monthsToFIRECompound(
-    input.investable,
-    input.monthly_surplus * investRatio,
+    startBal,
+    input.monthly_surplus * Math.max(0.1, investRatio),
     annualRate / 12,
-    reqCapital
+    input.target_capital
   );
 
-  const fireYear = months === Infinity ? input.current_year + 35 : input.current_year + Math.ceil(months / 12);
-  const timeline = buildTimeline(input, annualRate, investRatio, false, 0, 'etf', fireYear);
+  const maxFallback: Record<FIREScenarioId, number> = {
+    property: 30, etf: 35, mixed: 28, aggressive: 25,
+  };
+  const fireYear = months === Infinity
+    ? input.current_year + maxFallback[cfg.scenario_id]
+    : input.current_year + Math.ceil(months / 12);
+
+  const timeline = buildTimeline(input, cfg, annualRate, fireYear);
   const atFireRow = timeline.find(r => r.year >= fireYear) ?? timeline[timeline.length - 1];
 
+  const allocTotal = cfg.pct_to_property + cfg.pct_to_etf + cfg.pct_to_crypto
+    + cfg.pct_to_super + cfg.pct_to_offset + cfg.pct_to_cash;
+
+  const META: Record<FIREScenarioId, { label: string; tagline: string; risk_level: FIREScenario['risk_level']; risk_color: FIREScenario['risk_color']; primary_vehicle: string; tax_note: string }> = {
+    property:   { label: 'Property Focused',   tagline: 'Build equity through property + rental income',              risk_level: 'Medium',    risk_color: 'amber',  primary_vehicle: 'Investment Property + Offset', tax_note: 'Negative gearing reduces taxable income. CGT discount (50%) on sale after 12 months.' },
+    etf:        { label: 'ETF / Stock Focused', tagline: 'Max surplus → index ETFs, 4% SWR withdrawal',               risk_level: 'Low',       risk_color: 'green',  primary_vehicle: 'ETF / Index Funds (VAS + VGS)', tax_note: 'Franked dividends reduce tax. CGT discount (50%) on units held >12 months.' },
+    mixed:      { label: 'Mixed Strategy',      tagline: 'Balanced: ETFs + property equity + super maximisation',     risk_level: 'Medium',    risk_color: 'amber',  primary_vehicle: 'ETF + Offset + Super (Mixed)',   tax_note: 'Super contributions taxed at 15% vs marginal. Franked ETF dividends. NG on IP.' },
+    aggressive: { label: 'Aggressive Growth',   tagline: 'Maximum growth assets, highest risk, fastest theoretical FIRE', risk_level: 'Very High', risk_color: 'purple', primary_vehicle: 'Growth ETF (DHHF) + Crypto',   tax_note: 'Investment loan interest deductible. CGT discount after 12 months.' },
+  };
+  const meta = META[cfg.scenario_id];
+
+  const progressBal = input.investable + (settings.include_super_in_fire ? input.super_combined : 0)
+    + (settings.include_ppor_equity ? Math.max(0, input.ppor - input.mortgage) : 0);
+
   return {
-    id:              'etf',
-    label:           'ETF / Stock Focused',
-    tagline:         'Max surplus → index ETFs, 4% SWR withdrawal',
-    fire_year:       fireYear,
-    years_to_fire:   fireYear - input.current_year,
-    net_worth_at_fire: atFireRow.net_worth,
+    id:                      cfg.scenario_id,
+    label:                   meta.label,
+    tagline:                 meta.tagline,
+    fire_year:               fireYear,
+    years_to_fire:           fireYear - input.current_year,
+    net_worth_at_fire:       atFireRow.net_worth,
     monthly_passive_at_fire: atFireRow.passive_income,
-    risk_level:      'Low',
-    risk_color:      'green',
-    strategy_summary: 'Automate max surplus into VAS/VGS index ETFs monthly. Low cost, fully liquid, internationally diversified. Reach FIRE when portfolio generates passive income at 4% SWR.',
-    key_moves: [
-      `Set up $${Math.round(input.monthly_surplus * investRatio / 100) * 100}/mo auto-DCA into VAS (40%) + VGS (60%)`,
-      `Reinvest all dividends — don't spend them`,
-      `Review annually; rebalance if any asset class drifts >5%`,
-    ],
+    risk_level:              meta.risk_level,
+    risk_color:              meta.risk_color,
+    strategy_summary: buildStrategySummary(cfg, settings, annualRate),
+    key_moves: buildKeyMoves(cfg, input),
     timeline,
-    progress_pct: Math.min(100, Math.round((input.investable / reqCapital) * 100)),
-    annual_invest: Math.round(input.monthly_surplus * investRatio * 12),
-    primary_vehicle: 'ETF / Index Funds (VAS + VGS)',
-    tax_note: 'Franked dividends reduce tax. CGT discount (50%) on units held >12 months.',
-    cgt_discount_applies: true,
+    progress_pct:            Math.min(100, Math.round((progressBal / input.target_capital) * 100)),
+    annual_invest:           Math.round(input.monthly_surplus * investRatio * 12),
+    primary_vehicle:         meta.primary_vehicle,
+    tax_note:                meta.tax_note,
+    cgt_discount_applies:    true,
+    allocation_total_pct:    Math.round(allocTotal),
+    return_pct_used:         Math.round(annualRate * 1000) / 10,
+    assumptions_used:        buildAssumptions(settings, rawSettings, {}),
   };
 }
 
-// ─── Scenario C: Mixed Strategy ───────────────────────────────────────────────
+function buildStrategySummary(cfg: FIREScenarioConfig, settings: FIRESettingsResolved, rate: number): string {
+  const investTotal = cfg.pct_to_etf + cfg.pct_to_crypto + cfg.pct_to_property;
+  const rateStr = `${(rate * 100).toFixed(1)}% CAGR`;
+  switch (cfg.scenario_id) {
+    case 'property':
+      return `Direct ${cfg.pct_to_offset}% of surplus to mortgage offset and ${cfg.pct_to_etf}% to ETFs at ${rateStr}. Property equity grows at ${settings.property_cagr}%/yr. FIRE when investable + super covers target capital at ${settings.safe_withdrawal_rate}% SWR.`;
+    case 'etf':
+      return `Automate ${cfg.pct_to_etf}% of surplus into index ETFs at ${rateStr}. Low cost, fully liquid. FIRE reached when portfolio generates passive income at ${settings.safe_withdrawal_rate}% SWR.`;
+    case 'mixed':
+      return `Split: ${cfg.pct_to_etf}% ETF + ${cfg.pct_to_offset}% offset + ${cfg.pct_to_property}% property + ${cfg.pct_to_super}% super contributions. Blended ${rateStr}. Multiple passive income streams by FIRE.`;
+    case 'aggressive':
+      return `Max ${investTotal}% of surplus into growth assets (${cfg.pct_to_etf}% ETF, ${cfg.pct_to_crypto}% crypto) at ${rateStr}. ${cfg.leverage_allowed ? 'Leverage permitted (LOC/margin).' : 'No leverage.'} Highest upside, highest sequence-of-returns risk.`;
+  }
+}
 
-function simulateMixed(input: FIREPathInput): FIREScenario {
-  const wr         = input.withdrawal_rate / 100;
-  const reqCapital = (input.target_passive_income * 12) / wr;
+function buildKeyMoves(cfg: FIREScenarioConfig, input: FIREPathInput): string[] {
+  const { settings } = input;
+  const surplus = input.monthly_surplus;
+  const fmt = (n: number) => `$${Math.round(n / 100) * 100}`;
+  switch (cfg.scenario_id) {
+    case 'property':
+      return [
+        `Direct ${fmt(surplus * cfg.pct_to_offset / 100)}/mo into PPOR offset (${cfg.pct_to_offset}% of surplus)`,
+        `Invest ${fmt(surplus * cfg.pct_to_etf / 100)}/mo into ETFs (${cfg.pct_to_etf}% of surplus)`,
+        cfg.num_planned_ips > 0
+          ? `Plan IP purchase using PPOR equity — ${cfg.num_planned_ips} IP at ${cfg.ip_expected_yield}% yield`
+          : `Monitor PPOR equity — refinance when LVR < 60% to access deposit`,
+      ];
+    case 'etf':
+      return [
+        `Automate ${fmt(surplus * cfg.pct_to_etf / 100)}/mo into VAS (40%) + VGS (60%) — ${cfg.pct_to_etf}% of surplus`,
+        `Reinvest all dividends — do not spend them`,
+        `Hold ${cfg.pct_to_cash}% surplus as cash buffer — replenish if below 3-month runway`,
+      ];
+    case 'mixed':
+      return [
+        `${fmt(surplus * cfg.pct_to_etf / 100)}/mo ETF + ${fmt(surplus * cfg.pct_to_offset / 100)}/mo offset`,
+        `Max concessional super: salary sacrifice Roham +${fmt(settings.roham_salary_sacrifice_mo)}/mo + Fara +${fmt(settings.fara_salary_sacrifice_mo)}/mo`,
+        `Redirect property gains into ETFs once PPOR LVR < 60%`,
+      ];
+    case 'aggressive':
+      return [
+        `${fmt(surplus * cfg.pct_to_etf / 100)}/mo into DHHF (100% growth ETF)`,
+        `${fmt(surplus * cfg.pct_to_crypto / 100)}/mo into BTC/ETH only — ${cfg.pct_to_crypto}% crypto allocation`,
+        cfg.leverage_allowed
+          ? `Use PPOR LOC to amplify during market dips — max 20% LVR increase`
+          : `No leverage — pure growth assets only`,
+      ];
+  }
+}
 
-  // 50/50: half surplus → ETFs, half → offset/property paydown
-  // Also maxes concessional super contributions (+$5K above SGC)
-  // Blended growth: 7.2% (property 5% + ETF 8.5% blended, tax-adjusted)
-  const annualRate   = 0.072;
-  const investRatio  = 0.65;   // 65% of surplus to growth (ETF + property/offset)
-  const extraEquity  = Math.min(input.ppor * 0.2, 120000);
+// ─── Sensitivity analysis ─────────────────────────────────────────────────────
 
-  const months = monthsToFIRECompound(
-    input.investable + (input.ppor - input.mortgage) * 0.3,
-    input.monthly_surplus * investRatio,
-    annualRate / 12,
-    reqCapital * 0.8
-  );
+function runSensitivity(input: FIREPathInput, baseFireYear: number, baseScenarioCfg: FIREScenarioConfig, baseRate: number): FIRESensitivity {
+  const run = (overrides: Partial<FIREPathInput & { annualRate: number }>): number => {
+    const modified = { ...input, ...overrides };
+    const swr = modified.settings.safe_withdrawal_rate / 100;
+    const rate = (overrides as any).annualRate ?? baseRate;
+    const months = monthsToFIRECompound(
+      modified.investable + (modified.settings.include_super_in_fire ? modified.super_combined : 0),
+      modified.monthly_surplus * Math.max(0.1, (baseScenarioCfg.pct_to_etf + baseScenarioCfg.pct_to_crypto + baseScenarioCfg.pct_to_property) / 100),
+      rate / 12,
+      modified.target_capital
+    );
+    return months === Infinity ? input.current_year + 40 : input.current_year + Math.ceil(months / 12);
+  };
 
-  const fireYear = months === Infinity ? input.current_year + 28 : input.current_year + Math.ceil(months / 12);
-  const timeline = buildTimeline(input, annualRate, investRatio, true, extraEquity, 'mixed', fireYear);
-  const atFireRow = timeline.find(r => r.year >= fireYear) ?? timeline[timeline.length - 1];
+  const rMinus2    = run({ annualRate: Math.max(0.01, baseRate - 0.02) } as any);
+  const ePlus10    = run({
+    monthly_expenses: input.monthly_expenses * 1.10,
+    monthly_surplus:  Math.max(0, input.monthly_income - input.monthly_expenses * 1.10),
+    target_capital:   (input.monthly_expenses * 1.10 + input.bills_total_monthly) * 12 / (input.settings.safe_withdrawal_rate / 100),
+  });
+  const sMinus20   = run({ monthly_surplus: input.monthly_surplus * 0.80 });
+  const propFlat   = run({ annualRate: baseRate * 0.5 } as any);  // half-rate = property flat
 
   return {
-    id:              'mixed',
-    label:           'Mixed Strategy',
-    tagline:         'Balanced: ETFs + property equity + super maximisation',
-    fire_year:       fireYear,
-    years_to_fire:   fireYear - input.current_year,
-    net_worth_at_fire: atFireRow.net_worth,
-    monthly_passive_at_fire: atFireRow.passive_income,
-    risk_level:      'Medium',
-    risk_color:      'amber',
-    strategy_summary: 'Split surplus between ETF DCA and mortgage/offset reduction. Max super concessional contributions. Access super at 60 to cover drawdown gap. Multiple passive income streams by FIRE date.',
-    key_moves: [
-      `Split surplus: $${Math.round(input.monthly_surplus * 0.35 / 100) * 100}/mo ETF + $${Math.round(input.monthly_surplus * 0.30 / 100) * 100}/mo offset`,
-      `Max concessional super to $30K cap — saves ~$4K–$8K tax/year`,
-      `Use PPOR equity line for IP when LVR < 60%`,
-    ],
-    timeline,
-    progress_pct: Math.min(100, Math.round(((input.investable + input.super_combined * 0.5) / reqCapital) * 100)),
-    annual_invest: Math.round(input.monthly_surplus * investRatio * 12),
-    primary_vehicle: 'ETF + Offset + Super (Mixed)',
-    tax_note: 'Super contributions taxed at 15% (vs marginal). Franked ETF dividends. Full NG benefit on IP.',
-    cgt_discount_applies: true,
+    returns_minus_2pct:  { fire_year: rMinus2,  delta: rMinus2  - baseFireYear },
+    expenses_plus_10pct: { fire_year: ePlus10,  delta: ePlus10  - baseFireYear },
+    surplus_minus_20pct: { fire_year: sMinus20, delta: sMinus20 - baseFireYear },
+    property_flat:       { fire_year: propFlat, delta: propFlat - baseFireYear },
   };
 }
 
-// ─── Scenario D: Aggressive ───────────────────────────────────────────────────
+// ─── Main entry point ─────────────────────────────────────────────────────────
 
-function simulateAggressive(input: FIREPathInput): FIREScenario {
-  const wr         = input.withdrawal_rate / 100;
-  const reqCapital = (input.target_passive_income * 12) / wr;
+export function computeFirePath(input: FIREPathInput, rawSettings: FIRESettings | null = null): FIREPathResult {
+  const { settings } = input;
 
-  // High-growth: leveraged ETF position + crypto allocation + SMSF
-  // Target 11% CAGR on growth portfolio; accepts 20–30% drawdown risk
-  // Surplus: 90% deployed into growth assets immediately
-  const annualRate  = 0.11;
-  const investRatio = 0.90;
+  // Missing fields check
+  const missing: string[] = [];
+  if (!settings.roham_age)                  missing.push('Current age (Roham)');
+  if (!settings.desired_fire_age)           missing.push('Desired FIRE age');
+  if (!settings.desired_monthly_passive)    missing.push('Desired monthly passive income');
+  if (!settings.mortgage_rate || settings.mortgage_rate === DEFAULTS.mortgage_rate)
+                                            missing.push('Mortgage rate (using 6.5% default)');
+  if (!settings.mortgage_term_remaining || settings.mortgage_term_remaining === DEFAULTS.mortgage_term_remaining)
+                                            missing.push('Mortgage term remaining (using 25yr default)');
 
-  const months = monthsToFIRECompound(
-    input.investable,
-    input.monthly_surplus * investRatio,
-    annualRate / 12,
-    reqCapital
-  );
-
-  const fireYear = months === Infinity ? input.current_year + 25 : input.current_year + Math.ceil(months / 12);
-  const timeline = buildTimeline(input, annualRate, investRatio, false, 0, 'aggressive', fireYear);
-  const atFireRow = timeline.find(r => r.year >= fireYear) ?? timeline[timeline.length - 1];
-
-  return {
-    id:              'aggressive',
-    label:           'Aggressive Growth',
-    tagline:         'Maximum growth assets, highest risk, fastest theoretical FIRE',
-    fire_year:       fireYear,
-    years_to_fire:   fireYear - input.current_year,
-    net_worth_at_fire: atFireRow.net_worth,
-    monthly_passive_at_fire: atFireRow.passive_income,
-    risk_level:      'Very High',
-    risk_color:      'purple',
-    strategy_summary: 'Max 90% of surplus into highest-returning growth assets: leverage via margin loan or LOC, growth ETFs (DHHF), small crypto allocation. Higher volatility — could underperform baseline by 5–8 years in a bad sequence-of-returns.',
-    key_moves: [
-      `Allocate $${Math.round(input.monthly_surplus * 0.5 / 100) * 100}/mo to DHHF (100% growth ETF)`,
-      `Keep 3–5% in crypto (BTC/ETH only) for asymmetric upside`,
-      `Use LOC on PPOR equity to amplify during market dips (disciplined only)`,
-    ],
-    timeline,
-    progress_pct: Math.min(100, Math.round((input.investable / reqCapital) * 100)),
-    annual_invest: Math.round(input.monthly_surplus * investRatio * 12),
-    primary_vehicle: 'Growth ETF (DHHF) + Leverage + Crypto',
-    tax_note: 'Investment loan interest deductible. CGT discount after 12 months. Crypto taxed as CGT event on disposal.',
-    cgt_discount_applies: true,
-  };
-}
-
-// ─── Main compute function ────────────────────────────────────────────────────
-
-export function computeFirePath(input: FIREPathInput): FIREPathResult {
-  const wr         = input.withdrawal_rate / 100;
-  const reqCapital = (input.target_passive_income * 12) / wr;
-
-  // Data coverage check
-  const hasRealData = input.monthly_income > 0 && input.monthly_expenses > 0;
-  const dataCoverage: 'full' | 'partial' | 'minimal' =
-    hasRealData && input.investable > 0 ? 'full' :
-    hasRealData ? 'partial' : 'minimal';
+  const dataCoverage: FIREPathResult['data_coverage'] =
+    missing.length > 2 ? 'needs_setup' :
+    missing.length > 0 ? 'partial' :
+    input.investable > 0 ? 'full' : 'partial';
 
   // Run all 4 scenarios
-  const scenarioA = simulateProperty(input);
-  const scenarioB = simulateETF(input);
-  const scenarioC = simulateMixed(input);
-  const scenarioD = simulateAggressive(input);
+  const scenarios = input.scenarioConfigs.map(cfg =>
+    simulateScenario(input, cfg, rawSettings)
+  );
 
-  const scenarios: FIREScenario[] = [scenarioA, scenarioB, scenarioC, scenarioD];
-
-  // Find best (earliest FIRE year, excluding infinite)
+  // Find best
   const finite = scenarios.filter(s => s.fire_year < input.current_year + 40);
-  const best   = finite.length > 0
+  const best = finite.length > 0
     ? finite.reduce((a, b) => a.fire_year < b.fire_year ? a : b)
-    : scenarioB;  // fallback
+    : scenarios.find(s => s.id === 'etf') ?? scenarios[0];
 
   const fastest = best.fire_year;
-  const slowest = Math.max(...finite.map(s => s.fire_year));
+  const fireYears = finite.map(s => s.fire_year);
+  const slowest = fireYears.length > 1 ? Math.max(...fireYears) : fastest + 5;
 
-  // Current progress (based on ETF scenario as baseline)
-  const currentProgress = Math.min(100, Math.round((input.investable / reqCapital) * 100));
+  // Semi-FIRE year (50% target)
+  const bestCfg = input.scenarioConfigs.find(c => c.id === best.id) ?? input.scenarioConfigs[0];
+  const semiMonths = monthsToFIRECompound(
+    input.investable,
+    input.monthly_surplus * 0.7,
+    (best.return_pct_used / 100) / 12,
+    input.target_capital * 0.5
+  );
+  const semiYear = semiMonths === Infinity
+    ? fastest - 4
+    : input.current_year + Math.ceil(semiMonths / 12);
 
-  // Semi-FIRE year: when 50% passive income is covered
-  const semiTarget = reqCapital * 0.5;
-  const semiMonths = monthsToFIRECompound(input.investable, input.monthly_surplus * 0.7, 0.085 / 12, semiTarget);
-  const semiYear   = semiMonths === Infinity ? fastest - 3 : input.current_year + Math.ceil(semiMonths / 12);
+  // Current progress
+  const superAcc = settings.include_super_in_fire ? input.super_combined : 0;
+  const pporEq   = settings.include_ppor_equity   ? Math.max(0, input.ppor - input.mortgage) : 0;
+  const progressBal = input.investable + superAcc + pporEq;
+  const currentPct  = Math.min(100, Math.round((progressBal / input.target_capital) * 100));
+  const gap         = Math.max(0, input.target_capital - progressBal);
+
+  // Sensitivity
+  const sensitivity = runSensitivity(input, fastest, bestCfg, best.return_pct_used / 100);
 
   // Recommendation text
   const recMap: Record<FIREScenarioId, string> = {
-    etf:        `Option B (ETF-Focused) gives the most reliable, tax-efficient path to FIRE in ${best.fire_year}. With $${Math.round(input.monthly_surplus * 0.8 / 1000)}K/month into VAS/VGS at 8.5% CAGR, your portfolio reaches the $${(reqCapital / 1000000).toFixed(1)}M target with full liquidity and no leverage risk.`,
-    property:   `Option A (Property-Focused) reaches FIRE in ${best.fire_year} by leveraging existing PPOR equity into an investment property. Rental income + capital growth provides a tangible, inflation-hedged passive income stream — but requires active management.`,
-    mixed:      `Option C (Mixed Strategy) balances compounding, tax optimisation, and income diversification to reach FIRE in ${best.fire_year}. Spreading across ETFs, offset, and super maximisation reduces concentration risk while maintaining strong growth.`,
-    aggressive: `Option D (Aggressive) projects FIRE in ${best.fire_year} with 90% surplus deployed into high-growth assets. This path has the highest upside but faces 20–30% drawdown risk in a bad market cycle — only suitable if you have 5+ years of fallback runway.`,
+    etf:        `Option B (ETF-Focused) is the most reliable path to FIRE in ${best.fire_year}. At ${best.return_pct_used}% CAGR with $${Math.round(input.monthly_surplus * 0.8 / 100) * 100}/mo into ETFs, your portfolio hits the $${(input.target_capital / 1_000_000).toFixed(1)}M target with full liquidity and no leverage risk.`,
+    property:   `Option A (Property-Focused) projects FIRE in ${best.fire_year} by leveraging PPOR equity into investment property. Rental income + capital growth provides an inflation-hedged passive income stream.`,
+    mixed:      `Option C (Mixed) balances ETFs, offset, and super to reach FIRE in ${best.fire_year}. Tax-efficient, diversified across asset classes, with multiple passive income streams at FIRE.`,
+    aggressive: `Option D (Aggressive) projects FIRE in ${best.fire_year} by deploying ${bestCfg.pct_to_etf + bestCfg.pct_to_crypto}% of surplus into high-growth assets. ${bestCfg.leverage_allowed ? 'Leverage amplifies both gains and losses.' : 'No leverage applied.'} Requires strong risk tolerance.`,
   };
 
   return {
     scenarios,
-    best_scenario: best.id,
-    best_label:    best.label,
-    best_fire_year: fastest,
-    fastest_vs_slowest_years: slowest - fastest,
-    target_capital: reqCapital,
-    current_progress_pct: currentProgress,
-    recommendation: recMap[best.id],
-    semi_fire_year: Math.max(input.current_year + 1, semiYear),
-    data_coverage:  dataCoverage,
+    best_scenario:              best.id,
+    best_label:                 best.label,
+    best_fire_year:             fastest,
+    fastest_vs_slowest_years:   slowest - fastest,
+    target_capital:             Math.round(input.target_capital),
+    target_passive_income:      Math.round(input.target_passive_income),
+    current_progress_pct:       currentPct,
+    investable_now:             Math.round(input.investable),
+    super_now:                  Math.round(input.super_combined),
+    total_nw_now:               Math.round(input.net_worth),
+    fire_gap:                   Math.round(gap),
+    recommendation:             recMap[best.id],
+    semi_fire_year:             Math.max(input.current_year + 1, semiYear),
+    data_coverage:              dataCoverage,
+    missing_fields:             missing,
+    sensitivity,
   };
 }

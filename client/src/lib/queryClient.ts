@@ -21,6 +21,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { localStore } from "./localStore";
 import { sbAppSettings } from "./supabaseClient";
 import { sbBills, sbBudgets, sbTelegramSettings, sbAlertLogs, sbFamilyMsgLog, sbPlannedInvestments, sbUsers } from "./supabaseClient";
+import { sbFireSettings, sbFireScenarioConfig, sbFireYearAssumptions } from "./supabaseClient";
 
 // ─── Detect deployment mode ───────────────────────────────────────────────────
 
@@ -291,6 +292,29 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
   // ── Family Message Log ────────────────────────────────────────────────────
   if (path === "/api/family-msg-log") {
     if (m === "GET") return await sbFamilyMsgLog.getRecent();
+  }
+
+  // ── FIRE Settings ──────────────────────────────────────────────────────────
+  if (path === "/api/fire-settings") {
+    if (m === "GET")  return (await sbFireSettings.get()) ?? {};
+    if (m === "PUT")  return await sbFireSettings.upsert(body as any);
+  }
+
+  // ── FIRE Scenario Config ──────────────────────────────────────────────────
+  if (path === "/api/fire-scenario-config") {
+    if (m === "GET")  return await sbFireScenarioConfig.getAll();
+    if (m === "PUT")  { await sbFireScenarioConfig.upsertAll(body as any[]); return { success: true }; }
+  }
+  const fireScenarioMatch = path.match(/^\/api\/fire-scenario-config\/([a-z]+)$/);
+  if (fireScenarioMatch) {
+    const scenId = fireScenarioMatch[1];
+    if (m === "PUT")  return await sbFireScenarioConfig.upsert({ scenario_id: scenId, ...(body as any) });
+  }
+
+  // ── FIRE Year Assumptions ────────────────────────────────────────────────
+  if (path === "/api/fire-year-assumptions") {
+    if (m === "GET")  return await sbFireYearAssumptions.getAll();
+    if (m === "PUT")  { await sbFireYearAssumptions.upsertAll(body as any[]); return { success: true }; }
   }
 
   // ─── Market Data (prices + news) — fetched server-side to avoid CORS ────
