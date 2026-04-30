@@ -89,72 +89,98 @@ function ScoreRing({
 // ─── Legacy row normaliser ─────────────────────────────────────────────────────
 function normaliseBulletin(raw: any): CFOBulletin | null {
   if (!raw) return null;
-  if (raw.scores && typeof raw.scores.overall === 'number') return raw as CFOBulletin;
-  // Legacy flat format
-  const legacy: CFOBulletin = {
-    ...raw,
-    week_date:    raw.week_date    ?? new Date().toISOString().split('T')[0],
-    generated_at: raw.generated_at ?? raw.week_date ?? new Date().toISOString(),
-    scores: {
-      wealth:      raw.wealth_score      ?? 0,
-      cashflow:    raw.cashflow_score    ?? 0,
-      risk:        raw.risk_score        ?? 0,
-      discipline:  raw.discipline_score  ?? 0,
-      opportunity: 0,
-      overall: Math.round(((raw.wealth_score ?? 0) + (raw.cashflow_score ?? 0) + (raw.risk_score ?? 0) + (raw.discipline_score ?? 0)) / 4),
-    },
-    snapshot: raw.snapshot ?? {
-      net_worth:          raw.networth         ?? 0,
-      net_worth_delta:    raw.networth_delta   ?? 0,
-      cash_everyday:      raw.cash             ?? 0,
-      cash_savings:       0, cash_emergency: 0, cash_other: 0,
-      offset_balance:     0,
-      liquid_cash:        raw.cash             ?? 0,
-      offset_interest_saving: 0,
-      monthly_surplus:    raw.monthly_surplus  ?? 0,
-      debt_ratio:         0,
-      fire_progress_pct:  raw.fire_progress    ?? 0,
-      years_to_fire:      0,
-      fire_year:          raw.fire_year        ?? 0,
-      fire_on_track:      true,
-      total_assets:       0,
-      total_debt:         raw.debt_total       ?? 0,
-      portfolio_value:    raw.portfolio_value  ?? 0,
-      super_combined:     0,
-    },
-    cashflow: raw.cashflow ?? {
-      income_expected: 0, bills_total: 0,
-      net_cashflow: raw.cashflow_next14 ?? 0,
-      status: 'green' as const,
-      bills: raw.bills_ahead ?? [],
-    },
-    investment: raw.investment ?? {
-      stocks_value: 0, stocks_delta: 0, stocks_delta_pct: 0,
-      best_stock: '', worst_stock: '',
-      crypto_value: 0, crypto_delta: 0, crypto_delta_pct: 0,
-      dca_active: [], planned_buys: [], portfolio_total: raw.portfolio_value ?? 0,
-    },
-    fire: raw.fire ?? {
-      target_passive_income: 0, current_passive_income: 0,
-      years_remaining: 0, progress_pct: raw.fire_progress ?? 0,
-      fire_year: raw.fire_year ?? 0, semi_fire_year: 0,
-      target_capital: 0, investable: 0, on_track: true, accelerator: '',
-    },
-    property_watch: raw.property_watch ?? {
-      buy_score: 5, wait_score: 5, borrowing_power: 0, deposit_ready: 0, market_summary: '',
-    },
-    tax_alpha: raw.tax_alpha ?? {
-      neg_gearing_benefit: 0, super_room_remaining: 0, estimated_refund: 'N/A', tips: [],
-    },
-    risk_alerts:        raw.risk_alerts       ?? raw.alerts ?? [],
-    top_expenses:       raw.top_expenses      ?? [],
-    spending_insight:   raw.spending_insight  ?? '',
-    smart_action:       raw.smart_action      ?? raw.best_move ?? '',
-    smart_action_value: raw.smart_action_value ?? '',
-    cfo_insight:        raw.cfo_insight       ?? raw.summary ?? '',
-    opportunities:      raw.opportunities     ?? [],
+  if (
+    raw.scores && typeof raw.scores.overall === 'number' &&
+    raw.snapshot && typeof raw.snapshot.debt_ratio === 'number'
+  ) return raw as CFOBulletin;
+
+  const oldSnap = raw.snapshot ?? {};
+  const oldFire = oldSnap.fire ?? {};
+  const n = (v: any) => (typeof v === 'number' && isFinite(v) ? v : 0);
+  const s = (v: any) => (typeof v === 'string' ? v : '');
+  const b = (v: any) => (typeof v === 'boolean' ? v : true);
+
+  const snapshot = {
+    net_worth:              n(oldSnap.net_worth         ?? raw.networth),
+    net_worth_delta:        n(oldSnap.net_worth_delta   ?? raw.networth_delta),
+    cash_everyday:          n(oldSnap.cash_everyday     ?? oldSnap.cash ?? raw.cash),
+    cash_savings:           n(oldSnap.cash_savings),
+    cash_emergency:         n(oldSnap.cash_emergency),
+    cash_other:             n(oldSnap.cash_other),
+    offset_balance:         n(oldSnap.offset_balance),
+    liquid_cash:            n(oldSnap.liquid_cash       ?? oldSnap.cash ?? raw.cash),
+    offset_interest_saving: n(oldSnap.offset_interest_saving),
+    monthly_surplus:        n(oldSnap.monthly_surplus   ?? raw.monthly_surplus),
+    debt_ratio:             n(oldSnap.debt_ratio),
+    fire_progress_pct:      n(oldSnap.fire_progress_pct ?? oldFire.progress_pct ?? raw.fire_progress),
+    years_to_fire:          n(oldSnap.years_to_fire     ?? oldFire.years_away),
+    fire_year:              n(oldSnap.fire_year         ?? oldFire.fire_year    ?? raw.fire_year),
+    fire_on_track:          b(oldSnap.fire_on_track     ?? oldFire.on_track),
+    total_assets:           n(oldSnap.total_assets),
+    total_debt:             n(oldSnap.total_debt        ?? raw.debt_total),
+    portfolio_value:        n(oldSnap.portfolio_value   ?? raw.portfolio_value),
+    super_combined:         n(oldSnap.super_combined),
   };
-  return legacy;
+  const oldCF = raw.cashflow ?? {};
+  const cashflow = {
+    income_expected: n(oldCF.income_expected),
+    bills_total:     n(oldCF.bills_total),
+    net_cashflow:    n(oldCF.net_cashflow ?? raw.cashflow_next14),
+    status: (['green','amber','red'].includes(oldCF.status) ? oldCF.status : 'green') as 'green'|'amber'|'red',
+    bills: Array.isArray(oldCF.bills) ? oldCF.bills : (Array.isArray(raw.bills_ahead) ? raw.bills_ahead : []),
+  };
+  const oldInv = raw.investment ?? {};
+  const investment = {
+    stocks_value: n(oldInv.stocks_value), stocks_delta: n(oldInv.stocks_delta ?? oldInv.stocks_change),
+    stocks_delta_pct: n(oldInv.stocks_delta_pct), best_stock: s(oldInv.best_stock), worst_stock: s(oldInv.worst_stock),
+    crypto_value: n(oldInv.crypto_value), crypto_delta: n(oldInv.crypto_delta ?? oldInv.crypto_change),
+    crypto_delta_pct: n(oldInv.crypto_delta_pct),
+    dca_active: Array.isArray(oldInv.dca_active) ? oldInv.dca_active : (Array.isArray(oldInv.dca_scheduled) ? oldInv.dca_scheduled : []),
+    planned_buys: Array.isArray(oldInv.planned_buys) ? oldInv.planned_buys : [],
+    portfolio_total: n(oldInv.portfolio_total ?? raw.portfolio_value),
+  };
+  const oldF = raw.fire ?? {};
+  const fire = {
+    target_passive_income: n(oldF.target_passive_income), current_passive_income: n(oldF.current_passive_income),
+    years_remaining: n(oldF.years_remaining ?? oldF.years_away ?? oldFire.years_away),
+    progress_pct: n(oldF.progress_pct ?? oldFire.progress_pct ?? raw.fire_progress),
+    fire_year: n(oldF.fire_year ?? oldFire.fire_year ?? raw.fire_year), semi_fire_year: n(oldF.semi_fire_year),
+    target_capital: n(oldF.target_capital ?? oldFire.target_capital), investable: n(oldF.investable ?? oldFire.investable),
+    on_track: b(oldF.on_track ?? oldFire.on_track), accelerator: s(oldF.accelerator),
+  };
+  const oldPW = raw.property_watch ?? {};
+  const property_watch = {
+    buy_score: n(oldPW.buy_score ?? 5), wait_score: n(oldPW.wait_score ?? 5),
+    borrowing_power: n(oldPW.borrowing_power), deposit_ready: n(oldPW.deposit_ready), market_summary: s(oldPW.market_summary),
+  };
+  const oldTA = raw.tax_alpha ?? {};
+  const tax_alpha = {
+    neg_gearing_benefit: n(oldTA.neg_gearing_benefit), super_room_remaining: n(oldTA.super_room_remaining),
+    estimated_refund: s(oldTA.estimated_refund) || 'N/A', tips: Array.isArray(oldTA.tips) ? oldTA.tips : [],
+  };
+  const wS = n(raw.wealth_score ?? raw.scores?.wealth);
+  const cS = n(raw.cashflow_score ?? raw.scores?.cashflow);
+  const rS = n(raw.risk_score ?? raw.scores?.risk);
+  const dS = n(raw.discipline_score ?? raw.scores?.discipline);
+  const scores = {
+    wealth: n(raw.scores?.wealth ?? wS), cashflow: n(raw.scores?.cashflow ?? cS),
+    risk: n(raw.scores?.risk ?? rS), discipline: n(raw.scores?.discipline ?? dS),
+    opportunity: n(raw.scores?.opportunity),
+    overall: n(raw.scores?.overall ?? Math.round((wS + cS + rS + dS) / 4)),
+  };
+  return {
+    ...raw,
+    week_date: s(raw.week_date) || new Date().toISOString().split('T')[0],
+    generated_at: s(raw.generated_at) || s(raw.week_date) || new Date().toISOString(),
+    scores, snapshot, cashflow, investment, fire, property_watch, tax_alpha,
+    risk_alerts:        Array.isArray(raw.risk_alerts)  ? raw.risk_alerts  : (Array.isArray(raw.alerts) ? raw.alerts : []),
+    top_expenses:       Array.isArray(raw.top_expenses) ? raw.top_expenses : [],
+    spending_insight:   s(raw.spending_insight),
+    smart_action:       s(raw.smart_action ?? raw.best_move),
+    smart_action_value: s(raw.smart_action_value),
+    cfo_insight:        s(raw.cfo_insight ?? raw.summary),
+    opportunities:      Array.isArray(raw.opportunities) ? raw.opportunities : [],
+  } as CFOBulletin;
 }
 
 // ─── Traffic dot ──────────────────────────────────────────────────────────────
