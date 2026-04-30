@@ -302,9 +302,14 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
             <div className={`text-base font-bold ${surplusUp ? "text-emerald-400" : "text-red-400"}`}>
               {mv(fmt(snap.monthly_surplus))}
             </div>
-            <div className="text-[11px] text-slate-400 mt-0.5 leading-snug" title="Income minus Expenses (matches Dashboard calculation)">
-              {mv(fmt(snap.monthly_income ?? 0))}&nbsp;in&nbsp;−&nbsp;{mv(fmt(snap.monthly_expenses ?? 0))}&nbsp;out
-            </div>
+            {/* Only show income/expense breakdown if both values are available */}
+            {snap.monthly_income > 0 ? (
+              <div className="text-[11px] text-slate-400 mt-0.5 leading-snug" title="Income minus Expenses (matches Dashboard calculation)">
+                {mv(fmt(snap.monthly_income))}&nbsp;in&nbsp;−&nbsp;{mv(fmt(snap.monthly_expenses))}&nbsp;out
+              </div>
+            ) : (
+              <div className="text-[11px] text-slate-500 mt-0.5">Regenerate for breakdown</div>
+            )}
           </div>
           {/* KPI 6: Debt Ratio */}
           <KpiTile
@@ -739,22 +744,44 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
 // AND new CFOBulletin rows. Fully reconstructs every sub-object from any source.
 function normaliseBulletin(raw: any): CFOBulletin | null {
   if (!raw) return null;
-  // Already new format — scores.overall AND snapshot.debt_ratio both numeric
-  if (
-    raw.scores && typeof raw.scores.overall === 'number' &&
-    raw.snapshot && typeof raw.snapshot.debt_ratio === 'number'
-  ) return raw as CFOBulletin;
-
-  // Old snapshot had `snapshot.fire` nested; new has flat snapshot.fire_progress_pct
-  const oldSnap = raw.snapshot ?? {};
-  const oldFire = oldSnap.fire ?? {};
 
   const n = (v: any) => (typeof v === 'number' && isFinite(v) ? v : 0);
   const s = (v: any) => (typeof v === 'string' ? v : '');
   const b = (v: any) => (typeof v === 'boolean' ? v : true);
 
+  // Fast-path: only trust as complete if ALL key KPI fields are non-zero
+  // Specifically: total_assets must be present (old snapshots have 0 here)
+  // and monthly_income must be present (old snapshots omit this field)
+  if (
+    raw.scores && typeof raw.scores.overall === 'number' &&
+    raw.snapshot && typeof raw.snapshot.debt_ratio === 'number' &&
+    n(raw.snapshot.total_assets) > 0 &&
+    n(raw.snapshot.monthly_income) > 0
+  ) return raw as CFOBulletin;
+
+  // Full reconstruction — handles old format AND new format with missing fields
+  // Old snapshot shape: { cash, net_worth, offset_balance, monthly_surplus, fire: { ... } }
+  // Flat DB columns available: networth, debt_total, portfolio_value, monthly_surplus, fire_year, fire_progress, cash
+  const oldSnap = raw.snapshot ?? {};
+  const oldFire = oldSnap.fire ?? {};
+
+  // Reconstruct core values from every possible source
+  const nw         = n(oldSnap.net_worth         ?? raw.networth);
+  const totalDebt  = n(oldSnap.total_debt        ?? raw.debt_total);
+  // If total_assets not stored, derive: assets = net_worth + debt
+  const storedTA   = n(oldSnap.total_assets);
+  const totalAssets = storedTA > 0 ? storedTA : (nw + totalDebt > 0 ? nw + totalDebt : 0);
+  // Derive debt_ratio from reconstructed values — never trust stored 0
+  const debtRatio  = totalAssets > 0 ? totalDebt / totalAssets : n(oldSnap.debt_ratio);
+
+  // Surplus: stored monthly_surplus is the best single number we have
+  const surplus    = n(oldSnap.monthly_surplus ?? raw.monthly_surplus);
+  // monthly_income / expenses: if stored use them, otherwise they're unknown from old format
+  const mIncome    = n(oldSnap.monthly_income  ?? raw.monthly_income);
+  const mExpenses  = n(oldSnap.monthly_expenses ?? raw.monthly_expenses);
+
   const snapshot = {
-    net_worth:              n(oldSnap.net_worth         ?? raw.networth),
+    net_worth:              nw,
     net_worth_delta:        n(oldSnap.net_worth_delta   ?? raw.networth_delta),
     cash_everyday:          n(oldSnap.cash_everyday     ?? oldSnap.cash ?? raw.cash),
     cash_savings:           n(oldSnap.cash_savings),
@@ -763,16 +790,16 @@ function normaliseBulletin(raw: any): CFOBulletin | null {
     offset_balance:         n(oldSnap.offset_balance),
     liquid_cash:            n(oldSnap.liquid_cash       ?? oldSnap.cash ?? raw.cash),
     offset_interest_saving: n(oldSnap.offset_interest_saving),
-    monthly_income:         n(oldSnap.monthly_income    ?? raw.monthly_income    ?? raw.networth_income),
-    monthly_expenses:       n(oldSnap.monthly_expenses  ?? raw.monthly_expenses  ?? raw.networth_expenses),
-    monthly_surplus:        n(oldSnap.monthly_surplus   ?? raw.monthly_surplus),
-    debt_ratio:             n(oldSnap.debt_ratio),
+    monthly_income:         mIncome,
+    monthly_expenses:       mExpenses,
+    monthly_surplus:        surplus,
+    debt_ratio:             debtRatio,
     fire_progress_pct:      n(oldSnap.fire_progress_pct ?? oldFire.progress_pct ?? raw.fire_progress),
     years_to_fire:          n(oldSnap.years_to_fire     ?? oldFire.years_away),
     fire_year:              n(oldSnap.fire_year         ?? oldFire.fire_year    ?? raw.fire_year),
     fire_on_track:          b(oldSnap.fire_on_track     ?? oldFire.on_track),
-    total_assets:           n(oldSnap.total_assets),
-    total_debt:             n(oldSnap.total_debt        ?? raw.debt_total),
+    total_assets:           totalAssets,
+    total_debt:             totalDebt,
     portfolio_value:        n(oldSnap.portfolio_value   ?? raw.portfolio_value),
     super_combined:         n(oldSnap.super_combined),
   };
@@ -883,7 +910,12 @@ export default function AIWeeklyCFOPage() {
   const displayRow = selectedId
     ? rows.find((r: any) => r.id === selectedId)
     : rows[0];
-  const report: CFOBulletin | null = normaliseBulletin(displayRow?.json_payload);
+  // Pass BOTH the json_payload AND the flat DB row columns so normaliseBulletin
+  // can fall back to flat columns (debt_total, networth, wealth_score etc.) when
+  // the json_payload is an old-format object missing those fields.
+  const report: CFOBulletin | null = normaliseBulletin(
+    displayRow ? { ...displayRow, ...(displayRow.json_payload ?? {}) } : null
+  );
 
   const handleGenerate = useCallback(async () => {
     setGenerating(true);
@@ -972,7 +1004,7 @@ export default function AIWeeklyCFOPage() {
               </div>
               <div className="space-y-1">
                 {rows.map((row: any) => {
-                  const b = normaliseBulletin(row.json_payload);
+                  const b = normaliseBulletin({ ...row, ...(row.json_payload ?? {}) });
                   const score = b ? b.scores?.overall : null;
                   const isActive = row.id === (selectedId ?? rows[0]?.id);
                   return (

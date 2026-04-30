@@ -260,9 +260,10 @@ export async function saveCFOReport(report: CFOBulletin, telegramSent: boolean):
     telegram_sent:    telegramSent,
     json_payload:     report,   // full bulletin for in-app viewer
   };
+  // UPSERT by week_date — re-generating same week replaces stale row
   await fetch(`${SB_URL}/rest/v1/sf_cfo_reports`, {
     method: 'POST',
-    headers: SB_HDR,
+    headers: { ...SB_HDR, Prefer: 'resolution=merge-duplicates,return=representation' },
     body: JSON.stringify(row),
   });
   await saveCFOSettings({ last_run_at: new Date().toISOString() });
