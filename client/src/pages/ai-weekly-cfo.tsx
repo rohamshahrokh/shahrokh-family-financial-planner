@@ -5,7 +5,7 @@
  * Uses CFOBulletin type (new engine). Fields accessed via nested objects:
  *   report.scores.*        report.snapshot.*     report.cashflow.*
  *   report.investment.*    report.fire.*         report.property_watch.*
- *   report.tax_alpha.*     report.risk_alerts    report.risk_radar.*   report.top_expenses
+ *   report.tax_alpha.*     report.risk_alerts    report.risk_radar.*   report.fire_path.*   report.top_expenses
  */
 
 import { useState, useCallback } from "react";
@@ -206,7 +206,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
   const mv = (val: string) => maskValue(val, privacyMode, "currency");
   const [showAllBills, setShowAllBills] = useState(false);
 
-  const { scores, snapshot: snap, cashflow, investment, fire, property_watch: pw, tax_alpha, risk_alerts, risk_radar } = report;
+  const { scores, snapshot: snap, cashflow, investment, fire, property_watch: pw, tax_alpha, risk_alerts, risk_radar, fire_path } = report;
   const nwUp     = snap.net_worth_delta >= 0;
   const surplusUp = snap.monthly_surplus >= 0;
 
@@ -816,6 +816,47 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
             </p>
           </div>
         )}
+
+        {/* FIRE Path Optimizer callout */}
+        {fire_path && (
+          <div
+            className="mt-4 rounded-xl px-4 py-3"
+            style={{ background: 'rgba(249,115,22,0.08)', border: '1px solid rgba(249,115,22,0.22)' }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Zap size={12} className="text-orange-400" />
+              <p className="text-[11px] font-semibold text-orange-400 uppercase tracking-wider">Fastest Path to FIRE</p>
+            </div>
+            <p className="text-xs font-bold text-slate-100 mb-1">
+              Option {fire_path.best_scenario === 'etf' ? 'B' : fire_path.best_scenario === 'property' ? 'A' : fire_path.best_scenario === 'mixed' ? 'C' : 'D'} — {fire_path.best_label} → FIRE in {fire_path.best_fire_year}
+            </p>
+            <p className="text-[11px] text-slate-400 leading-relaxed mb-2">{fire_path.recommendation}</p>
+            <div className="grid grid-cols-2 gap-2">
+              {(fire_path.scenarios as any[]).map((s: any, i: number) => {
+                const letters = ['A','B','C','D'];
+                const colors = ['#f59e0b','#22c55e','#38bdf8','#a855f7'];
+                const isBest = s.id === fire_path.best_scenario;
+                return (
+                  <div
+                    key={s.id}
+                    className="rounded-lg px-2.5 py-2"
+                    style={{
+                      background: isBest ? 'rgba(249,115,22,0.10)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${isBest ? 'rgba(249,115,22,0.30)' : 'rgba(255,255,255,0.07)'}`,
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400">{letters[i]}. {s.label}</span>
+                      {isBest && <span className="text-[8px] text-orange-400 font-bold">⚡</span>}
+                    </div>
+                    <p className="text-sm font-bold" style={{ color: isBest ? '#f97316' : colors[i] }}>{s.fire_year}</p>
+                    <p className="text-[9px] text-slate-500">{s.risk_level} risk</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </Section>
 
       {/* ── Section 9: Tax Alpha ─────────────────────────────────────────── */}
@@ -1062,6 +1103,7 @@ function normaliseBulletin(raw: any): CFOBulletin | null {
     tax_alpha,
     risk_alerts:        Array.isArray(raw.risk_alerts)  ? raw.risk_alerts  : (Array.isArray(raw.alerts) ? raw.alerts : []),
     risk_radar:         raw.risk_radar ?? null,
+    fire_path:          raw.fire_path ?? null,
     top_expenses:       Array.isArray(raw.top_expenses) ? raw.top_expenses : [],
     spending_insight:   s(raw.spending_insight),
     smart_action:       s(raw.smart_action      ?? raw.best_move),

@@ -11,6 +11,7 @@
 import { safeNum } from './finance';
 import { computeTaxAlpha, buildTaxAlphaInput, type TaxAlphaResult } from './taxAlphaEngine';
 import { computeRiskRadar, buildRiskInput } from './riskEngine';
+import { computeFirePath, buildFirePathInput, type FIREPathResult } from './firePathEngine';
 import { computeBestMove, type BestMoveResult } from './bestMoveEngine';
 import { computeAllScenarios, defaultScenarioInputs } from './propertyBuyEngine';
 
@@ -193,6 +194,27 @@ export interface CFOBulletin {
 
   // 9. FIRE tracker
   fire:         CFOFireTracker;
+
+  // 9b. FIRE Fastest Path
+  fire_path: {
+    best_scenario:   string;
+    best_label:      string;
+    best_fire_year:  number;
+    fastest_vs_slowest_years: number;
+    target_capital:  number;
+    current_progress_pct: number;
+    semi_fire_year:  number;
+    recommendation:  string;
+    scenarios: Array<{
+      id:              string;
+      label:           string;
+      fire_year:       number;
+      years_to_fire:   number;
+      risk_level:      string;
+      monthly_passive_at_fire: number;
+      annual_invest:   number;
+    }>;
+  };
 
   // 10. Tax alpha
   tax_alpha:    CFOTaxAlpha;
@@ -810,6 +832,32 @@ export async function generateCFOReport(
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // SECTION 9b: FIRE FASTEST PATH — powered by firePathEngine.ts
+  // ═══════════════════════════════════════════════════════════════════════════
+  const firePathInput  = buildFirePathInput(snap, billRows ?? []);
+  const firePathResult: FIREPathResult = computeFirePath(firePathInput);
+
+  const firePath = {
+    best_scenario:            firePathResult.best_scenario,
+    best_label:               firePathResult.best_label,
+    best_fire_year:           firePathResult.best_fire_year,
+    fastest_vs_slowest_years: firePathResult.fastest_vs_slowest_years,
+    target_capital:           firePathResult.target_capital,
+    current_progress_pct:     firePathResult.current_progress_pct,
+    semi_fire_year:           firePathResult.semi_fire_year,
+    recommendation:           firePathResult.recommendation,
+    scenarios: firePathResult.scenarios.map(s => ({
+      id:                      s.id,
+      label:                   s.label,
+      fire_year:               s.fire_year,
+      years_to_fire:           s.years_to_fire,
+      risk_level:              s.risk_level,
+      monthly_passive_at_fire: s.monthly_passive_at_fire,
+      annual_invest:           s.annual_invest,
+    })),
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // SECTION 10: TAX ALPHA — powered by taxAlphaEngine.ts
   // ═══════════════════════════════════════════════════════════════════════════
   const taxAlphaInput  = buildTaxAlphaInput(snap, propRows ?? []);
@@ -982,6 +1030,7 @@ export async function generateCFOReport(
       top_mitigations: riskResult.top_mitigations,
     },
     fire,
+    fire_path:         firePath,
     tax_alpha:         taxAlpha,
     property_buy_signal: propertyBuyResult ? {
       best_label:  propertyBuyResult.best_label,

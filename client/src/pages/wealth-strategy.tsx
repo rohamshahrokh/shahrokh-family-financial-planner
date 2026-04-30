@@ -6,6 +6,7 @@
 
 import SaveButton from "@/components/SaveButton";
 import RiskRadarPage from "./risk-radar";
+import FIREPathPage from "./fire-path";
 import { useState, useMemo, useCallback } from "react";
 import html2canvas from 'html2canvas';
 import { useQuery } from "@tanstack/react-query";
@@ -212,6 +213,7 @@ const TABS = [
   { id: "coach", label: "AI Coach", icon: Brain },
   { id: "action-plan", label: "Action Plan", icon: Zap },
   { id: "risk-radar",  label: "Risk Radar",   icon: Shield },
+  { id: "fire-path",   label: "FIRE Path",     icon: Flame  },
 ];
 
 // ─── Month simulation helper ──────────────────────────────────────────────────
@@ -2806,6 +2808,8 @@ export default function WealthStrategyPage() {
       }
       case "risk-radar":
         return <RiskRadarPage />;
+      case "fire-path":
+        return <FIREPathPage />;
       default:
         return null;
     }
