@@ -159,6 +159,65 @@ export interface FireMCSettings {
   simulationCount:        number;   // 1000 | 5000 | 10000
 }
 
+// ─── Plan Input Types ───────────────────────────────────────────────────────
+
+export interface FireMCPlanInput {
+  properties:           PropertyForPlan[];
+  stockDCASchedules:    DCAForPlan[];
+  cryptoDCASchedules:   DCAForPlan[];
+  plannedStockOrders:   PlannedOrderForPlan[];
+  plannedCryptoOrders:  PlannedOrderForPlan[];
+  bills:                BillForPlan[];
+  ngAnnualBenefit?:     number;
+}
+
+export interface PropertyForPlan {
+  settlement_date?:  string;
+  purchase_date?:    string;
+  rental_start_date?: string;
+  deposit:           number;
+  stamp_duty?:       number;
+  legal_fees?:       number;
+  loan_setup_fees?:  number;
+  renovation_costs?: number;
+  building_inspection?: number;
+  loan_amount:       number;
+  interest_rate:     number;
+  loan_term:         number;
+  weekly_rent:       number;
+  rental_growth:     number;
+  vacancy_rate:      number;
+  management_fee:    number;
+  council_rates?:    number;
+  insurance?:        number;
+  maintenance?:      number;
+  water_rates?:      number;
+  body_corporate?:   number;
+  land_tax?:         number;
+  name?:             string;
+}
+
+export interface DCAForPlan {
+  enabled:    boolean;
+  amount:     number;
+  frequency:  string;   // 'weekly' | 'fortnightly' | 'monthly'
+  start_date: string;
+  end_date?:  string | null;
+}
+
+export interface PlannedOrderForPlan {
+  action:       string;  // 'buy' | 'sell'
+  amount_aud:   number;
+  planned_date: string;
+  status:       string;  // 'planned'
+}
+
+export interface BillForPlan {
+  amount:     number;
+  frequency:  string;
+  is_active?: boolean;
+}
+
 // ─── Result types ─────────────────────────────────────────────────────────────
 
 export interface FireFanPoint {
@@ -371,9 +430,26 @@ export function applyPreset(base: FireMCSettings, key: PresetKey): FireMCSetting
   return { ...base, ...PRESET_OVERRIDES[key] };
 }
 
+// ─── Plan-level helpers ──────────────────────────────────────────────────────
+
+function dcaMonthlyFromPlan(amount: number, frequency: string): number {
+  switch (frequency) {
+    case 'weekly':      return amount * (52 / 12);
+    case 'fortnightly': return amount * (26 / 12);
+    case 'monthly':     return amount;
+    case 'quarterly':   return amount / 3;
+    default:            return amount;
+  }
+}
+
+function dateToMonthIndex(dateStr: string, currentYear: number): number {
+  const d = new Date(dateStr);
+  return (d.getFullYear() - currentYear) * 12 + d.getMonth();
+}
+
 // ─── MAIN ENGINE ─────────────────────────────────────────────────────────────
 
-export function runFireMonteCarlo(settings: FireMCSettings): FireMCResult {
+export function runFireMonteCarlo(settings: FireMCSettings, planInput?: FireMCPlanInput): FireMCResult {
   const startTime = Date.now();
   const s = settings;
   const N_SIM = Math.max(100, Math.min(10000, safeNum(s.simulationCount) || 5000));
@@ -402,6 +478,142 @@ export function runFireMonteCarlo(settings: FireMCSettings): FireMCResult {
 
   // ── Cholesky decomposition once (all sims share the same correlation matrix) ──
   const L = buildCholesky(s.rhoStocksCrypto, s.rhoInflationRates, s.rhoRatesProperty, s.rhoStocksProperty);
+
+  // ── Pre-compute plan-level deterministic cash deltas ──────────────────────
+  // These override/augment the scalar settings for properties, DCA, and lump sums.
+  // Structure: monthDeltasCash[mi] = net cash delta from plan events in that month
+  //            monthDeltasPropEquity[mi] = { value, loan } deltas for each IP
+  //            monthDeltasStocks[mi] = cash outflow going INTO stocks (DCA + buys)
+  //            monthDeltasCrypto[mi] = cash outflow going INTO crypto
+
+  // Per-month net cash flows from plan (outflows negative, inflows positive)
+  const planCashDelta:   Float64Array = new Float64Array(N_MONTHS);
+  const planStockDelta:  Float64Array = new Float64Array(N_MONTHS); // $ added to stocks
+  const planCryptoDelta: Float64Array = new Float64Array(N_MONTHS); // $ added to crypto
+
+  // Investment properties from plan — each carries its own value + loan state
+  interface PlanIPState {
+    settledAtMi:    number;
+    rentalStartMi:  number;
+    initialValue:   number;
+    loanAmount:     number;
+    interestRate:   number;  // % pa
+    loanTerm:       number;  // years
+    weeklyRent:     number;
+    rentalGrowth:   number;  // % pa
+    vacancyRate:    number;  // %
+    managementFee:  number;  // %
+    monthlyHolding: number;  // sum of council/insurance/maintenance etc /12
+    purchaseCosts:  number;  // deposit + stamp duty + legal etc
+  }
+  const planIPStates: PlanIPState[] = [];
+
+  if (planInput) {
+    // ── Investment properties ──
+    for (const prop of planInput.properties) {
+      const settleDateStr = prop.settlement_date || prop.purchase_date;
+      const settledAtMi = settleDateStr
+        ? dateToMonthIndex(settleDateStr, currentYear)
+        : 0;
+      const rentalStartMi = prop.rental_start_date
+        ? dateToMonthIndex(prop.rental_start_date, currentYear)
+        : settledAtMi + 1;
+
+      const purchaseCosts =
+        safeNum(prop.deposit) +
+        safeNum(prop.stamp_duty) +
+        safeNum(prop.legal_fees) +
+        safeNum(prop.loan_setup_fees) +
+        safeNum(prop.renovation_costs) +
+        safeNum(prop.building_inspection);
+
+      const monthlyHolding = (
+        safeNum(prop.council_rates) +
+        safeNum(prop.insurance) +
+        safeNum(prop.maintenance) +
+        safeNum(prop.water_rates) +
+        safeNum(prop.body_corporate) +
+        safeNum(prop.land_tax)
+      ) / 12;
+
+      planIPStates.push({
+        settledAtMi,
+        rentalStartMi,
+        initialValue:  safeNum(prop.loan_amount) + safeNum(prop.deposit),
+        loanAmount:    safeNum(prop.loan_amount),
+        interestRate:  safeNum(prop.interest_rate) || 6.5,
+        loanTerm:      safeNum(prop.loan_term) || 30,
+        weeklyRent:    safeNum(prop.weekly_rent),
+        rentalGrowth:  safeNum(prop.rental_growth) || 3,
+        vacancyRate:   safeNum(prop.vacancy_rate),
+        managementFee: safeNum(prop.management_fee),
+        monthlyHolding,
+        purchaseCosts,
+      });
+
+      // Deduct purchase costs in settlement month
+      if (settledAtMi >= 0 && settledAtMi < N_MONTHS) {
+        planCashDelta[settledAtMi] -= purchaseCosts;
+      }
+    }
+
+    // ── Stock DCA ──
+    for (const dca of planInput.stockDCASchedules) {
+      if (!dca.enabled) continue;
+      const startMi  = dateToMonthIndex(dca.start_date, currentYear);
+      const endMi    = dca.end_date ? dateToMonthIndex(dca.end_date, currentYear) : N_MONTHS - 1;
+      const monthly  = dcaMonthlyFromPlan(safeNum(dca.amount), dca.frequency);
+      for (let mi = Math.max(0, startMi); mi <= Math.min(N_MONTHS - 1, endMi); mi++) {
+        planCashDelta[mi]  -= monthly;
+        planStockDelta[mi] += monthly;
+      }
+    }
+
+    // ── Crypto DCA ──
+    for (const dca of planInput.cryptoDCASchedules) {
+      if (!dca.enabled) continue;
+      const startMi  = dateToMonthIndex(dca.start_date, currentYear);
+      const endMi    = dca.end_date ? dateToMonthIndex(dca.end_date, currentYear) : N_MONTHS - 1;
+      const monthly  = dcaMonthlyFromPlan(safeNum(dca.amount), dca.frequency);
+      for (let mi = Math.max(0, startMi); mi <= Math.min(N_MONTHS - 1, endMi); mi++) {
+        planCashDelta[mi]   -= monthly;
+        planCryptoDelta[mi] += monthly;
+      }
+    }
+
+    // ── Planned stock lump-sum orders ──
+    for (const order of planInput.plannedStockOrders) {
+      if (order.status !== 'planned') continue;
+      const mi = dateToMonthIndex(order.planned_date, currentYear);
+      if (mi >= 0 && mi < N_MONTHS) {
+        const sign = order.action === 'buy' ? 1 : -1;
+        planCashDelta[mi]  -= sign * safeNum(order.amount_aud);
+        planStockDelta[mi] += sign * safeNum(order.amount_aud);
+      }
+    }
+
+    // ── Planned crypto lump-sum orders ──
+    for (const order of planInput.plannedCryptoOrders) {
+      if (order.status !== 'planned') continue;
+      const mi = dateToMonthIndex(order.planned_date, currentYear);
+      if (mi >= 0 && mi < N_MONTHS) {
+        const sign = order.action === 'buy' ? 1 : -1;
+        planCashDelta[mi]   -= sign * safeNum(order.amount_aud);
+        planCryptoDelta[mi] += sign * safeNum(order.amount_aud);
+      }
+    }
+
+    // ── Bills (already embedded in expenses baseline — but if bills are SEPARATE, add them) ──
+    // Bills are already folded into s.startMonthlyExpenses in the default path.
+    // When planInput provides them explicitly, they are additional outflows:
+    for (const bill of planInput.bills) {
+      if (bill.is_active === false) continue;
+      const monthly = dcaMonthlyFromPlan(safeNum(bill.amount), bill.frequency || 'monthly');
+      for (let mi = 0; mi < N_MONTHS; mi++) {
+        planCashDelta[mi] -= monthly;
+      }
+    }
+  }
 
   // ── Property purchase month index (deterministic event) ──────────────────
   const propBuyMi = (s.propNextBuyYear && s.propNextBuyPrice)
@@ -434,6 +646,24 @@ export function runFireMonteCarlo(settings: FireMCSettings): FireMCResult {
 
   // ── Mortgage baseline — deterministic repayment ignoring random rate shocks ──
   const baseMonthlyRepayment = calcMonthlyRepayment(s.startMortgage, initialMortgageRate, mortgageTermYears);
+
+  // ── Per-simulation IP state arrays for plan-driven path ────────────────
+  // Flat arrays: [sim * MAX_IPS + ipIdx] = value or loan balance
+  const MAX_IPS = 10;
+  const ipValues = planInput && planIPStates.length > 0
+    ? new Float64Array(N_SIM * MAX_IPS)
+    : null as unknown as Float64Array;
+  const ipLoans  = planInput && planIPStates.length > 0
+    ? new Float64Array(N_SIM * MAX_IPS)
+    : null as unknown as Float64Array;
+  if (planInput && planIPStates.length > 0) {
+    for (let sim2 = 0; sim2 < N_SIM; sim2++) {
+      for (let ipIdx = 0; ipIdx < planIPStates.length && ipIdx < MAX_IPS; ipIdx++) {
+        ipValues[sim2 * MAX_IPS + ipIdx] = planIPStates[ipIdx].initialValue;
+        ipLoans [sim2 * MAX_IPS + ipIdx] = planIPStates[ipIdx].loanAmount;
+      }
+    }
+  }
 
   // ── Main simulation loop ──────────────────────────────────────────────────
   for (let sim = 0; sim < N_SIM; sim++) {
@@ -571,12 +801,43 @@ export function runFireMonteCarlo(settings: FireMCSettings): FireMCResult {
 
       expenses *= (1 + safeNum(inflShock) + s.meanExpenseGrowth / 100 / 12);
 
-      // ── Investment property (acquired at propBuyMi) ──
-      let propRent = 0;
+      // ── Investment properties — plan-driven or legacy scalar ──────────────
+      let propRent  = 0;
       let propRepay = 0;
-      if (propBuyMi >= 0) {
+
+      if (planInput && planIPStates.length > 0) {
+        // ── Plan-driven path: iterate all real IPs from planInput ──
+        for (let ipIdx = 0; ipIdx < planIPStates.length; ipIdx++) {
+          const ip = planIPStates[ipIdx];
+          if (mi < ip.settledAtMi) continue;  // not yet settled
+
+          // Grow IP value by stochastic property return
+          ipValues[sim * MAX_IPS + ipIdx]   *= (1 + propRet);
+          const ipV   = ipValues[sim * MAX_IPS + ipIdx];
+          const ipL   = ipLoans[sim * MAX_IPS + ipIdx];
+
+          // Monthly loan repayment
+          const ipRate     = effectiveRatePct / 100 / 12;
+          const ipInterest = ipL * ipRate;
+          const ipRepayAmt = calcMonthlyRepayment(ip.loanAmount, effectiveRatePct, ip.loanTerm);
+          ipLoans[sim * MAX_IPS + ipIdx] = Math.max(0, ipL - Math.max(0, ipRepayAmt - ipInterest));
+          propRepay += ipRepayAmt;
+
+          // Rental income + holding costs (from rental start)
+          if (mi >= ip.rentalStartMi) {
+            const monthsSinceRental = mi - ip.rentalStartMi;
+            const yearsSinceRental  = monthsSinceRental / 12;
+            const annRent = ip.weeklyRent * 52
+              * (1 - ip.vacancyRate / 100)
+              * (1 - ip.managementFee / 100)
+              * Math.pow(1 + ip.rentalGrowth / 100, yearsSinceRental);
+            propRent += annRent / 12;
+            propRepay += ip.monthlyHolding;  // holding costs are an outflow
+          }
+        }
+      } else if (propBuyMi >= 0) {
+        // ── Legacy scalar path: single propNextBuy from settings ──
         if (mi === propBuyMi && !propAcquired) {
-          // Acquire investment property — deduct deposit from cash
           const buyPrice   = safeNum(s.propNextBuyPrice) || 800000;
           const depositAmt = buyPrice * s.propNextBuyDepositPct / 100;
           const loanAmt    = buyPrice - depositAmt;
@@ -588,12 +849,12 @@ export function runFireMonteCarlo(settings: FireMCSettings): FireMCResult {
         }
         if (propAcquired && mi >= invPropStartMi) {
           invPropValue *= (1 + propRet);
-          const invRate    = effectiveRatePct / 100 / 12;
+          const invRate     = effectiveRatePct / 100 / 12;
           const invInterest = invPropLoan * invRate;
-          propRepay        = calcMonthlyRepayment(safeNum(s.propNextBuyPrice) * (1 - s.propNextBuyDepositPct / 100), effectiveRatePct, 30);
-          invPropLoan      = Math.max(0, invPropLoan - Math.max(0, propRepay - invInterest));
-          const annRent    = safeNum(s.propNextRentPw) * 52 * 0.95;  // ~5% vacancy
-          propRent         = annRent / 12;
+          propRepay         = calcMonthlyRepayment(safeNum(s.propNextBuyPrice) * (1 - s.propNextBuyDepositPct / 100), effectiveRatePct, 30);
+          invPropLoan       = Math.max(0, invPropLoan - Math.max(0, propRepay - invInterest));
+          const annRent     = safeNum(s.propNextRentPw) * 52 * 0.95;
+          propRent          = annRent / 12;
         }
       }
 
@@ -616,10 +877,26 @@ export function runFireMonteCarlo(settings: FireMCSettings): FireMCResult {
       }
 
       // ── Net monthly cashflow ──
+      // Plan-driven additional cash deltas (DCA buys, lump sums, bill overrides)
+      const planDelta = planInput ? planCashDelta[mi] : 0;
       const monthlyCF = effectiveIncomeThisMonth + propRent + cashInterest + oneOffCash
-        - expenses - pporRepay - propRepay;
+        - expenses - pporRepay - propRepay + planDelta;
+
+      // Plan-driven asset accumulation (DCA stocks/crypto flowing in)
+      if (planInput) {
+        stocks += planStockDelta[mi];
+        crypto += planCryptoDelta[mi];
+      }
 
       cash += monthlyCF;
+
+      // NG tax benefit from plan (lump-sum in August each year)
+      if (planInput && planInput.ngAnnualBenefit && planInput.ngAnnualBenefit > 0) {
+        const calMonth = ((mi % 12) + 1);  // 1-based calendar month
+        if (calMonth === 8) {
+          cash += planInput.ngAnnualBenefit;
+        }
+      }
 
       // Super guarantee (9.5% pa → added to super monthly, not cash)
       superBal += effectiveIncomeThisMonth * 0.115 / 12;
@@ -650,7 +927,15 @@ export function runFireMonteCarlo(settings: FireMCSettings): FireMCResult {
       // We use SWR on total investable NW
       const currentAge = s.currentAge + mi / 12;
       const superAccessible = currentAge >= 60 ? superBal : 0;
-      const invPropEquity = Math.max(0, invPropValue - invPropLoan);
+      let invPropEquity = Math.max(0, invPropValue - invPropLoan);
+      if (planInput && planIPStates.length > 0) {
+        invPropEquity = 0;
+        for (let ipIdx = 0; ipIdx < planIPStates.length && ipIdx < MAX_IPS; ipIdx++) {
+          if (mi >= planIPStates[ipIdx].settledAtMi) {
+            invPropEquity += Math.max(0, ipValues[sim * MAX_IPS + ipIdx] - ipLoans[sim * MAX_IPS + ipIdx]);
+          }
+        }
+      }
       const investableNW = stocks + crypto + superAccessible + invPropEquity + Math.max(0, cash - 30000);
       const passiveIncomeEstimate = investableNW * s.swrPct / 100 / 12
         + (propRent > 0 ? propRent : 0);
@@ -679,9 +964,19 @@ export function runFireMonteCarlo(settings: FireMCSettings): FireMCResult {
 
       // ── Year-end snapshots ──
       if ((mi + 1) % 12 === 0) {
+        // Sum all plan IPs' equity
+        let planIPEquity = 0;
+        if (planInput && planIPStates.length > 0) {
+          for (let ipIdx = 0; ipIdx < planIPStates.length && ipIdx < MAX_IPS; ipIdx++) {
+            if (yi * 12 >= planIPStates[ipIdx].settledAtMi) {
+              planIPEquity += Math.max(0, ipValues[sim * MAX_IPS + ipIdx] - ipLoans[sim * MAX_IPS + ipIdx]);
+            }
+          }
+        }
         const totalNW = ppor + cash + superBal + stocks + crypto
-          + invPropValue
-          - mortgage - otherDebts - invPropLoan;
+          + (planInput && planIPStates.length > 0 ? planIPEquity : invPropValue)
+          - mortgage - otherDebts
+          - (planInput && planIPStates.length > 0 ? 0 : invPropLoan);
         yearNWSnapshots[yi][sim] = totalNW;
 
         if (s.compareOffsetVsEtf) {
@@ -693,8 +988,16 @@ export function runFireMonteCarlo(settings: FireMCSettings): FireMCResult {
         // Snapshot at target FIRE age
         const ageAtYearEnd = s.currentAge + yi + 1;
         if (ageAtYearEnd === s.targetFireAge) {
+          let planIPEqTarget = 0;
+          if (planInput && planIPStates.length > 0) {
+            for (let ipIdx = 0; ipIdx < planIPStates.length && ipIdx < MAX_IPS; ipIdx++) {
+              planIPEqTarget += Math.max(0, ipValues[sim * MAX_IPS + ipIdx] - ipLoans[sim * MAX_IPS + ipIdx]);
+            }
+          }
           nwAtTargetAge[sim] = ppor + cash + superBal + stocks + crypto
-            + invPropValue - mortgage - otherDebts - invPropLoan;
+            + (planInput && planIPStates.length > 0 ? planIPEqTarget : invPropValue)
+            - mortgage - otherDebts
+            - (planInput && planIPStates.length > 0 ? 0 : invPropLoan);
         }
       }
     }
@@ -882,5 +1185,53 @@ export function runFireMonteCarlo(settings: FireMCSettings): FireMCResult {
     ranAt:           new Date().toISOString(),
     simulationCount: N_SIM,
     runtimeMs:       Date.now() - startTime,
+  };
+}
+
+// ─── PLAN VALIDATION HELPER ──────────────────────────────────────────────────
+// Used by MyFinancialPlan.tsx to show event counts before running simulation.
+
+export interface PlanValidationSummary {
+  propertyCount:          number;
+  plannedStockOrderCount: number;
+  plannedCryptoOrderCount:number;
+  activeStockDCACount:    number;
+  activeCryptoDCACount:   number;
+  totalMonthlyDCA:        number;   // total DCA per month (approx at start)
+  totalLumpSums:          number;   // total one-off investment $ planned
+  ngAnnualBenefit:        number;
+  firstSettlementDate:    string | null;
+}
+
+export function validatePlanInput(planInput: FireMCPlanInput): PlanValidationSummary {
+  const activeStockDCA   = planInput.stockDCASchedules.filter(d => d.enabled);
+  const activeCryptoDCA  = planInput.cryptoDCASchedules.filter(d => d.enabled);
+  const totalMonthlyDCA  =
+    activeStockDCA.reduce((s, d) => s + dcaMonthlyFromPlan(d.amount, d.frequency), 0) +
+    activeCryptoDCA.reduce((s, d) => s + dcaMonthlyFromPlan(d.amount, d.frequency), 0);
+
+  const plannedBuysStock  = planInput.plannedStockOrders.filter(o => o.status === 'planned' && o.action === 'buy');
+  const plannedBuysCrypto = planInput.plannedCryptoOrders.filter(o => o.status === 'planned' && o.action === 'buy');
+  const totalLumpSums =
+    plannedBuysStock.reduce((s, o) => s + o.amount_aud, 0) +
+    plannedBuysCrypto.reduce((s, o) => s + o.amount_aud, 0);
+
+  const settlementDates = planInput.properties
+    .map(p => p.settlement_date || p.purchase_date)
+    .filter(Boolean) as string[];
+  const firstSettlementDate = settlementDates.length > 0
+    ? settlementDates.sort()[0]
+    : null;
+
+  return {
+    propertyCount:           planInput.properties.length,
+    plannedStockOrderCount:  plannedBuysStock.length,
+    plannedCryptoOrderCount: plannedBuysCrypto.length,
+    activeStockDCACount:     activeStockDCA.length,
+    activeCryptoDCACount:    activeCryptoDCA.length,
+    totalMonthlyDCA:         Math.round(totalMonthlyDCA),
+    totalLumpSums:           Math.round(totalLumpSums),
+    ngAnnualBenefit:         planInput.ngAnnualBenefit ?? 0,
+    firstSettlementDate,
   };
 }

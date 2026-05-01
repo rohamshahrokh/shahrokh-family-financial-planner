@@ -42,6 +42,7 @@ import BudgetPage           from "./pages/budget";
 import MarketNewsPage       from "./pages/market-news";
 import AIForecastEnginePage from "./pages/ai-forecast-engine";
 import AIWeeklyCFOPage         from "./pages/ai-weekly-cfo";
+import MyFinancialPlanPage     from "./pages/financial-plan";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -165,6 +166,9 @@ function AppRouter() {
         </Route>
         <Route path="/ai-weekly-cfo">
           <ProtectedRoute component={AIWeeklyCFOPage} title="AI Weekly CFO" />
+        </Route>
+        <Route path="/financial-plan">
+          <ProtectedRoute component={MyFinancialPlanPage} title="My Financial Plan" />
         </Route>
         {/* 404 */}
         <Route component={NotFound} />

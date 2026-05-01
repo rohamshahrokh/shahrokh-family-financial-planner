@@ -45,6 +45,7 @@ import {
   applyPreset,
   type FireMCSettings,
   type FireMCResult,
+  type FireMCPlanInput,
   type PresetKey,
 } from "@/lib/fireMonteCarlo";
 import SaveButton from "@/components/SaveButton";
@@ -220,6 +221,81 @@ export default function MonteCarloDashboard() {
   const { data: snapshot } = useQuery<any>({
     queryKey: ['/api/snapshot'],
   });
+
+  // ── Plan data for unified ledger simulation ──
+  const { data: planProperties }   = useQuery<any[]>({ queryKey: ['/api/properties'] });
+  const { data: planStockDCA }     = useQuery<any[]>({ queryKey: ['/api/stock-dca'] });
+  const { data: planCryptoDCA }    = useQuery<any[]>({ queryKey: ['/api/crypto-dca'] });
+  const { data: planStockOrders }  = useQuery<any[]>({ queryKey: ['/api/planned-investments?module=stock'] });
+  const { data: planCryptoOrders } = useQuery<any[]>({ queryKey: ['/api/planned-investments?module=crypto'] });
+  const { data: planBills }        = useQuery<any[]>({ queryKey: ['/api/bills'] });
+
+  // ── Build FireMCPlanInput from real data ──
+  const planInput = useMemo<FireMCPlanInput | undefined>(() => {
+    if (!planProperties && !planStockDCA && !planCryptoDCA) return undefined;
+    const investmentProps = (planProperties ?? []).filter((p: any) => p.type !== 'ppor');
+    if (!investmentProps.length && !(planStockDCA ?? []).length && !(planCryptoDCA ?? []).length &&
+        !(planStockOrders ?? []).length && !(planCryptoOrders ?? []).length) return undefined;
+    return {
+      properties: investmentProps.map((p: any) => ({
+        settlement_date:   p.settlement_date ?? p.purchase_date,
+        purchase_date:     p.purchase_date,
+        rental_start_date: p.rental_start_date,
+        deposit:           p.deposit           ?? 0,
+        stamp_duty:        p.stamp_duty        ?? 0,
+        legal_fees:        p.legal_fees        ?? 0,
+        loan_setup_fees:   p.loan_setup_fees   ?? 0,
+        renovation_costs:  p.renovation_costs  ?? 0,
+        building_inspection: p.building_inspection ?? 0,
+        loan_amount:       p.loan_amount       ?? 0,
+        interest_rate:     p.interest_rate     ?? 6.5,
+        loan_term:         p.loan_term         ?? 30,
+        weekly_rent:       p.weekly_rent       ?? 0,
+        rental_growth:     p.rental_growth     ?? 3,
+        vacancy_rate:      p.vacancy_rate      ?? 0,
+        management_fee:    p.management_fee    ?? 0,
+        council_rates:     p.council_rates     ?? 0,
+        insurance:         p.insurance         ?? 0,
+        maintenance:       p.maintenance       ?? 0,
+        water_rates:       p.water_rates       ?? 0,
+        body_corporate:    p.body_corporate    ?? 0,
+        land_tax:          p.land_tax          ?? 0,
+        name:              p.name ?? p.address,
+      })),
+      stockDCASchedules: (planStockDCA ?? []).map((d: any) => ({
+        enabled:    d.enabled ?? true,
+        amount:     d.amount  ?? 0,
+        frequency:  d.frequency ?? 'weekly',
+        start_date: d.start_date,
+        end_date:   d.end_date,
+      })),
+      cryptoDCASchedules: (planCryptoDCA ?? []).map((d: any) => ({
+        enabled:    d.enabled ?? true,
+        amount:     d.amount  ?? 0,
+        frequency:  d.frequency ?? 'weekly',
+        start_date: d.start_date,
+        end_date:   d.end_date,
+      })),
+      plannedStockOrders: (planStockOrders ?? []).map((o: any) => ({
+        action:       o.action        ?? 'buy',
+        amount_aud:   o.amount_aud    ?? 0,
+        planned_date: o.planned_date,
+        status:       o.status        ?? 'planned',
+      })),
+      plannedCryptoOrders: (planCryptoOrders ?? []).map((o: any) => ({
+        action:       o.action        ?? 'buy',
+        amount_aud:   o.amount_aud    ?? 0,
+        planned_date: o.planned_date,
+        status:       o.status        ?? 'planned',
+      })),
+      bills: (planBills ?? []).filter((b: any) => b.is_active !== false).map((b: any) => ({
+        amount:    b.amount    ?? 0,
+        frequency: b.frequency ?? 'monthly',
+        is_active: b.is_active,
+      })),
+      ngAnnualBenefit: snapshot?.ng_annual_benefit ?? 0,
+    };
+  }, [planProperties, planStockDCA, planCryptoDCA, planStockOrders, planCryptoOrders, planBills, snapshot]);
 
   // ── Build active settings (DB row merged with defaults) ──
   const [localSettings, setLocalSettings] = useState<FireMCSettings>(DEFAULT_FIRE_MC_SETTINGS);
@@ -417,7 +493,7 @@ export default function MonteCarloDashboard() {
     try {
       // Run in a microtask to allow React to render the loading state first
       await new Promise<void>(resolve => setTimeout(resolve, 50));
-      const result = runFireMonteCarlo(localSettings);
+      const result = runFireMonteCarlo(localSettings, planInput);
       setDisplayResult(result);
 
       // Persist result to Supabase
@@ -457,7 +533,7 @@ export default function MonteCarloDashboard() {
       setRunningScenario(key);
       await new Promise<void>(resolve => setTimeout(resolve, 30));
       const s = applyPreset({ ...localSettings, simulationCount: 1000 }, key);
-      const r = runFireMonteCarlo(s);
+      const r = runFireMonteCarlo(s, planInput);
       setScenarioResults(prev => ({ ...prev, [key]: r }));
     }
     setRunningScenario(null);
@@ -546,6 +622,18 @@ export default function MonteCarloDashboard() {
           <SaveButton onSave={handleSave}/>
         </div>
       </div>
+
+      {/* ── Plan data indicator bar ── */}
+      {planInput && (
+        <div className="text-xs flex flex-wrap items-center gap-x-4 gap-y-1 bg-emerald-950/30 border border-emerald-800/40 rounded-lg px-3 py-2">
+          <span className="text-emerald-400 font-semibold flex items-center gap-1">
+            <CheckCircle className="w-3.5 h-3.5"/> Unified Plan Active
+          </span>
+          <span className="text-muted-foreground">{planInput.properties.length} propert{planInput.properties.length === 1 ? 'y' : 'ies'}</span>
+          <span className="text-muted-foreground">{[...planInput.stockDCASchedules, ...planInput.cryptoDCASchedules].filter(d => d.enabled).length} DCA schedules</span>
+          <span className="text-muted-foreground">{[...planInput.plannedStockOrders, ...planInput.plannedCryptoOrders].filter(o => o.status === 'planned').length} planned orders</span>
+        </div>
+      )}
 
       {/* ── Run info bar ── */}
       {displayResult && (
