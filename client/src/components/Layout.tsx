@@ -365,12 +365,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <aside
         className={`
           fixed lg:static inset-y-0 left-0 z-50
-          flex flex-col w-56 shrink-0
-          bg-card
+          flex flex-col w-52 shrink-0
           transform transition-transform duration-200
           ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
         `}
-        style={{ borderRight: "1px solid hsl(var(--border))" }}
+        style={{
+          background: "hsl(222 25% 6%)",
+          borderRight: "1px solid hsl(var(--border) / 0.7)",
+        }}
       >
         <SidebarContent />
       </aside>
