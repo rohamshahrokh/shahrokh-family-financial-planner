@@ -319,27 +319,28 @@ export default function DashboardPage() {
   const savingsRate   = calcSavingsRate(snap.monthly_income, surplus);
 
   // ─── NG Summary ───────────────────────────────────────────────────────────
-  const ngSummary = useMemo<NGSummary>(() =>
-    calcNegativeGearing({ properties, annualSalaryIncome: snap.monthly_income * 12, refundMode: ngRefundMode }),
-    [properties, snap.monthly_income, ngRefundMode]
-  );
+  const ngSummary = useMemo<NGSummary>(() => {
+    if (!snapshot) return { totalAnnualTaxBenefit: 0, perProperty: [] } as NGSummary;
+    return calcNegativeGearing({ properties, annualSalaryIncome: snap.monthly_income * 12, refundMode: ngRefundMode });
+  }, [snapshot, properties, snap.monthly_income, ngRefundMode]);
 
   // ─── Projection ───────────────────────────────────────────────────────────
-  const projection = useMemo(() =>
-    projectNetWorth({
+  const projection = useMemo(() => {
+    if (!snapshot) return [];
+    return projectNetWorth({
       snap: { ...snap, offset_balance: snap.offset_balance },
       expenses, properties, stocks: stocksTotal, crypto: cryptoTotal,
       plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules,
       plannedStockOrders, plannedCryptoOrders, fa,
       ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
-    }),
-    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngRefundMode, ngSummary.totalAnnualTaxBenefit]
-  );
+    });
+  }, [snapshot, snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
   const year10NW      = projection[9]?.endNetWorth || netWorth;
   const passiveIncome = projection[0]?.passiveIncome || 0;
 
   // ─── Cash engine with events ──────────────────────────────────────────────
   const cashEngineResult = useMemo(() => {
+    if (!snapshot) return null;
     try {
       return runCashEngine({
         snap, expenses, properties,
@@ -350,7 +351,7 @@ export default function DashboardPage() {
         ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
       });
     } catch { return null; }
-  }, [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
+  }, [snapshot, snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
 
   // ─── NW chart data ────────────────────────────────────────────────────────
   const nwGrowthData = useMemo(() => {
@@ -370,15 +371,15 @@ export default function DashboardPage() {
   }, [nwGrowthData, chartRange]);
 
   // ─── Cashflow series ──────────────────────────────────────────────────────
-  const cashFlowSeries = useMemo(
-    () => buildCashFlowSeries({
+  const cashFlowSeries = useMemo(() => {
+    if (!snapshot) return [];
+    return buildCashFlowSeries({
       snap, expenses, properties,
       plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules,
       plannedStockOrders, plannedCryptoOrders, fa,
       ngRefundMode, ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
-    }),
-    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]
-  );
+    });
+  }, [snapshot, snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
   const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
 
   // ─── Master CF data with event markers ───────────────────────────────────
