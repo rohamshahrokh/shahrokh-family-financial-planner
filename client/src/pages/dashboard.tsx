@@ -183,6 +183,7 @@ export default function DashboardPage() {
   const [chartRange, setChartRange] = useState<"1Y" | "3Y" | "10Y" | "Scenario">("10Y");
   const [mainChartMode, setMainChartMode] = useState<"networth" | "cashflow">("cashflow");
   const [cfChartAnnotations, setCfChartAnnotations] = useState(true);
+  const [wdcTab, setWdcTab] = useState<"CASH" | "EVENTS" | "WEALTH" | "RISK">("CASH");
   const cashFlowView = chartView;
 
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1103,333 +1104,381 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          10-YEAR NW CHART + ASSET ALLOCATION DONUT
+          WEALTH DECISION CENTER
           ═════════════════════════════════════════════════════════════════ */}
       <div className="px-4 pb-4">
+        {/* Section header */}
+        <div className="mb-4">
+          <div className="text-lg font-bold text-foreground tracking-tight">Wealth Decision Center</div>
+          <div className="text-xs text-muted-foreground mt-0.5">Your money today, future path, and next best moves.</div>
+        </div>
+
+        {/* Main layout: 70% chart + 30% panel */}
         <div className="flex flex-col lg:flex-row gap-4">
 
-          {/* 10-Year Net Worth Growth chart (~60%) */}
-          <div className="flex-[3] rounded-2xl border border-border bg-card p-5 min-w-0">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="text-base font-bold text-foreground">10-Year Net Worth Growth</div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  {maskValue(formatCurrency(netWorth, true), privacyMode)} → {maskValue(formatCurrency(year10NW, true), privacyMode)} projected
-                </div>
-              </div>
-              <div className="flex gap-1">
-                {(["1Y","3Y","10Y"] as const).map(r => (
-                  <button
-                    key={r}
-                    onClick={() => setChartRange(r)}
-                    className={`px-2 py-1 rounded text-xs font-medium transition-all ${chartRange === r ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground border border-border"}`}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div style={{ height: 220 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={filteredNWData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="gNWMain" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="hsl(210,75%,52%)" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="hsl(210,75%,52%)" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="gAssetsMain" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="hsl(145,55%,42%)" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="hsl(145,55%,42%)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(222 15% 18% / 0.5)" vertical={false} />
-                  <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} />
-                  <YAxis tickFormatter={(v) => `$${(v/1000000).toFixed(1)}M`} tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} width={52} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="assets"   name="Total Assets" stroke="hsl(145,55%,42%)" strokeWidth={1.5} fill="url(#gAssetsMain)" dot={false} />
-                  <Area type="monotone" dataKey="netWorth" name="Net Worth"     stroke="hsl(210,75%,52%)" strokeWidth={2.5} fill="url(#gNWMain)"    dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="flex gap-4 mt-2">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className="w-2.5 h-2.5 rounded-full bg-blue-400 inline-block" />Net Worth</div>
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />Total Assets</div>
-            </div>
-          </div>
+          {/* LEFT: Interactive Smart Chart */}
+          <div className="flex-[7] min-w-0 rounded-2xl border border-border bg-card p-5">
 
-          {/* Asset Allocation donut (~40%) */}
-          <div className="flex-[2] rounded-2xl border border-border bg-card p-5 min-w-0">
-            <div className="text-base font-bold text-foreground mb-1">Asset Allocation</div>
-            <div className="text-xs text-muted-foreground mb-3">{maskValue(formatCurrency(totalAssets, true), privacyMode)} total</div>
-            <div style={{ position: "relative", height: 160 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={assetAllocData}
-                    cx="50%" cy="50%"
-                    innerRadius={50} outerRadius={74}
-                    paddingAngle={2}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {assetAllocData.map((entry, idx) => (
-                      <Cell key={idx} fill={entry.fill} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<DonutTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center", pointerEvents: "none" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "hsl(215 20% 88%)" }}>{maskValue(formatCurrency(totalAssets, true), privacyMode)}</div>
-                <div style={{ fontSize: 9, color: "hsl(215 12% 48%)" }}>Total Assets</div>
-              </div>
-            </div>
-            <div className="mt-3 space-y-1.5">
-              {assetAllocData.map((d) => (
-                <div key={d.name} className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.fill }} />
-                  <span className="text-xs text-muted-foreground flex-1">{d.name}</span>
-                  <span className="text-xs font-semibold text-foreground tabular-nums">{d.pct.toFixed(1)}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          MONTHLY CASHFLOW BAR + EXPENSE BREAKDOWN DONUT
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4">
-        <div className="flex flex-col md:flex-row gap-4">
-
-          {/* Monthly Cash Flow bar chart (~50%) */}
-          <div className="flex-1 rounded-2xl border border-border bg-card p-5 min-w-0">
-            <div className="text-base font-bold text-foreground mb-1">Monthly Cash Flow</div>
-            <div style={{ height: 160 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyCFBarData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(222 15% 18% / 0.5)" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} />
-                  <YAxis tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} width={44} />
-                  <Tooltip formatter={(v: any) => [formatCurrency(v, true), ""]} />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                    {monthlyCFBarData.map((_, i) => (
-                      <Cell key={i} fill={MONTHLY_CF_COLORS[i]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-border">
-              <div className="text-center">
-                <div className="text-xs text-muted-foreground mb-0.5">Income</div>
-                <div className="text-sm font-bold text-emerald-400 tabular-nums">{maskValue(formatCurrency(snap.monthly_income, true), privacyMode)}</div>
-              </div>
-              <div className="text-center">
-                <div className="text-xs text-muted-foreground mb-0.5">Expenses</div>
-                <div className="text-sm font-bold text-red-400 tabular-nums">{maskValue(formatCurrency(snap.monthly_expenses + monthlyMortgageRepay, true), privacyMode)}</div>
-              </div>
-              <div className="text-center">
-                <div className="text-xs text-muted-foreground mb-0.5">Surplus</div>
-                <div className={`text-sm font-bold tabular-nums ${surplus >= 0 ? "text-amber-400" : "text-red-400"}`}>{maskValue(formatCurrency(surplus, true), privacyMode)}</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Expense Breakdown donut (~50%) */}
-          <div className="flex-1 rounded-2xl border border-border bg-card p-5 min-w-0">
-            <div className="text-base font-bold text-foreground mb-1">Expense Breakdown</div>
-            <div className="text-xs text-muted-foreground mb-2">{maskValue(formatCurrency(snap.monthly_expenses + monthlyMortgageRepay, true), privacyMode)}/mo total</div>
-            {expenseBreakdown.length > 0 ? (
-              <div style={{ height: 150 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={expenseBreakdown}
-                      cx="50%" cy="50%"
-                      innerRadius={40} outerRadius={65}
-                      paddingAngle={2}
-                      dataKey="value"
-                      stroke="none"
-                    >
-                      {expenseBreakdown.map((_, i) => (
-                        <Cell key={i} fill={["hsl(5,70%,52%)","hsl(20,80%,55%)","hsl(40,85%,55%)","hsl(188,60%,48%)","hsl(260,60%,58%)","hsl(145,55%,42%)","hsl(210,75%,52%)"][i % 7]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: any) => [formatCurrency(v, true) + "/mo", ""]} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No expense categories</div>
-            )}
-            <div className="mt-2 space-y-1">
-              {expenseBreakdown.slice(0, 5).map((e, i) => (
-                <div key={e.name} className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: ["hsl(5,70%,52%)","hsl(20,80%,55%)","hsl(40,85%,55%)","hsl(188,60%,48%)","hsl(260,60%,58%)"][i] }} />
-                  <span className="text-xs text-muted-foreground flex-1">{e.name}</span>
-                  <span className="text-xs font-semibold tabular-nums">{maskValue(formatCurrency(e.value, true), privacyMode)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          MASTER CASHFLOW FORECAST — EXECUTIVE CHART
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4">
-        <div className="rounded-2xl border border-border bg-card p-5">
-
-          {/* ─ Header ───────────────────────────────────────────────────────── */}
-          <div className="flex flex-col sm:flex-row sm:items-start gap-2 mb-4">
-            <div className="flex-1">
-              <div className="text-base font-bold text-foreground">Master Cash Flow Forecast</div>
-              <div className="text-xs text-muted-foreground mt-0.5">
-                10-year outlook · Cash balance + annual net cashflow · Key milestones on timeline
-              </div>
-            </div>
-            <div className="flex gap-1.5 items-center flex-wrap">
-              <button
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${ngRefundMode === "lump-sum" ? "bg-primary/20 text-primary border border-primary/40" : "text-muted-foreground border border-border hover:text-foreground"}`}
-                onClick={() => setNgRefundMode("lump-sum")}
-              >Lump-sum</button>
-              <button
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${ngRefundMode === "payg" ? "bg-primary/20 text-primary border border-primary/40" : "text-muted-foreground border border-border hover:text-foreground"}`}
-                onClick={() => setNgRefundMode("payg")}
-              >PAYG</button>
-              <Link href="/reports"><span className="text-xs text-primary hover:underline ml-2">Deep Dive →</span></Link>
-            </div>
-          </div>
-
-          {/* ─ KPI row ─────────────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
-            {[
-              { label: "Cash Today",          val: formatCurrency(cfFirst.balance ?? 0, true),   color: "hsl(210,80%,65%)" },
-              { label: `${(new Date().getFullYear()+9)} Cash`,   val: formatCurrency(cfLast.balance ?? 0, true),    color: "hsl(142,60%,52%)" },
-              { label: "Annual Net CF",        val: formatCurrency(cfFirst.netCF ?? 0, true),    color: (cfFirst.netCF ?? 0) >= 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)" },
-              { label: "Est. Tax Refund/yr",   val: `+${formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}`, color: "hsl(43,90%,58%)" },
-            ].map(k => (
-              <div key={k.label} className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
-                <div className="text-xs text-muted-foreground mb-1">{k.label}</div>
-                <div className="text-sm font-bold tabular-nums" style={{ color: k.color }}>{maskValue(k.val, privacyMode)}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* ─ Main executive chart ──────────────────────────────────────── */}
-          <div style={{ height: 280 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={masterCFData} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="balGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%"   stopColor="hsl(210,80%,62%)" stopOpacity={0.22} />
-                    <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,18%)" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 10, fill: "hsl(215,12%,48%)", fontWeight: 600 }}
-                  axisLine={false} tickLine={false}
-                />
-                {/* Left Y axis — cash balance */}
-                <YAxis
-                  yAxisId="bal"
-                  orientation="left"
-                  tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`}
-                  tick={{ fontSize: 9, fill: "hsl(215,12%,40%)" }}
-                  axisLine={false} tickLine={false} width={50}
-                />
-                {/* Right Y axis — net CF bars */}
-                <YAxis
-                  yAxisId="cf"
-                  orientation="right"
-                  tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`}
-                  tick={{ fontSize: 9, fill: "hsl(215,12%,40%)" }}
-                  axisLine={false} tickLine={false} width={46}
-                />
-
-                <Tooltip content={<CashflowTooltip />} cursor={{ fill: "hsl(222,15%,18%)", fillOpacity: 0.5 }} />
-                <ReferenceLine yAxisId="cf" y={0} stroke="hsl(222,15%,28%)" strokeDasharray="3 3" />
-
-                {/* Milestone reference lines */}
-                {masterCFData.map((d: any) =>
-                  (d._milestones?.length > 0) ? (
-                    <ReferenceLine
-                      key={d.label}
-                      yAxisId="bal"
-                      x={d.label}
-                      stroke="hsl(43,80%,52%)"
-                      strokeDasharray="4 3"
-                      strokeOpacity={0.5}
-                      strokeWidth={1}
-                    />
-                  ) : null
-                )}
-
-                {/* Net cashflow bars (green positive / red negative) */}
-                <Bar
-                  yAxisId="cf"
-                  dataKey="netCF"
-                  name="Net Cashflow"
-                  radius={[3,3,0,0]}
-                  maxBarSize={36}
+            {/* Tab bar */}
+            <div className="flex gap-1 mb-4 flex-wrap">
+              {(["CASH","EVENTS","WEALTH","RISK"] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setWdcTab(tab)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all ${
+                    wdcTab === tab
+                      ? "bg-primary/15 text-primary border border-primary/30"
+                      : "text-muted-foreground border border-transparent hover:text-foreground hover:border-border"
+                  }`}
                 >
-                  {masterCFData.map((d: any, i: number) => (
-                    <Cell
-                      key={i}
-                      fill={(d.netCF ?? 0) >= 0 ? "hsl(142,55%,42%)" : "hsl(0,65%,52%)"}
-                      fillOpacity={0.75}
-                    />
+                  {tab}
+                </button>
+              ))}
+              {wdcTab === "CASH" && (
+                <div className="ml-auto flex gap-1.5 items-center">
+                  <button
+                    className={`px-2 py-1 rounded text-xs font-medium transition-all ${ngRefundMode === "lump-sum" ? "bg-primary/20 text-primary border border-primary/30" : "text-muted-foreground border border-border hover:text-foreground"}`}
+                    onClick={() => setNgRefundMode("lump-sum")}
+                  >Lump-sum</button>
+                  <button
+                    className={`px-2 py-1 rounded text-xs font-medium transition-all ${ngRefundMode === "payg" ? "bg-primary/20 text-primary border border-primary/30" : "text-muted-foreground border border-border hover:text-foreground"}`}
+                    onClick={() => setNgRefundMode("payg")}
+                  >PAYG</button>
+                </div>
+              )}
+              {wdcTab === "WEALTH" && (
+                <div className="ml-auto flex gap-1">
+                  {(["1Y","3Y","10Y"] as const).map(r => (
+                    <button key={r} onClick={() => setChartRange(r)}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-all ${chartRange === r ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground border border-border"}`}
+                    >{r}</button>
                   ))}
-                </Bar>
+                </div>
+              )}
+            </div>
 
-                {/* Cash balance area + line — primary signal */}
-                <Area
-                  yAxisId="bal"
-                  type="monotone"
-                  dataKey="balance"
-                  name="Cash Balance"
-                  stroke="hsl(210,80%,65%)"
-                  strokeWidth={2.5}
-                  fill="url(#balGrad)"
-                  dot={<MilestoneDot />}
-                  activeDot={{ r: 5, fill: "hsl(210,80%,65%)", strokeWidth: 0 }}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
+            {/* TAB: CASH */}
+            {wdcTab === "CASH" && (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                  {[
+                    { label: "Cash Today",    val: formatCurrency(cfFirst.balance ?? 0, true), color: "hsl(210,80%,65%)" },
+                    { label: `${new Date().getFullYear()+9} Cash`, val: formatCurrency(cfLast.balance ?? 0, true), color: "hsl(142,60%,52%)" },
+                    { label: "Annual Net CF", val: formatCurrency(cfFirst.netCF ?? 0, true), color: (cfFirst.netCF??0)>=0?"hsl(142,60%,52%)":"hsl(0,72%,58%)" },
+                    { label: "Tax Refund/yr", val: `+${formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}`, color: "hsl(43,90%,58%)" },
+                  ].map(k => (
+                    <div key={k.label} className="rounded-xl bg-background/60 border border-border px-3 py-2">
+                      <div className="text-xs text-muted-foreground mb-0.5">{k.label}</div>
+                      <div className="text-sm font-bold tabular-nums" style={{ color: k.color }}>{maskValue(k.val, privacyMode)}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ height: 255 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={masterCFData} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="wdcBalGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%"   stopColor="hsl(210,80%,62%)" stopOpacity={0.20} />
+                          <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.01} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,17%)" vertical={false} />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(215,12%,45%)", fontWeight: 600 }} axisLine={false} tickLine={false} />
+                      <YAxis yAxisId="bal" orientation="left" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={50} />
+                      <YAxis yAxisId="cf" orientation="right" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={44} />
+                      <Tooltip content={<CashflowTooltip />} cursor={{ fill: "hsl(222,15%,16%)", fillOpacity: 0.6 }} />
+                      <ReferenceLine yAxisId="cf" y={0} stroke="hsl(222,15%,26%)" strokeDasharray="3 3" />
+                      {masterCFData.map((d: any) =>
+                        d._milestones?.length > 0 ? (
+                          <ReferenceLine key={d.label} yAxisId="bal" x={d.label}
+                            stroke="hsl(43,80%,50%)" strokeDasharray="4 3" strokeOpacity={0.45} strokeWidth={1} />
+                        ) : null
+                      )}
+                      <Bar yAxisId="cf" dataKey="netCF" name="Net Cashflow" radius={[3,3,0,0]} maxBarSize={32}>
+                        {masterCFData.map((d: any, i: number) => (
+                          <Cell key={i} fill={(d.netCF??0)>=0 ? "hsl(142,55%,40%)" : "hsl(0,65%,50%)"} fillOpacity={0.7} />
+                        ))}
+                      </Bar>
+                      <Area yAxisId="bal" type="monotone" dataKey="balance" name="Cash Balance"
+                        stroke="hsl(210,80%,65%)" strokeWidth={2.5} fill="url(#wdcBalGrad)"
+                        dot={<MilestoneDot />} activeDot={{ r: 5, fill: "hsl(210,80%,65%)", strokeWidth: 0 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-3 pt-3 border-t border-border">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="inline-block w-6 h-0.5 rounded" style={{ background: "hsl(210,80%,65%)" }} />Cash Balance
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(142,55%,40%)", opacity: 0.8 }} />Net CF +
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(0,65%,50%)", opacity: 0.8 }} />Net CF &minus;
+                  </div>
+                  <div className="ml-auto flex flex-wrap gap-x-4 gap-y-1">
+                    {[
+                      { icon: "🏠", label: "Property",   color: "hsl(188,65%,52%)" },
+                      { icon: "📈", label: "Stocks",     color: "hsl(210,80%,65%)" },
+                      { icon: "₿",  label: "Crypto",     color: "hsl(262,70%,65%)" },
+                      { icon: "💰", label: "Tax Refund", color: "hsl(43,90%,58%)"  },
+                    ].map(m => (
+                      <div key={m.label} className="flex items-center gap-1 text-xs" style={{ color: m.color }}>
+                        <span>{m.icon}</span><span style={{ opacity: 0.8 }}>{m.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* TAB: EVENTS */}
+            {wdcTab === "EVENTS" && (
+              <div className="py-1">
+                <div className="text-xs text-muted-foreground mb-5">Milestone timeline — your wealth journey mapped out</div>
+                <div className="relative">
+                  <div className="absolute left-[18px] top-0 bottom-0 w-px bg-border" />
+                  <div className="space-y-0">
+                    {[
+                      { year: new Date().getFullYear(), icon: "📍", label: "Deposit Build", sub: `${maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)} liquid today`, color: "hsl(210,80%,65%)", active: true },
+                      ...((properties as any[]).filter((p: any) => p.type !== "ppor" && p.settlement_date).map((p: any) => ({
+                        year: new Date(p.settlement_date).getFullYear(),
+                        icon: "🏠",
+                        label: `Buy IP — ${p.label || (p.address ?? "").split(",")[0] || "Investment Property"}`,
+                        sub: `Deposit ~${maskValue(formatCurrency(p.deposit ?? 0, true), privacyMode)} · Loan ${maskValue(formatCurrency(p.loan_amount ?? 0, true), privacyMode)}`,
+                        color: "hsl(188,65%,52%)",
+                        active: false,
+                      }))),
+                      ...((ordersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date).slice(0,2).map((o: any) => ({
+                        year: new Date(o.planned_date).getFullYear(),
+                        icon: "📈",
+                        label: `Stocks — ${maskValue(formatCurrency(o.total_cost ?? o.amount ?? 0, true), privacyMode)}`,
+                        sub: new Date(o.planned_date).toLocaleDateString("en-AU", { month: "short", year: "numeric" }),
+                        color: "hsl(210,80%,65%)",
+                        active: false,
+                      }))),
+                      ...((cryptoOrdersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date).slice(0,2).map((o: any) => ({
+                        year: new Date(o.planned_date).getFullYear(),
+                        icon: "₿",
+                        label: `Crypto — ${maskValue(formatCurrency(o.total_cost ?? o.amount ?? 0, true), privacyMode)}`,
+                        sub: new Date(o.planned_date).toLocaleDateString("en-AU", { month: "short", year: "numeric" }),
+                        color: "hsl(262,70%,65%)",
+                        active: false,
+                      }))),
+                      { year: new Date().getFullYear()+4, icon: "🔄", label: "Refinance", sub: "Review loan structure", color: "hsl(43,90%,58%)", active: false },
+                      { year: new Date().getFullYear()+6, icon: "✅", label: "Debt Reduction", sub: "Aggressive paydown begins", color: "hsl(142,60%,52%)", active: false },
+                      { year: parseInt(fireCard?.value?.replace("~","") ?? String(new Date().getFullYear()+9)), icon: "🔥", label: "FIRE Ready", sub: `Target age ${fireCard?.value ?? "—"} · ${maskValue(formatCurrency(fireTargetAmt, true), privacyMode)} portfolio`, color: "hsl(20,90%,60%)", active: false },
+                    ]
+                    .sort((a, b) => a.year - b.year)
+                    .map((ev, i) => (
+                      <div key={i} className="flex items-start gap-4 pb-6 last:pb-0 relative">
+                        <div className={`relative z-10 w-9 h-9 rounded-full flex items-center justify-center text-base shrink-0 border-2 ${ev.active ? "border-primary bg-primary/10" : "border-border bg-background"}`}>
+                          {ev.icon}
+                        </div>
+                        <div className="pt-1.5 flex-1 min-w-0">
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-xs font-bold tabular-nums" style={{ color: ev.color }}>{ev.year}</span>
+                            <span className="text-sm font-semibold text-foreground truncate">{ev.label}</span>
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{ev.sub}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: WEALTH */}
+            {wdcTab === "WEALTH" && (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                  {[
+                    { label: "Net Worth Now",   val: formatCurrency(netWorth, true),    color: "hsl(210,80%,65%)" },
+                    { label: "Total Assets",    val: formatCurrency(totalAssets, true), color: "hsl(142,60%,52%)" },
+                    { label: "Total Debt",      val: formatCurrency(totalLiab, true),   color: "hsl(0,72%,58%)"   },
+                    { label: `${new Date().getFullYear()+9} NW`, val: formatCurrency(year10NW, true), color: "hsl(43,90%,58%)" },
+                  ].map(k => (
+                    <div key={k.label} className="rounded-xl bg-background/60 border border-border px-3 py-2">
+                      <div className="text-xs text-muted-foreground mb-0.5">{k.label}</div>
+                      <div className="text-sm font-bold tabular-nums" style={{ color: k.color }}>{maskValue(k.val, privacyMode)}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ height: 220 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={filteredNWData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="wdcNWGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%"   stopColor="hsl(210,75%,55%)" stopOpacity={0.25} />
+                          <stop offset="100%" stopColor="hsl(210,75%,55%)" stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id="wdcAssetGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%"   stopColor="hsl(142,55%,42%)" stopOpacity={0.18} />
+                          <stop offset="100%" stopColor="hsl(142,55%,42%)" stopOpacity={0.01} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,17%)" vertical={false} />
+                      <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(215,12%,45%)" }} axisLine={false} tickLine={false} />
+                      <YAxis yAxisId="nw" orientation="left" tickFormatter={(v) => `$${(v/1000000).toFixed(1)}M`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={50} />
+                      <YAxis yAxisId="debt" orientation="right" tickFormatter={(v) => `$${(v/1000000).toFixed(1)}M`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={44} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Bar yAxisId="debt" dataKey="liabilities" name="Debt" fill="hsl(0,65%,50%)" fillOpacity={0.45} radius={[2,2,0,0]} maxBarSize={20} />
+                      <Area yAxisId="nw" type="monotone" dataKey="assets" name="Total Assets" stroke="hsl(142,55%,42%)" strokeWidth={1.5} fill="url(#wdcAssetGrad)" dot={false} />
+                      <Area yAxisId="nw" type="monotone" dataKey="netWorth" name="Net Worth" stroke="hsl(210,75%,60%)" strokeWidth={2.5} fill="url(#wdcNWGrad)" dot={false} activeDot={{ r: 5, fill: "hsl(210,75%,60%)", strokeWidth: 0 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-border">
+                  {assetAllocData.map((d: any) => (
+                    <div key={d.name} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.fill }} />
+                      {d.name} <span className="font-semibold text-foreground">{d.pct.toFixed(0)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* TAB: RISK */}
+            {wdcTab === "RISK" && (() => {
+              const liquidCash = snap.cash + snap.offset_balance;
+              const totalMonthlyOut = snap.monthly_expenses + monthlyMortgageRepay;
+              const monthsCov = totalMonthlyOut > 0 ? liquidCash / totalMonthlyOut : 0;
+              const debtRatio = snap.monthly_income > 0 ? totalLiab / (snap.monthly_income * 12) : 0;
+              const propPct = totalAssets > 0 ? (snap.ppor / totalAssets) * 100 : 0;
+              const mktPct = totalAssets > 0 ? ((stocksTotal + cryptoTotal) / totalAssets) * 100 : 0;
+              const risks = [
+                { label: "Liquidity Risk",         score: monthsCov >= 6 ? 10 : monthsCov >= 3 ? 40 : monthsCov >= 1 ? 70 : 95, detail: `${monthsCov.toFixed(1)} months covered`,         color: monthsCov >= 6 ? "hsl(142,55%,45%)" : monthsCov >= 3 ? "hsl(43,90%,52%)" : "hsl(0,72%,55%)",   rating: monthsCov >= 6 ? "Low" : monthsCov >= 3 ? "Moderate" : "High" },
+                { label: "Debt Risk",               score: debtRatio <= 3 ? 15 : debtRatio <= 5 ? 40 : debtRatio <= 8 ? 65 : 90, detail: `Debt/income: ${debtRatio.toFixed(1)}×`,         color: debtRatio <= 3 ? "hsl(142,55%,45%)" : debtRatio <= 5 ? "hsl(43,90%,52%)" : "hsl(0,72%,55%)",    rating: debtRatio <= 3 ? "Low" : debtRatio <= 5 ? "Moderate" : "High" },
+                { label: "Income Dependency",       score: 65,                                                                    detail: "Single primary income source",                  color: "hsl(43,90%,52%)",                                                                                 rating: "Moderate" },
+                { label: "Property Concentration",  score: propPct >= 70 ? 75 : propPct >= 50 ? 50 : 20,                         detail: `${propPct.toFixed(0)}% of assets in property`,  color: propPct >= 70 ? "hsl(0,72%,55%)" : propPct >= 50 ? "hsl(43,90%,52%)" : "hsl(142,55%,45%)",       rating: propPct >= 70 ? "High" : propPct >= 50 ? "Moderate" : "Low" },
+                { label: "Market Risk",             score: mktPct >= 30 ? 60 : mktPct >= 15 ? 35 : 15,                          detail: `${mktPct.toFixed(0)}% in stocks & crypto`,      color: mktPct >= 30 ? "hsl(43,90%,52%)" : "hsl(142,55%,45%)",                                            rating: mktPct >= 30 ? "Moderate" : "Low" },
+              ];
+              const overallScore = Math.round(risks.reduce((s, r) => s + r.score, 0) / risks.length);
+              const overallColor = overallScore >= 60 ? "hsl(0,72%,55%)" : overallScore >= 35 ? "hsl(43,90%,52%)" : "hsl(142,55%,45%)";
+              const overallRating = overallScore >= 60 ? "High" : overallScore >= 35 ? "Moderate" : "Low";
+              return (
+                <>
+                  <div className="flex items-center gap-4 mb-5 px-4 py-3 rounded-xl border border-border bg-background/60">
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-0.5">Overall Risk Score</div>
+                      <div className="text-2xl font-bold tabular-nums" style={{ color: overallColor }}>{overallScore}<span className="text-sm font-normal text-muted-foreground ml-0.5">/100</span></div>
+                    </div>
+                    <div className="h-8 w-px bg-border" />
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-0.5">Rating</div>
+                      <div className="text-base font-bold" style={{ color: overallColor }}>{overallRating} Risk</div>
+                    </div>
+                    <div className="ml-auto flex-1 max-w-[160px]">
+                      <div className="h-2 rounded-full bg-border overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${overallScore}%`, background: overallColor }} />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    {risks.map(r => (
+                      <div key={r.label}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-foreground">{r.label}</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded font-semibold" style={{ background: `${r.color}22`, color: r.color }}>{r.rating}</span>
+                          </div>
+                          <span className="text-xs text-muted-foreground">{r.detail}</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-border overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${r.score}%`, background: r.color }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+
           </div>
 
-          {/* ─ Legend + milestone key ───────────────────────────────────── */}
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3 pt-3 border-t border-border">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="inline-block w-6 h-0.5 rounded" style={{ background: "hsl(210,80%,65%)" }} />
-              Cash Balance
-            </div>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(142,55%,42%)", opacity: 0.8 }} />
-              Net CF +
-            </div>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(0,65%,52%)", opacity: 0.8 }} />
-              Net CF −
-            </div>
-            <div className="ml-auto flex flex-wrap gap-x-4 gap-y-1">
-              {[
-                { icon: "🏠", label: "Property", color: "hsl(188,65%,52%)" },
-                { icon: "📈", label: "Stocks",   color: "hsl(210,80%,65%)" },
-                { icon: "₿",  label: "Crypto",   color: "hsl(262,70%,65%)" },
-                { icon: "💰", label: "Tax Refund", color: "hsl(43,90%,58%)" },
-              ].map(m => (
-                <div key={m.label} className="flex items-center gap-1 text-xs" style={{ color: m.color }}>
-                  <span>{m.icon}</span><span style={{ opacity: 0.8 }}>{m.label}</span>
+          {/* RIGHT: Decision Cards */}
+          <div className="flex-[3] min-w-0 flex flex-col gap-3">
+
+            {/* 1. BEST MOVE NOW */}
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-lg bg-amber-500/15 flex items-center justify-center">
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
                 </div>
-              ))}
+                <span className="text-xs font-bold uppercase tracking-widest text-amber-400">Best Move Now</span>
+              </div>
+              <div className="text-sm font-semibold text-foreground leading-snug mb-1">{bestMoveTitle}</div>
+              <div className="text-xs text-muted-foreground">{bestMoveImpact}</div>
+              <div className="mt-2.5 flex items-center justify-between">
+                <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${bestMoveUrgency === "High" ? "bg-red-500/15 text-red-400" : "bg-amber-500/15 text-amber-400"}`}>{bestMoveUrgency} Priority</span>
+                <Link href={bestMoveHref}><span className="text-xs text-primary hover:underline">Take Action →</span></Link>
+              </div>
             </div>
+
+            {/* 2. NEXT MAJOR EVENT */}
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-lg bg-sky-500/15 flex items-center justify-center">
+                  <Calendar className="w-3.5 h-3.5 text-sky-400" />
+                </div>
+                <span className="text-xs font-bold uppercase tracking-widest text-sky-400">Next Major Event</span>
+              </div>
+              {nextPropEvent ? (
+                <>
+                  <div className="text-sm font-semibold text-foreground mb-0.5">{nextPropEvent.label}</div>
+                  <div className="text-xs text-muted-foreground">{nextPropEvent.monthKey}</div>
+                  <div className="mt-2.5"><Link href="/financial-plan"><span className="text-xs text-primary hover:underline">View Plan →</span></Link></div>
+                </>
+              ) : (
+                <div className="text-xs text-muted-foreground">No upcoming events scheduled</div>
+              )}
+            </div>
+
+            {/* 3. CASH WARNING */}
+            <div className={`rounded-2xl border p-4 ${lowestFutureCash < 20000 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${lowestFutureCash < 20000 ? "bg-red-500/15" : "bg-emerald-500/15"}`}>
+                  <AlertTriangle className={`w-3.5 h-3.5 ${lowestFutureCash < 20000 ? "text-red-400" : "text-emerald-400"}`} />
+                </div>
+                <span className={`text-xs font-bold uppercase tracking-widest ${lowestFutureCash < 20000 ? "text-red-400" : "text-emerald-400"}`}>Cash {lowestFutureCash < 20000 ? "Warning" : "Health"}</span>
+              </div>
+              <div className="text-sm font-semibold text-foreground mb-0.5">Lowest projected: {maskValue(formatCurrency(lowestFutureCash, true), privacyMode)}</div>
+              <div className="text-xs text-muted-foreground">{lowestFutureCash < 5000 ? "⚠️ Critical — review purchase timing" : lowestFutureCash < 20000 ? "Monitor closely around major purchases" : "Comfortable buffer maintained"}</div>
+            </div>
+
+            {/* 4. OPPORTUNITY */}
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-lg bg-emerald-500/15 flex items-center justify-center">
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                </div>
+                <span className="text-xs font-bold uppercase tracking-widest text-emerald-400">Opportunity</span>
+              </div>
+              <div className="text-sm font-semibold text-foreground mb-0.5">Tax refund: {maskValue(`+${formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}/yr`, privacyMode)}</div>
+              <div className="text-xs text-muted-foreground">{ngProperties.length > 0 ? `${ngProperties.length} negatively geared ${ngProperties.length === 1 ? "property" : "properties"} active` : "Add IPs to unlock NG benefits"}</div>
+              <div className="mt-2.5"><Link href="/tax-strategy"><span className="text-xs text-primary hover:underline">Tax Strategy →</span></Link></div>
+            </div>
+
+            {/* 5. FIRE TRACKER */}
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-lg bg-orange-500/15 flex items-center justify-center">
+                  <Flame className="w-3.5 h-3.5 text-orange-400" />
+                </div>
+                <span className="text-xs font-bold uppercase tracking-widest text-orange-400">FIRE Tracker</span>
+              </div>
+              <div className="text-sm font-semibold text-foreground mb-0.5">Target age: {fireCard?.value ?? "—"}</div>
+              <div className="text-xs text-muted-foreground mb-2">{maskValue(formatCurrency(fireCurrentAmt, true), privacyMode)} of {maskValue(formatCurrency(fireTargetAmt, true), privacyMode)} target</div>
+              <div className="h-1.5 rounded-full bg-border overflow-hidden">
+                <div className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400" style={{ width: `${Math.min(100, fireProgressPct)}%` }} />
+              </div>
+              <div className="flex items-center justify-between mt-1.5">
+                <span className="text-xs text-muted-foreground">{fireProgressPct.toFixed(0)}% funded</span>
+                <Link href="/wealth-strategy"><span className="text-xs text-primary hover:underline">FIRE Plan →</span></Link>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
