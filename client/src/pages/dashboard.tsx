@@ -58,6 +58,7 @@ import {
   Receipt,
   ChevronDown,
   ChevronRight,
+  Zap,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -736,646 +737,710 @@ export default function DashboardPage() {
     { label: "Monthly Expenses",    key: "monthly_expenses", group: "expense" },
   ] as const;
 
-  // ─── Render ───────────────────────────────────────────────────────────────
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-5 pb-8 animate-fade-up">
+    <div className="dashboard-root">
 
-      {/* ═══════════════════════════════════════════════════════════════════
-          NARRATIVE INTELLIGENCE BANNER
-          ════════════════════════════════════════════════════════════════ */}
-      <div className="narrative-banner">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-widest text-gold mb-1">
-              Wealth Intelligence
-            </p>
-            <p className="text-sm text-foreground leading-relaxed">
-              <span className="font-bold">{currentUser === "Fara" ? "Fara" : "Roham"},</span>{" "}
-              your net worth is{" "}
-              <span className="font-bold text-gold num-display">{formatCurrency(netWorth, true)}</span>
-              {savingsRate >= 20
-                ? " — you're saving well and building momentum."
-                : surplus > 0
-                  ? " — surplus is positive but savings rate has room to grow."
-                  : " — expenses currently exceed income. Review your cashflow."}
-            </p>
-            <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2">
-              <span className="text-xs text-muted-foreground">
-                Projected 2035:{" "}
-                <span className="font-bold text-forecast-l num-display">
-                  {formatCurrency(year10NW, true)}
-                </span>
+      {/* ═══════════════════════════════════════════════════════════════════════
+          SECTION 1 — COMMAND STRIP
+          One-line executive intelligence bar, always visible at top
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div className="cmd-strip">
+        <div className="cmd-strip-inner">
+          {/* Left: greeting + status */}
+          <div className="cmd-left">
+            <span className="cmd-name">{currentUser === "Fara" ? "Fara" : "Roham"}</span>
+            <span className="cmd-dot" />
+            <span className={`cmd-status ${savingsRate >= 20 ? "on-track" : surplus > 0 ? "watch" : "alert"}`}>
+              {savingsRate >= 20 ? "On Track" : surplus > 0 ? "Watch" : "Needs Attention"}
+            </span>
+          </div>
+
+          {/* Center: 4 key KPIs */}
+          <div className="cmd-kpis">
+            <div className="cmd-kpi">
+              <span className="cmd-kpi-label">Net Worth</span>
+              <span className="cmd-kpi-value">{maskValue(formatCurrency(netWorth, true), privacyMode)}</span>
+            </div>
+            <div className="cmd-kpi-divider" />
+            <div className="cmd-kpi">
+              <span className="cmd-kpi-label">2035 Projection</span>
+              <span className="cmd-kpi-value forecast">{maskValue(formatCurrency(year10NW, true), privacyMode)}</span>
+            </div>
+            <div className="cmd-kpi-divider" />
+            <div className="cmd-kpi">
+              <span className="cmd-kpi-label">Monthly Surplus</span>
+              <span className={`cmd-kpi-value ${surplus >= 0 ? "positive" : "negative"}`}>
+                {maskValue(formatCurrency(surplus, true), privacyMode)}
               </span>
-              {forecastMode === "monte-carlo" && monteCarloResult && (
-                <span className="text-xs text-muted-foreground">
-                  MC Median 2035:{" "}
-                  <span className="font-bold text-forecast-l num-display">
-                    {formatCurrency(monteCarloResult.median, true)}
-                  </span>
-                </span>
-              )}
-              <span className="text-xs text-muted-foreground">
-                Monthly surplus:{" "}
-                <span className={`font-bold num-display ${surplus >= 0 ? "text-success-l" : "text-danger-l"}`}>
-                  {formatCurrency(surplus, true)}
-                </span>
+            </div>
+            <div className="cmd-kpi-divider" />
+            <div className="cmd-kpi">
+              <span className="cmd-kpi-label">FIRE Age</span>
+              <span className="cmd-kpi-value forecast">
+                {wealthCards.find(c => c.label === "FIRE Age")?.value ?? "—"}
               </span>
-              {liquidityWarnings.length > 0 && (
-                <span className="text-xs text-danger-l font-semibold">
-                  {liquidityWarnings.length} liquidity warning{liquidityWarnings.length > 1 ? "s" : ""}
-                </span>
-              )}
             </div>
           </div>
 
-          {/* Forecast mode badge */}
-          <div className="flex items-center gap-2 shrink-0">
-            <span
-              className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${
-                forecastMode === "monte-carlo"
-                  ? "bg-forecast-surface text-forecast-l border-forecast/20"
-                  : forecastMode === "year-by-year"
-                    ? "bg-intel-surface text-intel-l border-intelligence/20"
-                    : "bg-gold-surface text-gold border-gold/20"
-              }`}
+          {/* Right: forecast mode + sync */}
+          <div className="cmd-right">
+            <span className={`cmd-mode-badge ${forecastMode === "monte-carlo" ? "mc" : forecastMode === "year-by-year" ? "yby" : "profile"}`}>
+              {forecastMode === "monte-carlo" ? "Monte Carlo" :
+               forecastMode === "year-by-year" ? "Year-by-Year" :
+               `${profile.charAt(0).toUpperCase() + profile.slice(1)}`}
+            </span>
+            <button
+              className="cmd-sync-btn"
+              onClick={handleSyncFromCloud}
+              disabled={syncing}
+              data-testid="button-sync"
+              title="Sync from cloud"
             >
-              {forecastMode === "monte-carlo"
-                ? "Monte Carlo"
-                : forecastMode === "year-by-year"
-                  ? "Year-by-Year"
-                  : `Profile · ${profile.charAt(0).toUpperCase() + profile.slice(1)}`}
-            </span>
+              <RefreshCw className={`w-3 h-3 ${syncing ? "animate-spin" : ""}`} />
+            </button>
           </div>
         </div>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════
-          HERO STATS — TODAY / PLAN / FUTURE / ACTION
-          4-column grid matching the 4 master steps
-          ════════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 stagger-children">
+      {/* ═══════════════════════════════════════════════════════════════════════
+          SECTION 2 — FOUR CORE CARDS
+          Today / Plan / Future / Action — equal width, premium balance
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div className="core-grid">
 
-        {/* A — TODAY */}
-        <div className="hero-stat-card col-span-2 lg:col-span-1">
-          <p className="hero-stat-label" style={{ color: "hsl(var(--intelligence-light))" }}>
-            1 · Today
-          </p>
-          <p className="hero-stat-value num-display">
-            {maskValue(formatCurrency(netWorth, true), privacyMode)}
-          </p>
-          <p className="hero-stat-sub">Net Worth</p>
-          <div className="flex flex-wrap gap-2 mt-2">
-            <span className="kpi-pill neutral">
-              Cash {maskValue(formatCurrency(snap.cash, true), privacyMode)}
-            </span>
-            <span className="kpi-pill negative">
-              Debt {maskValue(formatCurrency(totalLiabilities, true), privacyMode)}
-            </span>
+        {/* 1 · TODAY */}
+        <div className="core-card core-today">
+          <div className="core-card-header">
+            <span className="core-step-num today-num">1</span>
+            <span className="core-step-label">Today</span>
           </div>
-        </div>
-
-        {/* B — PLAN */}
-        <div className="hero-stat-card">
-          <p className="hero-stat-label" style={{ color: "hsl(var(--gold-light))" }}>
-            2 · Plan
-          </p>
-          <p className="text-sm font-semibold text-foreground leading-snug">
-            {snap.cash + snap.offset_balance > 150000
-              ? "Building deposit for next IP"
-              : surplus > 3000
-                ? "Maximise DCA & super"
-                : "Reduce expenses first"}
-          </p>
-          <p className="hero-stat-sub mt-1">Active strategy</p>
-          <div className="mt-2">
-            <span className={`kpi-pill ${savingsRate >= 20 ? "positive" : "negative"}`}>
-              SR {savingsRate.toFixed(0)}%
-            </span>
+          <div className="core-primary">
+            <div className="core-big-value">{maskValue(formatCurrency(netWorth, true), privacyMode)}</div>
+            <div className="core-big-label">Net Worth</div>
           </div>
-        </div>
-
-        {/* C — FUTURE */}
-        <div className="hero-stat-card">
-          <p className="hero-stat-label" style={{ color: "hsl(var(--forecast-light))" }}>
-            3 · Future
-          </p>
-          <p className="hero-stat-value num-display" style={{ color: "hsl(var(--forecast-light))" }}>
-            {maskValue(formatCurrency(year10NW, true), privacyMode)}
-          </p>
-          <p className="hero-stat-sub">Proj. 2035</p>
-          <div className="mt-2">
-            <span className="kpi-pill neutral">
-              FIRE ~age {wealthCards.find(c => c.label === "FIRE Age")?.value ?? "?"}
-            </span>
-          </div>
-        </div>
-
-        {/* D — ACTION */}
-        <div className="hero-stat-card" style={{ borderColor: "hsl(var(--gold-dim) / 0.6)" }}>
-          <p className="hero-stat-label" style={{ color: "hsl(var(--success-light))" }}>
-            4 · Action
-          </p>
-          <div className="flex-1">
-            <BestMoveCard compact />
-          </div>
-        </div>
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          KPI STRIP — 6 key metrics across in a horizontal strip
-          ════════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-        {[
-          {
-            label: "Total Assets",
-            value: formatCurrency(totalAssets, true),
-            color: "hsl(var(--success-light))",
-            bg: "hsl(var(--success-surface))",
-          },
-          {
-            label: "Liabilities",
-            value: formatCurrency(totalLiabilities, true),
-            color: "hsl(var(--danger-light))",
-            bg: "hsl(var(--danger-surface))",
-          },
-          {
-            label: "Monthly Income",
-            value: formatCurrency(snap.monthly_income, true),
-            color: "hsl(var(--gold-light))",
-            bg: "hsl(var(--gold-surface))",
-          },
-          {
-            label: "Monthly Expenses",
-            value: formatCurrency(snap.monthly_expenses, true),
-            color: "hsl(var(--muted-foreground))",
-            bg: "hsl(var(--muted))",
-          },
-          {
-            label: "Super (Total)",
-            value: formatCurrency(currentTotalSuper, true),
-            color: "hsl(var(--intelligence-light))",
-            bg: "hsl(var(--intelligence-surface))",
-          },
-          {
-            label: "Passive Income",
-            value: formatCurrency(passiveIncome, true) + "/yr",
-            color: "hsl(var(--forecast-light))",
-            bg: "hsl(var(--forecast-surface))",
-          },
-        ].map((kpi) => (
-          <div
-            key={kpi.label}
-            className="rounded-lg px-3 py-2.5 flex flex-col gap-0.5"
-            style={{ background: kpi.bg, border: "1px solid hsl(var(--border))" }}
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {kpi.label}
-            </p>
-            <p
-              className="text-sm font-bold num-display"
-              style={{ color: kpi.color }}
-            >
-              {maskValue(kpi.value, privacyMode)}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          TWO-COLUMN MAIN AREA
-          Left: Charts + Financials  |  Right: AI + Widgets
-          ════════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-
-        {/* ── LEFT: 2/3 width ─────────────────────────────────── */}
-        <div className="xl:col-span-2 space-y-5">
-
-          {/* ── WEALTH PROJECTION CHART ── */}
-          <CollapsibleSection
-            title="Wealth Projection"
-            subtitle={`Net worth from ${new Date().getFullYear()} → ${new Date().getFullYear() + 10}`}
-            accentColor="hsl(var(--forecast-light))"
-            defaultOpen
-          >
-            <div className="p-4 pt-2">
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={nwGrowthData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="nwGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(260,60%,58%)" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="hsl(260,60%,58%)" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="assetsGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(145,55%,42%)" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="hsl(145,55%,42%)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                  <XAxis dataKey="year" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                  <YAxis tickFormatter={(v) => `$${(v / 1_000_000).toFixed(1)}M`} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} width={52} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="assets"      name="Total Assets"      stroke="hsl(145,55%,42%)"  strokeWidth={1.5} fill="url(#assetsGrad)" />
-                  <Area type="monotone" dataKey="liabilities" name="Liabilities"        stroke="hsl(5,70%,52%)"    strokeWidth={1.5} fill="none" strokeDasharray="4 2" />
-                  <Area type="monotone" dataKey="netWorth"    name="Net Worth"          stroke="hsl(260,60%,62%)"  strokeWidth={2.5} fill="url(#nwGrad)" />
-                </AreaChart>
-              </ResponsiveContainer>
+          <div className="core-stats">
+            <div className="core-stat">
+              <span className="core-stat-label">Cash</span>
+              <span className="core-stat-value positive">{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</span>
             </div>
-          </CollapsibleSection>
+            <div className="core-stat">
+              <span className="core-stat-label">Debt</span>
+              <span className="core-stat-value negative">{maskValue(formatCurrency(totalLiabilities, true), privacyMode)}</span>
+            </div>
+            <div className="core-stat">
+              <span className="core-stat-label">Surplus/mo</span>
+              <span className={`core-stat-value ${surplus >= 0 ? "positive" : "negative"}`}>
+                {maskValue(formatCurrency(surplus, true), privacyMode)}
+              </span>
+            </div>
+          </div>
+          <div className="core-bar-row">
+            <div className="core-bar-label">Savings Rate</div>
+            <div className="core-bar-track">
+              <div className="core-bar-fill" style={{ width: `${Math.min(100, savingsRate)}%`, background: savingsRate >= 20 ? "hsl(145,55%,42%)" : "hsl(42,80%,52%)" }} />
+            </div>
+            <span className="core-bar-pct">{savingsRate.toFixed(0)}%</span>
+          </div>
+        </div>
 
-          {/* ── CASHFLOW CHART ── */}
-          <CollapsibleSection
-            title="Cashflow Forecast"
-            subtitle={cashFlowView === "annual" ? "Annual view" : "Monthly view"}
-            accentColor="hsl(var(--intelligence-light))"
-            defaultOpen
-          >
-            <div className="p-4 pt-2">
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={masterCFData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap="30%">
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.5} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
-                  <YAxis tickFormatter={(v) => `$${(v / 1_000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={44} />
-                  <Tooltip content={<CashflowTooltip />} />
-                  <Bar dataKey="income"   name="Income"   fill="hsl(145,55%,42%)" radius={[3,3,0,0]} />
-                  <Bar dataKey="expenses" name="Expenses" fill="hsl(5,70%,52%)"   radius={[3,3,0,0]} opacity={0.8} />
-                  <Bar dataKey="netCF"    name="Net CF"   fill="hsl(210,75%,52%)" radius={[3,3,0,0]} />
-                  {settlementAnnotations.map((ann) => (
-                    <ReferenceLine key={ann.label} x={ann.label} stroke="hsl(42,80%,52%)" strokeDasharray="4 2" label={{ value: ann.name.substring(0, 8), position: "top", fontSize: 9, fill: "hsl(42,80%,52%)" }} />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
+        {/* 2 · PLAN */}
+        <div className="core-card core-plan">
+          <div className="core-card-header">
+            <span className="core-step-num plan-num">2</span>
+            <span className="core-step-label">Plan</span>
+          </div>
+          <div className="core-primary">
+            <div className="core-strategy-text">
+              {snap.cash + snap.offset_balance > 150000
+                ? "Build deposit for next IP"
+                : surplus > 3000
+                  ? "Maximise DCA & super contributions"
+                  : "Reduce monthly expenses first"}
+            </div>
+            <div className="core-big-label">Active strategy</div>
+          </div>
+          <div className="core-stats">
+            <div className="core-stat">
+              <span className="core-stat-label">IP Readiness</span>
+              <span className="core-stat-value">{wealthCards.find(c => c.label === "IP Readiness")?.value ?? "—"}</span>
+            </div>
+            <div className="core-stat">
+              <span className="core-stat-label">Emergency</span>
+              <span className={`core-stat-value ${(wealthCards.find(c => c.label === "Emergency")?.alert) ? "negative" : "positive"}`}>
+                {wealthCards.find(c => c.label === "Emergency")?.value ?? "—"}
+              </span>
+            </div>
+            <div className="core-stat">
+              <span className="core-stat-label">Passive Inc</span>
+              <span className="core-stat-value">{maskValue(formatCurrency(passiveIncome, true), privacyMode)}/yr</span>
+            </div>
+          </div>
+          <div className="core-bar-row">
+            <div className="core-bar-label">IP Deposit Progress</div>
+            <div className="core-bar-track">
+              {(() => {
+                const pct = parseInt(wealthCards.find(c => c.label === "IP Readiness")?.value ?? "0");
+                return <div className="core-bar-fill" style={{ width: `${Math.min(100, pct)}%`, background: "hsl(42,80%,52%)" }} />;
+              })()}
+            </div>
+            <span className="core-bar-pct">{wealthCards.find(c => c.label === "IP Readiness")?.value ?? "0%"}</span>
+          </div>
+        </div>
+
+        {/* 3 · FUTURE */}
+        <div className="core-card core-future">
+          <div className="core-card-header">
+            <span className="core-step-num future-num">3</span>
+            <span className="core-step-label">Future</span>
+          </div>
+          <div className="core-primary">
+            <div className="core-big-value forecast">{maskValue(formatCurrency(year10NW, true), privacyMode)}</div>
+            <div className="core-big-label">Projected 2035</div>
+          </div>
+          <div className="core-stats">
+            <div className="core-stat">
+              <span className="core-stat-label">2030 NW</span>
+              <span className="core-stat-value forecast">
+                {maskValue(formatCurrency(projection[4]?.endNetWorth ?? netWorth, true), privacyMode)}
+              </span>
+            </div>
+            <div className="core-stat">
+              <span className="core-stat-label">FIRE Year</span>
+              <span className="core-stat-value forecast">
+                ~{wealthCards.find(c => c.label === "FIRE Age")?.value?.replace("~", "") ?? "—"}
+              </span>
+            </div>
+            <div className="core-stat">
+              <span className="core-stat-label">Super @60</span>
+              <span className="core-stat-value forecast">
+                {maskValue(formatCurrency(superAt60, true), privacyMode)}
+              </span>
+            </div>
+          </div>
+          {forecastMode === "monte-carlo" && monteCarloResult && (
+            <div className="core-mc-strip">
+              <span className="core-mc-label">MC P10</span>
+              <span className="core-mc-val negative">{maskValue(formatCurrency(monteCarloResult.p10, true), privacyMode)}</span>
+              <span className="core-mc-label">Median</span>
+              <span className="core-mc-val forecast">{maskValue(formatCurrency(monteCarloResult.median, true), privacyMode)}</span>
+              <span className="core-mc-label">P90</span>
+              <span className="core-mc-val positive">{maskValue(formatCurrency(monteCarloResult.p90, true), privacyMode)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* 4 · ACTION */}
+        <div className="core-card core-action">
+          <div className="core-card-header">
+            <span className="core-step-num action-num">4</span>
+            <span className="core-step-label">Best Move</span>
+          </div>
+          <div className="core-action-body">
+            <BestMoveCard />
+          </div>
+        </div>
+
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          SECTION 3 — MAIN TWO-COLUMN GRID
+          Left 65%: Forecast Intelligence  |  Right 35%: Decision Center
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div className="main-grid">
+
+        {/* ── LEFT COLUMN — Forecast Intelligence ──────────────────────────── */}
+        <div className="main-left">
+
+          {/* A — Net Worth Projection */}
+          <div className="chart-panel">
+            <div className="chart-panel-header">
+              <div>
+                <h3 className="chart-panel-title">Wealth Projection</h3>
+                <p className="chart-panel-sub">Net worth trajectory 2026 → 2036</p>
+              </div>
+              <div className="chart-legend">
+                <span className="legend-dot" style={{ background: "hsl(260,60%,62%)" }} />
+                <span className="legend-label">Net Worth</span>
+                <span className="legend-dot" style={{ background: "hsl(145,55%,42%)", opacity: 0.7 }} />
+                <span className="legend-label">Assets</span>
+                <span className="legend-dot" style={{ background: "hsl(5,70%,52%)", opacity: 0.7 }} />
+                <span className="legend-label">Debt</span>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={230}>
+              <AreaChart data={nwGrowthData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="nwFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="hsl(260,60%,62%)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="hsl(260,60%,62%)" stopOpacity={0.02} />
+                  </linearGradient>
+                  <linearGradient id="assFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="hsl(145,55%,42%)" stopOpacity={0.18} />
+                    <stop offset="95%" stopColor="hsl(145,55%,42%)" stopOpacity={0.01} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" strokeOpacity={0.35} />
+                <XAxis dataKey="year" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                <YAxis tickFormatter={(v) => `$${(v/1_000_000).toFixed(1)}M`} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={48} axisLine={false} tickLine={false} />
+                <Tooltip content={<CustomTooltip />} />
+                <Area type="monotone" dataKey="assets"      name="Total Assets" stroke="hsl(145,55%,42%)"  strokeWidth={1.5} fill="url(#assFill)" />
+                <Area type="monotone" dataKey="liabilities" name="Debt"          stroke="hsl(5,70%,52%)"   strokeWidth={1.5} fill="none" strokeDasharray="4 3" />
+                <Area type="monotone" dataKey="netWorth"    name="Net Worth"     stroke="hsl(260,60%,65%)" strokeWidth={2.5} fill="url(#nwFill)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* B — Cashflow Forecast */}
+          <div className="chart-panel">
+            <div className="chart-panel-header">
+              <div>
+                <h3 className="chart-panel-title">Cashflow Forecast</h3>
+                <p className="chart-panel-sub">{cashFlowView === "annual" ? "Annual surplus & balance" : "Monthly detail"}</p>
+              </div>
               {ngSummary.totalAnnualTaxBenefit > 0 && (
-                <div className="mt-2 px-3 py-1.5 rounded-lg bg-gold-surface border border-gold/20 text-xs text-gold">
-                  Negative gearing benefit: {formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}/yr included
-                </div>
+                <span className="ng-badge">
+                  NG Benefit {maskValue(formatCurrency(ngSummary.totalAnnualTaxBenefit, true), privacyMode)}/yr
+                </span>
               )}
             </div>
-          </CollapsibleSection>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={masterCFData} margin={{ top: 4, right: 12, left: 0, bottom: 0 }} barCategoryGap="35%">
+                <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" strokeOpacity={0.35} vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                <YAxis tickFormatter={(v) => `$${(v/1_000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={40} axisLine={false} tickLine={false} />
+                <Tooltip content={<CashflowTooltip />} />
+                <Bar dataKey="income"   name="Income"    fill="hsl(145,55%,42%)" radius={[3,3,0,0]} />
+                <Bar dataKey="expenses" name="Expenses"  fill="hsl(5,65%,48%)"   radius={[3,3,0,0]} opacity={0.85} />
+                <Bar dataKey="netCF"    name="Net CF"    fill="hsl(210,70%,55%)" radius={[3,3,0,0]} />
+                {settlementAnnotations.map((ann) => (
+                  <ReferenceLine key={ann.label} x={ann.label} stroke="hsl(42,80%,52%)" strokeDasharray="3 3"
+                    label={{ value: "IP", position: "top", fontSize: 9, fill: "hsl(42,80%,52%)" }} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
 
-          {/* ── SNAPSHOT EDIT + ASSET ALLOCATION ── */}
-          <CollapsibleSection
-            title="Financial Snapshot"
-            subtitle="Current balance sheet"
-            accentColor="hsl(var(--gold-light))"
-            defaultOpen={false}
-            headerExtra={
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => { setEditSnap(!editSnap); if (!editSnap && !snapDraft) setSnapDraft({ ...snap }); }}
-                className="h-7 text-xs px-2.5"
-                style={{ borderColor: "hsl(var(--border))", color: "hsl(var(--muted-foreground))" }}
-                data-testid="button-edit-snapshot"
-              >
-                {editSnap ? "Cancel" : "Edit"}
-              </Button>
-            }
-          >
-            <div className="p-4" ref={snapContainerRef}>
-              {!editSnap ? (
-                /* READ MODE — clean 2-column grid */
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {[
-                    { label: "PPOR",          value: snap.ppor,             group: "asset" },
-                    { label: "Cash",           value: snap.cash,             group: "asset" },
-                    { label: "Offset",         value: snap.offset_balance,   group: "asset" },
-                    { label: "Super",          value: currentTotalSuper,     group: "asset" },
-                    { label: "Stocks",         value: liveStocks,            group: "asset" },
-                    { label: "Crypto",         value: liveCrypto,            group: "asset" },
-                    { label: "Cars",           value: snap.cars,             group: "asset" },
-                    { label: "Iran Property",  value: snap.iran_property,    group: "asset" },
-                    { label: "Mortgage",       value: snap.mortgage,         group: "liability" },
-                    { label: "Other Debts",    value: snap.other_debts,      group: "liability" },
-                  ].filter(f => f.value > 0).map((f) => (
-                    <div key={f.label} className="rounded-lg p-2.5"
-                      style={{
-                        background: f.group === "liability"
-                          ? "hsl(var(--danger-surface))"
-                          : "hsl(var(--secondary))",
-                        border: "1px solid hsl(var(--border))",
-                      }}
-                    >
-                      <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">{f.label}</p>
-                      <p className={`text-sm font-bold num-display mt-0.5 ${f.group === "liability" ? "text-danger-l" : "text-foreground"}`}>
-                        {maskValue(formatCurrency(f.value, true), privacyMode)}
-                      </p>
+          {/* C — Asset Allocation + Snapshot inline */}
+          <div className="twin-panel">
+
+            {/* Asset Pie */}
+            <div className="chart-panel twin-child">
+              <div className="chart-panel-header">
+                <h3 className="chart-panel-title">Asset Allocation</h3>
+              </div>
+              <div className="asset-alloc-body">
+                <ResponsiveContainer width="100%" height={160}>
+                  <PieChart>
+                    <Pie data={assetData} dataKey="value" cx="50%" cy="50%" innerRadius={44} outerRadius={72} paddingAngle={2}>
+                      {assetData.map((_: any, i: number) => (
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => maskValue(formatCurrency(v, true), privacyMode)} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="alloc-legend">
+                  {assetData.slice(0, 6).map((d: any, i: number) => (
+                    <div key={d.name} className="alloc-item">
+                      <span className="alloc-dot" style={{ background: COLORS[i % COLORS.length] }} />
+                      <span className="alloc-name">{d.name}</span>
+                      <span className="alloc-val">{maskValue(formatCurrency(d.value, true), privacyMode)}</span>
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+
+            {/* Balance Sheet */}
+            <div className="chart-panel twin-child">
+              <div className="chart-panel-header">
+                <h3 className="chart-panel-title">Balance Sheet</h3>
+                <button
+                  className="panel-edit-btn"
+                  onClick={() => { setEditSnap(!editSnap); if (!editSnap && !snapDraft) setSnapDraft({ ...snap }); }}
+                  data-testid="button-edit-snapshot"
+                >
+                  {editSnap ? "Cancel" : "Edit"}
+                </button>
+              </div>
+              {!editSnap ? (
+                <div className="bs-grid" ref={snapContainerRef}>
+                  <div className="bs-section">
+                    <div className="bs-section-label">Assets</div>
+                    {[
+                      { l: "PPOR",          v: snap.ppor },
+                      { l: "Cash + Offset", v: snap.cash + snap.offset_balance },
+                      { l: "Super",         v: currentTotalSuper },
+                      { l: "Stocks",        v: liveStocks },
+                      { l: "Crypto",        v: liveCrypto },
+                      { l: "Cars / Other",  v: snap.cars + snap.iran_property },
+                    ].filter(f => f.v > 0).map(f => (
+                      <div key={f.l} className="bs-row">
+                        <span className="bs-label">{f.l}</span>
+                        <span className="bs-value">{maskValue(formatCurrency(f.v, true), privacyMode)}</span>
+                      </div>
+                    ))}
+                    <div className="bs-total">
+                      <span>Total Assets</span>
+                      <span className="positive">{maskValue(formatCurrency(totalAssets, true), privacyMode)}</span>
+                    </div>
+                  </div>
+                  <div className="bs-section">
+                    <div className="bs-section-label">Liabilities</div>
+                    {[
+                      { l: "Mortgage",     v: snap.mortgage },
+                      { l: "Other Debts",  v: snap.other_debts },
+                    ].filter(f => f.v > 0).map(f => (
+                      <div key={f.l} className="bs-row">
+                        <span className="bs-label">{f.l}</span>
+                        <span className="bs-value negative">{maskValue(formatCurrency(f.v, true), privacyMode)}</span>
+                      </div>
+                    ))}
+                    <div className="bs-total">
+                      <span>Net Worth</span>
+                      <span className="forecast">{maskValue(formatCurrency(netWorth, true), privacyMode)}</span>
+                    </div>
+                  </div>
+                </div>
               ) : (
-                /* EDIT MODE */
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div className="snap-edit-grid" ref={snapContainerRef}>
                   {snapFields.map(({ label, key }) => (
-                    <div key={key}>
-                      <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+                    <div key={key} className="snap-field">
+                      <label className="snap-field-label">{label}</label>
                       <Input
                         type="number"
                         value={snapDraft?.[key] ?? ""}
-                        onChange={(e) =>
-                          setSnapDraft((prev: any) => ({ ...prev, [key]: Number(e.target.value) }))
-                        }
-                        className="h-8 text-sm num-display"
+                        onChange={(e) => setSnapDraft((prev: any) => ({ ...prev, [key]: Number(e.target.value) }))}
+                        className="h-7 text-xs num-display"
                         data-testid={`input-snap-${key}`}
                       />
                     </div>
                   ))}
-                  <div className="col-span-full flex gap-2 pt-1">
-                    <SaveButton
-                      onSave={handleSaveSnap}
-                      className="h-8 text-xs"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => { setEditSnap(false); setSnapDraft(null); }}
-                      className="h-8 text-xs"
-                    >
-                      Cancel
-                    </Button>
+                  <div className="snap-edit-actions">
+                    <SaveButton onSave={handleSaveSnap} className="h-7 text-xs" />
+                    <Button variant="outline" size="sm" onClick={() => { setEditSnap(false); setSnapDraft(null); }} className="h-7 text-xs">Cancel</Button>
                   </div>
                 </div>
               )}
             </div>
-          </CollapsibleSection>
 
-          {/* ── EXPENSE BREAKDOWN ── */}
-          {expensePieData.length > 0 && (
-            <CollapsibleSection
-              title="Expense Breakdown"
-              subtitle="Actual tracked expenses by category"
-              accentColor="hsl(var(--danger-light))"
-              defaultOpen={false}
-            >
-              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-                <ResponsiveContainer width="100%" height={180}>
-                  <PieChart>
-                    <Pie
-                      data={expensePieData}
-                      dataKey="value"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={80}
-                      paddingAngle={2}
-                    >
-                      {expensePieData.map((_: any, i: number) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: number) => formatCurrency(v, true)} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="space-y-1.5">
-                  {expensePieData.map((d: any, i: number) => (
-                    <div key={d.name} className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
-                        <span className="text-muted-foreground">{d.name}</span>
+          </div>
+
+          {/* ═══════════════════════════════════════════════════════════════════
+              SECTION 4 — ACTION CENTER
+              ═══════════════════════════════════════════════════════════════ */}
+          <div className="action-center">
+            <div className="action-center-header">
+              <div>
+                <h2 className="action-center-title">Action Center</h2>
+                <p className="action-center-sub">Your prioritised financial moves, ranked by impact</p>
+              </div>
+              <span className="action-priority-badge">
+                AI Priority Score: {savingsRate >= 25 && surplus > 3000 ? "A+" : savingsRate >= 15 ? "B+" : "C — needs review"}
+              </span>
+            </div>
+
+            <div className="action-grid">
+
+              {/* Column 1: Immediate (7 days) */}
+              <div className="action-col">
+                <div className="action-col-header immediate">
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>Immediate — 7 Days</span>
+                </div>
+                <div className="action-items">
+                  {snap.offset_balance < snap.cash * 0.5 && snap.cash > 50000 && (
+                    <div className="action-item high">
+                      <div className="action-item-dot high" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">Move cash to offset account</span>
+                        <span className="action-item-desc">
+                          {maskValue(formatCurrency(Math.round(snap.cash * 0.4), true), privacyMode)} could save ~{maskValue(formatCurrency(Math.round(snap.cash * 0.4 * 0.06 / 12), true), privacyMode)}/mo in interest
+                        </span>
                       </div>
-                      <span className="font-medium num-display">{formatCurrency(d.value, true)}</span>
+                      <Link href="/expenses"><span className="action-cta">Act</span></Link>
                     </div>
-                  ))}
+                  )}
+                  {savingsRate < 20 && (
+                    <div className="action-item high">
+                      <div className="action-item-dot high" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">Review discretionary spending</span>
+                        <span className="action-item-desc">
+                          Savings rate {savingsRate.toFixed(0)}% — target 20%+. Cut ~{maskValue(formatCurrency(Math.max(0, snap.monthly_income * 0.2 - surplus), true), privacyMode)}/mo
+                        </span>
+                      </div>
+                      <Link href="/expenses"><span className="action-cta">Act</span></Link>
+                    </div>
+                  )}
+                  {liquidityWarnings.length > 0 && (
+                    <div className="action-item critical">
+                      <div className="action-item-dot critical" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">Cashflow risk detected</span>
+                        <span className="action-item-desc">{liquidityWarnings[0].message.substring(0, 80)}</span>
+                      </div>
+                      <Link href="/reports"><span className="action-cta">Review</span></Link>
+                    </div>
+                  )}
+                  {billsDueCount > 0 && (
+                    <div className="action-item medium">
+                      <div className="action-item-dot medium" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">{billsDueCount} bill{billsDueCount > 1 ? "s" : ""} due this month</span>
+                        <span className="action-item-desc">{nextBillLabel} · {maskValue(formatCurrency(safeNum(nextBill?.amount), true), privacyMode)}</span>
+                      </div>
+                      <Link href="/recurring-bills"><span className="action-cta">View</span></Link>
+                    </div>
+                  )}
+                  {savingsRate >= 20 && liquidityWarnings.length === 0 && (
+                    <div className="action-item positive">
+                      <div className="action-item-dot positive" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">Cashflow is healthy</span>
+                        <span className="action-item-desc">No immediate actions required. Surplus {maskValue(formatCurrency(surplus, true), privacyMode)}/mo</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-            </CollapsibleSection>
-          )}
 
-          {/* ── LIQUIDITY WARNINGS ── */}
-          {liquidityWarnings.length > 0 && (
-            <CollapsibleSection
-              title="Liquidity Warnings"
-              subtitle={`${liquidityWarnings.length} cashflow risk${liquidityWarnings.length > 1 ? "s" : ""} detected`}
-              accentColor="hsl(var(--danger-light))"
-              defaultOpen
-            >
-              <div className="p-4 space-y-2">
-                {liquidityWarnings.slice(0, 5).map((w, i) => (
-                  <div key={i} className="flex items-start gap-3 rounded-lg p-2.5"
-                    style={{
-                      background: w.level === "critical"
-                        ? "hsl(var(--danger-surface))"
-                        : "hsl(var(--gold-surface))",
-                      border: `1px solid ${w.level === "critical" ? "hsl(var(--danger) / 0.3)" : "hsl(var(--gold-dim) / 0.3)"}`,
-                    }}
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5"
-                      style={{ color: w.level === "critical" ? "hsl(var(--danger-light))" : "hsl(var(--gold))" }}
-                    />
-                    <p className="text-xs text-foreground">{w.message}</p>
+              {/* Column 2: This Month */}
+              <div className="action-col">
+                <div className="action-col-header thismonth">
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>This Month</span>
+                </div>
+                <div className="action-items">
+                  <div className="action-item medium">
+                    <div className="action-item-dot medium" />
+                    <div className="action-item-content">
+                      <span className="action-item-title">Save & invest surplus</span>
+                      <span className="action-item-desc">
+                        Deploy {maskValue(formatCurrency(Math.max(0, surplus), true), privacyMode)} — split between offset + ETF DCA
+                      </span>
+                    </div>
+                    <Link href="/stocks"><span className="action-cta">Plan</span></Link>
                   </div>
-                ))}
+                  {categoriesOverBudget > 0 && (
+                    <div className="action-item medium">
+                      <div className="action-item-dot medium" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">{categoriesOverBudget} budget categor{categoriesOverBudget > 1 ? "ies" : "y"} over limit</span>
+                        <span className="action-item-desc">Review and reduce before month end</span>
+                      </div>
+                      <Link href="/budget"><span className="action-cta">Fix</span></Link>
+                    </div>
+                  )}
+                  {snap.roham_salary_sacrifice === 0 && (
+                    <div className="action-item medium">
+                      <div className="action-item-dot medium" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">Consider salary sacrifice to super</span>
+                        <span className="action-item-desc">Tax-effective way to build retirement wealth</span>
+                      </div>
+                      <Link href="/tax"><span className="action-cta">Calc</span></Link>
+                    </div>
+                  )}
+                  <div className="action-item low">
+                    <div className="action-item-dot low" />
+                    <div className="action-item-content">
+                      <span className="action-item-title">Update income & tax records</span>
+                      <span className="action-item-desc">Keep ledger current for accurate FIRE projections</span>
+                    </div>
+                    <Link href="/financial-plan"><span className="action-cta">Log</span></Link>
+                  </div>
+                </div>
               </div>
-            </CollapsibleSection>
-          )}
+
+              {/* Column 3: Strategic Moves */}
+              <div className="action-col">
+                <div className="action-col-header strategic">
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  <span>Strategic Moves</span>
+                </div>
+                <div className="action-items">
+                  {parseInt(wealthCards.find(c => c.label === "IP Readiness")?.value ?? "0") >= 50 && (
+                    <div className="action-item strategic">
+                      <div className="action-item-dot strategic" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">Investment property acquisition</span>
+                        <span className="action-item-desc">
+                          Deposit {wealthCards.find(c => c.label === "IP Readiness")?.value ?? "—"} ready. Negative gearing {maskValue(formatCurrency(ngSummary.totalAnnualTaxBenefit, true), privacyMode)}/yr benefit available
+                        </span>
+                      </div>
+                      <Link href="/property"><span className="action-cta">Plan</span></Link>
+                    </div>
+                  )}
+                  <div className="action-item strategic">
+                    <div className="action-item-dot strategic" />
+                    <div className="action-item-content">
+                      <span className="action-item-title">Debt recycling strategy</span>
+                      <span className="action-item-desc">Convert non-deductible mortgage to deductible investment debt</span>
+                    </div>
+                    <Link href="/debt-strategy"><span className="action-cta">Setup</span></Link>
+                  </div>
+                  <div className="action-item strategic">
+                    <div className="action-item-dot strategic" />
+                    <div className="action-item-content">
+                      <span className="action-item-title">Super contribution split</span>
+                      <span className="action-item-desc">Optimise Roham + Fara super split for tax efficiency</span>
+                    </div>
+                    <Link href="/tax"><span className="action-cta">Model</span></Link>
+                  </div>
+                </div>
+              </div>
+
+              {/* Column 4: Missed Opportunities */}
+              <div className="action-col">
+                <div className="action-col-header missed">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Missed Opportunities</span>
+                </div>
+                <div className="action-items">
+                  {snap.cash > snap.monthly_expenses * 6 && (
+                    <div className="action-item missed">
+                      <div className="action-item-dot missed" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">Idle cash above 6-month buffer</span>
+                        <span className="action-item-desc">
+                          ~{maskValue(formatCurrency(snap.cash - snap.monthly_expenses * 6, true), privacyMode)} idle.
+                          Annual cost: ~{maskValue(formatCurrency(Math.round((snap.cash - snap.monthly_expenses * 6) * 0.055), true), privacyMode)} in opportunity cost
+                        </span>
+                      </div>
+                      <Link href="/wealth-strategy"><span className="action-cta">Deploy</span></Link>
+                    </div>
+                  )}
+                  {ngSummary.totalAnnualTaxBenefit > 0 && (
+                    <div className="action-item missed">
+                      <div className="action-item-dot missed" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">Tax refund optimisation</span>
+                        <span className="action-item-desc">
+                          {maskValue(formatCurrency(ngSummary.totalAnnualTaxBenefit, true), privacyMode)}/yr negative gearing benefit — ensure PAYG withholding variation filed
+                        </span>
+                      </div>
+                      <Link href="/tax"><span className="action-cta">File</span></Link>
+                    </div>
+                  )}
+                  {liveStocks < 50000 && surplus > 2000 && (
+                    <div className="action-item missed">
+                      <div className="action-item-dot missed" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">Low equity market exposure</span>
+                        <span className="action-item-desc">
+                          Portfolio under-allocated to equities. Start DCA from surplus {maskValue(formatCurrency(Math.round(surplus * 0.3), true), privacyMode)}/mo
+                        </span>
+                      </div>
+                      <Link href="/stocks"><span className="action-cta">Start</span></Link>
+                    </div>
+                  )}
+                  {wealthCards.find(c => c.label === "Emergency")?.alert && (
+                    <div className="action-item missed">
+                      <div className="action-item-dot missed" />
+                      <div className="action-item-content">
+                        <span className="action-item-title">Emergency fund below target</span>
+                        <span className="action-item-desc">
+                          Build to {maskValue(formatCurrency(snap.monthly_expenses * 6, true), privacyMode)} (6 months expenses)
+                        </span>
+                      </div>
+                      <Link href="/budget"><span className="action-cta">Build</span></Link>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+            </div>
+          </div>
+
         </div>
 
-        {/* ── RIGHT: 1/3 width — widgets ─────────────────────── */}
-        <div className="space-y-4">
+        {/* ── RIGHT COLUMN — Decision Center (sticky) ──────────────────────── */}
+        <div className="main-right">
+          <div className="decision-center">
 
-          {/* AI Insights */}
-          <AIInsightsCard />
+            {/* Header */}
+            <div className="dc-header">
+              <span className="dc-title">Decision Center</span>
+              <span className="dc-sub">Live signals</span>
+            </div>
 
-          {/* CFO Weekly Bulletin */}
-          <CFODashboardWidget />
-
-          {/* Tax Alpha */}
-          <TaxAlphaCard />
-
-          {/* FIRE Path */}
-          <FIREPathCard />
-
-          {/* Risk Radar */}
-          <RiskRadarCard />
-
-          {/* Portfolio Live Returns */}
-          <PortfolioLiveReturn />
-
-          {/* ── WEALTH STRATEGY CARDS ── */}
-          <div
-            className="rounded-xl p-4"
-            style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
-          >
-            <p className="section-label">Health Indicators</p>
-            <div className="space-y-2">
-              {wealthCards.map((card) => (
-                <div
-                  key={card.label}
-                  className="flex items-center justify-between rounded-lg px-3 py-2"
-                  style={{
-                    background: card.alert
-                      ? "hsl(var(--danger-surface))"
-                      : "hsl(var(--secondary))",
-                    border: `1px solid ${card.alert ? "hsl(var(--danger) / 0.2)" : "hsl(var(--border))"}`,
-                  }}
-                >
-                  <div className="flex items-center gap-2">
-                    <card.Icon
-                      className="w-3.5 h-3.5 shrink-0"
-                      style={{
-                        color: card.alert
-                          ? "hsl(var(--danger-light))"
-                          : "hsl(var(--muted-foreground))",
-                      }}
-                    />
-                    <span className="text-xs text-muted-foreground">{card.label}</span>
-                  </div>
-                  <span
-                    className="text-xs font-bold num-display"
-                    style={{
-                      color: card.alert
-                        ? "hsl(var(--danger-light))"
-                        : "hsl(var(--foreground))",
-                    }}
-                  >
-                    {maskValue(card.value, privacyMode)}
-                  </span>
+            {/* Health Score Row */}
+            <div className="dc-health-row">
+              {[
+                { label: "FIRE", value: wealthCards.find(c => c.label === "FIRE Progress")?.value ?? "—", alert: wealthCards.find(c => c.label === "FIRE Progress")?.alert },
+                { label: "Safety", value: wealthCards.find(c => c.label === "Emergency")?.value?.split("/")[0] ?? "—", alert: wealthCards.find(c => c.label === "Emergency")?.alert },
+                { label: "SR", value: `${savingsRate.toFixed(0)}%`, alert: savingsRate < 20 },
+                { label: "Debt", value: `${Math.round(totalLiabilities / (snap.monthly_income * 12))}x`, alert: totalLiabilities / (snap.monthly_income * 12) > 5 },
+              ].map(h => (
+                <div key={h.label} className={`dc-health-chip ${h.alert ? "alert" : "ok"}`}>
+                  <span className="dc-health-val">{h.value}</span>
+                  <span className="dc-health-label">{h.label}</span>
                 </div>
               ))}
             </div>
-          </div>
 
-          {/* ── BILLS OVERVIEW ── */}
-          <div
-            className="rounded-xl p-4"
-            style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <p className="section-label mb-0">Bills Tracker</p>
-              <Link href="/recurring-bills">
-                <span className="text-[11px] text-gold hover:underline cursor-pointer">View all</span>
-              </Link>
+            {/* Risk Radar widget */}
+            <div className="dc-widget">
+              <RiskRadarCard />
             </div>
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Monthly fixed costs</span>
-                <span className="font-bold num-display text-foreground">
-                  {maskValue(formatCurrency(billMonthlyTotal, true), privacyMode)}
-                </span>
+
+            {/* Tax Alpha widget */}
+            <div className="dc-widget">
+              <TaxAlphaCard />
+            </div>
+
+            {/* FIRE Path widget */}
+            <div className="dc-widget">
+              <FIREPathCard />
+            </div>
+
+            {/* Portfolio Returns widget */}
+            <div className="dc-widget">
+              <PortfolioLiveReturn />
+            </div>
+
+            {/* AI Weekly CFO */}
+            <div className="dc-widget">
+              <CFODashboardWidget />
+            </div>
+
+            {/* Bills compact widget */}
+            <div className="dc-bills">
+              <div className="dc-bills-header">
+                <span className="dc-widget-title">Bills</span>
+                <Link href="/recurring-bills"><span className="dc-link">All</span></Link>
               </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Due in 30 days</span>
-                <span className={`font-bold ${billsDueCount > 0 ? "text-gold" : "text-success-l"}`}>
-                  {billsDueCount} bill{billsDueCount !== 1 ? "s" : ""}
+              <div className="dc-bills-row">
+                <span className="dc-bills-label">Monthly fixed</span>
+                <span className="dc-bills-value">{maskValue(formatCurrency(billMonthlyTotal, true), privacyMode)}</span>
+              </div>
+              <div className="dc-bills-row">
+                <span className="dc-bills-label">Due in 30d</span>
+                <span className={`dc-bills-value ${billsDueCount > 0 ? "gold" : "positive"}`}>
+                  {billsDueCount} due
                 </span>
               </div>
               {nextBill && (
-                <div className="mt-2 rounded-lg px-2.5 py-2 bg-gold-surface border border-gold/20">
-                  <p className="text-[11px] text-gold font-medium">{nextBillLabel}</p>
-                  <p className="text-xs text-muted-foreground">{formatCurrency(safeNum(nextBill.amount), true)}</p>
-                </div>
-              )}
-              {categoriesOverBudget > 0 && (
-                <div className="mt-1.5 rounded-lg px-2.5 py-1.5 bg-danger-surface border border-danger/20">
-                  <p className="text-[11px] text-danger-l">
-                    {categoriesOverBudget} budget categor{categoriesOverBudget > 1 ? "ies" : "y"} over limit
-                  </p>
+                <div className="dc-bills-next">
+                  <span className="dc-bills-next-name">{nextBillLabel}</span>
+                  <span className="dc-bills-next-val">{maskValue(formatCurrency(safeNum(nextBill.amount), true), privacyMode)}</span>
                 </div>
               )}
             </div>
-          </div>
 
-          {/* ── CASH ENGINE KPIs ── */}
-          {cashKPIs.length > 0 && (
-            <div
-              className="rounded-xl p-4"
-              style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
-            >
-              <p className="section-label">Cash Engine</p>
-              <div className="space-y-1.5">
-                {cashKPIs.slice(0, 4).map((kpi: any) => (
-                  <div key={kpi.label} className="flex justify-between text-xs items-center">
-                    <span className="text-muted-foreground">{kpi.label}</span>
-                    <span
-                      className="font-bold num-display"
-                      style={{ color: kpi.delta >= 0 ? "hsl(var(--success-light))" : "hsl(var(--danger-light))" }}
-                    >
-                      {maskValue(formatCurrency(kpi.value, true), privacyMode)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+            {/* AI Insights compact */}
+            <div className="dc-widget dc-ai">
+              <AIInsightsCard />
             </div>
-          )}
 
-          {/* ── SYNC STATUS ── */}
-          <div
-            className="rounded-xl p-4"
-            style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                {lastSync ? `Synced ${lastSync}` : "Not synced yet"}
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleSyncFromCloud}
-                disabled={syncing}
-                className="h-7 text-xs px-2.5"
-                data-testid="button-sync"
-              >
-                <RefreshCw className={`w-3 h-3 mr-1.5 ${syncing ? "animate-spin" : ""}`} />
-                {syncing ? "Syncing…" : "Sync"}
-              </Button>
-            </div>
           </div>
-
         </div>
+
       </div>
 
-    </div>
-  );
-}
-
-// ─── CollapsibleSection ───────────────────────────────────────────────────────
-
-function CollapsibleSection({
-  title,
-  subtitle,
-  accentColor,
-  defaultOpen = true,
-  children,
-  headerExtra,
-}: {
-  title: string;
-  subtitle?: string;
-  accentColor?: string;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-  headerExtra?: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  return (
-    <div className="collapsible-section">
-      <div
-        className="collapsible-header"
-        onClick={() => setOpen((o) => !o)}
-        role="button"
-        aria-expanded={open}
-      >
-        <div className="flex-1 min-w-0">
-          <p
-            className="text-sm font-semibold leading-none"
-            style={{ color: open && accentColor ? accentColor : undefined }}
-          >
-            {title}
-          </p>
-          {subtitle && (
-            <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {headerExtra}
-          <ChevronDown
-            className="w-4 h-4 text-muted-foreground transition-transform duration-200 shrink-0"
-            style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
-          />
-        </div>
-      </div>
-      {open && <div className="collapsible-content">{children}</div>}
     </div>
   );
 }
