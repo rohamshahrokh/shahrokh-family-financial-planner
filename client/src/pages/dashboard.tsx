@@ -330,16 +330,11 @@ export default function DashboardPage() {
   const totalLiab     = snap.mortgage + snap.other_debts;
   const netWorth      = totalAssets - totalLiab;
   const propertyEquity = snap.ppor - snap.mortgage;
-  // Monthly mortgage repayment from P×r(1+r)^n / ((1+r)^n−1) using rate+term in snapshot
-  const _mortgageMonthlyRate = (snap.mortgage_rate / 100) / 12;
-  const _mortgageTermMonths  = snap.mortgage_term_years * 12;
-  const monthlyMortgageRepay = snap.mortgage > 0 && _mortgageMonthlyRate > 0
-    ? snap.mortgage * (_mortgageMonthlyRate * Math.pow(1 + _mortgageMonthlyRate, _mortgageTermMonths))
-        / (Math.pow(1 + _mortgageMonthlyRate, _mortgageTermMonths) - 1)
-    : 0;
-  const surplus       = snap.monthly_income - snap.monthly_expenses - monthlyMortgageRepay;
-  const totalMonthlyOutgoings = snap.monthly_expenses + monthlyMortgageRepay;
-  const savingsRate   = calcSavingsRate(snap.monthly_income, totalMonthlyOutgoings);
+  // Mortgage is already included in monthly_expenses — do not deduct again
+  const monthlyMortgageRepay = 0;
+  const surplus       = snap.monthly_income - snap.monthly_expenses;
+  const totalMonthlyOutgoings = snap.monthly_expenses;
+  const savingsRate   = calcSavingsRate(snap.monthly_income, snap.monthly_expenses);
 
   // ─── NG Summary ───────────────────────────────────────────────────────────
   const ngSummary = useMemo<NGSummary>(() => {
