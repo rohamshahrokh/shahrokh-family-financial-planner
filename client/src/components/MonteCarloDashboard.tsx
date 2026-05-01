@@ -48,6 +48,7 @@ import {
   type FireMCPlanInput,
   type PresetKey,
 } from "@/lib/fireMonteCarlo";
+import { runCashEngine } from "@/lib/cashEngine";
 import SaveButton from "@/components/SaveButton";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -230,6 +231,36 @@ export default function MonteCarloDashboard() {
   const { data: planCryptoOrders } = useQuery<any[]>({ queryKey: ['/api/planned-investments?module=crypto'] });
   const { data: planBills }        = useQuery<any[]>({ queryKey: ['/api/bills'] });
 
+  // ── Run cashEngine to get plan-aware opening cash (overrides raw snapshot.cash) ──
+  // This ensures Monte Carlo sees the SAME opening cash as every other page — including
+  // IP deposit drain, BTC buy, and DCA — not just the raw snapshot balance.
+  const cashEngineSeedCash = useMemo<number | null>(() => {
+    if (!snapshot) return null;
+    const currentYear = new Date().getFullYear();
+    try {
+      const ceOut = runCashEngine({
+        snapshot: {
+          cash:              snapshot.cash             ?? 0,
+          monthly_income:    snapshot.monthly_income   ?? 0,
+          monthly_expenses:  snapshot.monthly_expenses ?? 0,
+          mortgage:          snapshot.mortgage         ?? 0,
+          other_debts:       snapshot.other_debts      ?? 0,
+        },
+        properties:          (planProperties ?? []).filter((p: any) => p.type !== 'ppor'),
+        stockDCASchedules:   planStockDCA    ?? [],
+        cryptoDCASchedules:  planCryptoDCA   ?? [],
+        plannedStockOrders:  planStockOrders ?? [],
+        plannedCryptoOrders: planCryptoOrders ?? [],
+        bills:               (planBills ?? []).filter((b: any) => b.is_active !== false),
+        inflationRate:       3,
+        incomeGrowthRate:    3.5,
+      });
+      return ceOut.cashByYear.get(currentYear) ?? null;
+    } catch {
+      return null;
+    }
+  }, [snapshot, planProperties, planStockDCA, planCryptoDCA, planStockOrders, planCryptoOrders, planBills]);
+
   // ── Build FireMCPlanInput from real data ──
   const planInput = useMemo<FireMCPlanInput | undefined>(() => {
     if (!planProperties && !planStockDCA && !planCryptoDCA) return undefined;
@@ -369,7 +400,7 @@ export default function MonteCarloDashboard() {
     setLocalSettings(prev => ({
       ...prev,
       startPPOR:            snapshot.ppor              ?? prev.startPPOR,
-      startCash:            snapshot.cash              ?? prev.startCash,
+      startCash:            cashEngineSeedCash ?? snapshot.cash ?? prev.startCash,
       startOffset:          snapshot.offset_balance    ?? prev.startOffset,
       startSuper:           (((snapshot.roham_super_balance ?? 0) + (snapshot.fara_super_balance ?? 0)) || snapshot.super_balance) ?? prev.startSuper,
       startStocks:          snapshot.stocks            ?? prev.startStocks,
