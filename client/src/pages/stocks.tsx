@@ -1084,7 +1084,7 @@ export default function StocksPage() {
   const cashEngineOut = snapshot ? runCashEngine({
     snapshot,
     properties: properties ?? [],
-    stocks: stocksData ?? [],
+    stocks: stocks ?? [],
     cryptos: cryptos ?? [],
     expenses,
     bills,
@@ -1092,8 +1092,8 @@ export default function StocksPage() {
     cryptoDCASchedules,
     plannedStockOrders,
     plannedCryptoOrders,
-    inflationRate:    fa?.inflation_pct    ?? 3,
-    incomeGrowthRate: fa?.income_growth_pct ?? 3.5,
+    inflationRate:    fa?.flat?.inflation    ?? 3,
+    incomeGrowthRate: fa?.flat?.income_growth ?? 3.5,
   }) : null;
 
     // ── Combined projection ────────────────────────────────────────────────────

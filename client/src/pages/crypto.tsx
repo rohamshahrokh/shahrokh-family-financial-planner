@@ -21,7 +21,7 @@ import {
 import {
   Plus, Trash2, Edit2, Bitcoin, CheckSquare, Square,
   ArrowUpRight, ArrowDownRight, X, Calendar, Filter,
-  Upload, RefreshCw, Download, ToggleLeft, ToggleRight, ShoppingCart,
+  Upload, RefreshCw, Download, ToggleLeft, ToggleRight, ShoppingCart, TrendingUp,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx";
@@ -1044,15 +1044,15 @@ export default function CryptoPage() {
     snapshot,
     properties: properties ?? [],
     stocks: stocks ?? [],
-    cryptos: cryptoData ?? [],
+    cryptos: cryptos ?? [],
     expenses,
     bills,
     stockDCASchedules,
     cryptoDCASchedules,
     plannedStockOrders,
     plannedCryptoOrders,
-    inflationRate:    fa?.inflation_pct    ?? 3,
-    incomeGrowthRate: fa?.income_growth_pct ?? 3.5,
+    inflationRate:    fa?.flat?.inflation    ?? 3,
+    incomeGrowthRate: fa?.flat?.income_growth ?? 3.5,
   }) : null;
 
     // ── DCA monthly total for projection ──────────────────────────────────────

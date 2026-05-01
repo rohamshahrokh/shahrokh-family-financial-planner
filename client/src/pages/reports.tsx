@@ -60,8 +60,8 @@ export default function ReportsPage() {
     cryptoDCASchedules,
     plannedStockOrders,
     plannedCryptoOrders,
-    inflationRate:    fa?.inflation_pct    ?? 3,
-    incomeGrowthRate: fa?.income_growth_pct ?? 3.5,
+    inflationRate:    fa?.flat?.inflation    ?? 3,
+    incomeGrowthRate: fa?.flat?.income_growth ?? 3.5,
   }) : null;
 
   const projection = cashEngineOut?.annual ?? [];
