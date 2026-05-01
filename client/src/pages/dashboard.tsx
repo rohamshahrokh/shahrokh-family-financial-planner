@@ -192,7 +192,7 @@ export default function DashboardPage() {
     }
   }, [qc]);
 
-  const { data: snapshot } = useQuery({
+  const { data: snapshot, isLoading: snapLoading } = useQuery({
     queryKey: ["/api/snapshot"],
     queryFn: () => apiRequest("GET", "/api/snapshot").then((r) => r.json()),
   });
@@ -554,14 +554,6 @@ export default function DashboardPage() {
     { label: "Monthly Expenses", key: "monthly_expenses", group: "expense" },
   ] as const;
 
-  const handleSaveSnap = async () => {
-    if (snapDraft) {
-      await updateSnap.mutateAsync(snapDraft);
-      setEditSnap(false);
-      setSnapDraft(null);
-    }
-  };
-
   // ─── Asset allocation donut data ──────────────────────────────────────────
   const assetAllocData = useMemo(() => {
     const items = [
@@ -582,7 +574,6 @@ export default function DashboardPage() {
       const cat = e.category || "Other";
       cats[cat] = (cats[cat] || 0) + safeNum(e.monthly_amount || e.amount);
     });
-    // Add mortgage as a category
     if (snap.mortgage > 0) cats["Mortgage"] = (cats["Mortgage"] || 0) + snap.mortgage / 12;
     return Object.entries(cats).map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
@@ -600,7 +591,7 @@ export default function DashboardPage() {
   }, [ngSummary]);
 
   // ─── FIRE calc ────────────────────────────────────────────────────────────
-  const fireTargetAmt = (8000 * 12) / 0.04; // $2.4M at 4% SWR
+  const fireTargetAmt = (8000 * 12) / 0.04;
   const fireCurrentAmt = snap.cash + snap.offset_balance + _totalSuperNow + stocksTotal + cryptoTotal;
   const fireProgressPct = Math.min(100, (fireCurrentAmt / fireTargetAmt) * 100);
   const fireGap = Math.max(0, fireTargetAmt - fireCurrentAmt);
@@ -618,6 +609,27 @@ export default function DashboardPage() {
       surplus:  p.yearlySurplus ?? (surplus * 12),
     }));
   }, [projection, snap.mortgage, surplus]);
+
+  // ─── Loading guard (MUST come after ALL hooks) ───────────────────────────
+  if (snapLoading || !snapshot) {
+    return (
+      <div className="db-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
+        <div style={{ textAlign: "center", color: "hsl(215 12% 48%)" }}>
+          <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-3" style={{ color: "hsl(var(--gold))" }} />
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Loading your wealth data…</div>
+          <div style={{ fontSize: 11, marginTop: 4 }}>Connecting to Supabase</div>
+        </div>
+      </div>
+    );
+  }
+
+  const handleSaveSnap = async () => {
+    if (snapDraft) {
+      await updateSnap.mutateAsync(snapDraft);
+      setEditSnap(false);
+      setSnapDraft(null);
+    }
+  };
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
