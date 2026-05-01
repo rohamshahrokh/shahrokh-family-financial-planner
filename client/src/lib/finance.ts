@@ -465,6 +465,7 @@ export function projectNetWorth(params: {
       const l = safeNum(p.loan_amount);
       return sum + Math.max(0, v - l);
     }, 0);
+  let prevCash    = safeNum(s.cash) + safeNum(s.offset_balance);  // tracks prior-year closing cash
   let prevEndNW = (
     ppor + cash + superRoham + superFara + stockVal + cryptoVal + cars * 0.8 + iranProp + _initPropEquity
   ) - (mortgage + otherDebts);
@@ -696,6 +697,7 @@ export function projectNetWorth(params: {
     const cryptoBefore = prevCrypto;
 
     // ── Cash balance from central monthly engine ──────────────────────────────
+    const cashBefore = prevCash;
     cash = _cashByYear.get(year) ?? cash;
 
     // ── Totals ────────────────────────────────────────────────────────────────
@@ -713,8 +715,10 @@ export function projectNetWorth(params: {
     const cryptoAppreciation  = cryptoTotal  - cryptoBefore;
     const liabNow             = totalLiabilities;
     const debtPaydown         = prevLiab - liabNow;  // positive = debt reduced
-    // Savings: net cashflow that landed in cash or investments (approximated as netCashflow)
-    const savingsContrib      = netCashflow;
+    // Savings: actual cash delta from central ledger — reflects ALL events
+    // (income, expenses, property deposits, crypto/stock buys, mortgage, etc.)
+    // This is the true cash change, NOT a simple income-expenses formula.
+    const savingsContrib      = cash - cashBefore;
     const growthTotal         = endNW - startNW;
 
     const growthBreakdown: GrowthBreakdown = {
@@ -753,6 +757,7 @@ export function projectNetWorth(params: {
     prevStocks     = stocksTotal;
     prevCrypto     = cryptoTotal;
     prevLiab       = liabNow;
+    prevCash       = cash;
     prevSuperTotal = totalSuperNow;
     // BUG FIX: carry stockRunning / cryptoRunning forward so next year
     // compounds from this year's ending value, not the original snapshot.
@@ -974,8 +979,11 @@ export function buildCashFlowSeries(params: {
       const totalExpenses = isActual ? actualExpenses : forecastExpenses;
 
       // ── PPOR Mortgage ──
-      // Skip if actuals already include a 'Mortgage' category row for this month
-      const mortgageRepayment = hasMortgageInActuals ? 0 : pporMonthlyRepayment;
+      // CRITICAL: snap_expenses ($15,000/mo) already INCLUDES the PPOR mortgage repayment.
+      // For forecast months (no actuals), forecastExpenses is derived from snap_expenses —
+      // so do NOT deduct pporMonthlyRepayment again (that would double-count ~$7,590/mo).
+      // Only deduct it for actual months where the actuals do NOT contain a mortgage category.
+      const mortgageRepayment = isActual && !hasMortgageInActuals ? pporMonthlyRepayment : 0;
 
       // ── Investment Properties ──
       let rentalIncome = 0;

@@ -294,23 +294,19 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
         icon: '💰',
       });
     } else {
-      // Forecast expenses grow with inflation
+      // Forecast expenses grow with inflation.
+      // CRITICAL: monthly_expenses already INCLUDES the PPOR mortgage repayment
+      // (user confirmed: "I included my mortgage in my expenses").
+      // Do NOT add a separate mortgage_ppor event — that would double-count ~$7,590/mo.
       const forecastExpenses = safeNum(s.monthly_expenses) * Math.pow(1 + infl, yearsFromStart) || 14_540;
       events.push({
         monthKey: key, year, month,
         type: 'expense',
         amount: -forecastExpenses,
-        label: 'Living expenses',
+        label: 'Living expenses (incl. mortgage)',
       });
-
-      // PPOR mortgage
-      events.push({
-        monthKey: key, year, month,
-        type: 'mortgage_ppor',
-        amount: -pporMonthlyPmt,
-        label: 'PPOR mortgage',
-        icon: '🏠',
-      });
+      // NOTE: mortgage_ppor event intentionally omitted for forecast months.
+      // The PPOR mortgage is already embedded in the monthly_expenses figure.
     }
 
     // ── 3. RECURRING BILLS (forecast months only — not in actuals) ─────────
