@@ -77,7 +77,8 @@ export default function PwaInstallBanner() {
 
   return (
     <div
-      className="fixed bottom-4 left-1/2 z-[9999] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-2xl border border-blue-800/60 bg-[#0d1630] shadow-2xl shadow-black/60 px-4 py-3"
+      className="fixed left-1/2 z-[9999] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-2xl border border-blue-800/60 bg-[#0d1630] shadow-2xl shadow-black/60 px-4 py-3"
+      style={{ bottom: 'max(1rem, env(safe-area-inset-bottom, 1rem))' }}
       role="banner"
       aria-label="Install Family Wealth Lab"
     >

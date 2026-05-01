@@ -66,6 +66,56 @@ export default function ReportsPage() {
 
   const projection = cashEngineOut?.annual ?? [];
 
+  // ─── Cashflow table — aggregate ledger months to annual rows ──────────────
+  // Each row has the breakdown fields required by the cashflow table.
+  // This is the same data source as the dashboard chart tooltips.
+  const cfTableRows: Array<{
+    year: number;
+    income: number;
+    rentalIncome: number;
+    expenses: number;
+    mortgage: number;
+    propertySettlement: number;
+    ngRefund: number;
+    netCashFlow: number;
+    endingCash: number;
+    netWorth: number;
+  }> = (() => {
+    if (!cashEngineOut) return [];
+    const ledger = cashEngineOut.ledger;
+    // Group monthly ledger rows by year
+    const byYear = new Map<number, typeof ledger[0][]>();
+    for (const m of ledger) {
+      if (!byYear.has(m.year)) byYear.set(m.year, []);
+      byYear.get(m.year)!.push(m);
+    }
+    // Base NW for year-on-year calculation
+    const baseNW = totalAssets - totalLiabilities;
+    const rows = Array.from(byYear.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([year, months]) => {
+        const income             = months.reduce((s, m) => s + m.salaryIncome, 0);
+        const rentalIncome       = months.reduce((s, m) => s + m.rentalIncome, 0);
+        const expenses           = months.reduce((s, m) => s + m.livingExpenses, 0);
+        const mortgage           = months.reduce((s, m) => s + m.mortgagePpor + m.mortgageIp, 0);
+        const propertySettlement = months.reduce((s, m) => s + m.propertyPurchase, 0);
+        const ngRefund           = months.reduce((s, m) => s + m.taxRefunds, 0);
+        const netCashFlow        = months.reduce((s, m) => s + m.netCashFlow, 0);
+        // Last month of year = ending cash balance
+        const lastMonth = months[months.length - 1];
+        const endingCash = lastMonth?.closingCash ?? 0;
+        return { year, income, rentalIncome, expenses, mortgage, propertySettlement, ngRefund, netCashFlow, endingCash, netWorth: 0 };
+      });
+    // Approximate net worth per year: base NW + cumulative netCashFlow
+    // (NW grows by surplus each year — same logic as dashboard NW chart)
+    let runningNW = baseNW;
+    for (const row of rows) {
+      runningNW += row.netCashFlow;
+      row.netWorth = runningNW;
+    }
+    return rows;
+  })();
+
   const assetData = [
     { name: 'PPOR', value: safeNum(snap.ppor) }, { name: 'Cash', value: safeNum(snap.cash) + safeNum(snap.offset_balance) },
     { name: 'Super', value: safeNum(snap.super_balance) }, { name: 'Cars', value: safeNum(snap.cars) },
@@ -501,29 +551,34 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* 10-Year Detail Table */}
+      {/* Cashflow Detail Table — reads from central cashEngine ledger (same source as chart) */}
       <div className="bg-card border border-border rounded-xl p-5">
-        <h3 className="text-sm font-bold mb-4">10-Year Wealth Projection Detail</h3>
+        <h3 className="text-sm font-bold mb-1">Annual Cashflow Detail</h3>
+        <p className="text-xs text-muted-foreground mb-4">Same source as the dashboard cashflow chart. All values are annual totals from the central cash engine.</p>
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs" style={{ minWidth: 700 }}>
             <thead>
               <tr className="border-b border-border">
-                {['Year', 'Net Worth', 'Growth', 'Property Equity', 'Stocks', 'Crypto', 'Passive Income', 'Monthly CF'].map(h => (
-                  <th key={h} className="text-left pb-2 pr-4 text-muted-foreground font-semibold whitespace-nowrap">{h}</th>
+                {['Year', 'Income', 'Rental Income', 'Expenses', 'Mortgage', 'Property Settlement', 'NG Tax Refund', 'Net Cashflow', 'Ending Cash', 'Net Worth'].map(h => (
+                  <th key={h} className="text-left pb-2 pr-3 text-muted-foreground font-semibold whitespace-nowrap" style={{ fontSize: 10 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {projection.map((p, i) => (
-                <tr key={p.year} className={`border-b border-border/40 hover:bg-secondary/20 ${i === 9 ? 'font-bold bg-secondary/10' : ''}`}>
-                  <td className="py-1.5 pr-4 font-semibold text-primary">{p.year}</td>
-                  <td className="py-1.5 pr-4 num-display" style={{ color: 'hsl(43,85%,65%)' }}>{formatCurrency(p.endNetWorth, true)}</td>
-                  <td className="py-1.5 pr-4 num-display text-emerald-400">{formatCurrency(p.growth, true)}</td>
-                  <td className="py-1.5 pr-4 num-display">{formatCurrency(p.propertyEquity, true)}</td>
-                  <td className="py-1.5 pr-4 num-display">{formatCurrency(p.stockValue, true)}</td>
-                  <td className="py-1.5 pr-4 num-display">{formatCurrency(p.cryptoValue, true)}</td>
-                  <td className="py-1.5 pr-4 num-display text-emerald-400">{formatCurrency(p.passiveIncome, true)}</td>
-                  <td className="py-1.5 pr-4 num-display">{formatCurrency(p.monthlyCashFlow, true)}</td>
+              {cfTableRows.length === 0 ? (
+                <tr><td colSpan={10} className="py-4 text-center text-muted-foreground text-xs">Loading cashflow data…</td></tr>
+              ) : cfTableRows.map((r, i) => (
+                <tr key={r.year} className={`border-b border-border/40 hover:bg-secondary/20 transition-colors ${i === cfTableRows.length - 1 ? 'font-bold bg-secondary/10' : ''}`}>
+                  <td className="py-1.5 pr-3 font-semibold" style={{ color: 'hsl(42,80%,55%)' }}>{r.year}</td>
+                  <td className="py-1.5 pr-3 font-mono" style={{ color: 'hsl(145,55%,52%)' }}>{formatCurrency(r.income, true)}</td>
+                  <td className="py-1.5 pr-3 font-mono" style={{ color: 'hsl(188,60%,52%)' }}>{r.rentalIncome > 0 ? formatCurrency(r.rentalIncome, true) : <span className="text-muted-foreground">—</span>}</td>
+                  <td className="py-1.5 pr-3 font-mono" style={{ color: 'hsl(5,70%,58%)' }}>{formatCurrency(r.expenses, true)}</td>
+                  <td className="py-1.5 pr-3 font-mono" style={{ color: 'hsl(20,80%,58%)' }}>{formatCurrency(r.mortgage, true)}</td>
+                  <td className="py-1.5 pr-3 font-mono" style={{ color: 'hsl(260,60%,62%)' }}>{r.propertySettlement > 0 ? formatCurrency(r.propertySettlement, true) : <span className="text-muted-foreground">—</span>}</td>
+                  <td className="py-1.5 pr-3 font-mono" style={{ color: 'hsl(43,85%,55%)' }}>{r.ngRefund > 0 ? formatCurrency(r.ngRefund, true) : <span className="text-muted-foreground">—</span>}</td>
+                  <td className="py-1.5 pr-3 font-mono" style={{ color: r.netCashFlow >= 0 ? 'hsl(145,55%,52%)' : 'hsl(5,70%,58%)' }}>{r.netCashFlow >= 0 ? '+' : ''}{formatCurrency(r.netCashFlow, true)}</td>
+                  <td className="py-1.5 pr-3 font-mono" style={{ color: 'hsl(210,75%,62%)' }}>{formatCurrency(r.endingCash, true)}</td>
+                  <td className="py-1.5 pr-3 font-mono font-bold" style={{ color: 'hsl(43,85%,65%)' }}>{formatCurrency(r.netWorth, true)}</td>
                 </tr>
               ))}
             </tbody>

@@ -1739,6 +1739,22 @@
   gap: 0;
   padding-bottom: 56px;
   min-height: 100%;
+  /* Cancel the parent <main> padding so db-section controls its own horizontal spacing */
+  margin: -1rem;
+  width: calc(100% + 2rem);
+  max-width: none;
+}
+/* On desktop the main has lg:p-6 (1.5rem) */
+@media (min-width: 1024px) {
+  .db-root {
+    margin: -1.5rem;
+    width: calc(100% + 3rem);
+  }
+}
+/* Prevent horizontal overflow on the whole page */
+.db-root,
+.db-root * {
+  box-sizing: border-box;
 }
 
 /* ─── Section wrapper ──────────────────────────────────────────────────────────── */
@@ -2627,6 +2643,195 @@ td.db-act-rank { padding: 9px 0; }
   .db-kpi-bestmove { display: none; }
   .db-hero-sep:nth-last-child(-n+2) { display: none; }
   .db-hero-kpi:nth-last-child(-n+2) { display: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MOBILE — iPhone / narrow viewport (≤480px)
+   No horizontal page scroll. Everything stacks vertically.
+   ══════════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 480px) {
+  /* Root — no horizontal overflow */
+  .db-root {
+    overflow-x: hidden;
+    padding-bottom: 120px; /* extra room for PWA banner */
+  }
+
+  /* Hero bar: stack greeting + KPIs vertically */
+  .db-hero {
+    height: auto;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 10px 16px 8px;
+    gap: 6px;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+  }
+  .db-hero-greeting {
+    width: 100%;
+    gap: 6px;
+  }
+  .db-hero-controls {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    gap: 6px;
+  }
+  .db-hero-badge { display: none; } /* hide MODERATE badge on mobile */
+
+  /* KPIs: 2-column grid below greeting */
+  .db-hero-kpis {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px 0;
+    width: 100%;
+    flex: none;
+    justify-content: initial;
+  }
+  .db-hero-sep { display: none; }
+  .db-hero-kpi {
+    padding: 4px 8px;
+    align-items: flex-start;
+    min-width: 0;
+  }
+  .db-kpi-lbl {
+    font-size: 8px;
+    white-space: normal;
+    line-height: 1.1;
+  }
+  .db-kpi-val {
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* Sections */
+  .db-section {
+    padding: 0 12px;
+    margin-top: 16px;
+  }
+
+  /* Main grid: single column */
+  .db-main-grid {
+    grid-template-columns: 1fr;
+    padding: 12px 12px 0;
+    gap: 12px;
+  }
+
+  /* Right stack: vertical */
+  .db-right-stack {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .db-stack-card {
+    min-height: auto;
+    width: 100%;
+  }
+
+  /* Chart card: constrain height, let ResponsiveContainer handle width */
+  .db-chart-card {
+    min-height: 0;
+    overflow: hidden;
+  }
+  .db-chart-body {
+    height: 220px !important;
+  }
+  .db-chart-controls {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .db-toggle-group {
+    flex-wrap: wrap;
+  }
+
+  /* Insights grid: 2 columns */
+  .db-insights-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .db-ic-value { font-size: 16px; }
+
+  /* Two-col layout: single column */
+  .db-two-col {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* Projection row: single column */
+  .db-projection-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* NG row: single column */
+  .db-ng-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .db-ng-total-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* FIRE row: single column */
+  .db-fire-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* Year-by-year table: horizontal scroll ONLY inside the card, not the page */
+  .db-ybyr-card {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 12px;
+  }
+  .db-ybyr-table {
+    min-width: 560px;
+  }
+
+  /* Action table: horizontal scroll inside card */
+  .db-actions-card {
+    overflow: hidden;
+  }
+  .db-action-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .db-action-table {
+    min-width: 500px;
+  }
+
+  /* Module tiles: 3-column */
+  .db-modules-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  /* Widgets row: single column */
+  .db-widgets-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  /* Balance sheet snap-edit grid: 2-column */
+  .db-snap-edit-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px;
+  }
+
+  /* Hide bestmove label */
+  .db-kpi-bestmove { display: none; }
+
+  /* Chart legends: wrap on narrow screens */
+  .db-chart-legend {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* Bulletin tile: full width */
+  .db-bulletin-tile {
+    padding: 12px;
+  }
 }
 
 /* ─── Dashboard Lower Section Classes ─────────────────────────────────────── */

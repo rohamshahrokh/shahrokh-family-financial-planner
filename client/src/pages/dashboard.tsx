@@ -1453,6 +1453,7 @@ export default function DashboardPage() {
               </div>
               <Link href="/ai-insights"><span className="db-section-link">AI Insights →</span></Link>
             </div>
+            <div className="db-action-table-wrap">
             <table className="db-action-table">
               <thead>
                 <tr>
@@ -1477,6 +1478,7 @@ export default function DashboardPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
 
         </div>
