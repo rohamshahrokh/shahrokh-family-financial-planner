@@ -5,6 +5,7 @@ import { formatCurrency, safeNum, projectInvestment, calcCAGR } from "@/lib/fina
 import { maskValue } from "@/components/PrivacyMask";
 import { useAppStore } from "@/lib/store";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
+import { runCashEngine } from "@/lib/cashEngine";
 import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
@@ -770,7 +771,7 @@ export default function CryptoPage() {
   const [lastCryptoPriceFetch, setLastCryptoPriceFetch] = useState<number | null>(null);
   // Import / DCA / Planned Orders state
   const [showImportModal, setShowImportModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'portfolio' | 'transactions' | 'dca' | 'orders'>('portfolio');
+  const [activeTab, setActiveTab] = useState<'portfolio' | 'transactions' | 'dca' | 'orders' | 'cashflow'>('portfolio');
   const [showDCAForm, setShowDCAForm] = useState(false);
   const [dcaDraft, setDcaDraft] = useState<any>(null);
   const [editingDCAId, setEditingDCAId] = useState<number | null>(null);
@@ -782,7 +783,16 @@ export default function CryptoPage() {
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
-  const { data: cryptos = [] } = useQuery<any[]>({
+  // ─── cashEngine dependencies ────────────────────────────────────────────
+  const { data: snapshot } = useQuery<any>({ queryKey: ["/api/snapshot"], queryFn: () => apiRequest("GET", "/api/snapshot").then(r => r.json()) });
+  const { data: expenses = [] } = useQuery<any[]>({ queryKey: ["/api/expenses"], queryFn: () => apiRequest("GET", "/api/expenses").then(r => r.json()) });
+  const { data: bills = [] } = useQuery<any[]>({ queryKey: ["/api/bills"], queryFn: () => apiRequest("GET", "/api/bills").then(r => r.json()) });
+  const { data: properties = [] } = useQuery<any[]>({ queryKey: ["/api/properties"], queryFn: () => apiRequest("GET", "/api/properties").then(r => r.json()) });
+  const { data: stocks = [] } = useQuery<any[]>({ queryKey: ["/api/stocks"], queryFn: () => apiRequest("GET", "/api/stocks").then(r => r.json()) });
+  const { data: stockDCASchedules = [] } = useQuery<any[]>({ queryKey: ["/api/stock-dca"], queryFn: () => apiRequest("GET", "/api/stock-dca").then(r => r.json()) });
+  const { data: plannedStockOrders = [] } = useQuery<any[]>({ queryKey: ["/api/planned-investments", "stock"], queryFn: () => apiRequest("GET", "/api/planned-investments?module=stock").then(r => r.json()) });
+  const { data: plannedCryptoOrders = [] } = useQuery<any[]>({ queryKey: ["/api/planned-investments", "crypto"], queryFn: () => apiRequest("GET", "/api/planned-investments?module=crypto").then(r => r.json()) });
+    const { data: cryptos = [] } = useQuery<any[]>({
     queryKey: ["/api/crypto"],
     queryFn: () => apiRequest("GET", "/api/crypto").then(r => r.json()),
   });
@@ -1028,7 +1038,23 @@ export default function CryptoPage() {
     return counts;
   }, [plannedOrders]);
 
-  // ── DCA monthly total for projection ──────────────────────────────────────
+  // ── Cash Engine — wired DCA cashflow ─────────────────────────────────────
+  const cashEngineOut = snapshot ? runCashEngine({
+    snapshot,
+    properties: properties ?? [],
+    stocks: stocks ?? [],
+    cryptos: cryptoData ?? [],
+    expenses,
+    bills,
+    stockDCASchedules,
+    cryptoDCASchedules,
+    plannedStockOrders,
+    plannedCryptoOrders,
+    inflationRate:    fa?.inflation_pct    ?? 3,
+    incomeGrowthRate: fa?.income_growth_pct ?? 3.5,
+  }) : null;
+
+    // ── DCA monthly total for projection ──────────────────────────────────────
   const dcaMonthlyTotal = useMemo(
     () => dcaSchedules.filter((d: CryptoDCASchedule) => d.enabled).reduce((s: number, d: CryptoDCASchedule) => s + cryptoDcaMonthlyEquiv(d.amount, d.frequency), 0),
     [dcaSchedules]
@@ -1318,6 +1344,7 @@ export default function CryptoPage() {
           ['transactions', 'Transactions'],
           ['dca', 'DCA Schedules'],
           ['orders', 'Planned Orders'],
+          ['cashflow', 'Cash Flow'],
         ] as const).map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
             className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${activeTab === id ? 'bg-card shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
@@ -2161,6 +2188,54 @@ export default function CryptoPage() {
         </div>
       )}
 
+
+      {/* ─── Cash Flow Tab (cashEngine wired) ─────────────────────────────── */}
+      {activeTab === 'cashflow' && (
+        <div className="space-y-4">
+          <div className="bg-card border border-border rounded-2xl p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <TrendingUp className="w-5 h-5 text-primary" />
+              <div>
+                <h3 className="font-bold text-sm">Cash Flow Impact of Crypto DCA</h3>
+                <p className="text-xs text-muted-foreground">Central cashEngine — all crypto DCA feeds into household cash flow</p>
+              </div>
+            </div>
+            {!cashEngineOut ? (
+              <p className="text-sm text-muted-foreground text-center py-8">Loading cash engine data…</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                  {[
+                    { label: 'Annual Crypto DCA', value: dcaMonthlyTotal * 12 },
+                    { label: 'This Year Net CF', value: cashEngineOut.annual[0]?.netCashFlow ?? 0 },
+                    { label: 'Year 5 Net CF', value: cashEngineOut.annual[4]?.netCashFlow ?? 0 },
+                    { label: 'Year 10 Net CF', value: cashEngineOut.annual[9]?.netCashFlow ?? 0 },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-secondary/40 rounded-xl p-3">
+                      <p className="text-xs text-muted-foreground">{label}</p>
+                      <p className={`text-base font-bold ${value >= 0 ? 'text-green-400' : 'text-red-400'}`}>{value >= 0 ? '' : '-'}{formatCurrency(Math.abs(value))}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={cashEngineOut.annual.map((a: any) => ({
+                      year: a.year, netCF: Math.round(a.netCashFlow), closingCash: Math.round(a.endingCash)
+                    }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="year" tick={{ fontSize: 11 }} />
+                      <YAxis tickFormatter={(v) => `$${Math.abs(v) >= 1000 ? (v/1000).toFixed(0)+'K' : v}`} tick={{ fontSize: 10 }} />
+                      <Tooltip formatter={(v: any) => formatCurrency(v)} contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} />
+                      <Area type="monotone" dataKey="netCF" name="Net Cash Flow" stroke="hsl(43,85%,55%)" fill="hsl(43,85%,25%)" fillOpacity={0.3} />
+                      <Area type="monotone" dataKey="closingCash" name="Closing Cash" stroke="hsl(142,60%,45%)" fill="hsl(142,60%,20%)" fillOpacity={0.2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {/* ─── Planned Orders Tab ────────────────────────────────────────────── */}
       {activeTab === 'orders' && (
         <div className="space-y-4">

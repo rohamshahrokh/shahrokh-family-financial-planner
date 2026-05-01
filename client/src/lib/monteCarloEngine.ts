@@ -90,17 +90,24 @@ export interface MCInput {
   simulations?: number;
   financialFreedomThreshold?: number;
   targetNetWorthMilestones?: number[];
+  /** Override start year (default: current calendar year) */
+  startYear?: number;
+  /** Override end year (default: startYear + 9, i.e. 10-year window) */
+  endYear?: number;
 }
 
 // ─── Main engine ──────────────────────────────────────────────────────────────
 
 export function runMonteCarlo(input: MCInput): MonteCarloResult {
   const N_SIM     = input.simulations ?? 1000;
-  const START_YR  = 2026;
-  const END_YR    = 2035;
+  // START_YR / END_YR: use override from forecastStore assumptions if provided, else derive from today
+  const _currentYear = new Date().getFullYear();
+  const START_YR  = input.startYear  ?? _currentYear;
+  const END_YR    = input.endYear    ?? (START_YR + 9);   // 10-year horizon by default
   const N_YEARS   = END_YR - START_YR + 1;
   const N_MONTHS  = N_YEARS * 12;
 
+  // FF_TARGET: from fire_settings.target_passive_monthly * 12 if provided, else 120k
   const FF_TARGET  = input.financialFreedomThreshold ?? 120_000;
   const MILESTONES = input.targetNetWorthMilestones  ?? [3_000_000, 5_000_000, 10_000_000];
 

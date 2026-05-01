@@ -19,7 +19,7 @@
 
 import { useState, useMemo } from "react";
 import TaxAlphaPage from "./tax-alpha";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum } from "@/lib/finance";
 import {
@@ -39,6 +39,7 @@ import {
   ChevronDown, ChevronRight, Shield, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import SaveButton from "@/components/SaveButton";
 import { Input } from "@/components/ui/input";
 import { useAppStore } from "@/lib/store";
 import { maskValue } from "@/components/PrivacyMask";
@@ -379,12 +380,63 @@ export default function Tax() {
   // Pre-fill from stored income
   const storedIncome = safeNum(snap?.monthly_income) * 12 || 185_680;
 
+  const qc = useQueryClient();
+
+  // ─── Load persisted tax profile from sf_tax_profile ──────────────────────
+  const { data: taxProfile } = useQuery<any>({
+    queryKey: ["/api/tax-profile"],
+    queryFn: () => apiRequest("GET", "/api/tax-profile").then(r => r.json()).catch(() => null),
+  });
+
   const [roham, setRoham] = useState<PersonState>(
     DEFAULT_PERSON("Roham", storedIncome)
   );
   const [fara, setFara] = useState<PersonState>(
     DEFAULT_PERSON("Fara", 0)
   );
+
+  // Pre-fill from saved tax profile when it loads
+  useEffect(() => {
+    if (!taxProfile) return;
+    if (taxProfile.roham_salary)       setRoham(prev => ({ ...prev, grossSalary: taxProfile.roham_salary }));
+    if (taxProfile.fara_salary)         setFara(prev => ({ ...prev, grossSalary: taxProfile.fara_salary }));
+    if (taxProfile.roham_tax_year)      setRoham(prev => ({ ...prev, taxYear: taxProfile.roham_tax_year }));
+    if (taxProfile.roham_super_rate)    setRoham(prev => ({ ...prev, superRate: taxProfile.roham_super_rate }));
+    if (taxProfile.roham_has_private_health !== undefined)
+      setRoham(prev => ({ ...prev, hasPrivateHospitalCover: taxProfile.roham_has_private_health }));
+    if (taxProfile.fara_has_private_health !== undefined)
+      setFara(prev => ({ ...prev, hasPrivateHospitalCover: taxProfile.fara_has_private_health }));
+    if (taxProfile.roham_has_help_debt !== undefined)
+      setRoham(prev => ({ ...prev, hasHelpDebt: taxProfile.roham_has_help_debt }));
+    if (taxProfile.fara_has_help_debt !== undefined)
+      setFara(prev => ({ ...prev, hasHelpDebt: taxProfile.fara_has_help_debt }));
+  }, [taxProfile]);
+
+  // ─── Save tax profile mutation ─────────────────────────────────────────────
+  const saveTaxProfile = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        owner_id:                  'shahrokh-family-main',
+        roham_salary:              roham.grossSalary,
+        fara_salary:               fara.grossSalary,
+        roham_tax_year:            roham.taxYear,
+        fara_tax_year:             fara.taxYear,
+        roham_super_rate:          roham.superRate,
+        fara_super_rate:           fara.superRate,
+        roham_salary_sacrifice:    roham.salarySacrifice,
+        fara_salary_sacrifice:     fara.salarySacrifice,
+        roham_has_private_health:  roham.hasPrivateHospitalCover,
+        fara_has_private_health:   fara.hasPrivateHospitalCover,
+        roham_has_help_debt:       roham.hasHelpDebt,
+        fara_has_help_debt:        fara.hasHelpDebt,
+        updated_at:                new Date().toISOString(),
+      };
+      return apiRequest("POST", "/api/tax-profile", payload).then(r => r.json());
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/tax-profile"] });
+    },
+  });
 
   const [pageTab, setPageTab] = useState<'calculator' | 'alpha'>('calculator');
   const [activeTab, setActiveTab] = useState<"roham" | "fara" | "household">("roham");
@@ -457,6 +509,14 @@ export default function Tax() {
             2025–26 ATO rates · Stage 3 cuts · LITO · Medicare · MLS · HELP
           </p>
         </div>
+
+      {/* ── Save Tax Profile ── */}
+      <div className="flex justify-end mb-2">
+        <SaveButton
+          onSave={async () => { await saveTaxProfile.mutateAsync(); }}
+          label="Save Tax Profile"
+        />
+      </div>
         <div className="flex items-center gap-1 px-2 py-1 bg-emerald-950/40 border border-emerald-800/30 rounded-md">
           <CheckCircle2 className="w-3 h-3 text-emerald-400" />
           <span className="text-xs text-emerald-400 font-medium">ATO Verified</span>

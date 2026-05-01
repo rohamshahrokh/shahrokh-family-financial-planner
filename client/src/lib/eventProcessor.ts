@@ -174,8 +174,20 @@ export function rangeKeys(startKey: string, endKey: string): string[] {
   return keys;
 }
 
-const ENGINE_START = '2025-01';
-const ENGINE_END   = '2035-12';
+// ─── Engine horizon — derived from current calendar year ─────────────────────
+// ENGINE_START: beginning of the current calendar year (so actuals can be loaded)
+// ENGINE_END:   10 years from start (inclusive of December)
+// Override by passing startYearOverride / endYearOverride in ProcessEventsParams.
+function _deriveEngineStart(): string {
+  const y = new Date().getFullYear();
+  return `${y}-01`;
+}
+function _deriveEngineEnd(): string {
+  const y = new Date().getFullYear() + 9;
+  return `${y}-12`;
+}
+const ENGINE_START = _deriveEngineStart();
+const ENGINE_END   = _deriveEngineEnd();
 
 // ─── Main event processor ─────────────────────────────────────────────────────
 
@@ -223,7 +235,7 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
   }
 
   const snapMortgage = safeNum(s.mortgage) || 1_200_000;
-  const pporMonthlyPmt = calcMonthlyRepayment(snapMortgage, 6.5, 30);
+  const pporMonthlyPmt = calcMonthlyRepayment(snapMortgage, safeNum(s.mortgage_rate) || 6.5, safeNum(s.mortgage_term_years) || 30);
 
   const investmentProps = params.properties.filter(p => p.type !== 'ppor');
 

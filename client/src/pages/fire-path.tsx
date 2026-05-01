@@ -34,6 +34,7 @@ import {
 import { maskValue } from "@/components/PrivacyMask";
 import { useAppStore } from "@/lib/store";
 import { apiRequest } from "@/lib/queryClient";
+import { runCashEngine } from "@/lib/cashEngine";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -888,6 +889,15 @@ export default function FIREPathPage() {
   const { data: settingsRaw }      = useQuery({ queryKey: ['/api/fire-settings'] });
   const { data: scenarioCfgRaw }   = useQuery({ queryKey: ['/api/fire-scenario-config'] });
   const { data: yearAssumpRaw }    = useQuery({ queryKey: ['/api/fire-year-assumptions'] });
+  // ─── cashEngine seed queries ─────────────────────────────────────────────
+  const { data: propertiesRaw }    = useQuery<any[]>({ queryKey: ['/api/properties'],    queryFn: () => apiRequest('GET', '/api/properties').then(r => r.json()) });
+  const { data: stocksRaw }        = useQuery<any[]>({ queryKey: ['/api/stocks'],         queryFn: () => apiRequest('GET', '/api/stocks').then(r => r.json()) });
+  const { data: cryptosRaw }       = useQuery<any[]>({ queryKey: ['/api/crypto'],         queryFn: () => apiRequest('GET', '/api/crypto').then(r => r.json()) });
+  const { data: expensesRaw }      = useQuery<any[]>({ queryKey: ['/api/expenses'],       queryFn: () => apiRequest('GET', '/api/expenses').then(r => r.json()) });
+  const { data: stockDCARaw }      = useQuery<any[]>({ queryKey: ['/api/stock-dca'],      queryFn: () => apiRequest('GET', '/api/stock-dca').then(r => r.json()) });
+  const { data: cryptoDCARaw }     = useQuery<any[]>({ queryKey: ['/api/crypto-dca'],     queryFn: () => apiRequest('GET', '/api/crypto-dca').then(r => r.json()) });
+  const { data: plannedStockRaw }  = useQuery<any[]>({ queryKey: ['/api/planned-investments', 'stock'],  queryFn: () => apiRequest('GET', '/api/planned-investments?module=stock').then(r => r.json()) });
+  const { data: plannedCryptoRaw } = useQuery<any[]>({ queryKey: ['/api/planned-investments', 'crypto'], queryFn: () => apiRequest('GET', '/api/planned-investments?module=crypto').then(r => r.json()) });
 
   // ── Local state for the assumptions panel ──────────────────────────────────
   const [localSettings, setLocalSettings]     = useState<FIRESettings | null>(null);
@@ -909,18 +919,42 @@ export default function FIREPathPage() {
   }, [yearAssumpRaw]);
 
   // ── Build result from live data + local overrides ─────────────────────────
+  // ── cashEngine base-case series (seeds opening cash for FIRE engine) ──────
+  const cashEngineOut = useMemo(() => {
+    const snap = (snapRaw as any)?.[0] ?? (snapRaw as any) ?? {};
+    if (!snap?.monthly_income) return null;
+    return runCashEngine({
+      snapshot: snap,
+      properties: Array.isArray(propertiesRaw) ? propertiesRaw : [],
+      stocks:     Array.isArray(stocksRaw)     ? stocksRaw     : [],
+      cryptos:    Array.isArray(cryptosRaw)    ? cryptosRaw    : [],
+      expenses:   Array.isArray(expensesRaw)   ? expensesRaw   : [],
+      bills:      Array.isArray(billsRaw)      ? billsRaw      : [],
+      stockDCASchedules:    Array.isArray(stockDCARaw)     ? stockDCARaw     : [],
+      cryptoDCASchedules:   Array.isArray(cryptoDCARaw)    ? cryptoDCARaw    : [],
+      plannedStockOrders:   Array.isArray(plannedStockRaw) ? plannedStockRaw : [],
+      plannedCryptoOrders:  Array.isArray(plannedCryptoRaw)? plannedCryptoRaw: [],
+    });
+  }, [snapRaw, propertiesRaw, stocksRaw, cryptosRaw, expensesRaw, billsRaw, stockDCARaw, cryptoDCARaw, plannedStockRaw, plannedCryptoRaw]);
+
   const result: FIREPathResult = useMemo(() => {
     const snap   = (snapRaw as any)?.[0] ?? (snapRaw as any) ?? {};
     const bills  = Array.isArray(billsRaw) ? billsRaw : [];
+    // Seed opening cash from cashEngine year-1 closing cash if available
+    const seedSnap = cashEngineOut ? {
+      ...snap,
+      // cashEngine year-1 gives us the actual projected closing cash
+      cash: cashEngineOut.cashByYear.get(new Date().getFullYear()) ?? snap.cash,
+    } : snap;
     const input  = buildFirePathInput(
-      snap,
+      seedSnap,
       bills,
       localSettings ?? (settingsRaw as FIRESettings | null),
       localScenarios ?? (Array.isArray(scenarioCfgRaw) ? scenarioCfgRaw : []),
       localYearRows  ?? (Array.isArray(yearAssumpRaw)  ? yearAssumpRaw  : []),
     );
     return computeFirePath(input, localSettings ?? (settingsRaw as FIRESettings | null));
-  }, [snapRaw, billsRaw, localSettings, localScenarios, localYearRows, settingsRaw, scenarioCfgRaw, yearAssumpRaw]);
+  }, [snapRaw, billsRaw, localSettings, localScenarios, localYearRows, settingsRaw, scenarioCfgRaw, yearAssumpRaw, cashEngineOut]);
 
   const [selectedId, setSelectedId] = useState<FIREScenarioId>(result.best_scenario);
   const selectedScenario = result.scenarios.find(s => s.id === selectedId) ?? result.scenarios[0];

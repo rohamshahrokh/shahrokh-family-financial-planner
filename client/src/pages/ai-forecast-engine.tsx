@@ -240,8 +240,8 @@ export default function AIForecastEnginePage() {
   const { data: bills = [] }          = useQuery<any[]>({ queryKey: ['/api/bills'],               queryFn: () => apiRequest('GET', '/api/bills').then(r => r.json()) });
   const { data: stockDCA = [] }       = useQuery<any[]>({ queryKey: ['/api/stock-dca'],           queryFn: () => apiRequest('GET', '/api/stock-dca').then(r => r.json()) });
   const { data: cryptoDCA = [] }      = useQuery<any[]>({ queryKey: ['/api/crypto-dca'],          queryFn: () => apiRequest('GET', '/api/crypto-dca').then(r => r.json()) });
-  const { data: plannedStock = [] }   = useQuery<any[]>({ queryKey: ['/api/planned-stock-orders'],  queryFn: () => apiRequest('GET', '/api/planned-stock-orders').then(r => r.json()) });
-  const { data: plannedCrypto = [] }  = useQuery<any[]>({ queryKey: ['/api/planned-crypto-orders'], queryFn: () => apiRequest('GET', '/api/planned-crypto-orders').then(r => r.json()) });
+  const { data: plannedStock = [] }   = useQuery<any[]>({ queryKey: ['/api/planned-investments', 'stock'],  queryFn: () => apiRequest('GET', '/api/planned-investments?module=stock').then(r => r.json()) });
+  const { data: plannedCrypto = [] }  = useQuery<any[]>({ queryKey: ['/api/planned-investments', 'crypto'], queryFn: () => apiRequest('GET', '/api/planned-investments?module=crypto').then(r => r.json()) });
 
   // ── Run Monte Carlo ──────────────────────────────────────────────────────────
   const handleRunMC = useCallback(() => {

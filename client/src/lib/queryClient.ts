@@ -22,6 +22,7 @@ import { localStore } from "./localStore";
 import { sbAppSettings } from "./supabaseClient";
 import { sbBills, sbBudgets, sbTelegramSettings, sbAlertLogs, sbFamilyMsgLog, sbPlannedInvestments, sbUsers } from "./supabaseClient";
 import { sbFireSettings, sbFireScenarioConfig, sbFireYearAssumptions } from "./supabaseClient";
+import { sbTaxProfile } from "./supabaseClient";
 import { sbMCFireSettings, sbMCFireResults, sbMCFirePresets } from "./supabaseClient";
 
 // ─── Detect deployment mode ───────────────────────────────────────────────────
@@ -293,6 +294,13 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
   // ── Family Message Log ────────────────────────────────────────────────────
   if (path === "/api/family-msg-log") {
     if (m === "GET") return await sbFamilyMsgLog.getRecent();
+  }
+
+  // ── Tax Profile ──────────────────────────────────────────────────────────
+  if (path === "/api/tax-profile") {
+    if (m === "GET")  return (await sbTaxProfile.get()) ?? null;
+    if (m === "POST") return await sbTaxProfile.upsert(body as any);
+    if (m === "PUT")  return await sbTaxProfile.upsert(body as any);
   }
 
   // ── FIRE Settings ──────────────────────────────────────────────────────────

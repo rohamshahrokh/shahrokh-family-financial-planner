@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { formatCurrency, projectNetWorth, calcSavingsRate } from "@/lib/finance";
+import { formatCurrency, calcSavingsRate, safeNum } from "@/lib/finance";
+import { runCashEngine } from "@/lib/cashEngine";
+import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import { Button } from "@/components/ui/button";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { useToast } from "@/hooks/use-toast";
@@ -27,28 +29,55 @@ export default function ReportsPage() {
   const { data: expenses = [] } = useQuery<any[]>({ queryKey: ['/api/expenses'], queryFn: () => apiRequest('GET', '/api/expenses').then(r => r.json()) });
   const { data: scenarios = [] } = useQuery<any[]>({ queryKey: ['/api/scenarios'], queryFn: () => apiRequest('GET', '/api/scenarios').then(r => r.json()).catch(() => []) });
   const { data: incomeRecords = [] } = useQuery<any[]>({ queryKey: ['/api/income'], queryFn: () => apiRequest('GET', '/api/income').then(r => r.json()).catch(() => []) });
+  const { data: bills = [] } = useQuery<any[]>({ queryKey: ['/api/bills'], queryFn: () => apiRequest('GET', '/api/bills').then(r => r.json()).catch(() => []) });
+  const { data: stockDCASchedules = [] } = useQuery<any[]>({ queryKey: ['/api/stock-dca'], queryFn: () => apiRequest('GET', '/api/stock-dca').then(r => r.json()).catch(() => []) });
+  const { data: cryptoDCASchedules = [] } = useQuery<any[]>({ queryKey: ['/api/crypto-dca'], queryFn: () => apiRequest('GET', '/api/crypto-dca').then(r => r.json()).catch(() => []) });
+  const { data: plannedStockOrders = [] } = useQuery<any[]>({ queryKey: ['/api/planned-investments', 'stock'], queryFn: () => apiRequest('GET', '/api/planned-investments?module=stock').then(r => r.json()).catch(() => []) });
+  const { data: plannedCryptoOrders = [] } = useQuery<any[]>({ queryKey: ['/api/planned-investments', 'crypto'], queryFn: () => apiRequest('GET', '/api/planned-investments?module=crypto').then(r => r.json()).catch(() => []) });
+  const fa = useForecastAssumptions();
 
   // ─── Bulk delete state for scenarios ─────────────────────────────────────
   const [selectedScenarios, setSelectedScenarios] = useState<Set<number>>(new Set());
   const [showScenarioBulkModal, setShowScenarioBulkModal] = useState(false);
 
-  const snap = snapshot || { ppor: 1510000, cash: 220000, super_balance: 85000, stocks: 0, crypto: 0, cars: 65000, iran_property: 150000, mortgage: 1200000, other_debts: 19000, monthly_income: 22000, monthly_expenses: 14540 };
+  const snap = snapshot ?? {};
 
-  const totalAssets = snap.ppor + snap.cash + snap.super_balance + snap.stocks + snap.crypto + snap.cars + snap.iran_property;
-  const totalLiabilities = snap.mortgage + snap.other_debts;
+  const totalAssets = safeNum(snap.ppor) + safeNum(snap.cash) + safeNum(snap.super_balance) + safeNum(snap.stocks) + safeNum(snap.crypto) + safeNum(snap.cars) + safeNum(snap.iran_property);
+  const totalLiabilities = safeNum(snap.mortgage) + safeNum(snap.other_debts);
   const netWorth = totalAssets - totalLiabilities;
-  const surplus = snap.monthly_income - snap.monthly_expenses;
-  const savingsRate = calcSavingsRate(snap.monthly_income, snap.monthly_expenses);
+  const surplus = safeNum(snap.monthly_income) - safeNum(snap.monthly_expenses);
+  const savingsRate = calcSavingsRate(safeNum(snap.monthly_income), safeNum(snap.monthly_expenses));
 
-  const projection = projectNetWorth({ snapshot: snap, properties, stocks, cryptos, years: 10 });
+  // ─── Central Cash Engine — one source of truth ────────────────────────
+  const cashEngineOut = snapshot ? runCashEngine({
+    snapshot: snap,
+    properties,
+    stocks,
+    cryptos,
+    expenses,
+    bills,
+    stockDCASchedules,
+    cryptoDCASchedules,
+    plannedStockOrders,
+    plannedCryptoOrders,
+    inflationRate:    fa?.inflation_pct    ?? 3,
+    incomeGrowthRate: fa?.income_growth_pct ?? 3.5,
+  }) : null;
+
+  const projection = cashEngineOut?.annual ?? [];
 
   const assetData = [
-    { name: 'PPOR', value: snap.ppor }, { name: 'Cash', value: snap.cash },
-    { name: 'Super', value: snap.super_balance }, { name: 'Cars', value: snap.cars },
-    { name: 'Iran Property', value: snap.iran_property },
+    { name: 'PPOR', value: safeNum(snap.ppor) }, { name: 'Cash', value: safeNum(snap.cash) },
+    { name: 'Super', value: safeNum(snap.super_balance) }, { name: 'Cars', value: safeNum(snap.cars) },
+    { name: 'Iran Property', value: safeNum(snap.iran_property) },
   ].filter(d => d.value > 0);
 
-  const nwChartData = projection.map(p => ({ year: p.year.toString(), netWorth: p.endNetWorth, assets: p.totalAssets }));
+  const nwChartData = projection.map((p: any) => ({
+    year: p.year?.toString() ?? '',
+    netWorth: safeNum(p.endNetWorth ?? p.endingCash),
+    assets: safeNum(p.totalAssets ?? p.totalInflows),
+    cashFlow: safeNum(p.netCashFlow ?? p.avgMonthlyCF),
+  }));
 
   const expenseByCategory: Record<string, number> = {};
   expenses.forEach((e: any) => { expenseByCategory[e.category] = (expenseByCategory[e.category] || 0) + e.amount; });

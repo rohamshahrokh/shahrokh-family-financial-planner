@@ -497,3 +497,30 @@ export function validateTaxEngine(): {
   const withinTolerance = Math.abs(result.netMonthly - seekBenchmark) / seekBenchmark <= 0.01;
   return { input: testInput, result, seekBenchmark, withinTolerance };
 }
+
+// ─── QLD Stamp Duty (transferable duty) ──────────────────────────────────────
+// Source: QLD OSR – transfer duty rates (general rate, owner-occupier / investor)
+// https://www.qld.gov.au/housing/buying-owning-home/advice-buying-home/transfer-duty/calculate-transfer-duty
+
+export function estimateQldStampDuty(price: number): number {
+  if (price <= 0) return 0;
+  // General (non-FHOB) duty schedule
+  const bands: Array<[number, number, number]> = [
+    //  [upTo,    base,   marginalRate]
+    [5_000,          0,      0.010],
+    [75_000,        50,      0.015],
+    [540_000,     1_075,     0.035],
+    [1_000_000,  17_325,     0.045],
+    [Infinity,   38_025,     0.0575],
+  ];
+  let prev = 0;
+  let duty = 0;
+  for (const [limit, base, rate] of bands) {
+    if (price <= prev) break;
+    const taxable = Math.min(price, limit) - prev;
+    duty = base + taxable * rate;
+    prev = limit;
+    if (price <= limit) break;
+  }
+  return Math.round(duty);
+}

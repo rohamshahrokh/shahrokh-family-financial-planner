@@ -111,7 +111,18 @@ export interface TaxAlphaInput {
 
 const CONCESSIONAL_CAP_2526 = 30_000;  // ATO 2025-26
 const SUPER_TAX_RATE        = 0.15;    // flat rate inside super fund
-const FY                    = '2025-26';
+// ─── Dynamic Financial Year ──────────────────────────────────────────────────
+function getCurrentFY(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1; // 1-based
+  // ATO financial year: 1 July – 30 June
+  if (m >= 7) {
+    return `${y}-${String(y + 1).slice(-2)}`;
+  }
+  return `${y - 1}-${String(y).slice(-2)}`;
+}
+const FY = getCurrentFY() as import('./australianTax').TaxYear;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -464,7 +475,7 @@ function detectBracketOptimisation(inp: TaxAlphaInput): TaxAlphaStrategy {
 // ─── Main Engine ──────────────────────────────────────────────────────────────
 
 export function computeTaxAlpha(inp: TaxAlphaInput): TaxAlphaResult {
-  const year = '2025-26' as const;
+  const year = FY;
 
   // Current tax position
   const rohamTaxInput: TaxInput = {
@@ -533,7 +544,7 @@ export function computeTaxAlpha(inp: TaxAlphaInput): TaxAlphaResult {
     fara_tax_now:         faraTax,
     household_tax_now:    householdTax,
     data_coverage:        dataCoverage,
-    fy:                   year,
+    fy:                   FY,
   };
 }
 

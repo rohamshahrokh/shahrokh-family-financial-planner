@@ -5,6 +5,7 @@ import { formatCurrency, safeNum, projectInvestment, calcCAGR } from "@/lib/fina
 import { maskValue } from "@/components/PrivacyMask";
 import { useAppStore } from "@/lib/store";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
+import { runCashEngine } from "@/lib/cashEngine";
 import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
@@ -810,7 +811,7 @@ export default function StocksPage() {
 
   // Import / DCA state
   const [showImportModal, setShowImportModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'portfolio' | 'transactions' | 'dca' | 'orders'>('portfolio');
+  const [activeTab, setActiveTab] = useState<'portfolio' | 'transactions' | 'dca' | 'orders' | 'cashflow'>('portfolio');
   const [showDCAForm, setShowDCAForm] = useState(false);
   const [dcaDraft, setDcaDraft] = useState<any>(null);
   const [editingDCAId, setEditingDCAId] = useState<number | null>(null);
@@ -822,7 +823,15 @@ export default function StocksPage() {
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
-  const { data: stocks = [] } = useQuery<any[]>({
+  // ─── cashEngine dependencies ────────────────────────────────────────────
+  const { data: snapshot } = useQuery<any>({ queryKey: ["/api/snapshot"], queryFn: () => apiRequest("GET", "/api/snapshot").then(r => r.json()) });
+  const { data: expenses = [] } = useQuery<any[]>({ queryKey: ["/api/expenses"], queryFn: () => apiRequest("GET", "/api/expenses").then(r => r.json()) });
+  const { data: bills = [] } = useQuery<any[]>({ queryKey: ["/api/bills"], queryFn: () => apiRequest("GET", "/api/bills").then(r => r.json()) });
+  const { data: properties = [] } = useQuery<any[]>({ queryKey: ["/api/properties"], queryFn: () => apiRequest("GET", "/api/properties").then(r => r.json()) });
+  const { data: cryptos = [] } = useQuery<any[]>({ queryKey: ["/api/crypto"], queryFn: () => apiRequest("GET", "/api/crypto").then(r => r.json()) });
+  const { data: plannedStockOrders = [] } = useQuery<any[]>({ queryKey: ["/api/planned-investments", "stock"], queryFn: () => apiRequest("GET", "/api/planned-investments?module=stock").then(r => r.json()) });
+  const { data: plannedCryptoOrders = [] } = useQuery<any[]>({ queryKey: ["/api/planned-investments", "crypto"], queryFn: () => apiRequest("GET", "/api/planned-investments?module=crypto").then(r => r.json()) });
+    const { data: stocks = [] } = useQuery<any[]>({
     queryKey: ["/api/stocks"],
     queryFn: () => apiRequest("GET", "/api/stocks").then(r => r.json()),
   });
@@ -1069,7 +1078,23 @@ export default function StocksPage() {
   );
   const netCashImpact = plannedSellTotal - plannedBuyTotal;
 
-  // ── Combined projection ────────────────────────────────────────────────────
+  // ── Cash Engine — central cashflow (wired to DCA schedules) ─────────────
+  const cashEngineOut = snapshot ? runCashEngine({
+    snapshot,
+    properties: properties ?? [],
+    stocks: stocksData ?? [],
+    cryptos: cryptos ?? [],
+    expenses,
+    bills,
+    stockDCASchedules,
+    cryptoDCASchedules,
+    plannedStockOrders,
+    plannedCryptoOrders,
+    inflationRate:    fa?.inflation_pct    ?? 3,
+    incomeGrowthRate: fa?.income_growth_pct ?? 3.5,
+  }) : null;
+
+    // ── Combined projection ────────────────────────────────────────────────────
   // Single stateful forward pass — each asset's running value is carried
   // year-over-year so DCA ending does NOT cause a cliff/drop.
   // Includes: current holdings + planned orders + DCA schedules.
@@ -1365,6 +1390,7 @@ export default function StocksPage() {
           ['transactions', 'Transactions'],
           ['dca', 'DCA Schedules'],
           ['orders', 'Planned Orders'],
+          ['cashflow', 'Cash Flow'],
         ] as const).map(([id, label]) => (
           <button
             key={id}
@@ -2231,6 +2257,60 @@ export default function StocksPage() {
         </div>
       )}
 
+
+      {/* ─── Cash Flow Tab (cashEngine wired) ─────────────────────────────── */}
+      {activeTab === 'cashflow' && (
+        <div className="space-y-4">
+          <div className="bg-card border border-border rounded-2xl p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <TrendingUp className="w-5 h-5 text-primary" />
+              <div>
+                <h3 className="font-bold text-sm">Cash Flow Impact of Stock DCA</h3>
+                <p className="text-xs text-muted-foreground">Central cashEngine — includes all stock DCA schedules in household cash flow</p>
+              </div>
+            </div>
+            {!cashEngineOut ? (
+              <p className="text-sm text-muted-foreground text-center py-8">Loading cash engine data…</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                  {[
+                    { label: 'Annual DCA Outflow', value: stockDCASchedules.filter((d: any) => d.enabled !== false).reduce((s: number, d: any) => {
+                        const FREQ: Record<string, number> = { Weekly: 52/12, Fortnightly: 26/12, Monthly: 1, Quarterly: 1/3 };
+                        return s + (d.amount || 0) * (FREQ[d.frequency] || 1) * 12;
+                      }, 0) },
+                    { label: 'This Year Net CF', value: cashEngineOut.annual[0]?.netCashFlow ?? 0 },
+                    { label: 'Year 5 Net CF', value: cashEngineOut.annual[4]?.netCashFlow ?? 0 },
+                    { label: 'Year 10 Net CF', value: cashEngineOut.annual[9]?.netCashFlow ?? 0 },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-secondary/40 rounded-xl p-3">
+                      <p className="text-xs text-muted-foreground">{label}</p>
+                      <p className={`text-base font-bold ${value >= 0 ? 'text-green-400' : 'text-red-400'}`}>{value >= 0 ? '' : '-'}{formatCurrency(Math.abs(value))}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={cashEngineOut.annual.map((a: any) => ({
+                      year: a.year, netCF: Math.round(a.netCashFlow), closingCash: Math.round(a.endingCash)
+                    }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="year" tick={{ fontSize: 11 }} />
+                      <YAxis tickFormatter={(v) => `$${Math.abs(v) >= 1000 ? (v/1000).toFixed(0)+'K' : v}`} tick={{ fontSize: 10 }} />
+                      <Tooltip
+                        formatter={(v: any) => formatCurrency(v)}
+                        contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+                      />
+                      <Area type="monotone" dataKey="netCF" name="Net Cash Flow" stroke="hsl(43,85%,55%)" fill="hsl(43,85%,25%)" fillOpacity={0.3} />
+                      <Area type="monotone" dataKey="closingCash" name="Closing Cash" stroke="hsl(142,60%,45%)" fill="hsl(142,60%,20%)" fillOpacity={0.2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {/* ─── Planned Orders Tab ────────────────────────────────────────────── */}
       {activeTab === 'orders' && (
         <div className="space-y-4">

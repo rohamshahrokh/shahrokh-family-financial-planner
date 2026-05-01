@@ -14,6 +14,14 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/finance";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
+import {
+  calcIncomeTax,
+  calcLITO,
+  calcMedicareLevy,
+  calcMarginalRate,
+  type TaxYear,
+} from "@/lib/australianTax";
+import { estimateQldStampDuty } from "@/lib/australianTax";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -219,14 +227,8 @@ const TABS = [
   { id: "monte-carlo", label: "Monte Carlo",   icon: Atom   },
 ];
 
-// ─── Month simulation helper ──────────────────────────────────────────────────
-
-function monthsToFIRE(
-  startBalance: number,
-  monthlyContrib: number,
-  monthlyRate: number,
-  target: number
-): number {
+// ─── FIRE months helper (delegates to shared util) ───────────────────────────
+function monthsToFIRE(startBalance: number, monthlyContrib: number, monthlyRate: number, target: number): number {
   if (startBalance >= target) return 0;
   let bal = startBalance;
   for (let m = 1; m <= 480; m++) {
@@ -236,62 +238,19 @@ function monthsToFIRE(
   return 480;
 }
 
-// ─── Australian Tax Calculator ────────────────────────────────────────────────
-
+// ─── Tax shims — delegate to australianTax.ts ────────────────────────────────
+// calcLITO, calcMarginalRate, calcMedicareLevy are imported from australianTax.ts above
+// calcAusTax shim using imported calcIncomeTax
 function calcAusTax(taxableIncome: number): number {
-  let tax = 0;
-  if (taxableIncome <= 18200) {
-    tax = 0;
-  } else if (taxableIncome <= 45000) {
-    tax = (taxableIncome - 18200) * 0.19;
-  } else if (taxableIncome <= 120000) {
-    tax = 5092 + (taxableIncome - 45000) * 0.325;
-  } else if (taxableIncome <= 180000) {
-    tax = 29467 + (taxableIncome - 120000) * 0.37;
-  } else {
-    tax = 51667 + (taxableIncome - 180000) * 0.45;
-  }
-  return tax;
+  return calcIncomeTax(taxableIncome, '2025-26');
 }
-
-function calcLITO(taxableIncome: number): number {
-  if (taxableIncome <= 37500) return 700;
-  if (taxableIncome <= 45000) return 700 - (taxableIncome - 37500) * 0.05;
-  if (taxableIncome <= 66667) return 325 - (taxableIncome - 45000) * 0.015;
-  return 0;
-}
-
+// calcMedicare shim
 function calcMedicare(taxableIncome: number): number {
-  return taxableIncome > 26000 ? taxableIncome * 0.02 : 0;
+  return calcMedicareLevy(taxableIncome, '2025-26');
 }
-
+// calcQldStampDuty shim delegates to australianTax.ts export
 function calcQldStampDuty(price: number): number {
-  let duty = 0;
-  const bands = [
-    [5000, 0],
-    [75000, 0.015],
-    [540000, 0.035],
-    [1000000, 0.045],
-    [3000000, 0.0575],
-    [Infinity, 0.0575],
-  ] as const;
-
-  let prev = 0;
-  for (const [limit, rate] of bands) {
-    if (price <= prev) break;
-    const taxable = Math.min(price, limit) - prev;
-    duty += taxable * rate;
-    prev = limit;
-  }
-  return Math.round(duty);
-}
-
-function calcMarginalRate(taxableIncome: number): number {
-  if (taxableIncome <= 18200) return 0;
-  if (taxableIncome <= 45000) return 0.19;
-  if (taxableIncome <= 120000) return 0.325;
-  if (taxableIncome <= 180000) return 0.37;
-  return 0.45;
+  return estimateQldStampDuty(price);
 }
 
 // ─── TAB 1: FIRE TRACKER ─────────────────────────────────────────────────────
@@ -438,38 +397,29 @@ interface DebtResult {
   order: string[];
 }
 
+// ─── Debt payoff simulation ─────────────────────────────────────────────────
+// Shared waterfall algorithm — avalanche/snowball/custom sortFn
 function simulateDebtPayoff(
   debts: DebtItem[],
   extraPayment: number,
   sortFn: (a: DebtItem, b: DebtItem) => number
 ): DebtResult {
-  // Deep clone
   let ds = debts.map((d) => ({ ...d }));
-  const totalMin = ds.reduce((s, d) => s + d.minPayment, 0);
-
-  // Minimum-only baseline (no extra)
   const baselineInterest = ds.reduce((s, d) => {
     let bal = d.balance;
     const r = d.rate / 100 / 12;
     for (let m = 0; m < 480; m++) {
       const interest = bal * r;
-      const principal = Math.max(0, d.minPayment - interest);
-      bal -= principal;
+      bal -= Math.max(0, d.minPayment - interest);
       s += interest;
       if (bal <= 0) break;
     }
     return s;
   }, 0);
-
-  let month = 0;
-  let totalInterest = 0;
-  let extra = extraPayment;
-
+  let month = 0, totalInterest = 0;
   for (let m = 0; m < 480; m++) {
-    // Sort each month
     const sorted = [...ds].sort(sortFn);
-    let remaining = extra;
-
+    let remaining = extraPayment;
     for (const d of sorted) {
       if (d.balance <= 0) continue;
       const r = d.rate / 100 / 12;
@@ -479,17 +429,9 @@ function simulateDebtPayoff(
       d.balance = Math.max(0, d.balance + interest - payment);
       if (d.balance <= 0) remaining += d.minPayment;
     }
-
-    // Update original array
-    ds = ds.map((orig) => {
-      const found = sorted.find((s) => s.id === orig.id);
-      return found ? { ...orig, balance: found.balance } : orig;
-    });
-
     month++;
     if (ds.every((d) => d.balance <= 0)) break;
   }
-
   return {
     months: month,
     totalInterest: Math.round(totalInterest),

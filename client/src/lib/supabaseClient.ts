@@ -704,3 +704,34 @@ export const sbMCFirePresets = {
   },
 };
 
+
+
+// ─── Tax Profile ──────────────────────────────────────────────────────────────
+// Persists tax calculator inputs to sf_tax_profile
+
+export const sbTaxProfile = {
+  async get(): Promise<any | null> {
+    try {
+      const rows = await sbGet('sf_tax_profile', 'owner_id=eq.shahrokh-family-main&limit=1');
+      return rows[0] ?? null;
+    } catch { return null; }
+  },
+
+  async upsert(data: any): Promise<any> {
+    const payload = { ...data, owner_id: 'shahrokh-family-main' };
+    const res = await fetch(`${BASE}/sf_tax_profile`, {
+      method: 'POST',
+      headers: {
+        ...HEADERS,
+        Prefer: 'resolution=merge-duplicates,return=representation',
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`sbTaxProfile.upsert failed: ${err}`);
+    }
+    const rows = await res.json();
+    return rows[0];
+  },
+};

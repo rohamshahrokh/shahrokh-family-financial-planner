@@ -42,15 +42,50 @@ export interface BestMoveResult {
   summary:     string;             // one-line summary for bulletin
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── BestMoveConfig — all tunable constants from DB ──────────────────────────
+// Callers pass this after reading from sf_forecast_assumptions + sf_snapshot.
+// All values have sensible AUS defaults so the engine degrades gracefully
+// if the caller omits some fields.
 
-const MORTGAGE_RATE         = 0.0625;  // 6.25% typical AUS variable
-const ETF_EXPECTED_RETURN   = 0.095;   // 9.5% long-run ASX/global ETF
-const CRYPTO_EXPECTED_RETURN= 0.20;    // 20% expected — high volatility
-const PERSONAL_DEBT_RATE    = 0.17;    // 17% typical credit card / personal loan
+export interface BestMoveConfig {
+  /** PPOR/IP mortgage rate, e.g. 0.065 — from sf_snapshot.mortgage_rate / 100 */
+  mortgageRate?: number;
+  /** Expected long-run ETF/stocks return, e.g. 0.095 — from sf_forecast_assumptions */
+  etfExpectedReturn?: number;
+  /** Expected crypto return, e.g. 0.20 — from sf_forecast_assumptions */
+  cryptoExpectedReturn?: number;
+  /** Personal / consumer debt rate, e.g. 0.17 — from sf_snapshot debt records */
+  personalDebtRate?: number;
+  /** ATO super guarantee rate for current FY, e.g. 0.12 — from sf_forecast_assumptions */
+  sgRate?: number;
+  /** Emergency buffer in months, e.g. 3 — from sf_forecast_assumptions */
+  monthsBufferTarget?: number;
+}
+
+// ─── Runtime config (merged defaults + caller overrides) ──────────────────────
+
+function resolveConfig(cfg: BestMoveConfig = {}): Required<BestMoveConfig> {
+  return {
+    mortgageRate:         cfg.mortgageRate         ?? 0.0625,
+    etfExpectedReturn:    cfg.etfExpectedReturn     ?? 0.095,
+    cryptoExpectedReturn: cfg.cryptoExpectedReturn  ?? 0.20,
+    personalDebtRate:     cfg.personalDebtRate      ?? 0.17,
+    sgRate:               cfg.sgRate                ?? 0.115,
+    monthsBufferTarget:   cfg.monthsBufferTarget    ?? 3,
+  };
+}
+
+// ─── Legacy constants (derived from resolveConfig defaults) ───────────────────
+// These are used inside the module where cfg is not yet threaded through.
+// TODO: thread cfg through all strategy functions.
+const _DEFAULTS = resolveConfig();
+const MORTGAGE_RATE         = _DEFAULTS.mortgageRate;
+const ETF_EXPECTED_RETURN   = _DEFAULTS.etfExpectedReturn;
+const CRYPTO_EXPECTED_RETURN= _DEFAULTS.cryptoExpectedReturn;
+const PERSONAL_DEBT_RATE    = _DEFAULTS.personalDebtRate;
 const SUPER_CONCESSIONAL_CAP= 30_000;
-const SG_RATE               = 0.115;   // Superannuation guarantee 2025-26
-const MONTHS_BUFFER_TARGET  = 3;       // 3-month emergency buffer
+const SG_RATE               = _DEFAULTS.sgRate;
+const MONTHS_BUFFER_TARGET  = _DEFAULTS.monthsBufferTarget;
 
 // ─── Supabase fetch helper (same pattern as cfoEngine) ────────────────────────
 
@@ -100,7 +135,8 @@ function fmt(n: number): string {
 
 // ─── Core evaluation ──────────────────────────────────────────────────────────
 
-export async function computeBestMove(): Promise<BestMoveResult> {
+export async function computeBestMove(cfg: BestMoveConfig = {}): Promise<BestMoveResult> {
+  const _cfg = resolveConfig(cfg);
   // ── 1. Fetch all data in parallel ─────────────────────────────────────────
   const [
     snapRows, billRows, propRows,

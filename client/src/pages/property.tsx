@@ -6,9 +6,12 @@ import {
   formatCurrency, safeNum, calcMonthlyRepayment, projectProperty,
   calcNegativeGearing, auMarginalRate,
 } from "@/lib/finance";
+import { estimateQldStampDuty } from "@/lib/australianTax";
 import { maskValue } from "@/components/PrivacyMask";
 import { useAppStore } from "@/lib/store";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
+import { runCashEngine } from "@/lib/cashEngine";
+import { useMemo } from "react";
 import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
@@ -27,15 +30,8 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
-// ─── QLD Stamp Duty estimate ────────────────────────────────────────────────
-function estimateStampDuty(price: number): number {
-  if (price <= 0) return 0;
-  if (price <= 5000) return price * 0.01;
-  if (price <= 75000) return 50 + (price - 5000) * 0.015;
-  if (price <= 540000) return 1075 + (price - 75000) * 0.035;
-  if (price <= 1000000) return 17325 + (price - 540000) * 0.045;
-  return 38025 + (price - 1000000) * 0.0575;
-}
+// ─── QLD Stamp Duty — delegates to australianTax.ts central function ────────
+const estimateStampDuty = estimateQldStampDuty;
 
 // ─── Empty property template ────────────────────────────────────────────────
 const EMPTY_PROPERTY = {
@@ -901,6 +897,146 @@ function PropertyCard({ prop, onDelete, selected, onToggleSelect, privacyMode }:
 }
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
+// ─── Portfolio Impact Component ───────────────────────────────────────────────
+// Shows cashEngine before/after diff when a property is added/sold
+
+function PropertyPortfolioImpact({
+  snapshot, properties, stocks, cryptos, expenses, bills,
+  stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa,
+}: {
+  snapshot: any; properties: any[]; stocks: any[]; cryptos: any[];
+  expenses: any[]; bills: any[];
+  stockDCASchedules: any[]; cryptoDCASchedules: any[];
+  plannedStockOrders: any[]; plannedCryptoOrders: any[];
+  fa: any;
+}) {
+  if (!snapshot) {
+    return (
+      <div className="bg-card border border-border rounded-2xl p-8 text-center text-muted-foreground">
+        Loading snapshot data…
+      </div>
+    );
+  }
+
+  const baseInput = {
+    snapshot,
+    properties,
+    stocks,
+    cryptos,
+    expenses,
+    bills,
+    stockDCASchedules,
+    cryptoDCASchedules,
+    plannedStockOrders,
+    plannedCryptoOrders,
+    inflationRate:    fa?.inflation_pct    ?? 3,
+    incomeGrowthRate: fa?.income_growth_pct ?? 3.5,
+  };
+
+  // Base case: all current properties
+  const baseResult = runCashEngine(baseInput);
+
+  // Without investment properties: show impact of IPs only
+  const propsNoIP = properties.filter((p: any) => p.type === 'ppor' || p.property_type === 'PPOR');
+  const noIPResult = runCashEngine({ ...baseInput, properties: propsNoIP });
+
+  // Compute annual diff
+  const baseAnnual = baseResult.annual;
+  const noIPAnnual = noIPResult.annual;
+
+  const diffData = baseAnnual.map((b: any, i: number) => {
+    const n = noIPAnnual[i] ?? { netCashFlow: 0, endingCash: 0 };
+    return {
+      year: b.year,
+      withIP_cf:    Math.round(b.netCashFlow),
+      withoutIP_cf: Math.round(n.netCashFlow),
+      ip_impact:    Math.round(b.netCashFlow - n.netCashFlow),
+      withIP_cash:  Math.round(b.endingCash),
+      withoutIP_cash: Math.round(n.endingCash),
+    };
+  });
+
+  const totalIPImpact = diffData.reduce((s: number, d: any) => s + d.ip_impact, 0);
+  const ipCount = properties.filter((p: any) => p.type !== 'ppor' && p.property_type !== 'PPOR').length;
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-card border border-border rounded-2xl p-5">
+        <div className="flex items-center gap-3 mb-4">
+          <TrendingUp className="w-5 h-5 text-primary" />
+          <div>
+            <h3 className="font-bold text-sm">Portfolio Cash Impact</h3>
+            <p className="text-xs text-muted-foreground">How your {ipCount} investment propert{ipCount === 1 ? 'y' : 'ies'} affect total household cash flow (from central cashEngine)</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <div className="bg-secondary/40 rounded-xl p-3">
+            <p className="text-xs text-muted-foreground">IP Cash Impact (10yr)</p>
+            <p className={`text-lg font-bold ${totalIPImpact >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {totalIPImpact >= 0 ? '+' : ''}{formatCurrency(totalIPImpact)}
+            </p>
+          </div>
+          <div className="bg-secondary/40 rounded-xl p-3">
+            <p className="text-xs text-muted-foreground">Avg Annual Impact</p>
+            <p className={`text-lg font-bold ${totalIPImpact >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {totalIPImpact >= 0 ? '+' : ''}{formatCurrency(totalIPImpact / Math.max(1, diffData.length))}
+            </p>
+          </div>
+          <div className="bg-secondary/40 rounded-xl p-3">
+            <p className="text-xs text-muted-foreground">Investment Properties</p>
+            <p className="text-lg font-bold">{ipCount}</p>
+          </div>
+        </div>
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={diffData} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="year" tick={{ fontSize: 11 }} />
+              <YAxis tickFormatter={(v) => `$${Math.abs(v) >= 1000 ? (v/1000).toFixed(0)+'K' : v}`} tick={{ fontSize: 10 }} />
+              <Tooltip
+                formatter={(v: any) => formatCurrency(v)}
+                contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+              />
+              <Legend />
+              <Bar dataKey="withIP_cf" name="With IPs (Net CF)" fill="hsl(43,85%,55%)" radius={[3,3,0,0]} />
+              <Bar dataKey="withoutIP_cf" name="Without IPs (Net CF)" fill="hsl(188,60%,48%)" radius={[3,3,0,0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-2xl p-5">
+        <h3 className="font-bold text-sm mb-3">Year-by-Year Breakdown</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="text-left py-2 font-semibold">Year</th>
+                <th className="text-right py-2 font-semibold">With IPs (CF)</th>
+                <th className="text-right py-2 font-semibold">Without IPs (CF)</th>
+                <th className="text-right py-2 font-semibold">IP Impact</th>
+                <th className="text-right py-2 font-semibold">Closing Cash</th>
+              </tr>
+            </thead>
+            <tbody>
+              {diffData.map((row: any) => (
+                <tr key={row.year} className="border-b border-border/40 hover:bg-muted/30">
+                  <td className="py-2 font-medium">{row.year}</td>
+                  <td className={`py-2 text-right font-mono ${row.withIP_cf >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatCurrency(row.withIP_cf)}</td>
+                  <td className={`py-2 text-right font-mono ${row.withoutIP_cf >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatCurrency(row.withoutIP_cf)}</td>
+                  <td className={`py-2 text-right font-mono font-bold ${row.ip_impact >= 0 ? 'text-green-400' : 'text-red-400'}`}>{row.ip_impact >= 0 ? '+' : ''}{formatCurrency(row.ip_impact)}</td>
+                  <td className="py-2 text-right font-mono text-muted-foreground">{formatCurrency(row.withIP_cash)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 export default function PropertyPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -919,7 +1055,7 @@ export default function PropertyPage() {
   const [showBulkModal, setShowBulkModal] = useState(false);
 
   // Tab state — detect sessionStorage signal OR #buy-vs-wait in URL hash
-  const [activeTab, setActiveTab] = useState<'portfolio' | 'buy-vs-wait'>(() => {
+  const [activeTab, setActiveTab] = useState<'portfolio' | 'buy-vs-wait' | 'impact'>(() => {
     if (typeof window !== 'undefined') {
       if (sessionStorage.getItem('property_open_tab') === 'buy-vs-wait') return 'buy-vs-wait';
       if (window.location.hash.includes('buy-vs-wait')) return 'buy-vs-wait';
@@ -1068,6 +1204,7 @@ export default function PropertyPage() {
       <div className="flex gap-1 p-1 rounded-xl bg-secondary/60 border border-border w-full sm:w-auto inline-flex">
         {[
           { key: 'portfolio', label: 'Portfolio Overview' },
+          { key: 'impact', label: 'Portfolio Impact' },
           { key: 'buy-vs-wait', label: 'Buy vs Wait Analysis' },
         ].map(({ key, label }) => (
           <button
@@ -1086,6 +1223,19 @@ export default function PropertyPage() {
 
       {/* ─── Buy vs Wait tab ────────────────────────────────────────────────── */}
       {activeTab === 'buy-vs-wait' && <PropertyBuyAnalysis />}
+      {activeTab === 'impact' && <PropertyPortfolioImpact
+        snapshot={snapshot}
+        properties={properties}
+        stocks={stocks}
+        cryptos={cryptos}
+        expenses={expenses}
+        bills={bills}
+        stockDCASchedules={stockDCASchedules}
+        cryptoDCASchedules={cryptoDCASchedules}
+        plannedStockOrders={plannedStockOrders}
+        plannedCryptoOrders={plannedCryptoOrders}
+        fa={fa}
+      />}
 
       {/* ─── Portfolio tab content ─────────────────────────────────────────── */}
       {activeTab === 'portfolio' && <>
