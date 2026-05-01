@@ -78,6 +78,7 @@ import FIREPathCard from "@/components/FIREPathCard";
 import TaxAlphaCard from "@/components/TaxAlphaCard";
 import RiskRadarCard from "@/components/RiskRadarCard";
 import KpiCard from "@/components/KpiCard";
+import WealthFlowBanner from "@/components/WealthFlowBanner";
 import { Link } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
@@ -770,6 +771,11 @@ export default function DashboardPage() {
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background text-foreground pb-16">
+
+      {/* ══════════════════════════════════════════════════════════════════
+          WEALTH FLOW BANNER
+          ═════════════════════════════════════════════════════════════════ */}
+      <WealthFlowBanner />
 
       {/* ══════════════════════════════════════════════════════════════════
           HERO SECTION
