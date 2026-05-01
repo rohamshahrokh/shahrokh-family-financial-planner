@@ -171,7 +171,7 @@ const MilestoneDot = (props: any) => {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const qc = useQueryClient();
-  const { chartView, privacyMode, togglePrivacy, currentUser } = useAppStore();
+  const { chartView, setChartView, privacyMode, togglePrivacy, currentUser } = useAppStore();
   const { forecastMode, profile, monteCarloResult } = useForecastStore();
   const fa = useForecastAssumptions();
 
@@ -184,6 +184,7 @@ export default function DashboardPage() {
   const [mainChartMode, setMainChartMode] = useState<"networth" | "cashflow">("cashflow");
   const [cfChartAnnotations, setCfChartAnnotations] = useState(true);
   const [wdcTab, setWdcTab] = useState<"CASH" | "EVENTS" | "WEALTH" | "RISK">("CASH");
+  const [wdcChartType, setWdcChartType] = useState<"combo" | "line" | "candlestick">("combo");
   const cashFlowView = chartView;
 
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -479,17 +480,33 @@ export default function DashboardPage() {
       const name = p.address?.split(" ").slice(-2).join(" ") || p.label || "IP";
       add(yr, { icon: "🏠", text: `${name} Settlement`, type: "property" });
     });
-    // Planned stock orders (lump sum)
+    // Planned stock orders — collapse per year (Fix 3: no duplicate labels)
+    const stockByYear = new Map<number, { count: number; totalAmt: number }>();
     (ordersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date).forEach((o: any) => {
       const yr = new Date(o.planned_date).getFullYear();
       const amt = o.total_cost ?? o.amount ?? 0;
-      add(yr, { icon: "📈", text: `Stocks $${Math.round(amt / 1000)}k`, type: "stock" });
+      const existing = stockByYear.get(yr) ?? { count: 0, totalAmt: 0 };
+      stockByYear.set(yr, { count: existing.count + 1, totalAmt: existing.totalAmt + amt });
     });
-    // Planned crypto orders (lump sum)
+    stockByYear.forEach(({ count, totalAmt }, yr) => {
+      const label = count > 1
+        ? `📈 Multiple Stock Buys ($${Math.round(totalAmt / 1000)}k)`
+        : `📈 Stock Buy ($${Math.round(totalAmt / 1000)}k)`;
+      add(yr, { icon: "📈", text: label.replace("📈 ", ""), type: "stock" });
+    });
+    // Planned crypto orders — collapse per year (Fix 3)
+    const cryptoByYear = new Map<number, { count: number; totalAmt: number }>();
     (cryptoOrdersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date).forEach((o: any) => {
       const yr = new Date(o.planned_date).getFullYear();
       const amt = o.total_cost ?? o.amount ?? 0;
-      add(yr, { icon: "₿", text: `Crypto $${Math.round(amt / 1000)}k`, type: "crypto" });
+      const existing = cryptoByYear.get(yr) ?? { count: 0, totalAmt: 0 };
+      cryptoByYear.set(yr, { count: existing.count + 1, totalAmt: existing.totalAmt + amt });
+    });
+    cryptoByYear.forEach(({ count, totalAmt }, yr) => {
+      const label = count > 1
+        ? `Multiple Crypto Buys ($${Math.round(totalAmt / 1000)}k)`
+        : `Crypto Buy ($${Math.round(totalAmt / 1000)}k)`;
+      add(yr, { icon: "₿", text: label, type: "crypto" });
     });
     // NG tax refund years (any year that has negatively geared properties settled)
     if (ngSummary.totalAnnualTaxBenefit > 0) {
@@ -502,11 +519,32 @@ export default function DashboardPage() {
   }, [properties, ordersRaw, cryptoOrdersRaw, ngSummary]);
 
   const masterCFData = useMemo(() => {
-    // Always use annual view for executive chart
+    if (cashFlowView === "monthly") {
+      // ── MONTHLY mode: use monthly cashFlowSeries ──────────────────────────
+      return cashFlowSeries.map((m: any) => {
+        // For monthly data, attach milestone for that month's year only once
+        // (we attach milestones on the first month of each year that has them)
+        const isJan = m.month === 1;
+        const ms = isJan ? (milestonesPerYear.get(m.year) ?? []) : [];
+        return {
+          label:       m.label,          // "Jan 2026", "Feb 2026", …
+          income:      m.income ?? 0,
+          expenses:    m.totalExpenses ?? 0,
+          mortgage:    m.mortgageRepayment ?? 0,
+          rental:      m.rentalIncome ?? 0,
+          ngRefund:    m.ngTaxBenefit ?? 0,
+          netCF:       m.netCashFlow ?? 0,
+          balance:     m.cumulativeBalance ?? 0,
+          investments: 0,
+          _milestones: ms,
+        };
+      });
+    }
+    // ── ANNUAL mode (default) ─────────────────────────────────────────────
     return cashFlowAnnual.map((a: any) => {
       const yr = a.year as number;
       const ms = milestonesPerYear.get(yr) ?? [];
-      // Deduplicate milestones by type (e.g. keep only first tax refund shown per year)
+      // Deduplicate milestones by type (keep only first tax refund per year)
       const seen = new Set<string>();
       const dedupMs = ms.filter(m => {
         if (m.type === "tax") { if (seen.has("tax")) return false; seen.add("tax"); }
@@ -521,11 +559,11 @@ export default function DashboardPage() {
         ngRefund:    a.ngTaxBenefit ?? 0,
         netCF:       a.netCashFlow ?? 0,
         balance:     a.endingBalance ?? 0,
-        investments: 0, // DCA handled by engine; lump sums already reflected in balance
+        investments: 0,
         _milestones: dedupMs,
       };
     });
-  }, [cashFlowAnnual, milestonesPerYear]);
+  }, [cashFlowView, cashFlowSeries, cashFlowAnnual, milestonesPerYear]);
 
   // ─── Property purchase event reference lines ──────────────────────────────
   const propertyEventLines = useMemo(() => {
@@ -1116,8 +1154,8 @@ export default function DashboardPage() {
         {/* Main layout: 70% chart + 30% panel */}
         <div className="flex flex-col lg:flex-row gap-4">
 
-          {/* LEFT: Interactive Smart Chart */}
-          <div className="flex-[7] min-w-0 rounded-2xl border border-border bg-card p-5">
+          {/* LEFT: Interactive Smart Chart — Fix 7: overflow-hidden prevents mobile bleed */}
+          <div className="flex-[7] min-w-0 rounded-2xl border border-border bg-card p-5 overflow-hidden">
 
             {/* Tab bar */}
             <div className="flex gap-1 mb-4 flex-wrap">
@@ -1135,7 +1173,27 @@ export default function DashboardPage() {
                 </button>
               ))}
               {wdcTab === "CASH" && (
-                <div className="ml-auto flex gap-1.5 items-center">
+                <div className="ml-auto flex gap-1.5 items-center flex-wrap">
+                  {/* Monthly / Annual toggle — Fix 2: drives masterCFData switch */}
+                  <div className="flex gap-0.5 rounded-lg border border-border/60 p-0.5 bg-background/40">
+                    <button
+                      className={`px-2 py-0.5 rounded text-xs font-semibold transition-all ${
+                        cashFlowView === "annual"
+                          ? "bg-primary/20 text-primary"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      onClick={() => setChartView("annual")}
+                    >Annual</button>
+                    <button
+                      className={`px-2 py-0.5 rounded text-xs font-semibold transition-all ${
+                        cashFlowView === "monthly"
+                          ? "bg-primary/20 text-primary"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      onClick={() => setChartView("monthly")}
+                    >Monthly</button>
+                  </div>
+                  <div className="w-px h-4 bg-border/60" />
                   <button
                     className={`px-2 py-1 rounded text-xs font-medium transition-all ${ngRefundMode === "lump-sum" ? "bg-primary/20 text-primary border border-primary/30" : "text-muted-foreground border border-border hover:text-foreground"}`}
                     onClick={() => setNgRefundMode("lump-sum")}
@@ -1160,11 +1218,12 @@ export default function DashboardPage() {
             {/* TAB: CASH */}
             {wdcTab === "CASH" && (
               <>
+                {/* KPI chips */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
                   {[
-                    { label: "Cash Today",    val: formatCurrency(cfFirst.balance ?? 0, true), color: "hsl(210,80%,65%)" },
-                    { label: `${new Date().getFullYear()+9} Cash`, val: formatCurrency(cfLast.balance ?? 0, true), color: "hsl(142,60%,52%)" },
-                    { label: "Annual Net CF", val: formatCurrency(cfFirst.netCF ?? 0, true), color: (cfFirst.netCF??0)>=0?"hsl(142,60%,52%)":"hsl(0,72%,58%)" },
+                    { label: cashFlowView === "monthly" ? "Cash Today" : "Cash Today",      val: formatCurrency(cfFirst.balance ?? 0, true), color: "hsl(210,80%,65%)" },
+                    { label: cashFlowView === "monthly" ? `${cashFlowSeries[cashFlowSeries.length-1]?.label ?? "Future"} Cash` : `${new Date().getFullYear()+9} Cash`, val: formatCurrency(cfLast.balance ?? 0, true), color: "hsl(142,60%,52%)" },
+                    { label: cashFlowView === "monthly" ? "Monthly Net CF" : "Annual Net CF", val: formatCurrency(cfFirst.netCF ?? 0, true), color: (cfFirst.netCF??0)>=0?"hsl(142,60%,52%)":"hsl(0,72%,58%)" },
                     { label: "Tax Refund/yr", val: `+${formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}`, color: "hsl(43,90%,58%)" },
                   ].map(k => (
                     <div key={k.label} className="rounded-xl bg-background/60 border border-border px-3 py-2">
@@ -1173,48 +1232,142 @@ export default function DashboardPage() {
                     </div>
                   ))}
                 </div>
-                <div style={{ height: 255 }}>
+
+                {/* Chart type toggle — Fix 5 */}
+                <div className="flex items-center gap-1 mb-3">
+                  {(["combo", "line", "candlestick"] as const).map(ct => (
+                    <button
+                      key={ct}
+                      onClick={() => setWdcChartType(ct)}
+                      className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+                        wdcChartType === ct
+                          ? "bg-primary/20 text-primary border border-primary/30"
+                          : "text-muted-foreground border border-border/50 hover:text-foreground"
+                      }`}
+                    >
+                      {ct === "combo" ? "Combo" : ct === "line" ? "Line" : "Candlestick"}
+                    </button>
+                  ))}
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {wdcChartType === "combo" ? "Balance line + Net CF bars" : wdcChartType === "line" ? "Cash balance only" : "OHLC balance movement"}
+                  </span>
+                </div>
+
+                {/* Chart — Fix 1: increased height to 360px, Fix 7: responsive */}
+                <div className="w-full" style={{ height: 360 }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={masterCFData} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="wdcBalGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%"   stopColor="hsl(210,80%,62%)" stopOpacity={0.20} />
-                          <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.01} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,17%)" vertical={false} />
-                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(215,12%,45%)", fontWeight: 600 }} axisLine={false} tickLine={false} />
-                      <YAxis yAxisId="bal" orientation="left" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={50} />
-                      <YAxis yAxisId="cf" orientation="right" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={44} />
-                      <Tooltip content={<CashflowTooltip />} cursor={{ fill: "hsl(222,15%,16%)", fillOpacity: 0.6 }} />
-                      <ReferenceLine yAxisId="cf" y={0} stroke="hsl(222,15%,26%)" strokeDasharray="3 3" />
-                      {masterCFData.map((d: any) =>
-                        d._milestones?.length > 0 ? (
-                          <ReferenceLine key={d.label} yAxisId="bal" x={d.label}
-                            stroke="hsl(43,80%,50%)" strokeDasharray="4 3" strokeOpacity={0.45} strokeWidth={1} />
-                        ) : null
-                      )}
-                      <Bar yAxisId="cf" dataKey="netCF" name="Net Cashflow" radius={[3,3,0,0]} maxBarSize={32}>
-                        {masterCFData.map((d: any, i: number) => (
-                          <Cell key={i} fill={(d.netCF??0)>=0 ? "hsl(142,55%,40%)" : "hsl(0,65%,50%)"} fillOpacity={0.7} />
-                        ))}
-                      </Bar>
-                      <Area yAxisId="bal" type="monotone" dataKey="balance" name="Cash Balance"
-                        stroke="hsl(210,80%,65%)" strokeWidth={2.5} fill="url(#wdcBalGrad)"
-                        dot={<MilestoneDot />} activeDot={{ r: 5, fill: "hsl(210,80%,65%)", strokeWidth: 0 }} />
-                    </ComposedChart>
+                    {wdcChartType === "line" ? (
+                      <LineChart data={masterCFData} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="wdcBalGradLine" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%"   stopColor="hsl(210,80%,62%)" stopOpacity={0.20} />
+                            <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.01} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,17%)" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(215,12%,45%)", fontWeight: 600 }} axisLine={false} tickLine={false}
+                          interval={cashFlowView === "monthly" ? Math.floor(masterCFData.length / 8) : 0} />
+                        <YAxis yAxisId="bal" orientation="left" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={50} />
+                        <Tooltip content={<CashflowTooltip />} cursor={{ stroke: "hsl(215,12%,40%)", strokeWidth: 1 }} />
+                        {masterCFData.map((d: any) =>
+                          d._milestones?.length > 0 ? (
+                            <ReferenceLine key={d.label} yAxisId="bal" x={d.label}
+                              stroke="hsl(43,80%,50%)" strokeDasharray="4 3" strokeOpacity={0.45} strokeWidth={1} />
+                          ) : null
+                        )}
+                        <Line yAxisId="bal" type="monotone" dataKey="balance" name="Cash Balance"
+                          stroke="hsl(210,80%,65%)" strokeWidth={2.5}
+                          dot={<MilestoneDot />} activeDot={{ r: 5, fill: "hsl(210,80%,65%)", strokeWidth: 0 }} />
+                      </LineChart>
+                    ) : wdcChartType === "candlestick" ? (
+                      // Candlestick — use ComposedChart with a custom Bar showing OHLC-style balance movement
+                      // open = prev year balance, close = this year balance, bar height = |close-open|
+                      <ComposedChart
+                        data={masterCFData.map((d: any, i: number) => ({
+                          ...d,
+                          open:   i === 0 ? d.balance : (masterCFData[i-1] as any).balance,
+                          close:  d.balance,
+                          high:   Math.max(d.balance, i === 0 ? d.balance : (masterCFData[i-1] as any).balance),
+                          low:    Math.min(d.balance, i === 0 ? d.balance : (masterCFData[i-1] as any).balance),
+                          barY:   Math.min(d.balance, i === 0 ? d.balance : (masterCFData[i-1] as any).balance),
+                          barH:   Math.abs(d.balance - (i === 0 ? d.balance : (masterCFData[i-1] as any).balance)),
+                          isUp:   d.balance >= (i === 0 ? d.balance : (masterCFData[i-1] as any).balance),
+                        }))}
+                        margin={{ top: 16, right: 8, left: 0, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,17%)" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(215,12%,45%)", fontWeight: 600 }} axisLine={false} tickLine={false}
+                          interval={cashFlowView === "monthly" ? Math.floor(masterCFData.length / 8) : 0} />
+                        <YAxis yAxisId="bal" orientation="left" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={50} />
+                        <Tooltip content={<CashflowTooltip />} cursor={{ fill: "hsl(222,15%,16%)", fillOpacity: 0.5 }} />
+                        {masterCFData.map((d: any) =>
+                          d._milestones?.length > 0 ? (
+                            <ReferenceLine key={d.label} yAxisId="bal" x={d.label}
+                              stroke="hsl(43,80%,50%)" strokeDasharray="4 3" strokeOpacity={0.45} strokeWidth={1} />
+                          ) : null
+                        )}
+                        {/* Candlestick body bar */}
+                        <Bar yAxisId="bal" dataKey="balance" name="Cash Balance" radius={[3,3,0,0]} maxBarSize={28}>
+                          {masterCFData.map((d: any, i: number) => {
+                            const prevBal = i === 0 ? d.balance : (masterCFData[i-1] as any).balance;
+                            const isUp = d.balance >= prevBal;
+                            return <Cell key={i} fill={isUp ? "hsl(142,55%,40%)" : "hsl(0,65%,50%)"} fillOpacity={0.85} />;
+                          })}
+                        </Bar>
+                        {/* Wick line rendered as an Area with near-zero width */}
+                        <Line yAxisId="bal" type="monotone" dataKey="balance" name="Trend"
+                          stroke="hsl(210,80%,65%)" strokeWidth={1.5} dot={false} strokeDasharray="3 3" strokeOpacity={0.4} />
+                      </ComposedChart>
+                    ) : (
+                      // DEFAULT: Combo — Balance area + Net CF bars
+                      <ComposedChart data={masterCFData} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="wdcBalGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%"   stopColor="hsl(210,80%,62%)" stopOpacity={0.20} />
+                            <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.01} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,17%)" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(215,12%,45%)", fontWeight: 600 }} axisLine={false} tickLine={false}
+                          interval={cashFlowView === "monthly" ? Math.floor(masterCFData.length / 8) : 0} />
+                        <YAxis yAxisId="bal" orientation="left" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={50} />
+                        <YAxis yAxisId="cf" orientation="right" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={44} />
+                        <Tooltip content={<CashflowTooltip />} cursor={{ fill: "hsl(222,15%,16%)", fillOpacity: 0.6 }} />
+                        <ReferenceLine yAxisId="cf" y={0} stroke="hsl(222,15%,26%)" strokeDasharray="3 3" />
+                        {masterCFData.map((d: any) =>
+                          d._milestones?.length > 0 ? (
+                            <ReferenceLine key={d.label} yAxisId="bal" x={d.label}
+                              stroke="hsl(43,80%,50%)" strokeDasharray="4 3" strokeOpacity={0.45} strokeWidth={1} />
+                          ) : null
+                        )}
+                        <Bar yAxisId="cf" dataKey="netCF" name="Net Cashflow" radius={[3,3,0,0]} maxBarSize={32}>
+                          {masterCFData.map((d: any, i: number) => (
+                            <Cell key={i} fill={(d.netCF??0)>=0 ? "hsl(142,55%,40%)" : "hsl(0,65%,50%)"} fillOpacity={0.7} />
+                          ))}
+                        </Bar>
+                        <Area yAxisId="bal" type="monotone" dataKey="balance" name="Cash Balance"
+                          stroke="hsl(210,80%,65%)" strokeWidth={2.5} fill="url(#wdcBalGrad)"
+                          dot={<MilestoneDot />} activeDot={{ r: 5, fill: "hsl(210,80%,65%)", strokeWidth: 0 }} />
+                      </ComposedChart>
+                    )}
                   </ResponsiveContainer>
                 </div>
+
+                {/* Legend row */}
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-3 pt-3 border-t border-border">
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <span className="inline-block w-6 h-0.5 rounded" style={{ background: "hsl(210,80%,65%)" }} />Cash Balance
                   </div>
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(142,55%,40%)", opacity: 0.8 }} />Net CF +
-                  </div>
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(0,65%,50%)", opacity: 0.8 }} />Net CF &minus;
-                  </div>
+                  {wdcChartType !== "line" && (
+                    <>
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(142,55%,40%)", opacity: 0.8 }} />{wdcChartType === "candlestick" ? "Up" : "Net CF +"}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(0,65%,50%)", opacity: 0.8 }} />{wdcChartType === "candlestick" ? "Down" : "Net CF −"}
+                      </div>
+                    </>
+                  )}
                   <div className="ml-auto flex flex-wrap gap-x-4 gap-y-1">
                     {[
                       { icon: "🏠", label: "Property",   color: "hsl(188,65%,52%)" },
@@ -1532,18 +1685,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          SATURDAY MORNING BULLETIN + BEST MOVE
-          ═════════════════════════════════════════════════════════════════ */}
+      {/* BEST MOVE CARD — Saturday Morning Bulletin removed from homepage (lives in Actions menu) */}
       <div className="px-4 pb-4">
-        <div className="flex flex-col lg:flex-row gap-4">
-          <div className="flex-[3] min-w-0">
-            <CFODashboardWidget />
-          </div>
-          <div className="flex-[2] min-w-0">
-            <BestMoveCard />
-          </div>
-        </div>
+        <BestMoveCard />
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
