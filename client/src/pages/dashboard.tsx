@@ -10,7 +10,7 @@ import {
   calcNegativeGearing,
   type NGSummary,
 } from "@/lib/finance";
-import { runCashEngine, getCashKPICards } from "@/lib/cashEngine";
+import { runCashEngine, getCashKPICards, type CashEvent } from "@/lib/cashEngine";
 import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import { maskValue } from "@/components/PrivacyMask";
@@ -28,6 +28,11 @@ import {
   LineChart,
   Line,
   Legend,
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
 } from "recharts";
 import {
   TrendingUp,
@@ -54,6 +59,14 @@ import {
   ArrowDownRight,
   BarChart2,
   Layers,
+  Briefcase,
+  Calendar,
+  Landmark,
+  TrendingDown,
+  Star,
+  Activity,
+  Info,
+  CheckCircle2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import AIInsightsCard from "@/components/AIInsightsCard";
@@ -84,24 +97,55 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload ?? {};
   const rows = [
-    { label: "Salary / Income",          value: d.income   ?? 0, color: "hsl(142,60%,45%)" },
-    { label: "Rental Income",            value: d.rental   ?? 0, color: "hsl(188,60%,48%)" },
-    { label: "Living Expenses",          value: -(d.expenses ?? 0), color: "hsl(0,72%,51%)" },
-    { label: "Mortgage Repayments",      value: -(d.mortgage ?? 0), color: "hsl(20,80%,55%)" },
-    { label: "NG Tax Refund",            value: d.ngRefund  ?? 0, color: "hsl(43,85%,55%)" },
-    { label: "Net Cashflow",             value: d.netCF    ?? 0, color: (d.netCF ?? 0) >= 0 ? "hsl(142,60%,45%)" : "hsl(0,72%,51%)" },
-    { label: "Ending Cash Balance",      value: d.balance  ?? 0, color: "hsl(270,60%,60%)" },
+    { label: "Salary / Income",     value: d.income    ?? 0, color: "hsl(142,60%,45%)" },
+    { label: "Rental Income",       value: d.rental    ?? 0, color: "hsl(188,60%,48%)" },
+    { label: "Living Expenses",     value: -(d.expenses ?? 0), color: "hsl(0,72%,51%)" },
+    { label: "Mortgage Repayments", value: -(d.mortgage ?? 0), color: "hsl(20,80%,55%)" },
+    { label: "NG Tax Refund",       value: d.ngRefund  ?? 0, color: "hsl(43,85%,55%)" },
+    { label: "Net Cashflow",        value: d.netCF     ?? 0, color: (d.netCF ?? 0) >= 0 ? "hsl(142,60%,45%)" : "hsl(0,72%,51%)" },
+    { label: "Ending Cash Balance", value: d.balance   ?? 0, color: "hsl(270,60%,60%)" },
   ].filter(r => r.value !== 0);
   return (
     <div className="db-tooltip" style={{ minWidth: 220 }}>
       <p className="db-tooltip-label">{label}</p>
       {rows.map((r, i) => (
-        <div key={i} className="db-tooltip-row" style={{ color: r.color }}>
+        <div key={i} className="db-tooltip-row" style={{ color: r.color, display: "flex", justifyContent: "space-between", gap: 16 }}>
           <span>{r.label}</span>
           <span className="font-mono">{r.value >= 0 ? "+" : ""}{formatCurrency(r.value, true)}</span>
         </div>
       ))}
+      {d._events?.length > 0 && (
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid hsl(222 15% 22%)" }}>
+          {d._events.map((ev: string, i: number) => (
+            <div key={i} style={{ fontSize: 10, color: "hsl(42,80%,60%)", marginTop: 2 }}>⚡ {ev}</div>
+          ))}
+        </div>
+      )}
     </div>
+  );
+};
+
+const DonutTooltip = ({ active, payload }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="db-tooltip">
+      <p className="db-tooltip-label">{payload[0].name}</p>
+      <p style={{ color: payload[0].payload.fill }} className="db-tooltip-row">
+        {formatCurrency(payload[0].value, true)} ({payload[0].payload.pct?.toFixed(1)}%)
+      </p>
+    </div>
+  );
+};
+
+// ─── Custom event dot for CF chart ───────────────────────────────────────────
+const EventDot = (props: any) => {
+  const { cx, cy, payload } = props;
+  if (!payload?._hasEvent) return null;
+  return (
+    <g>
+      <circle cx={cx} cy={cy} r={5} fill="hsl(42,80%,52%)" stroke="hsl(222,22%,7%)" strokeWidth={1.5} />
+      <circle cx={cx} cy={cy} r={3} fill="hsl(222,22%,7%)" />
+    </g>
   );
 };
 
@@ -119,6 +163,7 @@ export default function DashboardPage() {
   const [ngRefundMode, setNgRefundMode] = useState<"lump-sum" | "payg">("lump-sum");
   const [chartRange, setChartRange] = useState<"1Y" | "3Y" | "10Y" | "Scenario">("10Y");
   const [mainChartMode, setMainChartMode] = useState<"networth" | "cashflow">("cashflow");
+  const [cfChartAnnotations, setCfChartAnnotations] = useState(true);
   const cashFlowView = chartView;
 
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -206,207 +251,205 @@ export default function DashboardPage() {
     queryFn: () => apiRequest("GET", "/api/crypto-dca").then((r) => r.json()),
     staleTime: 0,
   });
-  const { data: plannedStockOrders = [] } = useQuery<any[]>({
-    queryKey: ["/api/planned-investments", "stock"],
-    queryFn: () => apiRequest("GET", "/api/planned-investments?module=stock").then((r) => r.json()),
+  const { data: ordersRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/stock-orders"],
+    queryFn: () => apiRequest("GET", "/api/stock-orders").then((r) => r.json()),
     staleTime: 0,
   });
-  const { data: plannedCryptoOrders = [] } = useQuery<any[]>({
-    queryKey: ["/api/planned-investments", "crypto"],
-    queryFn: () => apiRequest("GET", "/api/planned-investments?module=crypto").then((r) => r.json()),
+  const { data: cryptoOrdersRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/crypto-orders"],
+    queryFn: () => apiRequest("GET", "/api/crypto-orders").then((r) => r.json()),
+    staleTime: 0,
+  });
+  const { data: holdingsRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/holdings"],
+    queryFn: () => apiRequest("GET", "/api/holdings").then((r) => r.json()),
     staleTime: 0,
   });
 
   const updateSnap = useMutation({
-    mutationFn: (data: any) => apiRequest("PUT", "/api/snapshot", data).then((r) => r.json()),
+    mutationFn: (data: any) => apiRequest("POST", "/api/snapshot", data).then((r) => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/snapshot"] }),
   });
 
-  // ─── Income ──────────────────────────────────────────────────────────────
-  const FREQ_MULT: Record<string, number> = {
-    Weekly: 52 / 12, Fortnightly: 26 / 12, Monthly: 1,
-    Quarterly: 4 / 12, Annual: 1 / 12, "One-off": 0,
-  };
+  // ─── Derived data ─────────────────────────────────────────────────────────
+  const plannedStockTx = useMemo(() => (stockTransactionsRaw ?? []).filter((t: any) => t.status === "planned"), [stockTransactionsRaw]);
+  const plannedCryptoTx = useMemo(() => (cryptoTransactionsRaw ?? []).filter((t: any) => t.status === "planned"), [cryptoTransactionsRaw]);
+  const plannedStockOrders = useMemo(() => (ordersRaw ?? []).filter((o: any) => o.status !== "cancelled"), [ordersRaw]);
+  const plannedCryptoOrders = useMemo(() => (cryptoOrdersRaw ?? []).filter((o: any) => o.status !== "cancelled"), [cryptoOrdersRaw]);
 
-  const activeIncomeStreams = useMemo(() => {
-    const streamMap = new Map<string, any>();
-    const sorted = [...(incomeRecords as any[])]
-      .filter((r: any) => r.frequency !== "One-off")
-      .sort((a: any, b: any) => (b.date || "").localeCompare(a.date || ""));
-    for (const r of sorted) {
-      const key = [(r.member||"").toLowerCase().trim(),(r.source||"").toLowerCase().trim(),(r.description||"").toLowerCase().trim()].join("|");
-      if (!streamMap.has(key)) streamMap.set(key, r);
-    }
-    return Array.from(streamMap.values());
-  }, [incomeRecords]);
+  const snap = useMemo(() => {
+    const s = snapshot ?? {};
+    return {
+      ppor:             safeNum(s.ppor),
+      cash:             safeNum(s.cash),
+      offset_balance:   safeNum(s.offset_balance),
+      super_balance:    safeNum(s.super_balance),
+      super_roham:      safeNum(s.super_roham ?? s.super_balance),
+      super_fara:       safeNum(s.super_fara),
+      cars:             safeNum(s.cars),
+      iran_property:    safeNum(s.iran_property),
+      mortgage:         safeNum(s.mortgage),
+      other_debts:      safeNum(s.other_debts),
+      monthly_income:   safeNum(s.monthly_income),
+      monthly_expenses: safeNum(s.monthly_expenses),
+      mortgage_rate:    safeNum(s.mortgage_rate) || 6.5,
+      mortgage_term_years: safeNum(s.mortgage_term_years) || 30,
+    };
+  }, [snapshot]);
 
-  const incomeTrackerMonthly = useMemo(() =>
-    activeIncomeStreams.reduce((sum: number, r: any) => sum + safeNum(r.amount) * (FREQ_MULT[r.frequency] ?? 1), 0),
-  [activeIncomeStreams]);
+  // Live stocks / crypto from holdings
+  const liveStocks = useMemo(() =>
+    (holdingsRaw ?? []).filter((h: any) => h.asset_type === "stock").reduce((sum: number, h: any) => sum + safeNum(h.current_value), 0),
+    [holdingsRaw]);
+  const liveCrypto = useMemo(() =>
+    (holdingsRaw ?? []).filter((h: any) => h.asset_type === "crypto").reduce((sum: number, h: any) => sum + safeNum(h.current_value), 0),
+    [holdingsRaw]);
+  const stocksTotal = liveStocks || (stocks ?? []).reduce((s: number, x: any) => s + safeNum(x.current_value), 0);
+  const cryptoTotal = liveCrypto || (cryptos ?? []).reduce((s: number, x: any) => s + safeNum(x.current_value), 0);
 
-  const useIncomeTracker = incomeRecords.length > 0;
+  const _totalSuperNow = snap.super_roham + snap.super_fara;
 
-  // ─── Snapshot ─────────────────────────────────────────────────────────────
-  const snap = {
-    ppor:             safeNum(snapshot?.ppor)             || 1510000,
-    cash:             safeNum(snapshot?.cash)             || 220000,
-    offset_balance:   safeNum(snapshot?.offset_balance),
-    super_balance:    safeNum(snapshot?.super_balance)    || 85000,
-    stocks:           safeNum(snapshot?.stocks),
-    crypto:           safeNum(snapshot?.crypto),
-    cars:             safeNum(snapshot?.cars)             || 65000,
-    iran_property:    safeNum(snapshot?.iran_property)    || 150000,
-    mortgage:         safeNum(snapshot?.mortgage)         || 1200000,
-    other_debts:      safeNum(snapshot?.other_debts)      || 19000,
-    monthly_income:   useIncomeTracker ? incomeTrackerMonthly : safeNum(snapshot?.monthly_income) || 22000,
-    monthly_expenses: safeNum(snapshot?.monthly_expenses) || 14540,
-    roham_super_balance:          safeNum(snapshot?.roham_super_balance),
-    roham_super_salary:           safeNum(snapshot?.roham_super_salary),
-    roham_employer_contrib:       safeNum(snapshot?.roham_employer_contrib)       || 11.5,
-    roham_salary_sacrifice:       safeNum(snapshot?.roham_salary_sacrifice),
-    roham_super_personal_contrib: safeNum(snapshot?.roham_super_personal_contrib),
-    roham_super_annual_topup:     safeNum(snapshot?.roham_super_annual_topup),
-    roham_super_growth_rate:      safeNum(snapshot?.roham_super_growth_rate)      || 8.0,
-    roham_super_fee_pct:          safeNum(snapshot?.roham_super_fee_pct)          || 0.5,
-    roham_super_insurance_pa:     safeNum(snapshot?.roham_super_insurance_pa),
-    roham_super_option:           (snapshot?.roham_super_option  as string)       || "High Growth",
-    roham_super_provider:         (snapshot?.roham_super_provider as string)      || "",
-    roham_retirement_age:         safeNum(snapshot?.roham_retirement_age)         || 60,
-    fara_super_balance:           safeNum(snapshot?.fara_super_balance),
-    fara_super_salary:            safeNum(snapshot?.fara_super_salary),
-    fara_employer_contrib:        safeNum(snapshot?.fara_employer_contrib)        || 11.5,
-    fara_salary_sacrifice:        safeNum(snapshot?.fara_salary_sacrifice),
-    fara_super_personal_contrib:  safeNum(snapshot?.fara_super_personal_contrib),
-    fara_super_annual_topup:      safeNum(snapshot?.fara_super_annual_topup),
-    fara_super_growth_rate:       safeNum(snapshot?.fara_super_growth_rate)       || 8.0,
-    fara_super_fee_pct:           safeNum(snapshot?.fara_super_fee_pct)           || 0.5,
-    fara_super_insurance_pa:      safeNum(snapshot?.fara_super_insurance_pa),
-    fara_super_option:            (snapshot?.fara_super_option  as string)        || "High Growth",
-    fara_super_provider:          (snapshot?.fara_super_provider as string)       || "",
-    fara_retirement_age:          safeNum(snapshot?.fara_retirement_age)          || 60,
-  };
+  // ─── Core financials ──────────────────────────────────────────────────────
+  const totalAssets   = snap.ppor + snap.cash + snap.offset_balance + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property;
+  const totalLiab     = snap.mortgage + snap.other_debts;
+  const netWorth      = totalAssets - totalLiab;
+  const propertyEquity = snap.ppor - snap.mortgage;
+  const surplus       = snap.monthly_income - snap.monthly_expenses - (snap.mortgage / 12);
+  const savingsRate   = calcSavingsRate(snap.monthly_income, surplus);
 
-  // ─── Derived values ───────────────────────────────────────────────────────
-  const stocksTotal    = stocks.reduce((s: number, st: any) => s + safeNum(st.current_holding) * safeNum(st.current_price), 0);
-  const cryptoTotal    = cryptos.reduce((s: number, c: any) => s + safeNum(c.current_holding) * safeNum(c.current_price), 0);
-  const liveStocks  = stocksTotal  > 0 ? stocksTotal  : snap.stocks;
-  const liveCrypto  = cryptoTotal  > 0 ? cryptoTotal  : snap.crypto;
-
-  const _superRohamNow = snap.roham_super_balance > 0 ? snap.roham_super_balance : snap.super_balance * 0.6;
-  const _superFaraNow  = snap.fara_super_balance  > 0 ? snap.fara_super_balance  : snap.super_balance * 0.4;
-  const _totalSuperNow = _superRohamNow + _superFaraNow;
-
-  const totalAssets      = snap.ppor + snap.cash + snap.offset_balance + _totalSuperNow + liveStocks + liveCrypto + snap.cars + snap.iran_property;
-  const totalLiabilities = snap.mortgage + snap.other_debts;
-  const netWorth         = totalAssets - totalLiabilities;
-  const surplus          = snap.monthly_income - snap.monthly_expenses;
-  const savingsRate      = calcSavingsRate(snap.monthly_income, snap.monthly_expenses);
-  const propertyEquity   = snap.ppor - snap.mortgage;
-
-  const plannedStockTx = useMemo(
-    () => (stockTransactionsRaw as any[]).filter((t: any) => t.status === "planned"),
-    [stockTransactionsRaw]
-  );
-  const plannedCryptoTx = useMemo(
-    () => (cryptoTransactionsRaw as any[]).filter((t: any) => t.status === "planned"),
-    [cryptoTransactionsRaw]
-  );
-
+  // ─── NG Summary ───────────────────────────────────────────────────────────
   const ngSummary = useMemo<NGSummary>(() =>
-    calcNegativeGearing({
-      properties: properties as any[],
-      annualSalaryIncome: safeNum(snap.monthly_income) * 12,
-      refundMode: ngRefundMode,
-    }),
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  [properties, snap.monthly_income, ngRefundMode]);
+    calcNegativeGearing({ properties, annualSalaryIncome: snap.monthly_income * 12, refundMode: ngRefundMode }),
+    [properties, snap.monthly_income, ngRefundMode]
+  );
 
   // ─── Projection ───────────────────────────────────────────────────────────
-  const projection = useMemo(
-    () => projectNetWorth({
-      snapshot: snap, properties, stocks, cryptos,
-      liveStocksValue: liveStocks, liveCryptoValue: liveCrypto,
-      stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx,
-      stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders,
-      years: 10, inflation: fa.flat.inflation, ppor_growth: fa.flat.property_growth,
-      yearlyAssumptions: fa.yearly, expenses: expenses as any[],
-      bills: billsRaw as any[], ngRefundMode,
+  const projection = useMemo(() =>
+    projectNetWorth({
+      snap: { ...snap, offset_balance: snap.offset_balance },
+      expenses, properties, stocks: stocksTotal, crypto: cryptoTotal,
+      plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules,
+      plannedStockOrders, plannedCryptoOrders, fa,
       ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
-      annualSalaryIncome: safeNum(snap.monthly_income) * 12,
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngRefundMode, ngSummary.totalAnnualTaxBenefit]
   );
-
   const year10NW      = projection[9]?.endNetWorth || netWorth;
   const passiveIncome = projection[0]?.passiveIncome || 0;
 
-  const currentSuperRoham = snap.roham_super_balance || snap.super_balance * 0.6;
-  const currentSuperFara  = snap.fara_super_balance  || snap.super_balance * 0.4;
-  const currentTotalSuper = currentSuperRoham + currentSuperFara;
-
-  // ─── Bills ────────────────────────────────────────────────────────────────
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const activeBills = useMemo(() => {
-    return (billsRaw as any[])
-      .filter((b: any) => b.active !== false)
-      .sort((a: any, b: any) => {
-        const da = a.next_due_date ? new Date(a.next_due_date).getTime() : Infinity;
-        const db = b.next_due_date ? new Date(b.next_due_date).getTime() : Infinity;
-        return da - db;
+  // ─── Cash engine with events ──────────────────────────────────────────────
+  const cashEngineResult = useMemo(() => {
+    try {
+      return runCashEngine({
+        snap, expenses, properties,
+        plannedStockTx, plannedCryptoTx,
+        stockDCASchedules, cryptoDCASchedules,
+        plannedStockOrders, plannedCryptoOrders,
+        fa, ngRefundMode,
+        ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
       });
-  }, [billsRaw]);
+    } catch { return null; }
+  }, [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
 
-  // ─── Cashflow series ──────────────────────────────────────────────────────
-  const cashFlowSeries = useMemo(
-    () => buildCashFlowSeries({
-      snapshot: snap, expenses: expenses as any[], properties: properties as any[],
-      stockTransactions: plannedStockTx, cryptoTransactions: plannedCryptoTx,
-      stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders,
-      inflationRate: fa.flat.inflation, incomeGrowthRate: fa.flat.income_growth,
-      ngRefundMode, ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
-      annualSalaryIncome: safeNum(snap.monthly_income) * 12,
-    }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]
-  );
-
-  const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
-
-  const masterCFData = useMemo(() => {
-    if (cashFlowView === "annual") {
-      return cashFlowAnnual.map((y) => ({
-        label: y.year.toString(), income: y.income, expenses: y.totalExpenses,
-        mortgage: y.mortgageRepayment, rental: y.rentalIncome, ngRefund: y.ngTaxBenefit,
-        netCF: y.netCashFlow, balance: y.endingBalance, hasActuals: y.hasActualMonths > 0,
-      }));
-    }
-    return cashFlowSeries.map((m) => ({
-      label: m.label, income: m.income, expenses: m.totalExpenses,
-      mortgage: m.mortgageRepayment, rental: m.rentalIncome, ngRefund: m.ngTaxBenefit,
-      netCF: m.netCashFlow, balance: m.cumulativeBalance, hasActuals: m.isActual,
+  // ─── NW chart data ────────────────────────────────────────────────────────
+  const nwGrowthData = useMemo(() => {
+    const now = new Date().getFullYear();
+    return projection.map((p: any, i: number) => ({
+      year: String(now + i),
+      netWorth: p.endNetWorth,
+      assets: p.endAssets ?? (p.endNetWorth + snap.mortgage),
     }));
-  }, [cashFlowView, cashFlowAnnual, cashFlowSeries]);
-
-  // ─── Net worth chart ──────────────────────────────────────────────────────
-  const nwGrowthData = projection.map((p) => ({
-    year: p.year.toString(), netWorth: p.endNetWorth,
-    assets: p.totalAssets, liabilities: p.totalLiabilities,
-  }));
+  }, [projection, snap.mortgage]);
 
   const filteredNWData = useMemo(() => {
     const now = new Date().getFullYear();
     if (chartRange === "1Y") return nwGrowthData.filter((d: any) => parseInt(d.year) <= now + 1);
     if (chartRange === "3Y") return nwGrowthData.filter((d: any) => parseInt(d.year) <= now + 3);
     return nwGrowthData;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nwGrowthData, chartRange]);
+
+  // ─── Cashflow series ──────────────────────────────────────────────────────
+  const cashFlowSeries = useMemo(
+    () => buildCashFlowSeries({
+      snap, expenses, properties,
+      plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules,
+      plannedStockOrders, plannedCryptoOrders, fa,
+      ngRefundMode, ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
+    }),
+    [snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]
+  );
+  const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
+
+  // ─── Master CF data with event markers ───────────────────────────────────
+  // Build a lookup of monthKey → [event labels] from the cash engine events
+  const eventsByMonthKey = useMemo<Record<string, string[]>>(() => {
+    const events: CashEvent[] = cashEngineResult?.events ?? [];
+    const lookup: Record<string, string[]> = {};
+    const SHOW_TYPES = new Set(["property_purchase", "tax_refund", "rental_income"]);
+    for (const ev of events) {
+      if (!SHOW_TYPES.has(ev.type)) continue;
+      if (!lookup[ev.monthKey]) lookup[ev.monthKey] = [];
+      lookup[ev.monthKey].push(ev.label);
+    }
+    return lookup;
+  }, [cashEngineResult]);
+
+  const masterCFData = useMemo(() => {
+    if (cashFlowView === "annual") {
+      return cashFlowAnnual.map((a: any) => ({
+        label:    a.year ? String(a.year) : a.label,
+        income:   a.income ?? 0,
+        expenses: a.totalExpenses ?? 0,
+        mortgage: a.mortgageRepayment ?? 0,
+        rental:   a.rentalIncome ?? 0,
+        ngRefund: a.ngTaxBenefit ?? 0,
+        netCF:    a.netCashFlow ?? 0,
+        balance:  a.endingBalance ?? 0,
+        _hasEvent: false,
+        _events:   [] as string[],
+      }));
+    }
+    return cashFlowSeries.map((m: any) => {
+      const key = m.monthKey ?? m.label;
+      const evts = eventsByMonthKey[key] ?? [];
+      return {
+        label:    m.label,
+        income:   m.income   ?? 0,
+        expenses: m.totalExpenses ?? 0,
+        mortgage: m.mortgageRepayment ?? 0,
+        rental:   m.rentalIncome ?? 0,
+        ngRefund: m.ngTaxBenefit ?? 0,
+        netCF:    m.netCashFlow ?? 0,
+        balance:  m.cumulativeBalance ?? m.endingBalance ?? 0,
+        _hasEvent: evts.length > 0,
+        _events:   evts,
+      };
+    });
+  }, [cashFlowView, cashFlowAnnual, cashFlowSeries, eventsByMonthKey]);
+
+  // ─── Property purchase event reference lines ──────────────────────────────
+  const propertyEventLines = useMemo(() => {
+    if (cashFlowView === "annual" || !cfChartAnnotations) return [];
+    const lines: Array<{ index: number; label: string; color: string }> = [];
+    masterCFData.forEach((d: any, i: number) => {
+      if (d._hasEvent) {
+        const isIP = d._events.some((e: string) => e.toLowerCase().includes("purchase") || e.toLowerCase().includes("ip") || e.toLowerCase().includes("settlement"));
+        const isTax = d._events.some((e: string) => e.toLowerCase().includes("tax") || e.toLowerCase().includes("refund"));
+        const isRental = d._events.some((e: string) => e.toLowerCase().includes("rental") || e.toLowerCase().includes("rent"));
+        lines.push({
+          index: i,
+          label: d._events[0],
+          color: isIP ? "hsl(188,60%,48%)" : isTax ? "hsl(43,85%,55%)" : isRental ? "hsl(145,55%,42%)" : "hsl(260,60%,58%)",
+        });
+      }
+    });
+    return lines.slice(0, 8); // cap at 8 markers
+  }, [masterCFData, cashFlowView, cfChartAnnotations]);
 
   // ─── Wealth cards ─────────────────────────────────────────────────────────
   const wealthCards = useMemo(() => {
-    const currentInvestable = snap.cash + snap.offset_balance + snap.super_balance + liveStocks + liveCrypto;
+    const currentInvestable = snap.cash + snap.offset_balance + _totalSuperNow + stocksTotal + cryptoTotal;
     const requiredFIRE = (10000 * 12) / 0.04;
     const fireProgress = Math.min(100, Math.round((currentInvestable / requiredFIRE) * 100));
     const totalMonthly = snap.monthly_expenses + snap.mortgage / 12;
@@ -417,7 +460,7 @@ export default function DashboardPage() {
     const targetIP = 750000;
     const depositNeeded = targetIP * 0.2 + targetIP * 0.035;
     const depositReady = Math.min(100, Math.round(((snap.cash + snap.offset_balance) * 0.7 / depositNeeded) * 100));
-    const currentInvestable2 = snap.cash + snap.offset_balance + snap.super_balance + liveStocks + liveCrypto;
+    const currentInvestable2 = snap.cash + snap.offset_balance + _totalSuperNow + stocksTotal + cryptoTotal;
     const targetFIRE = (8000 * 12) / 0.04;
     const monthlySaving = Math.max(surplus, 100);
     const r = 0.07 / 12;
@@ -435,7 +478,6 @@ export default function DashboardPage() {
       { label: "Hidden Money",  value: `${formatCurrency(hiddenMonthly * 12, true)}/yr`, sub: "potential savings", Icon: Eye, alert: hiddenMonthly > 500 },
       { label: "Savings Rate",  value: `${savingsRate.toFixed(0)}%`, sub: savingsRate < 20 ? "Below target" : "On track", Icon: AlertTriangle, alert: savingsRate < 20 },
     ];
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap, surplus, savingsRate, stocksTotal, cryptoTotal]);
 
   const fireCard        = wealthCards.find(c => c.label === "FIRE Age");
@@ -444,13 +486,13 @@ export default function DashboardPage() {
   const debtCard        = wealthCards.find(c => c.label === "Total Debt");
   const ipCard          = wealthCards.find(c => c.label === "IP Readiness");
   const depositPct      = parseInt(ipCard?.value ?? "0");
-  const firePct         = parseInt((fireProgress as any)?._pct ?? "0");
+  const firePct         = parseInt(String((fireProgress as any)?._pct ?? "0"));
   const srPct           = savingsRate;
 
   // ─── Mission ──────────────────────────────────────────────────────────────
-  const missionLabel = depositPct >= 80 ? "Prepare for IP #2 Settlement" : depositPct >= 50 ? "Build deposit for next IP" : "Grow wealth base & cashflow";
-  const missionMonths = Math.max(1, Math.round((100 - depositPct) * 1.8));
-  const missionContrib = Math.round(surplus * 0.7);
+  const missionLabel    = depositPct >= 80 ? "Prepare for IP #2 Settlement" : depositPct >= 50 ? "Build deposit for next IP" : "Grow wealth base & cashflow";
+  const missionMonths   = Math.max(1, Math.round((100 - depositPct) * 1.8));
+  const missionContrib  = Math.round(surplus * 0.7);
 
   // ─── Best move ────────────────────────────────────────────────────────────
   const offsetBalance = snap.offset_balance;
@@ -520,13 +562,69 @@ export default function DashboardPage() {
     }
   };
 
+  // ─── Asset allocation donut data ──────────────────────────────────────────
+  const assetAllocData = useMemo(() => {
+    const items = [
+      { name: "PPOR",    value: snap.ppor,            fill: "hsl(188,60%,48%)" },
+      { name: "Cash",    value: snap.cash + snap.offset_balance, fill: "hsl(210,75%,52%)" },
+      { name: "Super",   value: _totalSuperNow,       fill: "hsl(43,85%,55%)" },
+      { name: "Stocks",  value: stocksTotal,          fill: "hsl(145,55%,42%)" },
+      { name: "Crypto",  value: cryptoTotal,          fill: "hsl(260,60%,58%)" },
+      { name: "Other",   value: snap.cars + snap.iran_property, fill: "hsl(222,15%,40%)" },
+    ].filter(x => x.value > 0);
+    return items.map(x => ({ ...x, pct: (x.value / (totalAssets || 1)) * 100 }));
+  }, [snap, _totalSuperNow, stocksTotal, cryptoTotal, totalAssets]);
+
+  // ─── Expense breakdown data ───────────────────────────────────────────────
+  const expenseBreakdown = useMemo(() => {
+    const cats: Record<string, number> = {};
+    (expenses ?? []).forEach((e: any) => {
+      const cat = e.category || "Other";
+      cats[cat] = (cats[cat] || 0) + safeNum(e.monthly_amount || e.amount);
+    });
+    // Add mortgage as a category
+    if (snap.mortgage > 0) cats["Mortgage"] = (cats["Mortgage"] || 0) + snap.mortgage / 12;
+    return Object.entries(cats).map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 7);
+  }, [expenses, snap.mortgage]);
+
+  // ─── NG per-property display ──────────────────────────────────────────────
+  const ngProperties = useMemo(() => {
+    return (ngSummary.perProperty ?? []).map((p: any) => ({
+      name: p.name || "Property",
+      annualBenefit: p.annualTaxBenefit ?? 0,
+      monthlyHolding: p.monthlyAfterTaxCost ?? 0,
+      rentalYield: p.grossRentalYield ?? 0,
+    }));
+  }, [ngSummary]);
+
+  // ─── FIRE calc ────────────────────────────────────────────────────────────
+  const fireTargetAmt = (8000 * 12) / 0.04; // $2.4M at 4% SWR
+  const fireCurrentAmt = snap.cash + snap.offset_balance + _totalSuperNow + stocksTotal + cryptoTotal;
+  const fireProgressPct = Math.min(100, (fireCurrentAmt / fireTargetAmt) * 100);
+  const fireGap = Math.max(0, fireTargetAmt - fireCurrentAmt);
+  const fireMonthlyNeeded = fireGap > 0 ? Math.round(fireGap * 0.07 / 12 / ((Math.pow(1.07 / 12 + 1, Math.max(1, (parseInt(fireCard?.value?.replace("~", "") ?? "55")) * 12 - 36 * 12)) - 1) / (0.07 / 12))) : 0;
+
+  // ─── Year-by-year table ───────────────────────────────────────────────────
+  const yrRows = useMemo(() => {
+    const now = new Date().getFullYear();
+    return projection.slice(0, 10).map((p: any, i: number) => ({
+      year: now + i,
+      nw:   p.endNetWorth,
+      assets: p.endAssets ?? (p.endNetWorth + snap.mortgage * Math.pow(0.97, i)),
+      liab:  p.endLiabilities ?? (snap.mortgage * Math.pow(0.97, i)),
+      passive: p.passiveIncome ?? 0,
+      surplus:  p.yearlySurplus ?? (surplus * 12),
+    }));
+  }, [projection, snap.mortgage, surplus]);
+
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="db-root">
 
       {/* ══════════════════════════════════════════════════════════════════
           ROW 1 — HERO BAR
-          Slim premium strip: greeting · 5 KPIs · controls
           ═════════════════════════════════════════════════════════════════ */}
       <div className="db-hero">
         {/* Greeting */}
@@ -554,25 +652,38 @@ export default function DashboardPage() {
           </div>
           <div className="db-hero-sep" />
           <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">2035 Projection</span>
+            <span className="db-kpi-lbl">Total Investments</span>
+            <span className="db-kpi-val val-gold">{maskValue(formatCurrency(stocksTotal + cryptoTotal, true), privacyMode)}</span>
+          </div>
+          <div className="db-hero-sep" />
+          <div className="db-hero-kpi">
+            <span className="db-kpi-lbl">Property Equity</span>
+            <span className="db-kpi-val val-blue">{maskValue(formatCurrency(propertyEquity, true), privacyMode)}</span>
+          </div>
+          <div className="db-hero-sep" />
+          <div className="db-hero-kpi">
+            <span className="db-kpi-lbl">Debt Balance</span>
+            <span className="db-kpi-val val-red">{maskValue(formatCurrency(totalLiab, true), privacyMode)}</span>
+          </div>
+          <div className="db-hero-sep" />
+          <div className="db-hero-kpi">
+            <span className="db-kpi-lbl">2035 Forecast</span>
             <span className="db-kpi-val val-blue">{maskValue(formatCurrency(year10NW, true), privacyMode)}</span>
           </div>
           <div className="db-hero-sep" />
           <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">FIRE Age</span>
-            <span className="db-kpi-val val-gold">{fireCard?.value ?? "—"}</span>
+            <span className="db-kpi-lbl">Passive Income</span>
+            <span className="db-kpi-val" style={{ color: "hsl(260,60%,68%)" }}>{maskValue(formatCurrency(passiveIncome, true), privacyMode)}/yr</span>
           </div>
           <div className="db-hero-sep" />
           <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">Risk Score</span>
-            <span className={`db-kpi-val ${riskScore >= 70 ? "val-green" : riskScore >= 50 ? "val-gold" : "val-red"}`}>
-              {riskScore} <span className="db-kpi-sub-inline">{riskLabel}</span>
-            </span>
+            <span className="db-kpi-lbl">Super</span>
+            <span className="db-kpi-val val-gold">{maskValue(formatCurrency(_totalSuperNow, true), privacyMode)}</span>
           </div>
           <div className="db-hero-sep" />
           <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">Best Move</span>
-            <span className="db-kpi-val db-kpi-bestmove">{bestMoveTitle}</span>
+            <span className="db-kpi-lbl">Savings Rate</span>
+            <span className={`db-kpi-val ${savingsRate >= 20 ? "val-green" : "val-gold"}`}>{savingsRate.toFixed(0)}%</span>
           </div>
         </div>
 
@@ -591,8 +702,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ROW 2 — MAIN GRID
-          LEFT 70%: Chart card  |  RIGHT 30%: 3 stacked equal cards
+          ROW 2 — MAIN GRID (70/30)
           ═════════════════════════════════════════════════════════════════ */}
       <div className="db-main-grid">
 
@@ -612,12 +722,10 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="db-chart-controls">
-              {/* Mode toggle */}
               <div className="db-toggle-group">
                 <button className={`db-toggle-btn ${mainChartMode === "networth" ? "active" : ""}`} onClick={() => setMainChartMode("networth")}>Net Worth</button>
                 <button className={`db-toggle-btn ${mainChartMode === "cashflow" ? "active" : ""}`} onClick={() => setMainChartMode("cashflow")}>Cashflow</button>
               </div>
-              {/* Range (NW only) */}
               {mainChartMode === "networth" && (
                 <div className="db-toggle-group">
                   {(["1Y","3Y","10Y","Scenario"] as const).map(r => (
@@ -625,13 +733,23 @@ export default function DashboardPage() {
                   ))}
                 </div>
               )}
+              {mainChartMode === "cashflow" && (
+                <button
+                  className={`db-toggle-btn ${cfChartAnnotations ? "active" : ""}`}
+                  onClick={() => setCfChartAnnotations(v => !v)}
+                  title="Toggle event markers"
+                  style={{ fontSize: 10, padding: "2px 8px" }}
+                >
+                  Events
+                </button>
+              )}
               <Link href="/reports">
                 <button className="db-expand-btn" title="Expand"><Maximize2 className="w-3.5 h-3.5" /></button>
               </Link>
             </div>
           </div>
 
-          {/* Chart — fills card height */}
+          {/* Chart */}
           <div className="db-chart-body">
             {mainChartMode === "networth" ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -674,20 +792,24 @@ export default function DashboardPage() {
                   />
                   <Tooltip content={<CashflowTooltip />} />
                   <ReferenceLine y={0} stroke="hsl(222 15% 25%)" strokeDasharray="2 2" />
-                  {/* Income */}
+                  {/* Event reference lines */}
+                  {cfChartAnnotations && propertyEventLines.map((ev, i) => (
+                    <ReferenceLine
+                      key={i}
+                      x={masterCFData[ev.index]?.label}
+                      stroke={ev.color}
+                      strokeDasharray="3 3"
+                      strokeWidth={1.5}
+                      label={{ value: ev.label.length > 14 ? ev.label.slice(0, 14) + "…" : ev.label, position: "insideTopRight", fontSize: 8, fill: ev.color }}
+                    />
+                  ))}
                   <Line type="monotone" dataKey="income"   name="Income"          stroke="hsl(145,55%,48%)" strokeWidth={2}   dot={false} activeDot={{ r: 4 }} />
-                  {/* Expenses (living) */}
                   <Line type="monotone" dataKey="expenses" name="Living Expenses"  stroke="hsl(5,70%,52%)"   strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
-                  {/* Mortgage */}
                   <Line type="monotone" dataKey="mortgage" name="Mortgage"         stroke="hsl(20,80%,55%)"  strokeWidth={1.5} dot={false} strokeDasharray="3 2" />
-                  {/* Rental income */}
                   <Line type="monotone" dataKey="rental"   name="Rental Income"   stroke="hsl(188,60%,48%)" strokeWidth={1.5} dot={false} />
-                  {/* NG tax refund */}
                   <Line type="monotone" dataKey="ngRefund" name="NG Refund"        stroke="hsl(43,85%,55%)"  strokeWidth={1.5} dot={false} strokeDasharray="2 3" />
-                  {/* Net cashflow */}
                   <Line type="monotone" dataKey="netCF"    name="Net Cashflow"    stroke="hsl(260,60%,58%)" strokeWidth={2.5} dot={false} activeDot={{ r: 5 }} />
-                  {/* Cash balance */}
-                  <Line type="monotone" dataKey="balance"  name="Cash Balance"    stroke="hsl(210,75%,60%)" strokeWidth={2}   dot={false} activeDot={{ r: 4 }} strokeDasharray="6 2" />
+                  <Line type="monotone" dataKey="balance"  name="Cash Balance"    stroke="hsl(210,75%,60%)" strokeWidth={2}   dot={<EventDot />} strokeDasharray="6 2" />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -709,15 +831,19 @@ export default function DashboardPage() {
                 <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(43,85%,55%)" }} />NG Refund</div>
                 <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(260,60%,58%)" }} />Net CF</div>
                 <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(210,75%,60%)" }} />Cash Balance</div>
+                {cfChartAnnotations && <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(42,80%,52%)", borderRadius: 0, width: 10, height: 2 }} />Events</div>}
               </>
             )}
           </div>
 
-          {/* Notes below chart */}
+          {/* Notes */}
           <div className="db-chart-notes">
             <span>Savings Rate <strong className={savingsRate >= 20 ? "text-green" : "text-gold"}>{savingsRate.toFixed(0)}%</strong></span>
             <span>Passive Income <strong className="val-blue">{maskValue(formatCurrency(passiveIncome, true), privacyMode)}/yr</strong></span>
             <span>Property Equity <strong>{maskValue(formatCurrency(propertyEquity, true), privacyMode)}</strong></span>
+            {ngSummary.totalAnnualTaxBenefit > 0 && (
+              <span>NG Benefit <strong className="val-green">{formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}/yr</strong></span>
+            )}
           </div>
         </div>
 
@@ -783,7 +909,6 @@ export default function DashboardPage() {
               <span className="db-risk-number" style={{ color: riskScore >= 70 ? "hsl(145,55%,42%)" : riskScore >= 50 ? "hsl(42,80%,52%)" : "hsl(5,70%,52%)" }}>{riskScore}</span>
               <span className="db-risk-label" style={{ color: riskScore >= 70 ? "hsl(145,55%,42%)" : riskScore >= 50 ? "hsl(42,80%,52%)" : "hsl(5,70%,52%)" }}>{riskLabel}</span>
             </div>
-            {/* Risk bar */}
             <div className="db-risk-track"><div className="db-risk-fill" style={{ width: `${riskScore}%`, background: riskScore >= 70 ? "hsl(145,55%,42%)" : riskScore >= 50 ? "hsl(42,80%,52%)" : "hsl(5,70%,52%)" }} /></div>
             <div className="db-risk-factors">
               <div className="db-rfactor"><span className="db-rfact-lbl">Savings Rate</span><span className={savingsRate >= 20 ? "val-green db-rfact-val" : "val-red db-rfact-val"}>{savingsRate.toFixed(0)}%</span></div>
@@ -797,8 +922,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ROW 3 — QUICK INSIGHTS
-          6 same-size compact metric cards
+          ROW 3 — QUICK INSIGHTS (6 cards)
           ═════════════════════════════════════════════════════════════════ */}
       <div className="db-section">
         <div className="db-section-head">
@@ -812,9 +936,7 @@ export default function DashboardPage() {
             <div className="db-ic-header">
               <DollarSign className="db-ic-icon" style={{ color: "hsl(210,75%,52%)" }} />
               <span className="db-ic-title">Cash Position</span>
-              <span className={`db-ic-badge ${snap.cash > snap.monthly_expenses * 3 ? "badge-ok" : "badge-warn"}`}>
-                {snap.cash > snap.monthly_expenses * 3 ? "Healthy" : "Low"}
-              </span>
+              <span className={`db-ic-badge ${snap.cash > snap.monthly_expenses * 3 ? "badge-ok" : "badge-warn"}`}>{snap.cash > snap.monthly_expenses * 3 ? "Healthy" : "Low"}</span>
             </div>
             <div className="db-ic-value">{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</div>
             <div className="db-ic-sub">Cash + {formatCurrency(snap.offset_balance, true)} offset</div>
@@ -869,7 +991,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* 5 — Tax Savings */}
+          {/* 5 — Tax / NG */}
           <div className="db-insight-card">
             <div className="db-ic-header">
               <Receipt className="db-ic-icon" style={{ color: "hsl(145,55%,42%)" }} />
@@ -903,12 +1025,378 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ROW 4 — ACTION CENTER + BALANCE SHEET
+          ROW 4 — WEALTH PROJECTION + ASSET ALLOCATION (MID SECTION)
           ═════════════════════════════════════════════════════════════════ */}
       <div className="db-section">
-        <div className="db-two-col">
+        <div className="db-section-head">
+          <span className="db-section-lbl">Wealth Projection &amp; Allocation</span>
+          <Link href="/reports"><span className="db-section-link">Full Report →</span></Link>
+        </div>
+        <div className="db-projection-row">
 
-          {/* Smart Actions Table */}
+          {/* Large projection chart */}
+          <div className="db-proj-chart-card">
+            <div className="db-proj-chart-head">
+              <div>
+                <div className="db-proj-title">10-Year Wealth Trajectory</div>
+                <div className="db-proj-sub">
+                  From {maskValue(formatCurrency(netWorth, true), privacyMode)} → {maskValue(formatCurrency(year10NW, true), privacyMode)} · {forecastMode === "monte-carlo" ? "Monte Carlo" : "Deterministic"}
+                </div>
+              </div>
+              <div className="db-toggle-group">
+                {(["1Y","3Y","10Y"] as const).map(r => (
+                  <button key={r} className={`db-toggle-btn ${chartRange === r ? "active" : ""}`} onClick={() => setChartRange(r)}>{r}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ height: 200 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={filteredNWData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gProjNW2" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="hsl(210,75%,52%)" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="hsl(210,75%,52%)" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gProjAssets2" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="hsl(145,55%,42%)" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="hsl(145,55%,42%)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(222 15% 18% / 0.5)" vertical={false} />
+                  <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={(v) => `$${(v/1000000).toFixed(1)}M`} tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} width={54} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Area type="monotone" dataKey="assets"   name="Total Assets" stroke="hsl(145,55%,42%)" strokeWidth={1.5} fill="url(#gProjAssets2)" dot={false} />
+                  <Area type="monotone" dataKey="netWorth" name="Net Worth"     stroke="hsl(210,75%,52%)" strokeWidth={2.5} fill="url(#gProjNW2)"    dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            {/* Projection milestones */}
+            <div className="db-proj-milestones">
+              {yrRows.filter((_, i) => i === 2 || i === 4 || i === 9).map((r) => (
+                <div key={r.year} className="db-proj-milestone">
+                  <div className="db-pm-year">{r.year}</div>
+                  <div className="db-pm-val">{maskValue(formatCurrency(r.nw, true), privacyMode)}</div>
+                  <div className="db-pm-sub">Net Worth</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Asset allocation donut */}
+          <div className="db-alloc-card">
+            <div className="db-alloc-head">
+              <div className="db-proj-title">Asset Allocation</div>
+              <div className="db-proj-sub">{maskValue(formatCurrency(totalAssets, true), privacyMode)} total</div>
+            </div>
+            <div style={{ position: "relative", height: 160 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={assetAllocData}
+                    cx="50%" cy="50%"
+                    innerRadius={50} outerRadius={74}
+                    paddingAngle={2}
+                    dataKey="value"
+                    stroke="none"
+                  >
+                    {assetAllocData.map((entry, idx) => (
+                      <Cell key={idx} fill={entry.fill} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<DonutTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+              {/* Center label */}
+              <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center", pointerEvents: "none" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "hsl(215 20% 88%)" }}>{maskValue(formatCurrency(totalAssets, true), privacyMode)}</div>
+                <div style={{ fontSize: 9, color: "hsl(215 12% 48%)" }}>Total Assets</div>
+              </div>
+            </div>
+            {/* Legend */}
+            <div className="db-alloc-legend">
+              {assetAllocData.map((d) => (
+                <div key={d.name} className="db-alloc-leg-row">
+                  <span className="db-alloc-dot" style={{ background: d.fill }} />
+                  <span className="db-alloc-name">{d.name}</span>
+                  <span className="db-alloc-pct">{d.pct.toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ROW 5 — MASTER CASHFLOW FORECAST (full-width with event markers)
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="db-section">
+        <div className="db-section-head">
+          <span className="db-section-lbl">Master Cash Flow Forecast</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              className={`db-toggle-btn ${cfChartAnnotations ? "active" : ""}`}
+              style={{ fontSize: 10, padding: "2px 8px" }}
+              onClick={() => setCfChartAnnotations(v => !v)}
+            >
+              {cfChartAnnotations ? "Events On" : "Events Off"}
+            </button>
+            <Link href="/reports"><span className="db-section-link">Deep Dive →</span></Link>
+          </div>
+        </div>
+
+        {/* Event chips */}
+        {cfChartAnnotations && propertyEventLines.length > 0 && (
+          <div className="db-cf-event-chips">
+            {propertyEventLines.map((ev, i) => (
+              <div key={i} className="db-cf-event-chip" style={{ borderColor: ev.color, color: ev.color }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: ev.color, display: "inline-block", marginRight: 4, flexShrink: 0 }} />
+                {ev.label}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="db-master-cf-card">
+          <div style={{ height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={masterCFData.slice(0, cashFlowView === "annual" ? 10 : 36)}
+                margin={{ top: 16, right: 16, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(222 15% 18% / 0.5)" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 9, fill: "hsl(215 12% 48%)" }}
+                  axisLine={false} tickLine={false}
+                  interval={cashFlowView === "annual" ? 0 : 3}
+                />
+                <YAxis
+                  tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`}
+                  tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }}
+                  axisLine={false} tickLine={false} width={54}
+                />
+                <Tooltip content={<CashflowTooltip />} />
+                <ReferenceLine y={0} stroke="hsl(222 15% 25%)" strokeDasharray="2 2" />
+                {/* IP purchase / settlement vertical markers */}
+                {cfChartAnnotations && propertyEventLines.map((ev, i) => (
+                  <ReferenceLine
+                    key={i}
+                    x={masterCFData[ev.index]?.label}
+                    stroke={ev.color}
+                    strokeDasharray="4 3"
+                    strokeWidth={1.5}
+                    label={{ value: "⚡", position: "top", fontSize: 10, fill: ev.color }}
+                  />
+                ))}
+                <Line type="monotone" dataKey="income"   name="Income"         stroke="hsl(145,55%,48%)" strokeWidth={2}   dot={false} activeDot={{ r: 4 }} />
+                <Line type="monotone" dataKey="expenses" name="Living Expenses" stroke="hsl(5,70%,52%)"   strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
+                <Line type="monotone" dataKey="mortgage" name="Mortgage"        stroke="hsl(20,80%,55%)"  strokeWidth={1.5} dot={false} strokeDasharray="3 2" />
+                <Line type="monotone" dataKey="rental"   name="Rental"         stroke="hsl(188,60%,48%)" strokeWidth={1.5} dot={false} />
+                <Line type="monotone" dataKey="ngRefund" name="NG Refund"       stroke="hsl(43,85%,55%)"  strokeWidth={1.5} dot={false} strokeDasharray="2 3" />
+                <Line type="monotone" dataKey="netCF"    name="Net Cashflow"   stroke="hsl(260,60%,58%)" strokeWidth={2.5} dot={false} activeDot={{ r: 5 }} />
+                <Line type="monotone" dataKey="balance"  name="Cash Balance"   stroke="hsl(210,75%,60%)" strokeWidth={2}   dot={<EventDot />} strokeDasharray="6 2" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          {/* Legend row */}
+          <div className="db-chart-legend" style={{ marginTop: 8 }}>
+            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(145,55%,48%)" }} />Income</div>
+            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(5,70%,52%)" }} />Expenses</div>
+            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(20,80%,55%)" }} />Mortgage</div>
+            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(188,60%,48%)" }} />Rental</div>
+            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(43,85%,55%)" }} />NG Refund</div>
+            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(260,60%,58%)" }} />Net CF</div>
+            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(210,75%,60%)" }} />Cash Balance</div>
+            {cfChartAnnotations && <div className="db-leg-item" style={{ color: "hsl(42,80%,60%)" }}>⚡ IP Purchase · Tax Refund · Rental Start</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ROW 6 — NEGATIVE GEARING + TAX ALPHA + EXPENSE BREAKDOWN
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="db-section">
+        <div className="db-three-col-wide">
+
+          {/* Negative Gearing Panel */}
+          <div className="db-ng-card">
+            <div className="db-ng-head">
+              <div className="db-card-eyebrow" style={{ color: "hsl(43,85%,60%)" }}>Negative Gearing Engine</div>
+              <div className="db-ng-refund-toggle">
+                <button className={`db-toggle-btn ${ngRefundMode === "lump-sum" ? "active" : ""}`} style={{ fontSize: 9, padding: "2px 6px" }} onClick={() => setNgRefundMode("lump-sum")}>Lump Sum</button>
+                <button className={`db-toggle-btn ${ngRefundMode === "payg" ? "active" : ""}`} style={{ fontSize: 9, padding: "2px 6px" }} onClick={() => setNgRefundMode("payg")}>PAYG</button>
+              </div>
+            </div>
+            {/* Portfolio total */}
+            <div className="db-ng-total-row">
+              <div className="db-ng-total-card">
+                <div className="db-ng-total-label">Annual Tax Refund</div>
+                <div className="db-ng-total-val" style={{ color: "hsl(145,55%,48%)" }}>{formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}</div>
+              </div>
+              <div className="db-ng-total-card">
+                <div className="db-ng-total-label">Monthly Benefit</div>
+                <div className="db-ng-total-val" style={{ color: "hsl(210,75%,52%)" }}>{formatCurrency(ngSummary.totalAnnualTaxBenefit / 12, true)}</div>
+              </div>
+              <div className="db-ng-total-card">
+                <div className="db-ng-total-label">Tax Bracket Effect</div>
+                <div className="db-ng-total-val" style={{ color: "hsl(43,85%,55%)" }}>
+                  {snap.monthly_income * 12 > 180000 ? "45%" : snap.monthly_income * 12 > 120000 ? "37%" : snap.monthly_income * 12 > 45000 ? "32.5%" : "19%"}
+                </div>
+              </div>
+            </div>
+            {/* Per-property breakdown */}
+            {ngProperties.length > 0 ? (
+              <div className="db-ng-props">
+                {ngProperties.map((p: any, i: number) => (
+                  <div key={i} className="db-ng-prop-row">
+                    <Home className="w-3 h-3 shrink-0" style={{ color: "hsl(188,60%,48%)" }} />
+                    <span className="db-ng-prop-name">{p.name}</span>
+                    <span className="db-ng-prop-val val-green">+{formatCurrency(p.annualBenefit, true)}/yr</span>
+                    <span className="db-ng-prop-hold" style={{ color: "hsl(5,70%,52%)" }}>Hold {formatCurrency(p.monthlyHolding, true)}/mo</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="db-ng-empty">
+                <span style={{ fontSize: 10, color: "hsl(215 12% 48%)" }}>Add investment properties to see NG breakdown</span>
+                <Link href="/property"><span className="db-section-link" style={{ fontSize: 10 }}>Add Property →</span></Link>
+              </div>
+            )}
+            <Link href="/tax"><button className="db-card-cta" style={{ marginTop: 8 }}>Tax Strategy →</button></Link>
+          </div>
+
+          {/* Expense Breakdown */}
+          <div className="db-expense-card">
+            <div className="db-card-eyebrow" style={{ color: "hsl(5,70%,52%)" }}>Monthly Expenses</div>
+            <div className="db-expense-total">
+              {maskValue(formatCurrency(snap.monthly_expenses + snap.mortgage / 12, true), privacyMode)}/mo
+            </div>
+            <div className="db-expense-sub">Living + Mortgage</div>
+            {expenseBreakdown.length > 0 ? (
+              <div style={{ height: 120, marginTop: 8 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={expenseBreakdown} layout="vertical" margin={{ top: 0, right: 12, left: 0, bottom: 0 }}>
+                    <XAxis type="number" hide tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
+                    <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 9, fill: "hsl(215 12% 52%)" }} axisLine={false} tickLine={false} />
+                    <Tooltip formatter={(v: any) => [`${formatCurrency(v, true)}/mo`, ""]} />
+                    <Bar dataKey="value" fill="hsl(5,70%,52%)" radius={[0, 3, 3, 0]} opacity={0.8} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="db-ng-empty" style={{ marginTop: 16 }}>
+                <span style={{ fontSize: 10, color: "hsl(215 12% 48%)" }}>No expense categories yet</span>
+                <Link href="/expenses"><span className="db-section-link" style={{ fontSize: 10 }}>Add Expenses →</span></Link>
+              </div>
+            )}
+            <Link href="/expenses"><button className="db-card-cta" style={{ marginTop: 8 }}>Expenses →</button></Link>
+          </div>
+
+          {/* Monthly Cash Flow Summary */}
+          <div className="db-mcf-card">
+            <div className="db-card-eyebrow" style={{ color: "hsl(260,60%,68%)" }}>Monthly Cash Flow</div>
+            <div className="db-mcf-rows">
+              <div className="db-mcf-row">
+                <span className="db-mcf-lbl">Total Income</span>
+                <span className="db-mcf-val val-green">+{maskValue(formatCurrency(snap.monthly_income, true), privacyMode)}</span>
+              </div>
+              <div className="db-mcf-row">
+                <span className="db-mcf-lbl">Living Expenses</span>
+                <span className="db-mcf-val val-red">−{maskValue(formatCurrency(snap.monthly_expenses, true), privacyMode)}</span>
+              </div>
+              <div className="db-mcf-row">
+                <span className="db-mcf-lbl">Mortgage Repayment</span>
+                <span className="db-mcf-val val-red">−{maskValue(formatCurrency(snap.mortgage / 12, true), privacyMode)}</span>
+              </div>
+              {(masterCFData[0]?.rental ?? 0) > 0 && (
+                <div className="db-mcf-row">
+                  <span className="db-mcf-lbl">Rental Income</span>
+                  <span className="db-mcf-val val-green">+{maskValue(formatCurrency(masterCFData[0]?.rental ?? 0, true), privacyMode)}</span>
+                </div>
+              )}
+              {ngSummary.totalAnnualTaxBenefit > 0 && (
+                <div className="db-mcf-row">
+                  <span className="db-mcf-lbl">NG Refund {ngRefundMode === "payg" ? "(PAYG)" : "(Annual)"}</span>
+                  <span className="db-mcf-val val-gold">+{formatCurrency(ngSummary.totalAnnualTaxBenefit / (ngRefundMode === "payg" ? 12 : 1), true)}{ngRefundMode === "lump-sum" ? "/yr" : "/mo"}</span>
+                </div>
+              )}
+              <div className="db-mcf-divider" />
+              <div className="db-mcf-row db-mcf-total">
+                <span className="db-mcf-lbl">Net Surplus</span>
+                <span className={`db-mcf-val ${surplus >= 0 ? "val-green" : "val-red"}`} style={{ fontSize: 15, fontWeight: 700 }}>
+                  {surplus >= 0 ? "+" : ""}{maskValue(formatCurrency(surplus, true), privacyMode)}/mo
+                </span>
+              </div>
+              <div className="db-mcf-row">
+                <span className="db-mcf-lbl">Annual Surplus</span>
+                <span className="db-mcf-val val-blue">{maskValue(formatCurrency(surplus * 12, true), privacyMode)}/yr</span>
+              </div>
+            </div>
+            <Link href="/budget"><button className="db-card-cta" style={{ marginTop: 8 }}>Full Budget →</button></Link>
+          </div>
+
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ROW 7 — FIRE PROGRESS + ACTION CENTER + BALANCE SHEET
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="db-section">
+        <div className="db-fire-action-row">
+
+          {/* FIRE Progress */}
+          <div className="db-fire-card">
+            <div className="db-card-eyebrow" style={{ color: "hsl(22,90%,55%)" }}>
+              <Flame className="w-3 h-3 inline mr-1" />FIRE Progress
+            </div>
+            <div className="db-fire-main">
+              {/* Large ring */}
+              <svg viewBox="0 0 100 100" className="db-fire-ring">
+                <circle cx="50" cy="50" r="42" fill="none" stroke="hsl(222 15% 16%)" strokeWidth="7" />
+                <circle
+                  cx="50" cy="50" r="42" fill="none"
+                  stroke="hsl(22,90%,55%)" strokeWidth="7"
+                  strokeDasharray={`${2 * Math.PI * 42}`}
+                  strokeDashoffset={`${2 * Math.PI * 42 * (1 - fireProgressPct / 100)}`}
+                  strokeLinecap="round"
+                  transform="rotate(-90 50 50)"
+                  style={{ filter: "drop-shadow(0 0 6px hsl(22 90% 55% / 0.5))" }}
+                />
+                <text x="50" y="44" textAnchor="middle" fontSize="15" fontWeight="800" fill="hsl(215 20% 88%)">{fireProgressPct.toFixed(0)}%</text>
+                <text x="50" y="58" textAnchor="middle" fontSize="8" fill="hsl(215 12% 48%)">of target</text>
+              </svg>
+              <div className="db-fire-stats">
+                <div className="db-fire-stat">
+                  <span className="db-fs-lbl">Current</span>
+                  <span className="db-fs-val">{maskValue(formatCurrency(fireCurrentAmt, true), privacyMode)}</span>
+                </div>
+                <div className="db-fire-stat">
+                  <span className="db-fs-lbl">Target ($2.4M)</span>
+                  <span className="db-fs-val">{maskValue(formatCurrency(fireTargetAmt, true), privacyMode)}</span>
+                </div>
+                <div className="db-fire-stat">
+                  <span className="db-fs-lbl">Gap</span>
+                  <span className="db-fs-val val-gold">{maskValue(formatCurrency(fireGap, true), privacyMode)}</span>
+                </div>
+                <div className="db-fire-stat">
+                  <span className="db-fs-lbl">FIRE Age</span>
+                  <span className="db-fs-val" style={{ color: "hsl(22,90%,55%)" }}>{fireCard?.value ?? "—"}</span>
+                </div>
+                <div className="db-fire-stat">
+                  <span className="db-fs-lbl">Save / Month</span>
+                  <span className="db-fs-val val-blue">{maskValue(formatCurrency(Math.min(surplus, fireMonthlyNeeded || surplus), true), privacyMode)}</span>
+                </div>
+              </div>
+            </div>
+            <div className="db-fire-bar-track">
+              <div className="db-fire-bar-fill" style={{ width: `${fireProgressPct}%` }} />
+            </div>
+            <Link href="/wealth-strategy"><button className="db-card-cta" style={{ marginTop: 10 }}>FIRE Strategy →</button></Link>
+          </div>
+
+          {/* Smart Actions */}
           <div className="db-actions-card">
             <div className="db-actions-head">
               <div>
@@ -943,6 +1431,15 @@ export default function DashboardPage() {
             </table>
           </div>
 
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ROW 8 — BALANCE SHEET + AI INSIGHTS CARD
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="db-section">
+        <div className="db-two-col">
+
           {/* Balance Sheet */}
           <div className="db-balance-card" ref={snapContainerRef}>
             <div className="db-balance-head">
@@ -965,8 +1462,8 @@ export default function DashboardPage() {
                     ["PPOR",         snap.ppor],
                     ["Cash + Offset", snap.cash + snap.offset_balance],
                     ["Super",        _totalSuperNow],
-                    ["Stocks",       liveStocks],
-                    ["Crypto",       liveCrypto],
+                    ["Stocks",       stocksTotal],
+                    ["Crypto",       cryptoTotal],
                     ["Other",        snap.cars + snap.iran_property],
                   ].filter(([,v]) => (v as number) > 0).map(([label, value]) => (
                     <div key={label as string} className="db-bs-row">
@@ -1016,11 +1513,71 @@ export default function DashboardPage() {
             )}
           </div>
 
+          {/* AI Insights */}
+          <AIInsightsCard
+            pageKey="dashboard"
+            pageLabel="Dashboard Overview"
+            getData={() => ({
+              netWorth, surplus, savingsRate, propertyEquity,
+              totalDebt: totalLiab, passiveIncome,
+              fireProgress: fireProgressPct.toFixed(0),
+              year10NW, ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
+              riskScore, riskLabel,
+            })}
+          />
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ROW 5 — MODULE ACCESS + WIDGETS
+          ROW 9 — YEAR-BY-YEAR PROJECTION TABLE
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="db-section">
+        <div className="db-section-head">
+          <span className="db-section-lbl">Year-by-Year Projection</span>
+          <Link href="/timeline"><span className="db-section-link">Full Timeline →</span></Link>
+        </div>
+        <div className="db-ybyr-card">
+          <table className="db-ybyr-table">
+            <thead>
+              <tr>
+                <th>Year</th>
+                <th>Net Worth</th>
+                <th>Total Assets</th>
+                <th>Liabilities</th>
+                <th>Passive Income</th>
+                <th>Annual Surplus</th>
+                <th>FIRE Progress</th>
+              </tr>
+            </thead>
+            <tbody>
+              {yrRows.map((r, idx) => {
+                const fp = Math.min(100, (r.nw / fireTargetAmt) * 100);
+                return (
+                  <tr key={r.year} className={idx === 0 ? "db-ybyr-current" : ""}>
+                    <td className="db-ybyr-year">{r.year}{idx === 0 ? " ★" : ""}</td>
+                    <td className="db-ybyr-nw">{maskValue(formatCurrency(r.nw, true), privacyMode)}</td>
+                    <td style={{ color: "hsl(145,55%,48%)", fontSize: 11, fontWeight: 600, fontFamily: "monospace" }}>{maskValue(formatCurrency(r.assets, true), privacyMode)}</td>
+                    <td style={{ color: "hsl(5,70%,52%)", fontSize: 11, fontWeight: 600, fontFamily: "monospace" }}>{maskValue(formatCurrency(r.liab, true), privacyMode)}</td>
+                    <td style={{ color: "hsl(260,60%,68%)", fontSize: 11, fontWeight: 600, fontFamily: "monospace" }}>{maskValue(formatCurrency(r.passive, true), privacyMode)}/yr</td>
+                    <td style={{ color: r.surplus >= 0 ? "hsl(145,55%,48%)" : "hsl(5,70%,52%)", fontSize: 11, fontWeight: 600, fontFamily: "monospace" }}>{r.surplus >= 0 ? "+" : ""}{maskValue(formatCurrency(r.surplus, true), privacyMode)}</td>
+                    <td>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ flex: 1, height: 4, background: "hsl(222 15% 18%)", borderRadius: 2, overflow: "hidden" }}>
+                          <div style={{ width: `${fp}%`, height: "100%", background: fp >= 80 ? "hsl(145,55%,42%)" : fp >= 50 ? "hsl(22,90%,55%)" : "hsl(42,80%,52%)", borderRadius: 2 }} />
+                        </div>
+                        <span style={{ fontSize: 9, color: "hsl(215 12% 52%)", minWidth: 28 }}>{fp.toFixed(0)}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ROW 10 — MODULES + LIVE WIDGETS + SAT BULLETIN SHORTCUT
           ═════════════════════════════════════════════════════════════════ */}
       <div className="db-section">
         <div className="db-section-head">
@@ -1038,10 +1595,21 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Live widgets row */}
+        {/* Live widgets + Saturday Bulletin shortcut */}
         <div className="db-widgets-row">
           <PortfolioLiveReturn />
           <CFODashboardWidget />
+          {/* Saturday Bulletin quick link */}
+          <Link href="/ai-weekly-cfo" style={{ textDecoration: "none" }}>
+            <div className="db-bulletin-tile">
+              <div className="db-bulletin-icon">📰</div>
+              <div>
+                <div className="db-bulletin-title">Saturday Bulletin</div>
+                <div className="db-bulletin-sub">Weekly AI wealth brief</div>
+              </div>
+              <ChevronRight className="w-4 h-4 ml-auto shrink-0" style={{ color: "hsl(43,85%,55%)" }} />
+            </div>
+          </Link>
         </div>
       </div>
 

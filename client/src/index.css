@@ -2628,3 +2628,388 @@ td.db-act-rank { padding: 9px 0; }
   .db-hero-sep:nth-last-child(-n+2) { display: none; }
   .db-hero-kpi:nth-last-child(-n+2) { display: none; }
 }
+
+/* ─── Dashboard Lower Section Classes ─────────────────────────────────────── */
+
+/* Projection Row (wide chart + donut) */
+.db-projection-row {
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: 12px;
+}
+
+.db-proj-chart-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.db-alloc-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.db-proj-chart-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 10px;
+}
+
+.db-proj-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: hsl(var(--foreground));
+}
+
+.db-proj-sub {
+  font-size: 10px;
+  color: hsl(215 12% 48%);
+  margin-top: 2px;
+}
+
+.db-proj-milestones {
+  display: flex;
+  gap: 0;
+  margin-top: 10px;
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 8px;
+}
+
+.db-proj-milestone {
+  flex: 1;
+  text-align: center;
+  padding: 4px 6px;
+  border-right: 1px solid hsl(var(--border));
+}
+.db-proj-milestone:last-child { border-right: none; }
+
+.db-pm-year { font-size: 9px; color: hsl(215 12% 48%); font-weight: 600; letter-spacing: 0.5px; }
+.db-pm-val  { font-size: 12px; font-weight: 700; color: hsl(210,75%,62%); font-family: monospace; margin-top: 2px; }
+.db-pm-sub  { font-size: 9px; color: hsl(215 12% 48%); }
+
+/* Asset Alloc */
+.db-alloc-head { margin-bottom: 6px; }
+
+.db-alloc-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.db-alloc-leg-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+}
+
+.db-alloc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.db-alloc-name { flex: 1; color: hsl(215 12% 52%); }
+.db-alloc-pct  { font-weight: 600; color: hsl(215 20% 80%); font-family: monospace; }
+
+/* Master CF chart card */
+.db-master-cf-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+/* Event chips */
+.db-cf-event-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.db-cf-event-chip {
+  display: flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid;
+  background: hsl(222 22% 9%);
+  white-space: nowrap;
+}
+
+/* Three column wide layout */
+.db-three-col-wide {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+
+/* Negative Gearing card */
+.db-ng-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-top: 2px solid hsl(43 85% 55% / 0.4);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.db-ng-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.db-ng-refund-toggle {
+  display: flex;
+  gap: 2px;
+}
+
+.db-ng-total-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.db-ng-total-card {
+  background: hsl(222 22% 9%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.db-ng-total-label { font-size: 9px; color: hsl(215 12% 48%); }
+.db-ng-total-val   { font-size: 13px; font-weight: 700; font-family: monospace; margin-top: 2px; }
+
+.db-ng-props { display: flex; flex-direction: column; gap: 5px; }
+
+.db-ng-prop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: hsl(222 22% 9%);
+  border-radius: 6px;
+  border: 1px solid hsl(var(--border));
+}
+
+.db-ng-prop-name  { flex: 1; font-size: 10px; color: hsl(215 20% 80%); }
+.db-ng-prop-val   { font-size: 10px; font-weight: 700; font-family: monospace; }
+.db-ng-prop-hold  { font-size: 10px; font-weight: 600; font-family: monospace; }
+
+.db-ng-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 0;
+}
+
+/* Expense breakdown card */
+.db-expense-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-top: 2px solid hsl(5 70% 52% / 0.4);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.db-expense-total {
+  font-size: 20px;
+  font-weight: 800;
+  color: hsl(5,70%,60%);
+  font-family: monospace;
+  margin-top: 4px;
+}
+
+.db-expense-sub {
+  font-size: 10px;
+  color: hsl(215 12% 48%);
+  margin-bottom: 2px;
+}
+
+/* Monthly CF card */
+.db-mcf-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-top: 2px solid hsl(260 60% 58% / 0.4);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.db-mcf-rows { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+
+.db-mcf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.db-mcf-lbl { font-size: 10px; color: hsl(215 12% 52%); }
+.db-mcf-val { font-size: 11px; font-weight: 700; font-family: monospace; }
+.db-mcf-divider { height: 1px; background: hsl(var(--border)); margin: 4px 0; }
+.db-mcf-total .db-mcf-lbl { font-size: 11px; font-weight: 700; color: hsl(215 20% 75%); }
+
+/* FIRE Progress Card */
+.db-fire-action-row {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 12px;
+}
+
+.db-fire-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-top: 2px solid hsl(22 90% 55% / 0.5);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.db-fire-main {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 8px;
+  margin-bottom: 10px;
+}
+
+.db-fire-ring {
+  width: 90px;
+  height: 90px;
+  flex-shrink: 0;
+}
+
+.db-fire-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.db-fire-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.db-fs-lbl { font-size: 9px; color: hsl(215 12% 48%); }
+.db-fs-val { font-size: 11px; font-weight: 700; font-family: monospace; color: hsl(215 20% 80%); }
+
+.db-fire-bar-track {
+  height: 4px;
+  background: hsl(222 15% 16%);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.db-fire-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, hsl(22,90%,45%), hsl(22,90%,65%));
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+/* Year-by-Year table */
+.db-ybyr-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  overflow: auto;
+}
+
+.db-ybyr-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.db-ybyr-table thead tr {
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.db-ybyr-table th {
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: hsl(215 12% 48%);
+  white-space: nowrap;
+}
+
+.db-ybyr-table th:first-child { padding-left: 14px; }
+
+.db-ybyr-table tbody tr {
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+  transition: background 0.1s;
+}
+
+.db-ybyr-table tbody tr:hover { background: hsl(222 22% 11%); }
+
+.db-ybyr-table td { padding: 7px 12px; }
+.db-ybyr-table td:first-child { padding-left: 14px; }
+
+.db-ybyr-current { background: hsl(210 75% 52% / 0.07) !important; }
+
+.db-ybyr-year {
+  font-size: 11px;
+  font-weight: 700;
+  color: hsl(215 20% 85%);
+}
+
+.db-ybyr-nw {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: monospace;
+  color: hsl(210,75%,62%);
+}
+
+/* Saturday Bulletin tile */
+.db-bulletin-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(43 85% 55% / 0.25);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.db-bulletin-tile:hover {
+  background: hsl(222 22% 11%);
+  border-color: hsl(43 85% 55% / 0.5);
+}
+
+.db-bulletin-icon { font-size: 22px; line-height: 1; }
+.db-bulletin-title { font-size: 13px; font-weight: 700; color: hsl(43,85%,60%); }
+.db-bulletin-sub   { font-size: 10px; color: hsl(215 12% 48%); margin-top: 1px; }
+
+/* Responsive overrides for new sections */
+@media (max-width: 1024px) {
+  .db-projection-row { grid-template-columns: 1fr 200px; }
+  .db-three-col-wide { grid-template-columns: repeat(2, 1fr); }
+  .db-fire-action-row { grid-template-columns: 240px 1fr; }
+}
+
+@media (max-width: 768px) {
+  .db-projection-row { grid-template-columns: 1fr; }
+  .db-three-col-wide { grid-template-columns: 1fr; }
+  .db-fire-action-row { grid-template-columns: 1fr; }
+  .db-ng-total-row { grid-template-columns: repeat(3, 1fr); }
+}

@@ -6,7 +6,7 @@
  * Clean, calm, premium fintech aesthetic.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { useAppStore } from "@/lib/store";
@@ -197,6 +197,26 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     action:   "hsl(var(--success))",
   };
 
+  // ─── Sidebar scroll preservation ───────────────────────────────────────────
+  // Save scroll position before any navigation, restore after mount.
+  const sidebarScrollRef = useRef<HTMLDivElement>(null);
+  const savedScrollPos = useRef<number>(0);
+
+  // Save scroll position whenever the location changes (i.e. just BEFORE we
+  // render the new page — we read from the DOM at effect-cleanup time)
+  useEffect(() => {
+    const el = sidebarScrollRef.current;
+    if (!el) return;
+    // Restore saved position immediately on every navigation
+    el.scrollTop = savedScrollPos.current;
+    return () => {
+      // Save current scroll position just before the next navigation renders
+      if (sidebarScrollRef.current) {
+        savedScrollPos.current = sidebarScrollRef.current.scrollTop;
+      }
+    };
+  }, [location]);
+
   const SidebarContent = () => (
     <>
       {/* Logo + close (mobile) */}
@@ -229,7 +249,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* ACCORDION NAV */}
-      <nav className="flex-1 px-3 py-2 overflow-y-auto space-y-1">
+      <nav ref={sidebarScrollRef} className="flex-1 px-3 py-2 overflow-y-auto space-y-1">
         {NAV_STEPS.map((stepDef) => {
           const visibleItems = stepDef.items.filter(i => !i.adminOnly || isAdmin);
           if (visibleItems.length === 0) return null;
