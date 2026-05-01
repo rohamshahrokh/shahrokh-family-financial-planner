@@ -336,10 +336,16 @@ export default function DashboardPage() {
   const projection = useMemo(() => {
     if (!snapshot) return [];
     return projectNetWorth({
-      snap: { ...snap, offset_balance: snap.offset_balance },
-      expenses, properties, stocks: stocksTotal, crypto: cryptoTotal,
-      plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules,
-      plannedStockOrders, plannedCryptoOrders, fa,
+      snapshot: { ...snap, offset_balance: snap.offset_balance },
+      expenses, properties,
+      stocks: stocks ?? [],
+      cryptos: cryptos ?? [],
+      liveStocksValue: stocksTotal,
+      liveCryptoValue: cryptoTotal,
+      stockTransactions:  plannedStockTx,
+      cryptoTransactions: plannedCryptoTx,
+      stockDCASchedules, cryptoDCASchedules,
+      plannedStockOrders, plannedCryptoOrders,
       ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
     });
   }, [snapshot, snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
@@ -351,11 +357,19 @@ export default function DashboardPage() {
     if (!snapshot) return null;
     try {
       return runCashEngine({
-        snap, expenses, properties,
-        plannedStockTx, plannedCryptoTx,
+        snapshot: {
+          cash:             snap.cash,
+          monthly_income:   snap.monthly_income,
+          monthly_expenses: snap.monthly_expenses,
+          mortgage:         snap.mortgage,
+          other_debts:      snap.other_debts,
+        },
+        expenses, properties,
+        stockTransactions:  plannedStockTx,
+        cryptoTransactions: plannedCryptoTx,
         stockDCASchedules, cryptoDCASchedules,
         plannedStockOrders, plannedCryptoOrders,
-        fa, ngRefundMode,
+        ngRefundMode,
         ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
       });
     } catch { return null; }
@@ -382,9 +396,18 @@ export default function DashboardPage() {
   const cashFlowSeries = useMemo(() => {
     if (!snapshot) return [];
     return buildCashFlowSeries({
-      snap, expenses, properties,
-      plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules,
-      plannedStockOrders, plannedCryptoOrders, fa,
+      snapshot: {
+        monthly_income:   snap.monthly_income,
+        monthly_expenses: snap.monthly_expenses,
+        mortgage:         snap.mortgage,
+        other_debts:      snap.other_debts,
+        cash:             snap.cash + snap.offset_balance,
+      },
+      expenses, properties,
+      stockTransactions:  plannedStockTx,
+      cryptoTransactions: plannedCryptoTx,
+      stockDCASchedules, cryptoDCASchedules,
+      plannedStockOrders, plannedCryptoOrders,
       ngRefundMode, ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
     });
   }, [snapshot, snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
