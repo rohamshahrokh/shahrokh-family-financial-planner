@@ -654,3 +654,53 @@ export const sbFireYearAssumptions = {
     } catch { /* swallow */ }
   },
 };
+
+// ─── MC FIRE Settings ─────────────────────────────────────────────────────────
+// ADD THIS BLOCK at the END of supabaseClient.ts (after sbFireYearAssumptions)
+
+const MC_FIRE_ID = "shahrokh-family-main";
+
+export const sbMCFireSettings = {
+  async get(): Promise<any | null> {
+    try {
+      const rows = await sbGet("mc_fire_settings", `id=eq.${MC_FIRE_ID}`);
+      return rows[0] ?? null;
+    } catch { return null; }
+  },
+  async upsert(data: object): Promise<any | null> {
+    try {
+      return await sbUpsert("mc_fire_settings", {
+        id: MC_FIRE_ID,
+        ...data,
+        updated_at: new Date().toISOString(),
+      });
+    } catch { return null; }
+  },
+};
+
+export const sbMCFireResults = {
+  async get(): Promise<any | null> {
+    try {
+      const rows = await sbGet("mc_fire_results", `id=eq.${MC_FIRE_ID}`);
+      return rows[0] ?? null;
+    } catch { return null; }
+  },
+  async upsert(data: object): Promise<any | null> {
+    try {
+      return await sbUpsert("mc_fire_results", {
+        id: MC_FIRE_ID,
+        ...data,
+        updated_at: new Date().toISOString(),
+      });
+    } catch { return null; }
+  },
+};
+
+export const sbMCFirePresets = {
+  async getAll(): Promise<any[]> {
+    try {
+      return await sbGet("mc_fire_presets", `record_owner=eq.${MC_FIRE_ID}&order=id.asc`);
+    } catch { return []; }
+  },
+};
+
