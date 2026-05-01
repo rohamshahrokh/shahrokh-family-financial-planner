@@ -69,12 +69,19 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import CFODashboardWidget from "@/components/CFODashboardWidget";
+import BestMoveCard from "@/components/BestMoveCard";
+import FIREPathCard from "@/components/FIREPathCard";
+import TaxAlphaCard from "@/components/TaxAlphaCard";
+import RiskRadarCard from "@/components/RiskRadarCard";
+import KpiCard from "@/components/KpiCard";
 import { Link } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
+import familyImg from "@assets/family.jpeg";
 
 // ─── Chart tooltips ───────────────────────────────────────────────────────────
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -414,7 +421,6 @@ export default function DashboardPage() {
   const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
 
   // ─── Master CF data with event markers ───────────────────────────────────
-  // Build a lookup of monthKey → [event labels] from the cash engine events
   const eventsByMonthKey = useMemo<Record<string, string[]>>(() => {
     const events: CashEvent[] = cashEngineResult?.events ?? [];
     const lookup: Record<string, string[]> = {};
@@ -476,7 +482,7 @@ export default function DashboardPage() {
         });
       }
     });
-    return lines.slice(0, 8); // cap at 8 markers
+    return lines.slice(0, 8);
   }, [masterCFData, cashFlowView, cfChartAnnotations]);
 
   // ─── Wealth cards ─────────────────────────────────────────────────────────
@@ -646,6 +652,29 @@ export default function DashboardPage() {
     }));
   }, [projection, snap.mortgage, surplus]);
 
+  // ─── Full year-by-year rows ───────────────────────────────────────────────
+  const yrRowsFull = useMemo(() => {
+    if (!snapshot) return [];
+    return projection.slice(0, 10).map((p: any) => ({
+      year: p.year,
+      startNW: p.startNetWorth,
+      income: p.income,
+      expenses: p.expenses,
+      propValue: p.propertyValue,
+      propLoans: p.propertyLoans,
+      equity: p.propertyEquity,
+      stocks: p.stockValue,
+      crypto: p.cryptoValue,
+      cash: p.cash,
+      totalAssets: p.totalAssets,
+      liab: p.totalLiabilities,
+      endNW: p.endNetWorth,
+      growth: p.growth,
+      passive: p.passiveIncome,
+      monthlyCF: p.monthlyCashFlow,
+    }));
+  }, [projection, snapshot]);
+
   // ─── Loading guard (MUST come after ALL hooks) ───────────────────────────
   if (snapLoading || !snapshot) {
     return (
@@ -667,147 +696,461 @@ export default function DashboardPage() {
     }
   };
 
+  // ─── Computed values for new layout ──────────────────────────────────────
+  const accessibleNW = netWorth - _totalSuperNow;
+  const lockedNW = _totalSuperNow;
+  const forecast2030 = projection.find((p: any) => p.year === 2030)?.cash ?? 0;
+  const forecast2035 = projection.find((p: any) => p.year === 2035)?.cash ?? 0;
+  const allFutureCash = projection.map((p: any) => p.cash);
+  const lowestFutureCash = allFutureCash.length > 0 ? Math.min(...allFutureCash) : 0;
+  const nextPropEvent = (cashEngineResult?.events ?? []).find((e: any) => e.type === "property_purchase" || e.type === "settlement");
+
+  const negativeCashMonths = (cashEngineResult?.ledger ?? [])
+    .filter((m: any) => m.closingCash < 0)
+    .slice(0, 5)
+    .map((m: any) => m.label || m.monthKey);
+  const hasLiquidityStress = negativeCashMonths.length > 0;
+
+  const upcomingBillsCount = (billsRaw ?? []).filter((b: any) => {
+    if (!b.next_due_date) return false;
+    const due = new Date(b.next_due_date);
+    const today = new Date();
+    const diff = (due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+    return diff >= 0 && diff <= 30;
+  }).length;
+
+  const budgetsSetCount = (budgetsRaw ?? []).length;
+  const alertsSent24h = (alertLogsRaw ?? []).filter((a: any) => {
+    const ts = new Date(a.sent_at || a.created_at).getTime();
+    return Date.now() - ts < 24 * 60 * 60 * 1000;
+  }).length;
+
+  const cashAfterBills = snap.cash - (billsRaw ?? [])
+    .filter((b: any) => {
+      if (!b.next_due_date) return false;
+      const due = new Date(b.next_due_date);
+      const today = new Date();
+      return (due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24) <= 7;
+    })
+    .reduce((sum: number, b: any) => sum + safeNum(b.amount), 0);
+
+  const monthlyCFBarData = [
+    { name: "Income", value: snap.monthly_income },
+    { name: "Expenses", value: snap.monthly_expenses + snap.mortgage / 12 },
+    { name: "Surplus", value: Math.max(0, surplus) },
+  ];
+  const MONTHLY_CF_COLORS = ["hsl(142,60%,45%)", "hsl(0,72%,51%)", "hsl(43,85%,55%)"];
+
+  const cfFirst = masterCFData.find((d: any) => d.label && d.label.includes("2026")) ?? masterCFData[0] ?? {};
+  const cfLast = masterCFData[masterCFData.length - 1] ?? {};
+
+  // Active income sources count
+  const activeIncomeSources = (incomeRecords ?? []).filter((r: any) => r.is_active !== false).length;
+
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="db-root">
+    <div className="min-h-screen bg-background text-foreground pb-16">
 
       {/* ══════════════════════════════════════════════════════════════════
-          ROW 1 — HERO BAR
+          HERO SECTION
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-hero">
-        {/* Greeting */}
-        <div className="db-hero-greeting">
-          <span className="db-hero-hello">Hello,</span>
-          <span className="db-hero-name">{currentUser === "Fara" ? "Fara" : "Roham"}</span>
-          <span className={`db-hero-status ${savingsRate >= 20 ? "status-ok" : surplus > 0 ? "status-warn" : "status-alert"}`}>
-            <span className="db-hero-dot" />
-            {savingsRate >= 20 ? "On Track" : surplus > 0 ? "Watch" : "Attention"}
-          </span>
-        </div>
+      <div className="px-4 pt-6 pb-4">
+        <div className="flex flex-col lg:flex-row gap-4 items-stretch">
 
-        {/* KPIs */}
-        <div className="db-hero-kpis">
-          <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">Net Worth</span>
-            <span className="db-kpi-val">{maskValue(formatCurrency(netWorth, true), privacyMode)}</span>
+          {/* Left — Family welcome card */}
+          <div className="flex-1 rounded-2xl border border-border bg-card p-5 flex gap-4 items-center min-w-0">
+            {/* Family photo */}
+            <div className="shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 border-amber-500/30">
+              <img src={familyImg} alt="Family" className="w-full h-full object-cover" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-bold uppercase tracking-widest text-amber-400 mb-0.5">Welcome Back</div>
+              <div className="text-2xl font-extrabold tracking-tight text-foreground leading-tight">Fara &amp; Roham</div>
+              <div className="text-sm font-semibold text-muted-foreground mt-0.5">Family Net Worth Command Center</div>
+              <div className="text-xs text-muted-foreground/70 mt-0.5">Building Wealth for Yara &amp; Jana</div>
+            </div>
           </div>
-          <div className="db-hero-sep" />
-          <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">Monthly Surplus</span>
-            <span className={`db-kpi-val ${surplus >= 0 ? "val-green" : "val-red"}`}>
-              {maskValue(formatCurrency(surplus, true), privacyMode)}
-            </span>
-          </div>
-          <div className="db-hero-sep" />
-          <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">Total Investments</span>
-            <span className="db-kpi-val val-gold">{maskValue(formatCurrency(stocksTotal + cryptoTotal, true), privacyMode)}</span>
-          </div>
-          <div className="db-hero-sep" />
-          <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">Property Equity</span>
-            <span className="db-kpi-val val-blue">{maskValue(formatCurrency(propertyEquity, true), privacyMode)}</span>
-          </div>
-          <div className="db-hero-sep" />
-          <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">Debt Balance</span>
-            <span className="db-kpi-val val-red">{maskValue(formatCurrency(totalLiab, true), privacyMode)}</span>
-          </div>
-          <div className="db-hero-sep" />
-          <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">2035 Forecast</span>
-            <span className="db-kpi-val val-blue">{maskValue(formatCurrency(year10NW, true), privacyMode)}</span>
-          </div>
-          <div className="db-hero-sep" />
-          <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">Passive Income</span>
-            <span className="db-kpi-val" style={{ color: "hsl(260,60%,68%)" }}>{maskValue(formatCurrency(passiveIncome, true), privacyMode)}/yr</span>
-          </div>
-          <div className="db-hero-sep" />
-          <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">Super</span>
-            <span className="db-kpi-val val-gold">{maskValue(formatCurrency(_totalSuperNow, true), privacyMode)}</span>
-          </div>
-          <div className="db-hero-sep" />
-          <div className="db-hero-kpi">
-            <span className="db-kpi-lbl">Savings Rate</span>
-            <span className={`db-kpi-val ${savingsRate >= 20 ? "val-green" : "val-gold"}`}>{savingsRate.toFixed(0)}%</span>
+
+          {/* Right — Net worth + controls */}
+          <div className="rounded-2xl border border-border bg-card p-5 flex flex-col justify-between min-w-[260px]">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">Estimated Net Worth</div>
+              <div className="text-4xl font-extrabold text-amber-400 tabular-nums leading-none mb-1">
+                {maskValue(formatCurrency(netWorth, true), privacyMode)}
+              </div>
+              <div className="text-xs text-muted-foreground">Brisbane, QLD · AUD</div>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={togglePrivacy}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
+              >
+                {privacyMode ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                {privacyMode ? "Show Values" : "Hide Values"}
+              </button>
+              <button
+                onClick={handleSyncFromCloud}
+                disabled={syncing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
+                Sync From Cloud
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Controls */}
-        <div className="db-hero-controls">
-          <span className="db-hero-badge">
-            {forecastMode === "monte-carlo" ? "Monte Carlo" : forecastMode === "year-by-year" ? "YoY" : profile.charAt(0).toUpperCase() + profile.slice(1)}
+        {/* Income source badge */}
+        <div className="mt-3">
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            Income source: Income Tracker ({activeIncomeSources > 0 ? activeIncomeSources : 3} active sources · {formatCurrency(snap.monthly_income, true)}/mo)
           </span>
-          <button className="db-ctrl-btn" onClick={handleSyncFromCloud} disabled={syncing} title="Sync">
-            <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
-          </button>
-          <button className="db-ctrl-btn" onClick={togglePrivacy} title={privacyMode ? "Show" : "Hide"}>
-            {privacyMode ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-          </button>
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ROW 2 — MAIN GRID (70/30)
+          8 KPI CARDS (4-column grid, 2 rows)
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-main-grid">
+      <div className="px-4 pb-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KpiCard
+            label="NET WORTH"
+            value={maskValue(formatCurrency(netWorth, true), privacyMode)}
+            subValue={`Accessible: ${maskValue(formatCurrency(accessibleNW, true), privacyMode)}`}
+            icon={<TrendingUp />}
+            accent="hsl(43,85%,55%)"
+          />
+          <KpiCard
+            label="MONTHLY SURPLUS"
+            value={maskValue(formatCurrency(surplus, true), privacyMode)}
+            subValue={`${maskValue(formatCurrency(surplus * 12, true), privacyMode)} / year`}
+            trend={surplus >= 0 ? 1 : -1}
+            icon={<PiggyBank />}
+            accent="hsl(142,60%,45%)"
+          />
+          <KpiCard
+            label="TOTAL INVESTMENTS"
+            value={maskValue(formatCurrency(stocksTotal + cryptoTotal, true), privacyMode)}
+            subValue={stocksTotal + cryptoTotal === 0 ? "— Stocks + Crypto" : `Stocks: ${formatCurrency(stocksTotal, true)}`}
+            icon={<BarChart2 />}
+            accent="hsl(210,75%,52%)"
+          />
+          <KpiCard
+            label="PROPERTY EQUITY"
+            value={maskValue(formatCurrency(propertyEquity, true), privacyMode)}
+            subValue={`${Math.round((propertyEquity / (snap.ppor || 1)) * 100)}% LVR met`}
+            icon={<Home />}
+            accent="hsl(188,60%,48%)"
+          />
+          <KpiCard
+            label="DEBT BALANCE"
+            value={maskValue(formatCurrency(totalLiab, true), privacyMode)}
+            subValue="Mortgage + Debts"
+            trend={-1}
+            icon={<CreditCard />}
+            accent="hsl(5,70%,52%)"
+          />
+          <KpiCard
+            label="10-YEAR FORECAST"
+            value={maskValue(formatCurrency(year10NW, true), privacyMode)}
+            subValue={`From ${maskValue(formatCurrency(netWorth, true), privacyMode)} today`}
+            trend={1}
+            icon={<Target />}
+            accent="hsl(260,60%,58%)"
+          />
+          <KpiCard
+            label="PASSIVE INCOME"
+            value={maskValue(formatCurrency(passiveIncome, true), privacyMode)}
+            subValue="Rental + Dividends"
+            icon={<Landmark />}
+            accent="hsl(145,55%,42%)"
+          />
+          <KpiCard
+            label="SUPER (COMBINED)"
+            value={maskValue(formatCurrency(_totalSuperNow, true), privacyMode)}
+            subValue={`At 60: ${maskValue(formatCurrency(_totalSuperNow * Math.pow(1.07, 24), true), privacyMode)}`}
+            icon={<Briefcase />}
+            accent="hsl(43,85%,55%)"
+          />
+        </div>
 
-        {/* LEFT — Wealth Intelligence Panel */}
-        <div className="db-chart-card">
-          {/* Header */}
-          <div className="db-chart-head">
-            <div>
-              <div className="db-chart-title">
-                {mainChartMode === "networth" ? "Net Worth Growth" : "Cashflow Forecast"}
-              </div>
-              <div className="db-chart-sub">
-                {mainChartMode === "networth"
-                  ? `${formatCurrency(netWorth, true)} → ${formatCurrency(year10NW, true)} projected`
-                  : `Monthly surplus: ${maskValue(formatCurrency(surplus, true), privacyMode)}`
-                }
-              </div>
-            </div>
-            <div className="db-chart-controls">
-              <div className="db-toggle-group">
-                <button className={`db-toggle-btn ${mainChartMode === "networth" ? "active" : ""}`} onClick={() => setMainChartMode("networth")}>Net Worth</button>
-                <button className={`db-toggle-btn ${mainChartMode === "cashflow" ? "active" : ""}`} onClick={() => setMainChartMode("cashflow")}>Cashflow</button>
-              </div>
-              {mainChartMode === "networth" && (
-                <div className="db-toggle-group">
-                  {(["1Y","3Y","10Y","Scenario"] as const).map(r => (
-                    <button key={r} className={`db-toggle-btn ${chartRange === r ? "active" : ""}`} onClick={() => setChartRange(r)}>{r}</button>
-                  ))}
-                </div>
-              )}
-              {mainChartMode === "cashflow" && (
-                <button
-                  className={`db-toggle-btn ${cfChartAnnotations ? "active" : ""}`}
-                  onClick={() => setCfChartAnnotations(v => !v)}
-                  title="Toggle event markers"
-                  style={{ fontSize: 10, padding: "2px 8px" }}
-                >
-                  Events
-                </button>
-              )}
-              <Link href="/reports">
-                <button className="db-expand-btn" title="Expand"><Maximize2 className="w-3.5 h-3.5" /></button>
-              </Link>
+        {/* Savings Rate — full-width banner card */}
+        <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-3 flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-widest text-amber-400">Savings Rate</span>
+            <span className="text-2xl font-extrabold text-amber-400 tabular-nums">{savingsRate.toFixed(1)}%</span>
+          </div>
+          <div className="h-5 w-px bg-border" />
+          <span className="text-sm text-muted-foreground">{maskValue(formatCurrency(surplus * 12, true), privacyMode)} saved / yr</span>
+          <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden ml-2">
+            <div
+              className="h-full rounded-full bg-amber-400 transition-all"
+              style={{ width: `${Math.min(100, savingsRate * 1.5)}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ACCESSIBLE / LOCKED / TOTAL NET WORTH + CASH PROJECTIONS
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pt-4 pb-2">
+        {/* 3 wealth split cards */}
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Accessible Wealth</div>
+            <div className="text-xl font-bold text-foreground tabular-nums">{maskValue(formatCurrency(accessibleNW, true), privacyMode)}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">Available now ex-super</div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Locked Retirement Wealth</div>
+            <div className="text-xl font-bold text-amber-400 tabular-nums">{maskValue(formatCurrency(lockedNW, true), privacyMode)}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">Superannuation — access at 60</div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Total Net Worth</div>
+            <div className="text-xl font-bold text-emerald-400 tabular-nums">{maskValue(formatCurrency(netWorth, true), privacyMode)}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">Accessible + Super combined</div>
+          </div>
+        </div>
+
+        {/* 6 cash projection cards */}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Current Cash</div>
+            <div className="text-lg font-bold text-foreground tabular-nums">{maskValue(formatCurrency(snap.cash, true), privacyMode)}</div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Forecast Cash 2030</div>
+            <div className={`text-lg font-bold tabular-nums ${forecast2030 < 0 ? "text-red-400" : "text-foreground"}`}>
+              {maskValue(formatCurrency(forecast2030, true), privacyMode)}
             </div>
           </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Forecast Cash 2035</div>
+            <div className={`text-lg font-bold tabular-nums ${forecast2035 < 0 ? "text-red-400" : "text-foreground"}`}>
+              {maskValue(formatCurrency(forecast2035, true), privacyMode)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Lowest Future Cash</div>
+            <div className={`text-lg font-bold tabular-nums ${lowestFutureCash < 0 ? "text-red-400" : "text-foreground"}`}>
+              {maskValue(formatCurrency(lowestFutureCash, true), privacyMode)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Next Major Event</div>
+            <div className="text-sm font-bold text-amber-400 truncate">
+              {nextPropEvent ? nextPropEvent.label : "No events scheduled"}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {nextPropEvent ? nextPropEvent.monthKey : "—"}
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Emergency Buffer</div>
+            <div className={`text-sm font-bold ${snap.cash >= snap.monthly_expenses * 3 ? "text-emerald-400" : "text-red-400"}`}>
+              {snap.cash >= snap.monthly_expenses * 3 ? "Buffer healthy" : "Buffer low"}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              ${Math.round(snap.monthly_expenses * 3 / 1000)}k reserve target
+            </div>
+          </div>
+        </div>
 
-          {/* Chart */}
-          <div className="db-chart-body">
-            {mainChartMode === "networth" ? (
+        {/* Liquidity stress alert */}
+        {hasLiquidityStress && (
+          <div className="mb-3 rounded-xl border border-red-500/40 bg-red-500/8 p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              <span className="text-sm font-bold text-red-400">Liquidity Stress Detected</span>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Cash goes negative in: {negativeCashMonths.join(", ")}
+            </div>
+          </div>
+        )}
+
+        {/* 4 quick metric tiles */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2">
+          <div className="rounded-xl border border-border bg-card p-3 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
+              <Calendar className="w-4 h-4 text-amber-400" />
+            </div>
+            <div>
+              <div className="text-lg font-bold text-foreground tabular-nums">{upcomingBillsCount}</div>
+              <div className="text-xs text-muted-foreground">Upcoming Bills</div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-3 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+              <Target className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div>
+              <div className="text-lg font-bold text-foreground tabular-nums">{budgetsSetCount}</div>
+              <div className="text-xs text-muted-foreground">Budget Status</div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-3 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+              <Activity className="w-4 h-4 text-blue-400" />
+            </div>
+            <div>
+              <div className="text-lg font-bold text-foreground tabular-nums">{alertsSent24h}</div>
+              <div className="text-xs text-muted-foreground">Alerts Sent</div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-3 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+              <DollarSign className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-foreground tabular-nums">{maskValue(formatCurrency(cashAfterBills, true), privacyMode)}</div>
+              <div className="text-xs text-muted-foreground">Cash After Bills</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          WEALTH HEALTH CARDS (8 cards)
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pb-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {wealthCards.map((card) => (
+            <div
+              key={card.label}
+              className={`rounded-xl border p-4 bg-card ${card.alert ? "border-red-500/30" : "border-border"}`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</span>
+                <card.Icon className={`w-3.5 h-3.5 ${card.alert ? "text-red-400" : "text-muted-foreground"}`} />
+              </div>
+              <div className={`text-lg font-bold tabular-nums ${card.alert ? "text-red-400" : "text-foreground"}`}>
+                {card.value}
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">{card.sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          FINANCIAL SNAPSHOT SECTION
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pb-4">
+        <div className="rounded-2xl border border-border bg-card p-5" ref={snapContainerRef}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-bold text-foreground">Financial Snapshot</h2>
+            <button
+              onClick={() => { setEditSnap(!editSnap); if (!editSnap && !snapDraft) setSnapDraft({ ...snap }); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
+            >
+              <Edit2 className="w-3 h-3" />{editSnap ? "Cancel" : "Edit"}
+            </button>
+          </div>
+
+          {!editSnap ? (
+            <>
+              {/* Individual field cards in 4-column grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                {[
+                  { label: "PPOR", value: snap.ppor, isLiab: false },
+                  { label: "Cash (Everyday)", value: snap.cash, isLiab: false },
+                  { label: "Cash (Savings)", value: snap.offset_balance, isLiab: false },
+                  { label: "Cash (Emergency)", value: 0, isLiab: false },
+                  { label: "Cash (Other)", value: 0, isLiab: false },
+                  { label: "Offset Balance", value: snap.offset_balance, isLiab: false },
+                  { label: "Super", value: _totalSuperNow, isLiab: false },
+                  { label: "Cars", value: snap.cars, isLiab: false },
+                  { label: "Iran Property", value: snap.iran_property, isLiab: false },
+                  { label: "Mortgage", value: snap.mortgage, isLiab: true },
+                  { label: "Other Debts", value: snap.other_debts, isLiab: true },
+                  { label: "Monthly Income", value: snap.monthly_income, isLiab: false },
+                  { label: "Monthly Expenses", value: snap.monthly_expenses, isLiab: false },
+                ].map((f) => (
+                  <div key={f.label} className="rounded-lg border border-border bg-background/50 px-3 py-2">
+                    <div className="text-xs text-muted-foreground mb-0.5">{f.label}</div>
+                    <div className={`text-sm font-bold tabular-nums ${f.isLiab ? "text-red-400" : "text-foreground"}`}>
+                      {maskValue(formatCurrency(f.value, true), privacyMode)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Totals row */}
+              <div className="grid grid-cols-3 gap-3 pt-3 border-t border-border">
+                <div className="text-center">
+                  <div className="text-xs text-muted-foreground mb-0.5">Total Assets</div>
+                  <div className="text-base font-bold text-emerald-400 tabular-nums">{maskValue(formatCurrency(totalAssets, true), privacyMode)}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-xs text-muted-foreground mb-0.5">Total Liabilities</div>
+                  <div className="text-base font-bold text-red-400 tabular-nums">{maskValue(formatCurrency(totalLiab, true), privacyMode)}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-xs text-muted-foreground mb-0.5">Net Worth</div>
+                  <div className="text-base font-bold text-amber-400 tabular-nums">{maskValue(formatCurrency(netWorth, true), privacyMode)}</div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="db-snap-edit-grid">
+              {snapFields.map(({ label, key }) => (
+                <div key={key} className="db-snap-field">
+                  <label className="db-snap-lbl">{label}</label>
+                  <Input
+                    type="number"
+                    className="h-7 text-xs"
+                    value={snapDraft?.[key] ?? ""}
+                    onChange={(e) => setSnapDraft((d: any) => ({ ...d, [key]: parseFloat(e.target.value) || 0 }))}
+                  />
+                </div>
+              ))}
+              <div style={{ gridColumn: "1 / -1", marginTop: 8 }}>
+                <SaveButton onSave={handleSaveSnap} className="h-7 text-xs" />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          10-YEAR NW CHART + ASSET ALLOCATION DONUT
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pb-4">
+        <div className="flex flex-col lg:flex-row gap-4">
+
+          {/* 10-Year Net Worth Growth chart (~60%) */}
+          <div className="flex-[3] rounded-2xl border border-border bg-card p-5 min-w-0">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="text-base font-bold text-foreground">10-Year Net Worth Growth</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {maskValue(formatCurrency(netWorth, true), privacyMode)} → {maskValue(formatCurrency(year10NW, true), privacyMode)} projected
+                </div>
+              </div>
+              <div className="flex gap-1">
+                {(["1Y","3Y","10Y"] as const).map(r => (
+                  <button
+                    key={r}
+                    onClick={() => setChartRange(r)}
+                    className={`px-2 py-1 rounded text-xs font-medium transition-all ${chartRange === r ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground border border-border"}`}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ height: 220 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={filteredNWData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                   <defs>
-                    <linearGradient id="gNW" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id="gNWMain" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%"  stopColor="hsl(210,75%,52%)" stopOpacity={0.4} />
                       <stop offset="95%" stopColor="hsl(210,75%,52%)" stopOpacity={0} />
                     </linearGradient>
-                    <linearGradient id="gAssets" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id="gAssetsMain" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%"  stopColor="hsl(145,55%,42%)" stopOpacity={0.25} />
                       <stop offset="95%" stopColor="hsl(145,55%,42%)" stopOpacity={0} />
                     </linearGradient>
@@ -816,327 +1159,21 @@ export default function DashboardPage() {
                   <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={(v) => `$${(v/1000000).toFixed(1)}M`} tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} width={52} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="assets"   name="Total Assets" stroke="hsl(145,55%,42%)" strokeWidth={1.5} fill="url(#gAssets)" dot={false} />
-                  <Area type="monotone" dataKey="netWorth" name="Net Worth"     stroke="hsl(210,75%,52%)" strokeWidth={2.5} fill="url(#gNW)"     dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={masterCFData.slice(0, cashFlowView === "annual" ? 10 : 24)}
-                  margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(222 15% 18% / 0.5)" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 9, fill: "hsl(215 12% 48%)" }}
-                    axisLine={false} tickLine={false}
-                    interval={cashFlowView === "annual" ? 0 : 2}
-                  />
-                  <YAxis
-                    tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`}
-                    tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }}
-                    axisLine={false} tickLine={false} width={52}
-                  />
-                  <Tooltip content={<CashflowTooltip />} />
-                  <ReferenceLine y={0} stroke="hsl(222 15% 25%)" strokeDasharray="2 2" />
-                  {/* Event reference lines */}
-                  {cfChartAnnotations && propertyEventLines.map((ev, i) => (
-                    <ReferenceLine
-                      key={i}
-                      x={masterCFData[ev.index]?.label}
-                      stroke={ev.color}
-                      strokeDasharray="3 3"
-                      strokeWidth={1.5}
-                      label={{ value: ev.label.length > 14 ? ev.label.slice(0, 14) + "…" : ev.label, position: "insideTopRight", fontSize: 8, fill: ev.color }}
-                    />
-                  ))}
-                  <Line type="monotone" dataKey="income"   name="Income"          stroke="hsl(145,55%,48%)" strokeWidth={2}   dot={false} activeDot={{ r: 4 }} />
-                  <Line type="monotone" dataKey="expenses" name="Living Expenses"  stroke="hsl(5,70%,52%)"   strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
-                  <Line type="monotone" dataKey="mortgage" name="Mortgage"         stroke="hsl(20,80%,55%)"  strokeWidth={1.5} dot={false} strokeDasharray="3 2" />
-                  <Line type="monotone" dataKey="rental"   name="Rental Income"   stroke="hsl(188,60%,48%)" strokeWidth={1.5} dot={false} />
-                  <Line type="monotone" dataKey="ngRefund" name="NG Refund"        stroke="hsl(43,85%,55%)"  strokeWidth={1.5} dot={false} strokeDasharray="2 3" />
-                  <Line type="monotone" dataKey="netCF"    name="Net Cashflow"    stroke="hsl(260,60%,58%)" strokeWidth={2.5} dot={false} activeDot={{ r: 5 }} />
-                  <Line type="monotone" dataKey="balance"  name="Cash Balance"    stroke="hsl(210,75%,60%)" strokeWidth={2}   dot={<EventDot />} strokeDasharray="6 2" />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-
-          {/* Legend */}
-          <div className="db-chart-legend">
-            {mainChartMode === "networth" ? (
-              <>
-                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(210,75%,52%)" }} />Net Worth</div>
-                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(145,55%,42%)" }} />Total Assets</div>
-              </>
-            ) : (
-              <>
-                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(145,55%,48%)" }} />Income</div>
-                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(5,70%,52%)" }} />Expenses</div>
-                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(20,80%,55%)" }} />Mortgage</div>
-                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(188,60%,48%)" }} />Rental</div>
-                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(43,85%,55%)" }} />NG Refund</div>
-                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(260,60%,58%)" }} />Net CF</div>
-                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(210,75%,60%)" }} />Cash Balance</div>
-                {cfChartAnnotations && <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(42,80%,52%)", borderRadius: 0, width: 10, height: 2 }} />Events</div>}
-              </>
-            )}
-          </div>
-
-          {/* Notes */}
-          <div className="db-chart-notes">
-            <span>Savings Rate <strong className={savingsRate >= 20 ? "text-green" : "text-gold"}>{savingsRate.toFixed(0)}%</strong></span>
-            <span>Passive Income <strong className="val-blue">{maskValue(formatCurrency(passiveIncome, true), privacyMode)}/yr</strong></span>
-            <span>Property Equity <strong>{maskValue(formatCurrency(propertyEquity, true), privacyMode)}</strong></span>
-            {ngSummary.totalAnnualTaxBenefit > 0 && (
-              <span>NG Benefit <strong className="val-green">{formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}/yr</strong></span>
-            )}
-          </div>
-        </div>
-
-        {/* RIGHT — 3 stacked equal cards */}
-        <div className="db-right-stack">
-
-          {/* Card A — Current Mission */}
-          <div className="db-stack-card db-mission-card">
-            <div className="db-card-eyebrow">Active Mission</div>
-            <div className="db-mission-title">{missionLabel}</div>
-            <div className="db-mission-ring-row">
-              <svg viewBox="0 0 64 64" className="db-ring-svg">
-                <circle cx="32" cy="32" r="26" fill="none" stroke="hsl(222 15% 18%)" strokeWidth="5" />
-                <circle
-                  cx="32" cy="32" r="26" fill="none"
-                  stroke="hsl(42,80%,52%)" strokeWidth="5"
-                  strokeDasharray={`${2 * Math.PI * 26}`}
-                  strokeDashoffset={`${2 * Math.PI * 26 * (1 - depositPct / 100)}`}
-                  strokeLinecap="round"
-                  transform="rotate(-90 32 32)"
-                  style={{ filter: "drop-shadow(0 0 5px hsl(42 80% 52% / 0.5))" }}
-                />
-                <text x="32" y="30" textAnchor="middle" fontSize="11" fontWeight="700" fill="hsl(215 20% 88%)">{depositPct}%</text>
-                <text x="32" y="42" textAnchor="middle" fontSize="7" fill="hsl(215 12% 48%)">Deposit</text>
-              </svg>
-              <div className="db-mission-stats">
-                <div className="db-mstat"><span className="db-mstat-lbl">Timeline</span><span className="db-mstat-val">{missionMonths}mo</span></div>
-                <div className="db-mstat"><span className="db-mstat-lbl">Contribution</span><span className="db-mstat-val">{maskValue(formatCurrency(missionContrib, true), privacyMode)}/mo</span></div>
-                <div className="db-mstat"><span className="db-mstat-lbl">Status</span><span className="db-mstat-val" style={{ color: depositPct >= 70 ? "hsl(145,55%,42%)" : "hsl(42,80%,52%)" }}>{depositPct >= 80 ? "Ready" : depositPct >= 50 ? "Near" : "Building"}</span></div>
-              </div>
-            </div>
-            <Link href="/financial-plan"><button className="db-card-cta">View Plan →</button></Link>
-          </div>
-
-          {/* Card B — Best Move */}
-          <div className="db-stack-card db-bestmove-card">
-            <div className="db-card-eyebrow db-eyebrow-green">Best Move Now</div>
-            <div className="db-bm-move-row">
-              <Zap className="db-bm-zap" />
-              <span className="db-bm-title">{bestMoveTitle}</span>
-            </div>
-            <div className="db-bm-impact">
-              <span className="db-bm-impact-lbl">Impact</span>
-              <span className="db-bm-impact-val">{maskValue(bestMoveImpact, privacyMode)}</span>
-            </div>
-            <div className="db-bm-meta-row">
-              <div className="db-bm-chip">
-                <span>Urgency</span>
-                <strong className={bestMoveUrgency === "High" ? "val-red" : "val-gold"}>{bestMoveUrgency}</strong>
-              </div>
-              <div className="db-bm-chip">
-                <span>Difficulty</span>
-                <strong style={{ color: "hsl(215 12% 65%)" }}>Easy</strong>
-              </div>
-            </div>
-            <Link href={bestMoveHref}><button className="db-card-cta db-cta-green">Take Action →</button></Link>
-          </div>
-
-          {/* Card C — Risk Status */}
-          <div className="db-stack-card db-risk-card">
-            <div className="db-card-eyebrow">Risk Status</div>
-            <div className="db-risk-score-row">
-              <span className="db-risk-number" style={{ color: riskScore >= 70 ? "hsl(145,55%,42%)" : riskScore >= 50 ? "hsl(42,80%,52%)" : "hsl(5,70%,52%)" }}>{riskScore}</span>
-              <span className="db-risk-label" style={{ color: riskScore >= 70 ? "hsl(145,55%,42%)" : riskScore >= 50 ? "hsl(42,80%,52%)" : "hsl(5,70%,52%)" }}>{riskLabel}</span>
-            </div>
-            <div className="db-risk-track"><div className="db-risk-fill" style={{ width: `${riskScore}%`, background: riskScore >= 70 ? "hsl(145,55%,42%)" : riskScore >= 50 ? "hsl(42,80%,52%)" : "hsl(5,70%,52%)" }} /></div>
-            <div className="db-risk-factors">
-              <div className="db-rfactor"><span className="db-rfact-lbl">Savings Rate</span><span className={savingsRate >= 20 ? "val-green db-rfact-val" : "val-red db-rfact-val"}>{savingsRate.toFixed(0)}%</span></div>
-              <div className="db-rfactor"><span className="db-rfact-lbl">Emergency Fund</span><span className={!emergencyCard?.alert ? "val-green db-rfact-val" : "val-red db-rfact-val"}>{emergencyCard?.sub}</span></div>
-              <div className="db-rfactor"><span className="db-rfact-lbl">Debt Ratio</span><span className={!debtCard?.alert ? "val-green db-rfact-val" : "val-red db-rfact-val"}>{debtCard?.sub}</span></div>
-            </div>
-            <Link href="/wealth-strategy"><button className="db-card-cta">Risk Report →</button></Link>
-          </div>
-
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          ROW 3 — QUICK INSIGHTS (6 cards)
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section">
-        <div className="db-section-head">
-          <span className="db-section-lbl">Wealth Intelligence</span>
-          <Link href="/data-health"><span className="db-section-link">Data Health →</span></Link>
-        </div>
-        <div className="db-insights-grid">
-
-          {/* 1 — Cash */}
-          <div className="db-insight-card">
-            <div className="db-ic-header">
-              <DollarSign className="db-ic-icon" style={{ color: "hsl(210,75%,52%)" }} />
-              <span className="db-ic-title">Cash Position</span>
-              <span className={`db-ic-badge ${snap.cash > snap.monthly_expenses * 3 ? "badge-ok" : "badge-warn"}`}>{snap.cash > snap.monthly_expenses * 3 ? "Healthy" : "Low"}</span>
-            </div>
-            <div className="db-ic-value">{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</div>
-            <div className="db-ic-sub">Cash + {formatCurrency(snap.offset_balance, true)} offset</div>
-            <div className="db-ic-bar-wrap">
-              <div className="db-ic-bar-track"><div className="db-ic-bar-fill" style={{ width: `${Math.min(100, (snap.cash / (snap.monthly_expenses * 6)) * 100)}%`, background: "hsl(210,75%,52%)" }} /></div>
-              <span className="db-ic-bar-lbl">{Math.round(snap.cash / (snap.monthly_expenses || 1))}mo buffer</span>
-            </div>
-          </div>
-
-          {/* 2 — Debt */}
-          <div className="db-insight-card">
-            <div className="db-ic-header">
-              <CreditCard className="db-ic-icon" style={{ color: debtCard?.alert ? "hsl(5,70%,52%)" : "hsl(145,55%,42%)" }} />
-              <span className="db-ic-title">Debt Health</span>
-              <span className={`db-ic-badge ${debtCard?.alert ? "badge-warn" : "badge-ok"}`}>{debtCard?.alert ? "High" : "OK"}</span>
-            </div>
-            <div className="db-ic-value">{maskValue(formatCurrency(snap.mortgage + snap.other_debts, true), privacyMode)}</div>
-            <div className="db-ic-sub">Mortgage + {formatCurrency(snap.other_debts, true)} other</div>
-            <div className="db-ic-bar-wrap">
-              <div className="db-ic-bar-track"><div className="db-ic-bar-fill" style={{ width: `${Math.min(100, (snap.mortgage / (totalAssets || 1)) * 100)}%`, background: debtCard?.alert ? "hsl(5,70%,52%)" : "hsl(145,55%,42%)" }} /></div>
-              <span className="db-ic-bar-lbl">{Math.round((snap.mortgage / (totalAssets || 1)) * 100)}% LVR</span>
-            </div>
-          </div>
-
-          {/* 3 — Savings Rate */}
-          <div className="db-insight-card">
-            <div className="db-ic-header">
-              <PiggyBank className="db-ic-icon" style={{ color: savingsRate >= 20 ? "hsl(145,55%,42%)" : "hsl(42,80%,52%)" }} />
-              <span className="db-ic-title">Savings Rate</span>
-              <span className={`db-ic-badge ${savingsRate >= 20 ? "badge-ok" : "badge-warn"}`}>{savingsRate >= 20 ? "On Track" : "Below"}</span>
-            </div>
-            <div className="db-ic-value" style={{ color: savingsRate >= 20 ? "hsl(145,55%,42%)" : "hsl(42,80%,52%)" }}>{savingsRate.toFixed(1)}%</div>
-            <div className="db-ic-sub">{maskValue(formatCurrency(surplus, true), privacyMode)}/mo surplus · target 20%</div>
-            <div className="db-ic-bar-wrap">
-              <div className="db-ic-bar-track"><div className="db-ic-bar-fill" style={{ width: `${Math.min(100, savingsRate * 3)}%`, background: savingsRate >= 20 ? "hsl(145,55%,42%)" : "hsl(42,80%,52%)" }} /></div>
-              <span className="db-ic-bar-lbl">{savingsRate.toFixed(0)}% of 33% max</span>
-            </div>
-          </div>
-
-          {/* 4 — Property Equity */}
-          <div className="db-insight-card">
-            <div className="db-ic-header">
-              <Home className="db-ic-icon" style={{ color: "hsl(188,60%,48%)" }} />
-              <span className="db-ic-title">Property Equity</span>
-              <span className={`db-ic-badge ${propertyEquity > 0 ? "badge-ok" : "badge-warn"}`}>{propertyEquity > 0 ? "Positive" : "Negative"}</span>
-            </div>
-            <div className="db-ic-value">{maskValue(formatCurrency(propertyEquity, true), privacyMode)}</div>
-            <div className="db-ic-sub">PPOR {maskValue(formatCurrency(snap.ppor, true), privacyMode)} − Mortgage {maskValue(formatCurrency(snap.mortgage, true), privacyMode)}</div>
-            <div className="db-ic-bar-wrap">
-              <div className="db-ic-bar-track"><div className="db-ic-bar-fill" style={{ width: `${Math.min(100, Math.max(0, (propertyEquity / snap.ppor) * 100))}%`, background: "hsl(188,60%,48%)" }} /></div>
-              <span className="db-ic-bar-lbl">{Math.round((propertyEquity / (snap.ppor || 1)) * 100)}% owned</span>
-            </div>
-          </div>
-
-          {/* 5 — Tax / NG */}
-          <div className="db-insight-card">
-            <div className="db-ic-header">
-              <Receipt className="db-ic-icon" style={{ color: "hsl(145,55%,42%)" }} />
-              <span className="db-ic-title">Tax Savings</span>
-              <span className="db-ic-badge badge-ok">Active</span>
-            </div>
-            <div className="db-ic-value val-green">{formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}/yr</div>
-            <div className="db-ic-sub">Negative gearing tax benefit</div>
-            <div className="db-ic-bar-wrap">
-              <div className="db-ic-bar-track"><div className="db-ic-bar-fill" style={{ width: `${Math.min(100, (ngSummary.totalAnnualTaxBenefit / 20000) * 100)}%`, background: "hsl(145,55%,42%)" }} /></div>
-              <span className="db-ic-bar-lbl">NG benefit</span>
-            </div>
-          </div>
-
-          {/* 6 — Passive Income */}
-          <div className="db-insight-card">
-            <div className="db-ic-header">
-              <TrendingUp className="db-ic-icon" style={{ color: "hsl(260,60%,58%)" }} />
-              <span className="db-ic-title">Passive Income</span>
-              <span className={`db-ic-badge ${passiveIncome > 0 ? "badge-ok" : "badge-neutral"}`}>{passiveIncome > 0 ? "Active" : "Building"}</span>
-            </div>
-            <div className="db-ic-value" style={{ color: "hsl(260,60%,58%)" }}>{maskValue(formatCurrency(passiveIncome, true), privacyMode)}/yr</div>
-            <div className="db-ic-sub">Rental + dividends · target $120k/yr</div>
-            <div className="db-ic-bar-wrap">
-              <div className="db-ic-bar-track"><div className="db-ic-bar-fill" style={{ width: `${Math.min(100, (passiveIncome / 120000) * 100)}%`, background: "hsl(260,60%,58%)" }} /></div>
-              <span className="db-ic-bar-lbl">{Math.round((passiveIncome / 120000) * 100)}% of FIRE income</span>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          ROW 4 — WEALTH PROJECTION + ASSET ALLOCATION (MID SECTION)
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section">
-        <div className="db-section-head">
-          <span className="db-section-lbl">Wealth Projection &amp; Allocation</span>
-          <Link href="/reports"><span className="db-section-link">Full Report →</span></Link>
-        </div>
-        <div className="db-projection-row">
-
-          {/* Large projection chart */}
-          <div className="db-proj-chart-card">
-            <div className="db-proj-chart-head">
-              <div>
-                <div className="db-proj-title">10-Year Wealth Trajectory</div>
-                <div className="db-proj-sub">
-                  From {maskValue(formatCurrency(netWorth, true), privacyMode)} → {maskValue(formatCurrency(year10NW, true), privacyMode)} · {forecastMode === "monte-carlo" ? "Monte Carlo" : "Deterministic"}
-                </div>
-              </div>
-              <div className="db-toggle-group">
-                {(["1Y","3Y","10Y"] as const).map(r => (
-                  <button key={r} className={`db-toggle-btn ${chartRange === r ? "active" : ""}`} onClick={() => setChartRange(r)}>{r}</button>
-                ))}
-              </div>
-            </div>
-            <div style={{ height: 200 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={filteredNWData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="gProjNW2" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="hsl(210,75%,52%)" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="hsl(210,75%,52%)" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="gProjAssets2" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="hsl(145,55%,42%)" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="hsl(145,55%,42%)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(222 15% 18% / 0.5)" vertical={false} />
-                  <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} />
-                  <YAxis tickFormatter={(v) => `$${(v/1000000).toFixed(1)}M`} tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} width={54} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="assets"   name="Total Assets" stroke="hsl(145,55%,42%)" strokeWidth={1.5} fill="url(#gProjAssets2)" dot={false} />
-                  <Area type="monotone" dataKey="netWorth" name="Net Worth"     stroke="hsl(210,75%,52%)" strokeWidth={2.5} fill="url(#gProjNW2)"    dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
+                  <Area type="monotone" dataKey="assets"   name="Total Assets" stroke="hsl(145,55%,42%)" strokeWidth={1.5} fill="url(#gAssetsMain)" dot={false} />
+                  <Area type="monotone" dataKey="netWorth" name="Net Worth"     stroke="hsl(210,75%,52%)" strokeWidth={2.5} fill="url(#gNWMain)"    dot={false} activeDot={{ r: 5, strokeWidth: 0 }} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            {/* Projection milestones */}
-            <div className="db-proj-milestones">
-              {yrRows.filter((_, i) => i === 2 || i === 4 || i === 9).map((r) => (
-                <div key={r.year} className="db-proj-milestone">
-                  <div className="db-pm-year">{r.year}</div>
-                  <div className="db-pm-val">{maskValue(formatCurrency(r.nw, true), privacyMode)}</div>
-                  <div className="db-pm-sub">Net Worth</div>
-                </div>
-              ))}
+            <div className="flex gap-4 mt-2">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className="w-2.5 h-2.5 rounded-full bg-blue-400 inline-block" />Net Worth</div>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />Total Assets</div>
             </div>
           </div>
 
-          {/* Asset allocation donut */}
-          <div className="db-alloc-card">
-            <div className="db-alloc-head">
-              <div className="db-proj-title">Asset Allocation</div>
-              <div className="db-proj-sub">{maskValue(formatCurrency(totalAssets, true), privacyMode)} total</div>
-            </div>
+          {/* Asset Allocation donut (~40%) */}
+          <div className="flex-[2] rounded-2xl border border-border bg-card p-5 min-w-0">
+            <div className="text-base font-bold text-foreground mb-1">Asset Allocation</div>
+            <div className="text-xs text-muted-foreground mb-3">{maskValue(formatCurrency(totalAssets, true), privacyMode)} total</div>
             <div style={{ position: "relative", height: 160 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -1155,58 +1192,161 @@ export default function DashboardPage() {
                   <Tooltip content={<DonutTooltip />} />
                 </PieChart>
               </ResponsiveContainer>
-              {/* Center label */}
               <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center", pointerEvents: "none" }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "hsl(215 20% 88%)" }}>{maskValue(formatCurrency(totalAssets, true), privacyMode)}</div>
                 <div style={{ fontSize: 9, color: "hsl(215 12% 48%)" }}>Total Assets</div>
               </div>
             </div>
-            {/* Legend */}
-            <div className="db-alloc-legend">
+            <div className="mt-3 space-y-1.5">
               {assetAllocData.map((d) => (
-                <div key={d.name} className="db-alloc-leg-row">
-                  <span className="db-alloc-dot" style={{ background: d.fill }} />
-                  <span className="db-alloc-name">{d.name}</span>
-                  <span className="db-alloc-pct">{d.pct.toFixed(1)}%</span>
+                <div key={d.name} className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.fill }} />
+                  <span className="text-xs text-muted-foreground flex-1">{d.name}</span>
+                  <span className="text-xs font-semibold text-foreground tabular-nums">{d.pct.toFixed(1)}%</span>
                 </div>
               ))}
             </div>
           </div>
-
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ROW 5 — MASTER CASHFLOW FORECAST (full-width with event markers)
+          MONTHLY CASHFLOW BAR + EXPENSE BREAKDOWN DONUT
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section">
-        <div className="db-section-head">
-          <span className="db-section-lbl">Master Cash Flow Forecast</span>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button
-              className={`db-toggle-btn ${cfChartAnnotations ? "active" : ""}`}
-              style={{ fontSize: 10, padding: "2px 8px" }}
-              onClick={() => setCfChartAnnotations(v => !v)}
-            >
-              {cfChartAnnotations ? "Events On" : "Events Off"}
-            </button>
-            <Link href="/reports"><span className="db-section-link">Deep Dive →</span></Link>
+      <div className="px-4 pb-4">
+        <div className="flex flex-col md:flex-row gap-4">
+
+          {/* Monthly Cash Flow bar chart (~50%) */}
+          <div className="flex-1 rounded-2xl border border-border bg-card p-5 min-w-0">
+            <div className="text-base font-bold text-foreground mb-1">Monthly Cash Flow</div>
+            <div style={{ height: 160 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyCFBarData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(222 15% 18% / 0.5)" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} width={44} />
+                  <Tooltip formatter={(v: any) => [formatCurrency(v, true), ""]} />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                    {monthlyCFBarData.map((_, i) => (
+                      <Cell key={i} fill={MONTHLY_CF_COLORS[i]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-border">
+              <div className="text-center">
+                <div className="text-xs text-muted-foreground mb-0.5">Income</div>
+                <div className="text-sm font-bold text-emerald-400 tabular-nums">{maskValue(formatCurrency(snap.monthly_income, true), privacyMode)}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-muted-foreground mb-0.5">Expenses</div>
+                <div className="text-sm font-bold text-red-400 tabular-nums">{maskValue(formatCurrency(snap.monthly_expenses + snap.mortgage / 12, true), privacyMode)}</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-muted-foreground mb-0.5">Surplus</div>
+                <div className={`text-sm font-bold tabular-nums ${surplus >= 0 ? "text-amber-400" : "text-red-400"}`}>{maskValue(formatCurrency(surplus, true), privacyMode)}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Expense Breakdown donut (~50%) */}
+          <div className="flex-1 rounded-2xl border border-border bg-card p-5 min-w-0">
+            <div className="text-base font-bold text-foreground mb-1">Expense Breakdown</div>
+            <div className="text-xs text-muted-foreground mb-2">{maskValue(formatCurrency(snap.monthly_expenses + snap.mortgage / 12, true), privacyMode)}/mo total</div>
+            {expenseBreakdown.length > 0 ? (
+              <div style={{ height: 150 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={expenseBreakdown}
+                      cx="50%" cy="50%"
+                      innerRadius={40} outerRadius={65}
+                      paddingAngle={2}
+                      dataKey="value"
+                      stroke="none"
+                    >
+                      {expenseBreakdown.map((_, i) => (
+                        <Cell key={i} fill={["hsl(5,70%,52%)","hsl(20,80%,55%)","hsl(40,85%,55%)","hsl(188,60%,48%)","hsl(260,60%,58%)","hsl(145,55%,42%)","hsl(210,75%,52%)"][i % 7]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v: any) => [formatCurrency(v, true) + "/mo", ""]} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No expense categories</div>
+            )}
+            <div className="mt-2 space-y-1">
+              {expenseBreakdown.slice(0, 5).map((e, i) => (
+                <div key={e.name} className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: ["hsl(5,70%,52%)","hsl(20,80%,55%)","hsl(40,85%,55%)","hsl(188,60%,48%)","hsl(260,60%,58%)"][i] }} />
+                  <span className="text-xs text-muted-foreground flex-1">{e.name}</span>
+                  <span className="text-xs font-semibold tabular-nums">{maskValue(formatCurrency(e.value, true), privacyMode)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
+      </div>
 
-        {/* Event chips */}
-        {cfChartAnnotations && propertyEventLines.length > 0 && (
-          <div className="db-cf-event-chips">
-            {propertyEventLines.map((ev, i) => (
-              <div key={i} className="db-cf-event-chip" style={{ borderColor: ev.color, color: ev.color }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: ev.color, display: "inline-block", marginRight: 4, flexShrink: 0 }} />
-                {ev.label}
+      {/* ══════════════════════════════════════════════════════════════════
+          MASTER CASHFLOW FORECAST (full-width)
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pb-4">
+        <div className="rounded-2xl border border-border bg-card p-5">
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:items-center gap-2 mb-3">
+            <div className="flex-1">
+              <div className="text-base font-bold text-foreground">Master Cash Flow Forecast</div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Australian Negative Gearing Active · {ngProperties.length} negatively geared {ngProperties.length === 1 ? "property" : "properties"} · Marginal rate: {snap.monthly_income * 12 > 180000 ? "47%" : snap.monthly_income * 12 > 120000 ? "37%" : "32.5%"}
               </div>
-            ))}
+            </div>
+            <div className="flex gap-2 items-center">
+              <button
+                className={`px-2 py-1 rounded text-xs font-medium transition-all ${ngRefundMode === "lump-sum" ? "bg-primary text-primary-foreground" : "text-muted-foreground border border-border hover:text-foreground"}`}
+                onClick={() => setNgRefundMode("lump-sum")}
+              >
+                Lump-sum (Aug)
+              </button>
+              <button
+                className={`px-2 py-1 rounded text-xs font-medium transition-all ${ngRefundMode === "payg" ? "bg-primary text-primary-foreground" : "text-muted-foreground border border-border hover:text-foreground"}`}
+                onClick={() => setNgRefundMode("payg")}
+              >
+                PAYG
+              </button>
+              <button
+                className={`px-2 py-1 rounded text-xs font-medium transition-all ${cfChartAnnotations ? "bg-primary text-primary-foreground" : "text-muted-foreground border border-border hover:text-foreground"}`}
+                onClick={() => setCfChartAnnotations(v => !v)}
+              >
+                Events
+              </button>
+              <Link href="/reports"><span className="text-xs text-primary hover:underline ml-1">Deep Dive →</span></Link>
+            </div>
           </div>
-        )}
 
-        <div className="db-master-cf-card">
+          {/* NG summary stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="rounded-lg bg-background/60 border border-border px-3 py-2">
+              <div className="text-xs text-muted-foreground">Monthly Cash Loss</div>
+              <div className="text-sm font-bold text-red-400 tabular-nums">{formatCurrency(-(snap.monthly_expenses + snap.mortgage / 12 - snap.monthly_income), true)}</div>
+            </div>
+            <div className="rounded-lg bg-background/60 border border-border px-3 py-2">
+              <div className="text-xs text-muted-foreground">Est. Annual Tax Refund</div>
+              <div className="text-sm font-bold text-emerald-400 tabular-nums">+{formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}</div>
+            </div>
+            <div className="rounded-lg bg-background/60 border border-border px-3 py-2">
+              <div className="text-xs text-muted-foreground">Net After-Tax Cost/mo</div>
+              <div className="text-sm font-bold text-foreground tabular-nums">{formatCurrency(surplus - ngSummary.totalAnnualTaxBenefit / 12, true)}</div>
+            </div>
+            <div className="rounded-lg bg-background/60 border border-border px-3 py-2">
+              <div className="text-xs text-muted-foreground">Refund Mode</div>
+              <div className="text-sm font-bold text-amber-400">{ngRefundMode === "lump-sum" ? "Lump-sum (Aug)" : "PAYG"}</div>
+            </div>
+          </div>
+
+          {/* Chart */}
           <div style={{ height: 240 }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart
@@ -1227,7 +1367,6 @@ export default function DashboardPage() {
                 />
                 <Tooltip content={<CashflowTooltip />} />
                 <ReferenceLine y={0} stroke="hsl(222 15% 25%)" strokeDasharray="2 2" />
-                {/* IP purchase / settlement vertical markers */}
                 {cfChartAnnotations && propertyEventLines.map((ev, i) => (
                   <ReferenceLine
                     key={i}
@@ -1248,419 +1387,192 @@ export default function DashboardPage() {
               </LineChart>
             </ResponsiveContainer>
           </div>
-          {/* Legend row */}
-          <div className="db-chart-legend" style={{ marginTop: 8 }}>
-            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(145,55%,48%)" }} />Income</div>
-            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(5,70%,52%)" }} />Expenses</div>
-            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(20,80%,55%)" }} />Mortgage</div>
-            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(188,60%,48%)" }} />Rental</div>
-            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(43,85%,55%)" }} />NG Refund</div>
-            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(260,60%,58%)" }} />Net CF</div>
-            <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(210,75%,60%)" }} />Cash Balance</div>
-            {cfChartAnnotations && <div className="db-leg-item" style={{ color: "hsl(42,80%,60%)" }}>⚡ IP Purchase · Tax Refund · Rental Start</div>}
+
+          {/* Legend */}
+          <div className="flex flex-wrap gap-3 mt-2 mb-3">
+            {[
+              { label: "Income", color: "hsl(145,55%,48%)" },
+              { label: "Expenses", color: "hsl(5,70%,52%)" },
+              { label: "Mortgage", color: "hsl(20,80%,55%)" },
+              { label: "Rental", color: "hsl(188,60%,48%)" },
+              { label: "NG Refund", color: "hsl(43,85%,55%)" },
+              { label: "Net CF", color: "hsl(260,60%,58%)" },
+              { label: "Cash Balance", color: "hsl(210,75%,60%)" },
+            ].map(l => (
+              <div key={l.label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="w-2 h-2 rounded-full" style={{ background: l.color }} />
+                {l.label}
+              </div>
+            ))}
+          </div>
+
+          {/* Summary row */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-border">
+            <div>
+              <div className="text-xs text-muted-foreground">2026 Net CF</div>
+              <div className={`text-sm font-bold tabular-nums ${(cfFirst.netCF ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {formatCurrency(cfFirst.netCF ?? 0, true)}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">2026 Balance</div>
+              <div className="text-sm font-bold text-foreground tabular-nums">{formatCurrency(cfFirst.balance ?? 0, true)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">2035 Net CF</div>
+              <div className={`text-sm font-bold tabular-nums ${(cfLast.netCF ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {formatCurrency(cfLast.netCF ?? 0, true)}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">2035 Balance</div>
+              <div className="text-sm font-bold text-foreground tabular-nums">{formatCurrency(cfLast.balance ?? 0, true)}</div>
+            </div>
           </div>
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ROW 6 — NEGATIVE GEARING + TAX ALPHA + EXPENSE BREAKDOWN
+          YEAR-BY-YEAR TABLE
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section">
-        <div className="db-three-col-wide">
-
-          {/* Negative Gearing Panel */}
-          <div className="db-ng-card">
-            <div className="db-ng-head">
-              <div className="db-card-eyebrow" style={{ color: "hsl(43,85%,60%)" }}>Negative Gearing Engine</div>
-              <div className="db-ng-refund-toggle">
-                <button className={`db-toggle-btn ${ngRefundMode === "lump-sum" ? "active" : ""}`} style={{ fontSize: 9, padding: "2px 6px" }} onClick={() => setNgRefundMode("lump-sum")}>Lump Sum</button>
-                <button className={`db-toggle-btn ${ngRefundMode === "payg" ? "active" : ""}`} style={{ fontSize: 9, padding: "2px 6px" }} onClick={() => setNgRefundMode("payg")}>PAYG</button>
-              </div>
-            </div>
-            {/* Portfolio total */}
-            <div className="db-ng-total-row">
-              <div className="db-ng-total-card">
-                <div className="db-ng-total-label">Annual Tax Refund</div>
-                <div className="db-ng-total-val" style={{ color: "hsl(145,55%,48%)" }}>{formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}</div>
-              </div>
-              <div className="db-ng-total-card">
-                <div className="db-ng-total-label">Monthly Benefit</div>
-                <div className="db-ng-total-val" style={{ color: "hsl(210,75%,52%)" }}>{formatCurrency(ngSummary.totalAnnualTaxBenefit / 12, true)}</div>
-              </div>
-              <div className="db-ng-total-card">
-                <div className="db-ng-total-label">Tax Bracket Effect</div>
-                <div className="db-ng-total-val" style={{ color: "hsl(43,85%,55%)" }}>
-                  {snap.monthly_income * 12 > 180000 ? "45%" : snap.monthly_income * 12 > 120000 ? "37%" : snap.monthly_income * 12 > 45000 ? "32.5%" : "19%"}
-                </div>
-              </div>
-            </div>
-            {/* Per-property breakdown */}
-            {ngProperties.length > 0 ? (
-              <div className="db-ng-props">
-                {ngProperties.map((p: any, i: number) => (
-                  <div key={i} className="db-ng-prop-row">
-                    <Home className="w-3 h-3 shrink-0" style={{ color: "hsl(188,60%,48%)" }} />
-                    <span className="db-ng-prop-name">{p.name}</span>
-                    <span className="db-ng-prop-val val-green">+{formatCurrency(p.annualBenefit, true)}/yr</span>
-                    <span className="db-ng-prop-hold" style={{ color: "hsl(5,70%,52%)" }}>Hold {formatCurrency(p.monthlyHolding, true)}/mo</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="db-ng-empty">
-                <span style={{ fontSize: 10, color: "hsl(215 12% 48%)" }}>Add investment properties to see NG breakdown</span>
-                <Link href="/property"><span className="db-section-link" style={{ fontSize: 10 }}>Add Property →</span></Link>
-              </div>
-            )}
-            <Link href="/tax"><button className="db-card-cta" style={{ marginTop: 8 }}>Tax Strategy →</button></Link>
-          </div>
-
-          {/* Expense Breakdown */}
-          <div className="db-expense-card">
-            <div className="db-card-eyebrow" style={{ color: "hsl(5,70%,52%)" }}>Monthly Expenses</div>
-            <div className="db-expense-total">
-              {maskValue(formatCurrency(snap.monthly_expenses + snap.mortgage / 12, true), privacyMode)}/mo
-            </div>
-            <div className="db-expense-sub">Living + Mortgage</div>
-            {expenseBreakdown.length > 0 ? (
-              <div style={{ height: 120, marginTop: 8 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={expenseBreakdown} layout="vertical" margin={{ top: 0, right: 12, left: 0, bottom: 0 }}>
-                    <XAxis type="number" hide tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
-                    <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 9, fill: "hsl(215 12% 52%)" }} axisLine={false} tickLine={false} />
-                    <Tooltip formatter={(v: any) => [`${formatCurrency(v, true)}/mo`, ""]} />
-                    <Bar dataKey="value" fill="hsl(5,70%,52%)" radius={[0, 3, 3, 0]} opacity={0.8} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="db-ng-empty" style={{ marginTop: 16 }}>
-                <span style={{ fontSize: 10, color: "hsl(215 12% 48%)" }}>No expense categories yet</span>
-                <Link href="/expenses"><span className="db-section-link" style={{ fontSize: 10 }}>Add Expenses →</span></Link>
-              </div>
-            )}
-            <Link href="/expenses"><button className="db-card-cta" style={{ marginTop: 8 }}>Expenses →</button></Link>
-          </div>
-
-          {/* Monthly Cash Flow Summary */}
-          <div className="db-mcf-card">
-            <div className="db-card-eyebrow" style={{ color: "hsl(260,60%,68%)" }}>Monthly Cash Flow</div>
-            <div className="db-mcf-rows">
-              <div className="db-mcf-row">
-                <span className="db-mcf-lbl">Total Income</span>
-                <span className="db-mcf-val val-green">+{maskValue(formatCurrency(snap.monthly_income, true), privacyMode)}</span>
-              </div>
-              <div className="db-mcf-row">
-                <span className="db-mcf-lbl">Living Expenses</span>
-                <span className="db-mcf-val val-red">−{maskValue(formatCurrency(snap.monthly_expenses, true), privacyMode)}</span>
-              </div>
-              <div className="db-mcf-row">
-                <span className="db-mcf-lbl">Mortgage Repayment</span>
-                <span className="db-mcf-val val-red">−{maskValue(formatCurrency(snap.mortgage / 12, true), privacyMode)}</span>
-              </div>
-              {(masterCFData[0]?.rental ?? 0) > 0 && (
-                <div className="db-mcf-row">
-                  <span className="db-mcf-lbl">Rental Income</span>
-                  <span className="db-mcf-val val-green">+{maskValue(formatCurrency(masterCFData[0]?.rental ?? 0, true), privacyMode)}</span>
-                </div>
-              )}
-              {ngSummary.totalAnnualTaxBenefit > 0 && (
-                <div className="db-mcf-row">
-                  <span className="db-mcf-lbl">NG Refund {ngRefundMode === "payg" ? "(PAYG)" : "(Annual)"}</span>
-                  <span className="db-mcf-val val-gold">+{formatCurrency(ngSummary.totalAnnualTaxBenefit / (ngRefundMode === "payg" ? 12 : 1), true)}{ngRefundMode === "lump-sum" ? "/yr" : "/mo"}</span>
-                </div>
-              )}
-              <div className="db-mcf-divider" />
-              <div className="db-mcf-row db-mcf-total">
-                <span className="db-mcf-lbl">Net Surplus</span>
-                <span className={`db-mcf-val ${surplus >= 0 ? "val-green" : "val-red"}`} style={{ fontSize: 15, fontWeight: 700 }}>
-                  {surplus >= 0 ? "+" : ""}{maskValue(formatCurrency(surplus, true), privacyMode)}/mo
-                </span>
-              </div>
-              <div className="db-mcf-row">
-                <span className="db-mcf-lbl">Annual Surplus</span>
-                <span className="db-mcf-val val-blue">{maskValue(formatCurrency(surplus * 12, true), privacyMode)}/yr</span>
-              </div>
-            </div>
-            <Link href="/budget"><button className="db-card-cta" style={{ marginTop: 8 }}>Full Budget →</button></Link>
-          </div>
-
+      <div className="px-4 pb-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-bold text-foreground">Year-by-Year Projection</h2>
+          <Link href="/timeline"><span className="text-xs text-primary hover:underline">Full Timeline →</span></Link>
         </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          ROW 7 — FIRE PROGRESS + ACTION CENTER + BALANCE SHEET
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section">
-        <div className="db-fire-action-row">
-
-          {/* FIRE Progress */}
-          <div className="db-fire-card">
-            <div className="db-card-eyebrow" style={{ color: "hsl(22,90%,55%)" }}>
-              <Flame className="w-3 h-3 inline mr-1" />FIRE Progress
-            </div>
-            <div className="db-fire-main">
-              {/* Large ring */}
-              <svg viewBox="0 0 100 100" className="db-fire-ring">
-                <circle cx="50" cy="50" r="42" fill="none" stroke="hsl(222 15% 16%)" strokeWidth="7" />
-                <circle
-                  cx="50" cy="50" r="42" fill="none"
-                  stroke="hsl(22,90%,55%)" strokeWidth="7"
-                  strokeDasharray={`${2 * Math.PI * 42}`}
-                  strokeDashoffset={`${2 * Math.PI * 42 * (1 - fireProgressPct / 100)}`}
-                  strokeLinecap="round"
-                  transform="rotate(-90 50 50)"
-                  style={{ filter: "drop-shadow(0 0 6px hsl(22 90% 55% / 0.5))" }}
-                />
-                <text x="50" y="44" textAnchor="middle" fontSize="15" fontWeight="800" fill="hsl(215 20% 88%)">{fireProgressPct.toFixed(0)}%</text>
-                <text x="50" y="58" textAnchor="middle" fontSize="8" fill="hsl(215 12% 48%)">of target</text>
-              </svg>
-              <div className="db-fire-stats">
-                <div className="db-fire-stat">
-                  <span className="db-fs-lbl">Current</span>
-                  <span className="db-fs-val">{maskValue(formatCurrency(fireCurrentAmt, true), privacyMode)}</span>
-                </div>
-                <div className="db-fire-stat">
-                  <span className="db-fs-lbl">Target ($2.4M)</span>
-                  <span className="db-fs-val">{maskValue(formatCurrency(fireTargetAmt, true), privacyMode)}</span>
-                </div>
-                <div className="db-fire-stat">
-                  <span className="db-fs-lbl">Gap</span>
-                  <span className="db-fs-val val-gold">{maskValue(formatCurrency(fireGap, true), privacyMode)}</span>
-                </div>
-                <div className="db-fire-stat">
-                  <span className="db-fs-lbl">FIRE Age</span>
-                  <span className="db-fs-val" style={{ color: "hsl(22,90%,55%)" }}>{fireCard?.value ?? "—"}</span>
-                </div>
-                <div className="db-fire-stat">
-                  <span className="db-fs-lbl">Save / Month</span>
-                  <span className="db-fs-val val-blue">{maskValue(formatCurrency(Math.min(surplus, fireMonthlyNeeded || surplus), true), privacyMode)}</span>
-                </div>
-              </div>
-            </div>
-            <div className="db-fire-bar-track">
-              <div className="db-fire-bar-fill" style={{ width: `${fireProgressPct}%` }} />
-            </div>
-            <Link href="/wealth-strategy"><button className="db-card-cta" style={{ marginTop: 10 }}>FIRE Strategy →</button></Link>
-          </div>
-
-          {/* Smart Actions */}
-          <div className="db-actions-card">
-            <div className="db-actions-head">
-              <div>
-                <div className="db-actions-title">Action Center</div>
-                <div className="db-actions-sub">Top opportunities ranked by ROI</div>
-              </div>
-              <Link href="/ai-insights"><span className="db-section-link">AI Insights →</span></Link>
-            </div>
-            <div className="db-action-table-wrap">
-            <table className="db-action-table">
+        <div className="rounded-2xl border border-border bg-card overflow-hidden">
+          <div className="db-action-table-wrap overflow-x-auto">
+            <table className="w-full text-xs">
               <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Action</th>
-                  <th>Impact</th>
-                  <th>Difficulty</th>
-                  <th>Time</th>
-                  <th>Priority</th>
+                <tr className="border-b border-border">
+                  {["Year","Start NW","Income","Expenses","Prop. Value","Prop. Loans","Equity","Stocks","Crypto","Cash","Total Assets","Liabilities","End NW","Growth","Passive Income","Mthly CF"].map(h => (
+                    <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {smartActions.map((action, idx) => (
-                  <tr key={idx} className={`db-action-row priority-${action.priority}`} onClick={() => window.location.hash = `#${action.href}`} style={{ cursor: "pointer" }}>
-                    <td className="db-act-rank">{idx + 1}</td>
-                    <td className="db-act-title">{action.title}</td>
-                    <td className="db-act-impact">{action.impact}</td>
-                    <td className="db-act-meta">{action.difficulty}</td>
-                    <td className="db-act-meta">{action.time}</td>
-                    <td><span className={`db-priority-badge priority-badge-${action.priority}`}>{action.priority}</span></td>
+                {yrRowsFull.map((r, idx) => (
+                  <tr key={r.year} className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${idx === 0 ? "bg-amber-500/5" : ""}`}>
+                    <td className="px-3 py-2 font-bold text-foreground whitespace-nowrap">{r.year}{idx === 0 ? " ★" : ""}</td>
+                    <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.startNW ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.income ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.expenses ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.propValue ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.propLoans ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.equity ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono text-blue-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.stocks ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono text-purple-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.crypto ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.cash ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.totalAssets ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.liab ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono text-amber-400 font-bold tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.endNW ?? 0, true), privacyMode)}</td>
+                    <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap" style={{ color: (r.growth ?? 0) >= 0 ? "hsl(142,60%,45%)" : "hsl(5,70%,52%)" }}>
+                      {(r.growth ?? 0) >= 0 ? "+" : ""}{((r.growth ?? 0) * 100).toFixed(1)}%
+                    </td>
+                    <td className="px-3 py-2 font-mono text-purple-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.passive ?? 0, true), privacyMode)}/yr</td>
+                    <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap" style={{ color: (r.monthlyCF ?? 0) >= 0 ? "hsl(142,60%,45%)" : "hsl(5,70%,52%)" }}>
+                      {maskValue(formatCurrency(r.monthlyCF ?? 0, true), privacyMode)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            </div>
           </div>
-
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ROW 8 — BALANCE SHEET + AI INSIGHTS CARD
+          SATURDAY MORNING BULLETIN + BEST MOVE
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section">
-        <div className="db-two-col">
-
-          {/* Balance Sheet */}
-          <div className="db-balance-card" ref={snapContainerRef}>
-            <div className="db-balance-head">
-              <div>
-                <div className="db-balance-title">Balance Sheet</div>
-                <div className="db-balance-sub">Net Worth: {maskValue(formatCurrency(netWorth, true), privacyMode)}</div>
-              </div>
-              <button
-                className="db-edit-btn"
-                onClick={() => { setEditSnap(!editSnap); if (!editSnap && !snapDraft) setSnapDraft({ ...snap }); }}
-              >
-                <Edit2 className="w-3 h-3 mr-1" />{editSnap ? "Cancel" : "Edit"}
-              </button>
-            </div>
-            {!editSnap ? (
-              <div className="db-bs-grid">
-                <div>
-                  <div className="db-bs-section-lbl">Assets</div>
-                  {[
-                    ["PPOR",         snap.ppor],
-                    ["Cash + Offset", snap.cash + snap.offset_balance],
-                    ["Super",        _totalSuperNow],
-                    ["Stocks",       stocksTotal],
-                    ["Crypto",       cryptoTotal],
-                    ["Other",        snap.cars + snap.iran_property],
-                  ].filter(([,v]) => (v as number) > 0).map(([label, value]) => (
-                    <div key={label as string} className="db-bs-row">
-                      <span className="db-bs-lbl">{label as string}</span>
-                      <span className="db-bs-val">{maskValue(formatCurrency(value as number, true), privacyMode)}</span>
-                    </div>
-                  ))}
-                  <div className="db-bs-total">
-                    <span>Total Assets</span>
-                    <span>{maskValue(formatCurrency(totalAssets, true), privacyMode)}</span>
-                  </div>
-                </div>
-                <div>
-                  <div className="db-bs-section-lbl db-bs-liab-lbl">Liabilities</div>
-                  {[
-                    ["Mortgage",    snap.mortgage],
-                    ["Other Debts", snap.other_debts],
-                  ].filter(([,v]) => (v as number) > 0).map(([label, value]) => (
-                    <div key={label as string} className="db-bs-row">
-                      <span className="db-bs-lbl">{label as string}</span>
-                      <span className="db-bs-val val-red">{maskValue(formatCurrency(value as number, true), privacyMode)}</span>
-                    </div>
-                  ))}
-                  <div className="db-bs-total db-bs-nw-total">
-                    <span>Net Worth</span>
-                    <span className="val-blue">{maskValue(formatCurrency(netWorth, true), privacyMode)}</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="db-snap-edit-grid">
-                {snapFields.map(({ label, key }) => (
-                  <div key={key} className="db-snap-field">
-                    <label className="db-snap-lbl">{label}</label>
-                    <Input
-                      type="number"
-                      className="h-7 text-xs"
-                      value={snapDraft?.[key] ?? ""}
-                      onChange={(e) => setSnapDraft((d: any) => ({ ...d, [key]: parseFloat(e.target.value) || 0 }))}
-                    />
-                  </div>
-                ))}
-                <div style={{ gridColumn: "1 / -1", marginTop: 8 }}>
-                  <SaveButton onSave={handleSaveSnap} className="h-7 text-xs" />
-                </div>
-              </div>
-            )}
+      <div className="px-4 pb-4">
+        <div className="flex flex-col lg:flex-row gap-4">
+          <div className="flex-[3] min-w-0">
+            <CFODashboardWidget />
           </div>
-
-          {/* AI Insights */}
-          <AIInsightsCard
-            pageKey="dashboard"
-            pageLabel="Dashboard Overview"
-            getData={() => ({
-              netWorth, surplus, savingsRate, propertyEquity,
-              totalDebt: totalLiab, passiveIncome,
-              fireProgress: fireProgressPct.toFixed(0),
-              year10NW, ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
-              riskScore, riskLabel,
-            })}
-          />
+          <div className="flex-[2] min-w-0">
+            <BestMoveCard />
+          </div>
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ROW 9 — YEAR-BY-YEAR PROJECTION TABLE
+          FIRE PATH OPTIMIZER + PORTFOLIO LIVE RETURN
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section">
-        <div className="db-section-head">
-          <span className="db-section-lbl">Year-by-Year Projection</span>
-          <Link href="/timeline"><span className="db-section-link">Full Timeline →</span></Link>
-        </div>
-        <div className="db-ybyr-card">
-          <table className="db-ybyr-table">
-            <thead>
-              <tr>
-                <th>Year</th>
-                <th>Net Worth</th>
-                <th>Total Assets</th>
-                <th>Liabilities</th>
-                <th>Passive Income</th>
-                <th>Annual Surplus</th>
-                <th>FIRE Progress</th>
-              </tr>
-            </thead>
-            <tbody>
-              {yrRows.map((r, idx) => {
-                const fp = Math.min(100, (r.nw / fireTargetAmt) * 100);
-                return (
-                  <tr key={r.year} className={idx === 0 ? "db-ybyr-current" : ""}>
-                    <td className="db-ybyr-year">{r.year}{idx === 0 ? " ★" : ""}</td>
-                    <td className="db-ybyr-nw">{maskValue(formatCurrency(r.nw, true), privacyMode)}</td>
-                    <td style={{ color: "hsl(145,55%,48%)", fontSize: 11, fontWeight: 600, fontFamily: "monospace" }}>{maskValue(formatCurrency(r.assets, true), privacyMode)}</td>
-                    <td style={{ color: "hsl(5,70%,52%)", fontSize: 11, fontWeight: 600, fontFamily: "monospace" }}>{maskValue(formatCurrency(r.liab, true), privacyMode)}</td>
-                    <td style={{ color: "hsl(260,60%,68%)", fontSize: 11, fontWeight: 600, fontFamily: "monospace" }}>{maskValue(formatCurrency(r.passive, true), privacyMode)}/yr</td>
-                    <td style={{ color: r.surplus >= 0 ? "hsl(145,55%,48%)" : "hsl(5,70%,52%)", fontSize: 11, fontWeight: 600, fontFamily: "monospace" }}>{r.surplus >= 0 ? "+" : ""}{maskValue(formatCurrency(r.surplus, true), privacyMode)}</td>
-                    <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div style={{ flex: 1, height: 4, background: "hsl(222 15% 18%)", borderRadius: 2, overflow: "hidden" }}>
-                          <div style={{ width: `${fp}%`, height: "100%", background: fp >= 80 ? "hsl(145,55%,42%)" : fp >= 50 ? "hsl(22,90%,55%)" : "hsl(42,80%,52%)", borderRadius: 2 }} />
-                        </div>
-                        <span style={{ fontSize: 9, color: "hsl(215 12% 52%)", minWidth: 28 }}>{fp.toFixed(0)}%</span>
-                      </div>
+      <div className="px-4 pb-4">
+        <FIREPathCard />
+      </div>
+
+      <div className="px-4 pb-4">
+        <PortfolioLiveReturn />
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ACTION CENTER (smart actions table)
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pb-4">
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="text-base font-bold text-foreground">Action Center</div>
+              <div className="text-xs text-muted-foreground mt-0.5">Top opportunities ranked by ROI</div>
+            </div>
+            <Link href="/ai-insights"><span className="text-xs text-primary hover:underline">AI Insights →</span></Link>
+          </div>
+          <div className="db-action-table-wrap overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">#</th>
+                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Action</th>
+                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Impact</th>
+                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Difficulty</th>
+                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Time</th>
+                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Priority</th>
+                </tr>
+              </thead>
+              <tbody>
+                {smartActions.map((action, idx) => (
+                  <tr
+                    key={idx}
+                    className={`db-action-row priority-${action.priority} border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer`}
+                    onClick={() => window.location.hash = `#${action.href}`}
+                  >
+                    <td className="px-3 py-2 font-bold text-muted-foreground">{idx + 1}</td>
+                    <td className="px-3 py-2 font-medium text-foreground">{action.title}</td>
+                    <td className="px-3 py-2 text-emerald-400">{action.impact}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{action.difficulty}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{action.time}</td>
+                    <td className="px-3 py-2">
+                      <span className={`db-priority-badge priority-badge-${action.priority} inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+                        action.priority === "high" ? "bg-red-500/15 text-red-400" :
+                        action.priority === "medium" ? "bg-amber-500/15 text-amber-400" :
+                        action.priority === "strategic" ? "bg-blue-500/15 text-blue-400" :
+                        "bg-muted text-muted-foreground"
+                      }`}>{action.priority}</span>
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ROW 10 — MODULES + LIVE WIDGETS + SAT BULLETIN SHORTCUT
+          AI INSIGHTS
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section">
-        <div className="db-section-head">
-          <span className="db-section-lbl">Modules</span>
-        </div>
-        <div className="db-modules-grid">
-          {deepModules.map((mod) => (
-            <Link key={mod.href} href={mod.href}>
-              <div className="db-mod-tile">
-                <span className="db-mod-icon" style={{ color: mod.color }}>{mod.icon}</span>
-                <span className="db-mod-label">{mod.label}</span>
-                <ChevronRight className="db-mod-arrow" />
-              </div>
-            </Link>
-          ))}
-        </div>
-
-        {/* Live widgets + Saturday Bulletin shortcut */}
-        <div className="db-widgets-row">
-          <PortfolioLiveReturn />
-          <CFODashboardWidget />
-          {/* Saturday Bulletin quick link */}
-          <Link href="/ai-weekly-cfo" style={{ textDecoration: "none" }}>
-            <div className="db-bulletin-tile">
-              <div className="db-bulletin-icon">📰</div>
-              <div>
-                <div className="db-bulletin-title">Saturday Bulletin</div>
-                <div className="db-bulletin-sub">Weekly AI wealth brief</div>
-              </div>
-              <ChevronRight className="w-4 h-4 ml-auto shrink-0" style={{ color: "hsl(43,85%,55%)" }} />
-            </div>
-          </Link>
-        </div>
+      <div className="px-4 pb-4">
+        <AIInsightsCard
+          pageKey="dashboard"
+          pageLabel="Dashboard Overview"
+          getData={() => ({
+            netWorth, surplus, savingsRate, propertyEquity,
+            totalDebt: totalLiab, passiveIncome,
+            fireProgress: fireProgressPct.toFixed(0),
+            year10NW, ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
+            riskScore, riskLabel,
+          })}
+        />
       </div>
 
     </div>
