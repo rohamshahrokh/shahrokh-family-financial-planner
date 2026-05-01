@@ -54,6 +54,7 @@ import { safeNum } from './mathUtils';
 export interface CashEngineInput {
   snapshot: {
     cash: number;
+    offset_balance?: number;  // combined with cash as total liquid balance
     monthly_income: number;
     monthly_expenses: number;
     mortgage: number;
@@ -128,7 +129,7 @@ export function runCashEngine(input: CashEngineInput): CashEngineOutput {
   // 1. Process all events into a flat list
   const eventParams: ProcessEventsParams = {
     snapshot: {
-      cash:             safeNum(snapshot.cash),
+      cash:             safeNum(snapshot.cash) + safeNum(snapshot.offset_balance),
       monthly_income:   safeNum(snapshot.monthly_income),
       monthly_expenses: safeNum(snapshot.monthly_expenses),
       mortgage:         safeNum(snapshot.mortgage),
@@ -155,7 +156,7 @@ export function runCashEngine(input: CashEngineInput): CashEngineOutput {
   // 2. Build monthly ledger
   const ledger = buildLedger({
     events,
-    openingCash:      safeNum(snapshot.cash),
+    openingCash:      safeNum(snapshot.cash) + safeNum(snapshot.offset_balance),
     reservedCash:     reservedCash ?? 30_000,
     actualMonthKeys,
   });

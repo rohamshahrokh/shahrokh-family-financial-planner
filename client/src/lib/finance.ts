@@ -854,6 +854,7 @@ export function buildCashFlowSeries(params: {
     mortgage: number;
     other_debts: number;
     cash: number;
+    offset_balance?: number;
   };
   expenses: Array<{ date: string; amount: number; category: string }>;
   properties: Array<{
@@ -943,7 +944,7 @@ export function buildCashFlowSeries(params: {
   const investmentProps = params.properties.filter(p => p.type !== 'ppor');
 
   const results: CashFlowMonth[] = [];
-  let cumulativeBalance = safeNum(s.cash);
+  let cumulativeBalance = safeNum(s.cash) + safeNum(s.offset_balance);
   let monthIndex = 0; // months since Jan 2025
 
   for (let year = START_YEAR; year <= END_YEAR; year++) {

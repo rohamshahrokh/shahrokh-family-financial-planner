@@ -384,6 +384,7 @@ export default function DashboardPage() {
       return runCashEngine({
         snapshot: {
           cash:             snap.cash,
+          offset_balance:   snap.offset_balance,  // total liquid = cash + offset
           monthly_income:   snap.monthly_income,
           monthly_expenses: snap.monthly_expenses,
           mortgage:         snap.mortgage,
@@ -510,7 +511,7 @@ export default function DashboardPage() {
     const requiredFIRE = (10000 * 12) / 0.04;
     const fireProgress = Math.min(100, Math.round((currentInvestable / requiredFIRE) * 100));
     const totalMonthly = snap.monthly_expenses + monthlyMortgageRepay;
-    const monthsCovered = snap.cash / totalMonthly;
+    const monthsCovered = (snap.cash + snap.offset_balance) / totalMonthly;
     const emergencyScore = Math.min(100, Math.round((monthsCovered / 6) * 100));
     const totalDebt = snap.mortgage + snap.other_debts;
     const debtToIncome = totalDebt / (snap.monthly_income * 12);
@@ -553,7 +554,8 @@ export default function DashboardPage() {
 
   // ─── Best move ────────────────────────────────────────────────────────────
   const offsetBalance = snap.offset_balance;
-  const savingsIdleForOffset = snap.cash > snap.monthly_expenses * 6 ? snap.cash - snap.monthly_expenses * 6 : 0;
+  const totalLiquid = snap.cash + snap.offset_balance;
+  const savingsIdleForOffset = totalLiquid > snap.monthly_expenses * 6 ? totalLiquid - snap.monthly_expenses * 6 : 0;
   const bestMoveTitle = offsetBalance > 0 && snap.mortgage > 0
     ? `Move $${Math.round(savingsIdleForOffset / 1000)}k to offset`
     : surplus > 4000 ? "Increase IP deposit savings" : "Review expense categories";
@@ -743,7 +745,7 @@ export default function DashboardPage() {
     return Date.now() - ts < 24 * 60 * 60 * 1000;
   }).length;
 
-  const cashAfterBills = snap.cash - (billsRaw ?? [])
+  const cashAfterBills = (snap.cash + snap.offset_balance) - (billsRaw ?? [])
     .filter((b: any) => {
       if (!b.next_due_date) return false;
       const due = new Date(b.next_due_date);
@@ -937,7 +939,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Current Cash</div>
-            <div className="text-lg font-bold text-foreground tabular-nums">{maskValue(formatCurrency(snap.cash, true), privacyMode)}</div>
+            <div className="text-lg font-bold text-foreground tabular-nums">{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</div>
           </div>
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Forecast Cash 2030</div>
@@ -968,8 +970,8 @@ export default function DashboardPage() {
           </div>
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Emergency Buffer</div>
-            <div className={`text-sm font-bold ${snap.cash >= snap.monthly_expenses * 3 ? "text-emerald-400" : "text-red-400"}`}>
-              {snap.cash >= snap.monthly_expenses * 3 ? "Buffer healthy" : "Buffer low"}
+            <div className={`text-sm font-bold ${(snap.cash + snap.offset_balance) >= snap.monthly_expenses * 3 ? "text-emerald-400" : "text-red-400"}`}>
+              {(snap.cash + snap.offset_balance) >= snap.monthly_expenses * 3 ? "Buffer healthy" : "Buffer low"}
             </div>
             <div className="text-xs text-muted-foreground mt-0.5">
               ${Math.round(snap.monthly_expenses * 3 / 1000)}k reserve target
