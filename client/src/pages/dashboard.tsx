@@ -330,8 +330,16 @@ export default function DashboardPage() {
   const totalLiab     = snap.mortgage + snap.other_debts;
   const netWorth      = totalAssets - totalLiab;
   const propertyEquity = snap.ppor - snap.mortgage;
-  const surplus       = snap.monthly_income - snap.monthly_expenses - (snap.mortgage / 12);
-  const savingsRate   = calcSavingsRate(snap.monthly_income, surplus);
+  // Monthly mortgage repayment from P×r(1+r)^n / ((1+r)^n−1) using rate+term in snapshot
+  const _mortgageMonthlyRate = (snap.mortgage_rate / 100) / 12;
+  const _mortgageTermMonths  = snap.mortgage_term_years * 12;
+  const monthlyMortgageRepay = snap.mortgage > 0 && _mortgageMonthlyRate > 0
+    ? snap.mortgage * (_mortgageMonthlyRate * Math.pow(1 + _mortgageMonthlyRate, _mortgageTermMonths))
+        / (Math.pow(1 + _mortgageMonthlyRate, _mortgageTermMonths) - 1)
+    : 0;
+  const surplus       = snap.monthly_income - snap.monthly_expenses - monthlyMortgageRepay;
+  const totalMonthlyOutgoings = snap.monthly_expenses + monthlyMortgageRepay;
+  const savingsRate   = calcSavingsRate(snap.monthly_income, totalMonthlyOutgoings);
 
   // ─── NG Summary ───────────────────────────────────────────────────────────
   const ngSummary = useMemo<NGSummary>(() => {
@@ -491,7 +499,7 @@ export default function DashboardPage() {
     const currentInvestable = snap.cash + snap.offset_balance + _totalSuperNow + stocksTotal + cryptoTotal;
     const requiredFIRE = (10000 * 12) / 0.04;
     const fireProgress = Math.min(100, Math.round((currentInvestable / requiredFIRE) * 100));
-    const totalMonthly = snap.monthly_expenses + snap.mortgage / 12;
+    const totalMonthly = snap.monthly_expenses + monthlyMortgageRepay;
     const monthsCovered = snap.cash / totalMonthly;
     const emergencyScore = Math.min(100, Math.round((monthsCovered / 6) * 100));
     const totalDebt = snap.mortgage + snap.other_debts;
@@ -615,7 +623,7 @@ export default function DashboardPage() {
       const cat = e.category || "Other";
       cats[cat] = (cats[cat] || 0) + safeNum(e.monthly_amount || e.amount);
     });
-    if (snap.mortgage > 0) cats["Mortgage"] = (cats["Mortgage"] || 0) + snap.mortgage / 12;
+    if (snap.mortgage > 0) cats["Mortgage"] = (cats["Mortgage"] || 0) + monthlyMortgageRepay;
     return Object.entries(cats).map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 7);
@@ -736,7 +744,7 @@ export default function DashboardPage() {
 
   const monthlyCFBarData = [
     { name: "Income", value: snap.monthly_income },
-    { name: "Expenses", value: snap.monthly_expenses + snap.mortgage / 12 },
+    { name: "Expenses", value: snap.monthly_expenses + monthlyMortgageRepay },
     { name: "Surplus", value: Math.max(0, surplus) },
   ];
   const MONTHLY_CF_COLORS = ["hsl(142,60%,45%)", "hsl(0,72%,51%)", "hsl(43,85%,55%)"];
@@ -1241,7 +1249,7 @@ export default function DashboardPage() {
               </div>
               <div className="text-center">
                 <div className="text-xs text-muted-foreground mb-0.5">Expenses</div>
-                <div className="text-sm font-bold text-red-400 tabular-nums">{maskValue(formatCurrency(snap.monthly_expenses + snap.mortgage / 12, true), privacyMode)}</div>
+                <div className="text-sm font-bold text-red-400 tabular-nums">{maskValue(formatCurrency(snap.monthly_expenses + monthlyMortgageRepay, true), privacyMode)}</div>
               </div>
               <div className="text-center">
                 <div className="text-xs text-muted-foreground mb-0.5">Surplus</div>
@@ -1253,7 +1261,7 @@ export default function DashboardPage() {
           {/* Expense Breakdown donut (~50%) */}
           <div className="flex-1 rounded-2xl border border-border bg-card p-5 min-w-0">
             <div className="text-base font-bold text-foreground mb-1">Expense Breakdown</div>
-            <div className="text-xs text-muted-foreground mb-2">{maskValue(formatCurrency(snap.monthly_expenses + snap.mortgage / 12, true), privacyMode)}/mo total</div>
+            <div className="text-xs text-muted-foreground mb-2">{maskValue(formatCurrency(snap.monthly_expenses + monthlyMortgageRepay, true), privacyMode)}/mo total</div>
             {expenseBreakdown.length > 0 ? (
               <div style={{ height: 150 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -1330,7 +1338,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <div className="rounded-lg bg-background/60 border border-border px-3 py-2">
               <div className="text-xs text-muted-foreground">Monthly Cash Loss</div>
-              <div className="text-sm font-bold text-red-400 tabular-nums">{formatCurrency(-(snap.monthly_expenses + snap.mortgage / 12 - snap.monthly_income), true)}</div>
+              <div className="text-sm font-bold text-red-400 tabular-nums">{formatCurrency(-(snap.monthly_expenses + monthlyMortgageRepay - snap.monthly_income), true)}</div>
             </div>
             <div className="rounded-lg bg-background/60 border border-border px-3 py-2">
               <div className="text-xs text-muted-foreground">Est. Annual Tax Refund</div>
