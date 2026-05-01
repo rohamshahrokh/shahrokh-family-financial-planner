@@ -33,6 +33,8 @@ import {
   Cell,
   BarChart,
   Bar,
+  ComposedChart,
+  type TooltipProps,
 } from "recharts";
 import {
   TrendingUp,
@@ -101,31 +103,33 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
+// ─── Executive Cashflow Tooltip ──────────────────────────────────────────────
 const CashflowTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload ?? {};
   const rows = [
-    { label: "Salary / Income",     value: d.income    ?? 0, color: "hsl(142,60%,45%)" },
-    { label: "Rental Income",       value: d.rental    ?? 0, color: "hsl(188,60%,48%)" },
-    { label: "Living Expenses",     value: -(d.expenses ?? 0), color: "hsl(0,72%,51%)" },
-    { label: "Mortgage Repayments", value: -(d.mortgage ?? 0), color: "hsl(20,80%,55%)" },
-    { label: "NG Tax Refund",       value: d.ngRefund  ?? 0, color: "hsl(43,85%,55%)" },
-    { label: "Net Cashflow",        value: d.netCF     ?? 0, color: (d.netCF ?? 0) >= 0 ? "hsl(142,60%,45%)" : "hsl(0,72%,51%)" },
-    { label: "Ending Cash Balance", value: d.balance   ?? 0, color: "hsl(270,60%,60%)" },
-  ].filter(r => r.value !== 0);
+    { label: "Cash Balance",        value: d.balance   ?? 0, color: "hsl(210,80%,65%)",  bold: true },
+    { label: "Income",              value: d.income    ?? 0, color: "hsl(142,60%,52%)" },
+    { label: "Expenses",            value: -(d.expenses ?? 0), color: "hsl(0,72%,58%)" },
+    { label: "Debt Payments",       value: -(d.mortgage ?? 0), color: "hsl(20,75%,58%)" },
+    { label: "Investments",         value: -(d.investments ?? 0), color: "hsl(262,60%,65%)" },
+    { label: "Tax Refund",          value: d.ngRefund  ?? 0, color: "hsl(43,90%,58%)" },
+    { label: "Net Cashflow",        value: d.netCF     ?? 0, color: (d.netCF ?? 0) >= 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)", bold: true },
+  ].filter(r => Math.abs(r.value) > 0);
+  const milestones: { icon: string; text: string }[] = d._milestones ?? [];
   return (
-    <div className="db-tooltip" style={{ minWidth: 220 }}>
-      <p className="db-tooltip-label">{label}</p>
+    <div className="db-tooltip" style={{ minWidth: 240, background: "hsl(222,22%,9%)", border: "1px solid hsl(222,15%,22%)", borderRadius: 10, padding: "10px 14px" }}>
+      <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(215,20%,80%)", marginBottom: 8, letterSpacing: "0.03em" }}>{label}</p>
       {rows.map((r, i) => (
-        <div key={i} className="db-tooltip-row" style={{ color: r.color, display: "flex", justifyContent: "space-between", gap: 16 }}>
-          <span>{r.label}</span>
-          <span className="font-mono">{r.value >= 0 ? "+" : ""}{formatCurrency(r.value, true)}</span>
+        <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 20, marginBottom: 3, color: r.color, fontWeight: r.bold ? 700 : 400, fontSize: r.bold ? 12 : 11 }}>
+          <span style={{ opacity: r.bold ? 1 : 0.85 }}>{r.label}</span>
+          <span style={{ fontFamily: "monospace" }}>{r.value >= 0 ? "+" : ""}{formatCurrency(r.value, true)}</span>
         </div>
       ))}
-      {d._events?.length > 0 && (
-        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid hsl(222 15% 22%)" }}>
-          {d._events.map((ev: string, i: number) => (
-            <div key={i} style={{ fontSize: 10, color: "hsl(42,80%,60%)", marginTop: 2 }}>⚡ {ev}</div>
+      {milestones.length > 0 && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid hsl(222,15%,22%)" }}>
+          {milestones.map((m, i) => (
+            <div key={i} style={{ fontSize: 11, color: "hsl(43,90%,62%)", marginTop: 3 }}>{m.icon} {m.text}</div>
           ))}
         </div>
       )}
@@ -145,14 +149,21 @@ const DonutTooltip = ({ active, payload }: any) => {
   );
 };
 
-// ─── Custom event dot for CF chart ───────────────────────────────────────────
-const EventDot = (props: any) => {
+// ─── Milestone dot for executive CF chart ─────────────────────────────────────
+const MilestoneDot = (props: any) => {
   const { cx, cy, payload } = props;
-  if (!payload?._hasEvent) return null;
+  const ms: any[] = payload?._milestones ?? [];
+  if (!ms.length) return null;
+  const isIP     = ms.some((m: any) => m.type === "property");
+  const isStock  = ms.some((m: any) => m.type === "stock");
+  const isCrypto = ms.some((m: any) => m.type === "crypto");
+  const isTax    = ms.some((m: any) => m.type === "tax");
+  const isDebt   = ms.some((m: any) => m.type === "debt");
+  const color = isIP ? "hsl(188,65%,52%)" : isStock ? "hsl(210,80%,65%)" : isCrypto ? "hsl(262,70%,65%)" : isTax ? "hsl(43,90%,58%)" : isDebt ? "hsl(142,60%,52%)" : "hsl(42,80%,52%)";
   return (
     <g>
-      <circle cx={cx} cy={cy} r={5} fill="hsl(42,80%,52%)" stroke="hsl(222,22%,7%)" strokeWidth={1.5} />
-      <circle cx={cx} cy={cy} r={3} fill="hsl(222,22%,7%)" />
+      <circle cx={cx} cy={cy} r={7} fill={color} fillOpacity={0.18} stroke={color} strokeWidth={1.5} />
+      <circle cx={cx} cy={cy} r={3.5} fill={color} />
     </g>
   );
 };
@@ -453,38 +464,67 @@ export default function DashboardPage() {
     return lookup;
   }, [cashEngineResult]);
 
-  const masterCFData = useMemo(() => {
-    if (cashFlowView === "annual") {
-      return cashFlowAnnual.map((a: any) => ({
-        label:    a.year ? String(a.year) : a.label,
-        income:   a.income ?? 0,
-        expenses: a.totalExpenses ?? 0,
-        mortgage: a.mortgageRepayment ?? 0,
-        rental:   a.rentalIncome ?? 0,
-        ngRefund: a.ngTaxBenefit ?? 0,
-        netCF:    a.netCashFlow ?? 0,
-        balance:  a.endingBalance ?? 0,
-        _hasEvent: false,
-        _events:   [] as string[],
-      }));
+  // ─── Build milestone map keyed by year (for annual chart) ──────────────────
+  const milestonesPerYear = useMemo(() => {
+    const map = new Map<number, Array<{ icon: string; text: string; type: string }>>();
+    const add = (year: number, m: { icon: string; text: string; type: string }) => {
+      if (!map.has(year)) map.set(year, []);
+      map.get(year)!.push(m);
+    };
+    // Investment properties
+    (properties as any[]).forEach((p: any) => {
+      if (p.type === "ppor" || !p.settlement_date) return;
+      const yr = new Date(p.settlement_date).getFullYear();
+      const name = p.address?.split(" ").slice(-2).join(" ") || p.label || "IP";
+      add(yr, { icon: "🏠", text: `${name} Settlement`, type: "property" });
+    });
+    // Planned stock orders (lump sum)
+    (ordersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date).forEach((o: any) => {
+      const yr = new Date(o.planned_date).getFullYear();
+      const amt = o.total_cost ?? o.amount ?? 0;
+      add(yr, { icon: "📈", text: `Stocks $${Math.round(amt / 1000)}k`, type: "stock" });
+    });
+    // Planned crypto orders (lump sum)
+    (cryptoOrdersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date).forEach((o: any) => {
+      const yr = new Date(o.planned_date).getFullYear();
+      const amt = o.total_cost ?? o.amount ?? 0;
+      add(yr, { icon: "₿", text: `Crypto $${Math.round(amt / 1000)}k`, type: "crypto" });
+    });
+    // NG tax refund years (any year that has negatively geared properties settled)
+    if (ngSummary.totalAnnualTaxBenefit > 0) {
+      const currentYear = new Date().getFullYear();
+      for (let y = currentYear; y <= currentYear + 9; y++) {
+        add(y, { icon: "💰", text: `Tax Refund ~$${Math.round(ngSummary.totalAnnualTaxBenefit / 1000)}k`, type: "tax" });
+      }
     }
-    return cashFlowSeries.map((m: any) => {
-      const key = m.monthKey ?? m.label;
-      const evts = eventsByMonthKey[key] ?? [];
+    return map;
+  }, [properties, ordersRaw, cryptoOrdersRaw, ngSummary]);
+
+  const masterCFData = useMemo(() => {
+    // Always use annual view for executive chart
+    return cashFlowAnnual.map((a: any) => {
+      const yr = a.year as number;
+      const ms = milestonesPerYear.get(yr) ?? [];
+      // Deduplicate milestones by type (e.g. keep only first tax refund shown per year)
+      const seen = new Set<string>();
+      const dedupMs = ms.filter(m => {
+        if (m.type === "tax") { if (seen.has("tax")) return false; seen.add("tax"); }
+        return true;
+      });
       return {
-        label:    m.label,
-        income:   m.income   ?? 0,
-        expenses: m.totalExpenses ?? 0,
-        mortgage: m.mortgageRepayment ?? 0,
-        rental:   m.rentalIncome ?? 0,
-        ngRefund: m.ngTaxBenefit ?? 0,
-        netCF:    m.netCashFlow ?? 0,
-        balance:  m.cumulativeBalance ?? m.endingBalance ?? 0,
-        _hasEvent: evts.length > 0,
-        _events:   evts,
+        label:       String(yr),
+        income:      a.income ?? 0,
+        expenses:    a.totalExpenses ?? 0,
+        mortgage:    a.mortgageRepayment ?? 0,
+        rental:      a.rentalIncome ?? 0,
+        ngRefund:    a.ngTaxBenefit ?? 0,
+        netCF:       a.netCashFlow ?? 0,
+        balance:     a.endingBalance ?? 0,
+        investments: 0, // DCA handled by engine; lump sums already reflected in balance
+        _milestones: dedupMs,
       };
     });
-  }, [cashFlowView, cashFlowAnnual, cashFlowSeries, eventsByMonthKey]);
+  }, [cashFlowAnnual, milestonesPerYear]);
 
   // ─── Property purchase event reference lines ──────────────────────────────
   const propertyEventLines = useMemo(() => {
@@ -1238,142 +1278,157 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          MASTER CASHFLOW FORECAST (full-width)
+          MASTER CASHFLOW FORECAST — EXECUTIVE CHART
           ═════════════════════════════════════════════════════════════════ */}
       <div className="px-4 pb-4">
         <div className="rounded-2xl border border-border bg-card p-5">
-          {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-center gap-2 mb-3">
+
+          {/* ─ Header ───────────────────────────────────────────────────────── */}
+          <div className="flex flex-col sm:flex-row sm:items-start gap-2 mb-4">
             <div className="flex-1">
               <div className="text-base font-bold text-foreground">Master Cash Flow Forecast</div>
               <div className="text-xs text-muted-foreground mt-0.5">
-                Australian Negative Gearing Active · {ngProperties.length} negatively geared {ngProperties.length === 1 ? "property" : "properties"} · Marginal rate: {snap.monthly_income * 12 > 180000 ? "47%" : snap.monthly_income * 12 > 120000 ? "37%" : "32.5%"}
+                10-year outlook · Cash balance + annual net cashflow · Key milestones on timeline
               </div>
             </div>
-            <div className="flex gap-2 items-center">
+            <div className="flex gap-1.5 items-center flex-wrap">
               <button
-                className={`px-2 py-1 rounded text-xs font-medium transition-all ${ngRefundMode === "lump-sum" ? "bg-primary text-primary-foreground" : "text-muted-foreground border border-border hover:text-foreground"}`}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${ngRefundMode === "lump-sum" ? "bg-primary/20 text-primary border border-primary/40" : "text-muted-foreground border border-border hover:text-foreground"}`}
                 onClick={() => setNgRefundMode("lump-sum")}
-              >
-                Lump-sum (Aug)
-              </button>
+              >Lump-sum</button>
               <button
-                className={`px-2 py-1 rounded text-xs font-medium transition-all ${ngRefundMode === "payg" ? "bg-primary text-primary-foreground" : "text-muted-foreground border border-border hover:text-foreground"}`}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${ngRefundMode === "payg" ? "bg-primary/20 text-primary border border-primary/40" : "text-muted-foreground border border-border hover:text-foreground"}`}
                 onClick={() => setNgRefundMode("payg")}
-              >
-                PAYG
-              </button>
-              <button
-                className={`px-2 py-1 rounded text-xs font-medium transition-all ${cfChartAnnotations ? "bg-primary text-primary-foreground" : "text-muted-foreground border border-border hover:text-foreground"}`}
-                onClick={() => setCfChartAnnotations(v => !v)}
-              >
-                Events
-              </button>
-              <Link href="/reports"><span className="text-xs text-primary hover:underline ml-1">Deep Dive →</span></Link>
+              >PAYG</button>
+              <Link href="/reports"><span className="text-xs text-primary hover:underline ml-2">Deep Dive →</span></Link>
             </div>
           </div>
 
-          {/* NG summary stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <div className="rounded-lg bg-background/60 border border-border px-3 py-2">
-              <div className="text-xs text-muted-foreground">Monthly Cash Loss</div>
-              <div className="text-sm font-bold text-red-400 tabular-nums">{formatCurrency(-(snap.monthly_expenses + monthlyMortgageRepay - snap.monthly_income), true)}</div>
-            </div>
-            <div className="rounded-lg bg-background/60 border border-border px-3 py-2">
-              <div className="text-xs text-muted-foreground">Est. Annual Tax Refund</div>
-              <div className="text-sm font-bold text-emerald-400 tabular-nums">+{formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}</div>
-            </div>
-            <div className="rounded-lg bg-background/60 border border-border px-3 py-2">
-              <div className="text-xs text-muted-foreground">Net After-Tax Cost/mo</div>
-              <div className="text-sm font-bold text-foreground tabular-nums">{formatCurrency(surplus - ngSummary.totalAnnualTaxBenefit / 12, true)}</div>
-            </div>
-            <div className="rounded-lg bg-background/60 border border-border px-3 py-2">
-              <div className="text-xs text-muted-foreground">Refund Mode</div>
-              <div className="text-sm font-bold text-amber-400">{ngRefundMode === "lump-sum" ? "Lump-sum (Aug)" : "PAYG"}</div>
-            </div>
-          </div>
-
-          {/* Chart */}
-          <div style={{ height: 240 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={masterCFData.slice(0, cashFlowView === "annual" ? 10 : 36)}
-                margin={{ top: 16, right: 16, left: 0, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(222 15% 18% / 0.5)" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 9, fill: "hsl(215 12% 48%)" }}
-                  axisLine={false} tickLine={false}
-                  interval={cashFlowView === "annual" ? 0 : 3}
-                />
-                <YAxis
-                  tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`}
-                  tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }}
-                  axisLine={false} tickLine={false} width={54}
-                />
-                <Tooltip content={<CashflowTooltip />} />
-                <ReferenceLine y={0} stroke="hsl(222 15% 25%)" strokeDasharray="2 2" />
-                {cfChartAnnotations && propertyEventLines.map((ev, i) => (
-                  <ReferenceLine
-                    key={i}
-                    x={masterCFData[ev.index]?.label}
-                    stroke={ev.color}
-                    strokeDasharray="4 3"
-                    strokeWidth={1.5}
-                    label={{ value: "⚡", position: "top", fontSize: 10, fill: ev.color }}
-                  />
-                ))}
-                <Line type="monotone" dataKey="income"   name="Income"         stroke="hsl(145,55%,48%)" strokeWidth={2}   dot={false} activeDot={{ r: 4 }} />
-                <Line type="monotone" dataKey="expenses" name="Living Expenses" stroke="hsl(5,70%,52%)"   strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
-                <Line type="monotone" dataKey="mortgage" name="Mortgage"        stroke="hsl(20,80%,55%)"  strokeWidth={1.5} dot={false} strokeDasharray="3 2" />
-                <Line type="monotone" dataKey="rental"   name="Rental"         stroke="hsl(188,60%,48%)" strokeWidth={1.5} dot={false} />
-                <Line type="monotone" dataKey="ngRefund" name="NG Refund"       stroke="hsl(43,85%,55%)"  strokeWidth={1.5} dot={false} strokeDasharray="2 3" />
-                <Line type="monotone" dataKey="netCF"    name="Net Cashflow"   stroke="hsl(260,60%,58%)" strokeWidth={2.5} dot={false} activeDot={{ r: 5 }} />
-                <Line type="monotone" dataKey="balance"  name="Cash Balance"   stroke="hsl(210,75%,60%)" strokeWidth={2}   dot={<EventDot />} strokeDasharray="6 2" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Legend */}
-          <div className="flex flex-wrap gap-3 mt-2 mb-3">
+          {/* ─ KPI row ─────────────────────────────────────────────────── */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
             {[
-              { label: "Income", color: "hsl(145,55%,48%)" },
-              { label: "Expenses", color: "hsl(5,70%,52%)" },
-              { label: "Mortgage", color: "hsl(20,80%,55%)" },
-              { label: "Rental", color: "hsl(188,60%,48%)" },
-              { label: "NG Refund", color: "hsl(43,85%,55%)" },
-              { label: "Net CF", color: "hsl(260,60%,58%)" },
-              { label: "Cash Balance", color: "hsl(210,75%,60%)" },
-            ].map(l => (
-              <div key={l.label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className="w-2 h-2 rounded-full" style={{ background: l.color }} />
-                {l.label}
+              { label: "Cash Today",          val: formatCurrency(cfFirst.balance ?? 0, true),   color: "hsl(210,80%,65%)" },
+              { label: `${(new Date().getFullYear()+9)} Cash`,   val: formatCurrency(cfLast.balance ?? 0, true),    color: "hsl(142,60%,52%)" },
+              { label: "Annual Net CF",        val: formatCurrency(cfFirst.netCF ?? 0, true),    color: (cfFirst.netCF ?? 0) >= 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)" },
+              { label: "Est. Tax Refund/yr",   val: `+${formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}`, color: "hsl(43,90%,58%)" },
+            ].map(k => (
+              <div key={k.label} className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
+                <div className="text-xs text-muted-foreground mb-1">{k.label}</div>
+                <div className="text-sm font-bold tabular-nums" style={{ color: k.color }}>{maskValue(k.val, privacyMode)}</div>
               </div>
             ))}
           </div>
 
-          {/* Summary row */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-border">
-            <div>
-              <div className="text-xs text-muted-foreground">2026 Net CF</div>
-              <div className={`text-sm font-bold tabular-nums ${(cfFirst.netCF ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                {formatCurrency(cfFirst.netCF ?? 0, true)}
-              </div>
+          {/* ─ Main executive chart ──────────────────────────────────────── */}
+          <div style={{ height: 280 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={masterCFData} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="balGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stopColor="hsl(210,80%,62%)" stopOpacity={0.22} />
+                    <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,18%)" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10, fill: "hsl(215,12%,48%)", fontWeight: 600 }}
+                  axisLine={false} tickLine={false}
+                />
+                {/* Left Y axis — cash balance */}
+                <YAxis
+                  yAxisId="bal"
+                  orientation="left"
+                  tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`}
+                  tick={{ fontSize: 9, fill: "hsl(215,12%,40%)" }}
+                  axisLine={false} tickLine={false} width={50}
+                />
+                {/* Right Y axis — net CF bars */}
+                <YAxis
+                  yAxisId="cf"
+                  orientation="right"
+                  tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`}
+                  tick={{ fontSize: 9, fill: "hsl(215,12%,40%)" }}
+                  axisLine={false} tickLine={false} width={46}
+                />
+
+                <Tooltip content={<CashflowTooltip />} cursor={{ fill: "hsl(222,15%,18%)", fillOpacity: 0.5 }} />
+                <ReferenceLine yAxisId="cf" y={0} stroke="hsl(222,15%,28%)" strokeDasharray="3 3" />
+
+                {/* Milestone reference lines */}
+                {masterCFData.map((d: any) =>
+                  (d._milestones?.length > 0) ? (
+                    <ReferenceLine
+                      key={d.label}
+                      yAxisId="bal"
+                      x={d.label}
+                      stroke="hsl(43,80%,52%)"
+                      strokeDasharray="4 3"
+                      strokeOpacity={0.5}
+                      strokeWidth={1}
+                    />
+                  ) : null
+                )}
+
+                {/* Net cashflow bars (green positive / red negative) */}
+                <Bar
+                  yAxisId="cf"
+                  dataKey="netCF"
+                  name="Net Cashflow"
+                  radius={[3,3,0,0]}
+                  maxBarSize={36}
+                >
+                  {masterCFData.map((d: any, i: number) => (
+                    <Cell
+                      key={i}
+                      fill={(d.netCF ?? 0) >= 0 ? "hsl(142,55%,42%)" : "hsl(0,65%,52%)"}
+                      fillOpacity={0.75}
+                    />
+                  ))}
+                </Bar>
+
+                {/* Cash balance area + line — primary signal */}
+                <Area
+                  yAxisId="bal"
+                  type="monotone"
+                  dataKey="balance"
+                  name="Cash Balance"
+                  stroke="hsl(210,80%,65%)"
+                  strokeWidth={2.5}
+                  fill="url(#balGrad)"
+                  dot={<MilestoneDot />}
+                  activeDot={{ r: 5, fill: "hsl(210,80%,65%)", strokeWidth: 0 }}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* ─ Legend + milestone key ───────────────────────────────────── */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3 pt-3 border-t border-border">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="inline-block w-6 h-0.5 rounded" style={{ background: "hsl(210,80%,65%)" }} />
+              Cash Balance
             </div>
-            <div>
-              <div className="text-xs text-muted-foreground">2026 Balance</div>
-              <div className="text-sm font-bold text-foreground tabular-nums">{formatCurrency(cfFirst.balance ?? 0, true)}</div>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(142,55%,42%)", opacity: 0.8 }} />
+              Net CF +
             </div>
-            <div>
-              <div className="text-xs text-muted-foreground">2035 Net CF</div>
-              <div className={`text-sm font-bold tabular-nums ${(cfLast.netCF ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                {formatCurrency(cfLast.netCF ?? 0, true)}
-              </div>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(0,65%,52%)", opacity: 0.8 }} />
+              Net CF −
             </div>
-            <div>
-              <div className="text-xs text-muted-foreground">2035 Balance</div>
-              <div className="text-sm font-bold text-foreground tabular-nums">{formatCurrency(cfLast.balance ?? 0, true)}</div>
+            <div className="ml-auto flex flex-wrap gap-x-4 gap-y-1">
+              {[
+                { icon: "🏠", label: "Property", color: "hsl(188,65%,52%)" },
+                { icon: "📈", label: "Stocks",   color: "hsl(210,80%,65%)" },
+                { icon: "₿",  label: "Crypto",   color: "hsl(262,70%,65%)" },
+                { icon: "💰", label: "Tax Refund", color: "hsl(43,90%,58%)" },
+              ].map(m => (
+                <div key={m.label} className="flex items-center gap-1 text-xs" style={{ color: m.color }}>
+                  <span>{m.icon}</span><span style={{ opacity: 0.8 }}>{m.label}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
