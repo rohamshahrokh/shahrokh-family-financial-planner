@@ -43,6 +43,7 @@ import MarketNewsPage       from "./pages/market-news";
 import AIForecastEnginePage from "./pages/ai-forecast-engine";
 import AIWeeklyCFOPage         from "./pages/ai-weekly-cfo";
 import MyFinancialPlanPage     from "./pages/financial-plan";
+import LedgerAuditPage         from "./pages/ledger-audit";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -169,6 +170,9 @@ function AppRouter() {
         </Route>
         <Route path="/financial-plan">
           <ProtectedRoute component={MyFinancialPlanPage} title="My Financial Plan" />
+        </Route>
+        <Route path="/ledger-audit">
+          <ProtectedRoute component={LedgerAuditPage} title="Ledger Audit" />
         </Route>
         {/* 404 */}
         <Route component={NotFound} />
