@@ -278,8 +278,16 @@ export default function DashboardPage() {
   const plannedStockOrders = useMemo(() => (ordersRaw ?? []).filter((o: any) => o.status !== "cancelled"), [ordersRaw]);
   const plannedCryptoOrders = useMemo(() => (cryptoOrdersRaw ?? []).filter((o: any) => o.status !== "cancelled"), [cryptoOrdersRaw]);
 
+  const SNAP_ZERO = {
+    ppor: 0, cash: 0, offset_balance: 0, super_balance: 0,
+    super_roham: 0, super_fara: 0, cars: 0, iran_property: 0,
+    mortgage: 0, other_debts: 0, monthly_income: 0, monthly_expenses: 0,
+    mortgage_rate: 6.5, mortgage_term_years: 30,
+  };
+
   const snap = useMemo(() => {
-    const s = snapshot ?? {};
+    if (!snapshot) return SNAP_ZERO;
+    const s = snapshot;
     return {
       ppor:             safeNum(s.ppor),
       cash:             safeNum(s.cash),
@@ -450,6 +458,7 @@ export default function DashboardPage() {
 
   // ─── Wealth cards ─────────────────────────────────────────────────────────
   const wealthCards = useMemo(() => {
+    if (!snapshot) return [];
     const currentInvestable = snap.cash + snap.offset_balance + _totalSuperNow + stocksTotal + cryptoTotal;
     const requiredFIRE = (10000 * 12) / 0.04;
     const fireProgress = Math.min(100, Math.round((currentInvestable / requiredFIRE) * 100));
@@ -557,6 +566,7 @@ export default function DashboardPage() {
 
   // ─── Asset allocation donut data ──────────────────────────────────────────
   const assetAllocData = useMemo(() => {
+    if (!snapshot) return [];
     const items = [
       { name: "PPOR",    value: snap.ppor,            fill: "hsl(188,60%,48%)" },
       { name: "Cash",    value: snap.cash + snap.offset_balance, fill: "hsl(210,75%,52%)" },
@@ -570,6 +580,7 @@ export default function DashboardPage() {
 
   // ─── Expense breakdown data ───────────────────────────────────────────────
   const expenseBreakdown = useMemo(() => {
+    if (!snapshot) return [];
     const cats: Record<string, number> = {};
     (expenses ?? []).forEach((e: any) => {
       const cat = e.category || "Other";
@@ -600,6 +611,7 @@ export default function DashboardPage() {
 
   // ─── Year-by-year table ───────────────────────────────────────────────────
   const yrRows = useMemo(() => {
+    if (!snapshot) return [];
     const now = new Date().getFullYear();
     return projection.slice(0, 10).map((p: any, i: number) => ({
       year: now + i,
