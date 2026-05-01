@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAppStore } from "@/lib/store";
@@ -436,6 +436,75 @@ export default function BudgetPage() {
     return result.sort((a, b) => b.totalSpend - a.totalSpend);
   }, [budgets, expenseByCategory]);
 
+  // ---------------------------------------------------------------------------
+  // Auto-recurrence: budgets repeat from the most recent prior month
+  // ---------------------------------------------------------------------------
+  // If the selected month has zero budget rows AND there are budgets in some
+  // earlier month, materialize copies from the most recent prior month so the
+  // budget always recurs. The user can then manually edit those rows.
+  //
+  // Guards against duplicate materialization:
+  //  - only runs when budgets.length === 0 for the selected month after load
+  //  - tracks processed (year,month) keys in a ref so each month is attempted
+  //    at most once per session
+  //  - bulkCreate uses Supabase merge-duplicates, so re-runs are safe even
+  //    across reloads if a unique (year,month,category,member) constraint exists
+  const autoCopiedKeys = useRef<Set<string>>(new Set());
+  const autoCopyInFlight = useRef(false);
+
+  useEffect(() => {
+    if (budgetsLoading) return;
+    if (budgets.length > 0) return;
+
+    const monthKey = `${selectedYear}-${selectedMonth}`;
+    if (autoCopiedKeys.current.has(monthKey)) return;
+    if (autoCopyInFlight.current) return;
+
+    // Find most recent prior (year, month) that has budget rows
+    const selectedKey = selectedYear * 12 + (selectedMonth - 1);
+    const priorMonths = new Map<number, any[]>();
+    for (const b of budgetsRaw) {
+      const y = safeNum(b.year);
+      const m = safeNum(b.month);
+      if (!y || !m) continue;
+      const key = y * 12 + (m - 1);
+      if (key >= selectedKey) continue;
+      const arr = priorMonths.get(key) ?? [];
+      arr.push(b);
+      priorMonths.set(key, arr);
+    }
+    if (priorMonths.size === 0) return;
+
+    let mostRecentKey = -Infinity;
+    priorMonths.forEach((_v, k) => {
+      if (k > mostRecentKey) mostRecentKey = k;
+    });
+    const sourceRows = priorMonths.get(mostRecentKey) ?? [];
+    if (sourceRows.length === 0) return;
+
+    autoCopiedKeys.current.add(monthKey);
+    autoCopyInFlight.current = true;
+
+    const newRows = sourceRows.map(({ id: _id, created_at: _ca, updated_at: _ua, ...rest }: any) => ({
+      ...rest,
+      year: selectedYear,
+      month: selectedMonth,
+    }));
+
+    apiRequest("POST", "/api/budgets/bulk", { budgets: newRows })
+      .then((r) => r.json().catch(() => null))
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/budgets"] });
+      })
+      .catch(() => {
+        // allow another attempt later if it failed
+        autoCopiedKeys.current.delete(monthKey);
+      })
+      .finally(() => {
+        autoCopyInFlight.current = false;
+      });
+  }, [budgetsLoading, budgets.length, budgetsRaw, selectedYear, selectedMonth, queryClient]);
+
   // Totals
   const totals = useMemo(() => {
     return rows.reduce(
@@ -678,7 +747,9 @@ export default function BudgetPage() {
           <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
             <Target className="w-10 h-10 mb-3 opacity-30" />
             <p className="text-sm">No budget rows for this month.</p>
-            <p className="text-xs mt-1">Add a row above or copy from the previous month.</p>
+            <p className="text-xs mt-1">
+              Budgets recur automatically from the previous month. Add a row above to start.
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
