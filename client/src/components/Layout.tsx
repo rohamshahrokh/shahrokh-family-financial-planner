@@ -198,26 +198,34 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   };
 
   // ─── Sidebar scroll preservation ───────────────────────────────────────────
-  // Save scroll position before any navigation, restore after mount.
+  // Root cause was SidebarContent being a nested component (remounted on every
+  // render). Fixed by inlining. This effect now just saves on scroll events and
+  // restores after location changes (belt-and-suspenders).
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const savedScrollPos = useRef<number>(0);
 
-  // Save scroll position whenever the location changes (i.e. just BEFORE we
-  // render the new page — we read from the DOM at effect-cleanup time)
+  // Continuously save scrollTop via scroll event — most reliable approach
   useEffect(() => {
     const el = sidebarScrollRef.current;
     if (!el) return;
-    // Restore saved position immediately on every navigation
-    el.scrollTop = savedScrollPos.current;
-    return () => {
-      // Save current scroll position just before the next navigation renders
-      if (sidebarScrollRef.current) {
-        savedScrollPos.current = sidebarScrollRef.current.scrollTop;
-      }
-    };
+    const onScroll = () => { savedScrollPos.current = el.scrollTop; };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []); // mount once
+
+  // On location change, restore the saved scroll position
+  useEffect(() => {
+    const el = sidebarScrollRef.current;
+    if (!el) return;
+    // Use rAF to ensure DOM has settled before restoring
+    const raf = requestAnimationFrame(() => {
+      el.scrollTop = savedScrollPos.current;
+    });
+    return () => cancelAnimationFrame(raf);
   }, [location]);
 
-  const SidebarContent = () => (
+  // ─── Sidebar JSX (inlined — NOT a nested component to avoid remount on nav) ──
+  const sidebarJsx = (
     <>
       {/* Logo + close (mobile) */}
       <div
@@ -248,7 +256,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <p className="text-[10px] text-muted-foreground">Yara · Jana · Brisbane</p>
       </div>
 
-      {/* ACCORDION NAV */}
+      {/* ACCORDION NAV — ref attached here for scroll preservation */}
       <nav ref={sidebarScrollRef} className="flex-1 px-3 py-2 overflow-y-auto space-y-1">
         {NAV_STEPS.map((stepDef) => {
           const visibleItems = stepDef.items.filter(i => !i.adminOnly || isAdmin);
@@ -396,7 +404,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           borderRight: "1px solid hsl(var(--border) / 0.7)",
         }}
       >
-        <SidebarContent />
+        {sidebarJsx}
       </aside>
 
       {/* Mobile overlay */}
