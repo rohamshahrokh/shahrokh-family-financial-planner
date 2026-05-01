@@ -360,7 +360,22 @@ export default function DashboardPage() {
     });
   }, [snapshot, snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
   const year10NW      = projection[9]?.endNetWorth || netWorth;
-  const passiveIncome = projection[0]?.passiveIncome || 0;
+  // Passive income: only count properties already settled + actual stock/crypto dividends today
+  // projection[0] includes future planned properties (e.g. July IP) which inflates today's figure
+  const todayStr = new Date().toISOString().split('T')[0];
+  const passiveIncome = useMemo(() => {
+    const settledProperties = (properties ?? []).filter((p: any) =>
+      p.type !== 'ppor' && p.settlement_date && p.settlement_date <= todayStr
+    );
+    const annualRental = settledProperties.reduce((sum: number, p: any) => {
+      const wRent = safeNum(p.weekly_rent);
+      const vacancy = safeNum(p.vacancy_rate) || 0;
+      const mgmt = safeNum(p.management_fee) || 0;
+      return sum + wRent * 52 * (1 - vacancy / 100) * (1 - mgmt / 100);
+    }, 0);
+    const annualDividends = stocksTotal * 0.02 + cryptoTotal * 0.01;
+    return Math.round(annualRental + annualDividends);
+  }, [properties, stocksTotal, cryptoTotal, todayStr]);
 
   // ─── Cash engine with events ──────────────────────────────────────────────
   const cashEngineResult = useMemo(() => {

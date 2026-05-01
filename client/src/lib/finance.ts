@@ -572,15 +572,18 @@ export function projectNetWorth(params: {
       propLoans += loanBal;
 
       let annualRent = 0;
-      const rentalStartYear = prop.rental_start_date
-        ? new Date(prop.rental_start_date).getFullYear()
-        : settleYear;
+      const rentalStartDateStr = prop.rental_start_date || settleDateStr;
+      const rentalStartYear = rentalStartDateStr ? new Date(rentalStartDateStr).getFullYear() : settleYear;
+      const rentalStartMonth = rentalStartDateStr ? new Date(rentalStartDateStr).getMonth() : 0; // 0-based
       if (year >= rentalStartYear) {
         const yearsSinceRental = year - rentalStartYear;
-        annualRent = safeNum(prop.weekly_rent) * 52
+        const fullAnnualRent = safeNum(prop.weekly_rent) * 52
           * (1 - safeNum(prop.vacancy_rate)    / 100)
           * (1 - safeNum(prop.management_fee)  / 100)
           * Math.pow(1 + (safeNum(prop.rental_growth) || 3) / 100, yearsSinceRental);
+        // Prorate in the settlement year — only count months from settlement onward
+        const monthsActive = year === rentalStartYear ? (12 - rentalStartMonth) : 12;
+        annualRent = fullAnnualRent * (monthsActive / 12);
         propRent += annualRent;
       }
       const annualLoanRepayment = calcMonthlyRepayment(
