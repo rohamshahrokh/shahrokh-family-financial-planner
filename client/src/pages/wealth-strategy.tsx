@@ -7,6 +7,7 @@
 import SaveButton from "@/components/SaveButton";
 import RiskRadarPage from "./risk-radar";
 import FIREPathPage from "./fire-path";
+import MonteCarloDashboard from "@/components/MonteCarloDashboard";
 import { useState, useMemo, useCallback } from "react";
 import html2canvas from 'html2canvas';
 import { useQuery } from "@tanstack/react-query";
@@ -47,6 +48,7 @@ import {
   Eye,
   FileDown,
   Bookmark,
+  Atom,
 } from "lucide-react";
 import {
   LineChart,
@@ -214,6 +216,7 @@ const TABS = [
   { id: "action-plan", label: "Action Plan", icon: Zap },
   { id: "risk-radar",  label: "Risk Radar",   icon: Shield },
   { id: "fire-path",   label: "FIRE Path",     icon: Flame  },
+  { id: "monte-carlo", label: "Monte Carlo",   icon: Atom   },
 ];
 
 // ─── Month simulation helper ──────────────────────────────────────────────────
@@ -2815,6 +2818,8 @@ export default function WealthStrategyPage() {
         return <RiskRadarPage />;
       case "fire-path":
         return <FIREPathPage />;
+      case "monte-carlo":
+        return <MonteCarloDashboard />;
       default:
         return null;
     }

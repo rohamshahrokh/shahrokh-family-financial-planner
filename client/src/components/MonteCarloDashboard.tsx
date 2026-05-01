@@ -295,7 +295,7 @@ export default function MonteCarloDashboard() {
       startPPOR:            snapshot.ppor              ?? prev.startPPOR,
       startCash:            snapshot.cash              ?? prev.startCash,
       startOffset:          snapshot.offset_balance    ?? prev.startOffset,
-      startSuper:           (snapshot.roham_super_balance ?? 0) + (snapshot.fara_super_balance ?? 0) || snapshot.super_balance ?? prev.startSuper,
+      startSuper:           (((snapshot.roham_super_balance ?? 0) + (snapshot.fara_super_balance ?? 0)) || snapshot.super_balance) ?? prev.startSuper,
       startStocks:          snapshot.stocks            ?? prev.startStocks,
       startCrypto:          snapshot.crypto            ?? prev.startCrypto,
       startMortgage:        snapshot.mortgage          ?? prev.startMortgage,
@@ -543,7 +543,7 @@ export default function MonteCarloDashboard() {
               : <><Play className="w-3.5 h-3.5 mr-1.5"/>Run Simulation</>
             }
           </Button>
-          <SaveButton onClick={handleSave} status={saveStatus}/>
+          <SaveButton onSave={handleSave}/>
         </div>
       </div>
 
@@ -1061,7 +1061,7 @@ export default function MonteCarloDashboard() {
             </div>
           </div>
 
-          <SaveButton onClick={handleSave} status={saveStatus} label="Save Event Settings"/>
+          <SaveButton onSave={handleSave} label="Save Event Settings"/>
         </div>
       )}
 
@@ -1234,7 +1234,7 @@ export default function MonteCarloDashboard() {
             </div>
           </div>
 
-          <SaveButton onClick={handleSave} status={saveStatus} label="Save All Settings"/>
+          <SaveButton onSave={handleSave} label="Save All Settings"/>
         </div>
       )}
 

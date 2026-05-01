@@ -22,6 +22,7 @@ import { localStore } from "./localStore";
 import { sbAppSettings } from "./supabaseClient";
 import { sbBills, sbBudgets, sbTelegramSettings, sbAlertLogs, sbFamilyMsgLog, sbPlannedInvestments, sbUsers } from "./supabaseClient";
 import { sbFireSettings, sbFireScenarioConfig, sbFireYearAssumptions } from "./supabaseClient";
+import { sbMCFireSettings, sbMCFireResults, sbMCFirePresets } from "./supabaseClient";
 
 // ─── Detect deployment mode ───────────────────────────────────────────────────
 
@@ -315,6 +316,23 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
   if (path === "/api/fire-year-assumptions") {
     if (m === "GET")  return await sbFireYearAssumptions.getAll();
     if (m === "PUT")  { await sbFireYearAssumptions.upsertAll(body as any[]); return { success: true }; }
+  }
+
+  // ── MC FIRE Settings ────────────────────────────────────────────────────
+  if (path === "/api/mc-fire-settings") {
+    if (m === "GET")  return (await sbMCFireSettings.get()) ?? {};
+    if (m === "PUT")  return await sbMCFireSettings.upsert(body as any);
+  }
+
+  // ── MC FIRE Results ─────────────────────────────────────────────────────
+  if (path === "/api/mc-fire-results") {
+    if (m === "GET")  return (await sbMCFireResults.get()) ?? null;
+    if (m === "PUT")  return await sbMCFireResults.upsert(body as any);
+  }
+
+  // ── MC FIRE Presets ─────────────────────────────────────────────────────
+  if (path === "/api/mc-fire-presets") {
+    if (m === "GET")  return await sbMCFirePresets.getAll();
   }
 
   // ─── Market Data (prices + news) — fetched server-side to avoid CORS ────
