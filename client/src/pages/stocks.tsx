@@ -831,7 +831,9 @@ export default function StocksPage() {
   const { data: cryptos = [] } = useQuery<any[]>({ queryKey: ["/api/crypto"], queryFn: () => apiRequest("GET", "/api/crypto").then(r => r.json()) });
   const { data: plannedStockOrders = [] } = useQuery<any[]>({ queryKey: ["/api/planned-investments", "stock"], queryFn: () => apiRequest("GET", "/api/planned-investments?module=stock").then(r => r.json()) });
   const { data: plannedCryptoOrders = [] } = useQuery<any[]>({ queryKey: ["/api/planned-investments", "crypto"], queryFn: () => apiRequest("GET", "/api/planned-investments?module=crypto").then(r => r.json()) });
-    const { data: stocks = [] } = useQuery<any[]>({
+  const { data: stockDCASchedules = [] } = useQuery<any[]>({ queryKey: ["/api/stock-dca"], queryFn: () => apiRequest("GET", "/api/stock-dca").then(r => r.json()) });
+  const { data: cryptoDCASchedules = [] } = useQuery<any[]>({ queryKey: ["/api/crypto-dca"], queryFn: () => apiRequest("GET", "/api/crypto-dca").then(r => r.json()) });
+  const { data: stocks = [] } = useQuery<any[]>({
     queryKey: ["/api/stocks"],
     queryFn: () => apiRequest("GET", "/api/stocks").then(r => r.json()),
   });

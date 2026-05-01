@@ -1079,9 +1079,45 @@ export default function PropertyPage() {
 
   const handleDraftChange = useCallback((d: any) => setDraft(d), []);
 
+  const { data: snapshot } = useQuery<any>({
+    queryKey: ["/api/snapshot"],
+    queryFn: () => apiRequest("GET", "/api/snapshot").then(r => r.json()),
+  });
   const { data: properties = [] } = useQuery<any[]>({
     queryKey: ["/api/properties"],
     queryFn: () => apiRequest("GET", "/api/properties").then(r => r.json()),
+  });
+  const { data: stocks = [] } = useQuery<any[]>({
+    queryKey: ["/api/stocks"],
+    queryFn: () => apiRequest("GET", "/api/stocks").then(r => r.json()),
+  });
+  const { data: cryptos = [] } = useQuery<any[]>({
+    queryKey: ["/api/crypto"],
+    queryFn: () => apiRequest("GET", "/api/crypto").then(r => r.json()),
+  });
+  const { data: expenses = [] } = useQuery<any[]>({
+    queryKey: ["/api/expenses"],
+    queryFn: () => apiRequest("GET", "/api/expenses").then(r => r.json()),
+  });
+  const { data: bills = [] } = useQuery<any[]>({
+    queryKey: ["/api/bills"],
+    queryFn: () => apiRequest("GET", "/api/bills").then(r => r.json()),
+  });
+  const { data: stockDCASchedules = [] } = useQuery<any[]>({
+    queryKey: ["/api/stock-dca"],
+    queryFn: () => apiRequest("GET", "/api/stock-dca").then(r => r.json()),
+  });
+  const { data: cryptoDCASchedules = [] } = useQuery<any[]>({
+    queryKey: ["/api/crypto-dca"],
+    queryFn: () => apiRequest("GET", "/api/crypto-dca").then(r => r.json()),
+  });
+  const { data: plannedStockOrders = [] } = useQuery<any[]>({
+    queryKey: ["/api/planned-investments", "stock"],
+    queryFn: () => apiRequest("GET", "/api/planned-investments?module=stock").then(r => r.json()),
+  });
+  const { data: plannedCryptoOrders = [] } = useQuery<any[]>({
+    queryKey: ["/api/planned-investments", "crypto"],
+    queryFn: () => apiRequest("GET", "/api/planned-investments?module=crypto").then(r => r.json()),
   });
 
   const createMut = useMutation({
