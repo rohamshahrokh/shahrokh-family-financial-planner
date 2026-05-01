@@ -259,13 +259,13 @@ export default function DashboardPage() {
     staleTime: 0,
   });
   const { data: ordersRaw = [] } = useQuery<any[]>({
-    queryKey: ["/api/stock-orders"],
-    queryFn: () => apiRequest("GET", "/api/stock-orders").then((r) => r.json()),
+    queryKey: ["/api/planned-investments", "stock"],
+    queryFn: () => apiRequest("GET", "/api/planned-investments?module=stock").then((r) => r.json()),
     staleTime: 0,
   });
   const { data: cryptoOrdersRaw = [] } = useQuery<any[]>({
-    queryKey: ["/api/crypto-orders"],
-    queryFn: () => apiRequest("GET", "/api/crypto-orders").then((r) => r.json()),
+    queryKey: ["/api/planned-investments", "crypto"],
+    queryFn: () => apiRequest("GET", "/api/planned-investments?module=crypto").then((r) => r.json()),
     staleTime: 0,
   });
   const { data: holdingsRaw = [] } = useQuery<any[]>({
