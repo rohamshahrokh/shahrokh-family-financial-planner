@@ -49,7 +49,6 @@ import {
   EyeOff,
   Flame,
   Shield,
-  Sword,
   Building2,
   Clock,
   AlertTriangle,
@@ -610,22 +609,18 @@ export default function DashboardPage() {
     return [
       { label: "FIRE Progress", value: `${fireProgress}%`, sub: "of target capital", Icon: Flame, alert: fireProgress < 20, _pct: fireProgress },
       { label: "Emergency",     value: `${emergencyScore}/100`, sub: `${Math.round(monthsCovered)}mo covered`, Icon: Shield, alert: emergencyScore < 50 },
-      { label: "Total Debt",    value: formatCurrency(totalDebt, true), sub: debtToIncome > 5 ? "High debt ratio" : "Manageable", Icon: Sword, alert: debtToIncome > 5 },
       { label: "IP Readiness",  value: `${depositReady}%`, sub: "deposit ready", Icon: Building2, alert: depositReady < 30, _pct: depositReady },
       { label: "FIRE Age",      value: `~${fireAge}`, sub: "est. financial freedom", Icon: Clock, alert: fireAge > 60 },
       { label: "Hidden Money",  value: `${formatCurrency(hiddenMonthly * 12, true)}/yr`, sub: "potential savings", Icon: Eye, alert: hiddenMonthly > 500 },
-      { label: "Savings Rate",  value: `${savingsRate.toFixed(0)}%`, sub: savingsRate < 20 ? "Below target" : "On track", Icon: AlertTriangle, alert: savingsRate < 20 },
     ];
   }, [snap, surplus, savingsRate, stocksTotal, cryptoTotal]);
 
   const fireCard        = wealthCards.find(c => c.label === "FIRE Age");
   const fireProgress    = wealthCards.find(c => c.label === "FIRE Progress");
   const emergencyCard   = wealthCards.find(c => c.label === "Emergency");
-  const debtCard        = wealthCards.find(c => c.label === "Total Debt");
   const ipCard          = wealthCards.find(c => c.label === "IP Readiness");
   const depositPct      = parseInt(ipCard?.value ?? "0");
   const firePct         = parseInt(String((fireProgress as any)?._pct ?? "0"));
-  const srPct           = savingsRate;
 
   // ─── Mission ──────────────────────────────────────────────────────────────
   const missionLabel    = depositPct >= 80 ? "Prepare for IP #2 Settlement" : depositPct >= 50 ? "Build deposit for next IP" : "Grow wealth base & cashflow";
@@ -799,8 +794,6 @@ export default function DashboardPage() {
   // ─── Computed values for new layout ──────────────────────────────────────
   const accessibleNW = netWorth - _totalSuperNow;
   const lockedNW = _totalSuperNow;
-  const forecast2030 = projection.find((p: any) => p.year === 2030)?.cash ?? 0;
-  const forecast2035 = projection.find((p: any) => p.year === 2035)?.cash ?? 0;
   const allFutureCash = projection.map((p: any) => p.cash);
   const lowestFutureCash = allFutureCash.length > 0 ? Math.min(...allFutureCash) : 0;
   const nextPropEvent = (cashEngineResult?.events ?? []).find((e: any) => e.type === "property_purchase" || e.type === "settlement");
@@ -915,17 +908,10 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          8 KPI CARDS (4-column grid, 2 rows)
+          KPI CARDS
           ═════════════════════════════════════════════════════════════════ */}
       <div className="px-4 pb-2">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <KpiCard
-            label="NET WORTH"
-            value={maskValue(formatCurrency(netWorth, true), privacyMode)}
-            subValue={`Accessible: ${maskValue(formatCurrency(accessibleNW, true), privacyMode)}`}
-            icon={<TrendingUp />}
-            accent="hsl(43,85%,55%)"
-          />
           <KpiCard
             label="MONTHLY SURPLUS"
             value={maskValue(formatCurrency(surplus, true), privacyMode)}
@@ -957,14 +943,6 @@ export default function DashboardPage() {
             accent="hsl(5,70%,52%)"
           />
           <KpiCard
-            label="10-YEAR FORECAST"
-            value={maskValue(formatCurrency(year10NW, true), privacyMode)}
-            subValue={`From ${maskValue(formatCurrency(netWorth, true), privacyMode)} today`}
-            trend={1}
-            icon={<Target />}
-            accent="hsl(260,60%,58%)"
-          />
-          <KpiCard
             label="PASSIVE INCOME"
             value={maskValue(formatCurrency(passiveIncome, true), privacyMode)}
             subValue="Rental + Dividends"
@@ -980,21 +958,6 @@ export default function DashboardPage() {
           />
         </div>
 
-        {/* Savings Rate — full-width banner card */}
-        <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-3 flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-widest text-amber-400">Savings Rate</span>
-            <span className="text-2xl font-extrabold text-amber-400 tabular-nums">{savingsRate.toFixed(1)}%</span>
-          </div>
-          <div className="h-5 w-px bg-border" />
-          <span className="text-sm text-muted-foreground">{maskValue(formatCurrency(surplus * 12, true), privacyMode)} saved / yr</span>
-          <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden ml-2">
-            <div
-              className="h-full rounded-full bg-amber-400 transition-all"
-              style={{ width: `${Math.min(100, savingsRate * 1.5)}%` }}
-            />
-          </div>
-        </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
@@ -1020,29 +983,11 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 6 cash projection cards */}
+        {/* cash projection cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Current Cash</div>
             <div className="text-lg font-bold text-foreground tabular-nums">{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Forecast Cash 2030</div>
-            <div className={`text-lg font-bold tabular-nums ${forecast2030 < 0 ? "text-red-400" : "text-foreground"}`}>
-              {maskValue(formatCurrency(forecast2030, true), privacyMode)}
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Forecast Cash 2035</div>
-            <div className={`text-lg font-bold tabular-nums ${forecast2035 < 0 ? "text-red-400" : "text-foreground"}`}>
-              {maskValue(formatCurrency(forecast2035, true), privacyMode)}
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Lowest Future Cash</div>
-            <div className={`text-lg font-bold tabular-nums ${lowestFutureCash < 0 ? "text-red-400" : "text-foreground"}`}>
-              {maskValue(formatCurrency(lowestFutureCash, true), privacyMode)}
-            </div>
           </div>
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Next Major Event</div>
