@@ -2,74 +2,144 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   WEALTH OS — Premium Luxury Dark Fintech Design System
+   Palette: Deep Abyss Navy · Refined Gold · Semantic Signal Colors
+   Philosophy: Calm · Clear · Powerful · Guided · Premium
+   ───────────────────────────────────────────────────────────────────────────── */
+
 @layer base {
   :root {
-    /* === SHAHROKH FAMILY FINANCIAL PLANNER === */
-    /* Palette: Deep Navy (wealth/trust) + Gold (prosperity) + Warm Cream surfaces */
+    /* === SURFACES — Deep Abyss (primary dark mode) === */
+    --background:    222 22% 7%;       /* #0d1017 — true deep navy */
+    --foreground:    215 20% 88%;      /* #d6dde8 — cool silver text */
+    --card:          222 20% 10%;      /* #13181f — card surface */
+    --card-foreground: 215 20% 88%;
+    --popover:       222 20% 10%;
+    --popover-foreground: 215 20% 88%;
 
-    --background: 224 15% 8%;
-    --foreground: 220 15% 92%;
-    --card: 224 15% 11%;
-    --card-foreground: 220 15% 92%;
-    --popover: 224 15% 11%;
-    --popover-foreground: 220 15% 92%;
-    --primary: 43 85% 55%;
-    --primary-foreground: 224 15% 8%;
-    --secondary: 224 12% 18%;
-    --secondary-foreground: 220 15% 80%;
-    --muted: 224 10% 16%;
-    --muted-foreground: 220 10% 55%;
-    --accent: 43 85% 55%;
-    --accent-foreground: 224 15% 8%;
-    --destructive: 0 72% 51%;
+    /* === INTERACTION STATES === */
+    --secondary:     222 18% 15%;      /* #1b2130 — hover/secondary bg */
+    --secondary-foreground: 215 18% 72%;
+
+    --muted:         222 15% 13%;      /* #181f2a — muted surface */
+    --muted-foreground: 215 12% 48%;   /* #6d7d92 — muted text */
+
+    /* === BORDERS === */
+    --border:        222 15% 18%;      /* #232d3d — subtle border */
+    --input:         222 15% 16%;      /* #1e2838 */
+    --ring:          42 80% 52%;       /* gold focus ring */
+
+    /* === RADIUS === */
+    --radius: 0.625rem;                /* 10px — modern, not too round */
+
+    /* === PRIMARY: Refined Gold (actions / CTAs / premium moments) === */
+    --primary:          42 80% 52%;    /* hsl(42, 80%, 52%) */
+    --primary-foreground: 222 22% 7%;  /* dark bg on gold */
+
+    /* === ACCENT === */
+    --accent:        222 18% 15%;
+    --accent-foreground: 215 20% 88%;
+
+    /* === DESTRUCTIVE === */
+    --destructive:   0 70% 52%;
     --destructive-foreground: 0 0% 98%;
-    --border: 224 12% 20%;
-    --input: 224 12% 18%;
-    --ring: 43 85% 55%;
-    --radius: 0.75rem;
 
-    /* Chart colors */
-    --chart-1: 43 85% 55%;
-    --chart-2: 188 60% 48%;
-    --chart-3: 142 60% 45%;
-    --chart-4: 20 80% 55%;
-    --chart-5: 270 60% 60%;
+    /* ── SEMANTIC PALETTE (semantic roles for data, not decoration) ── */
 
-    /* Custom tokens */
-    --gold: 43 85% 55%;
-    --gold-dark: 43 70% 40%;
-    --navy: 224 40% 12%;
-    --navy-light: 224 25% 18%;
-    --success: 142 60% 45%;
-    --danger: 0 72% 51%;
-    --info: 188 60% 48%;
+    /* Gold — actions, CTAs, premium highlights */
+    --gold:          42 80% 52%;
+    --gold-light:    42 85% 65%;
+    --gold-dim:      42 60% 38%;
+    --gold-surface:  42 40% 12%;       /* very dark gold tint for card bg */
+
+    /* Green — healthy, positive, on-track */
+    --success:       145 55% 42%;
+    --success-light: 145 60% 55%;
+    --success-surface: 145 30% 9%;
+
+    /* Red — danger, risk, negative */
+    --danger:        5 70% 52%;
+    --danger-light:  5 75% 62%;
+    --danger-surface: 5 30% 9%;
+
+    /* Blue — intelligence, AI, data insights */
+    --intelligence:  210 75% 52%;
+    --intelligence-light: 210 80% 65%;
+    --intelligence-surface: 210 40% 10%;
+
+    /* Purple — forecasting, projections, Monte Carlo */
+    --forecast:      260 60% 58%;
+    --forecast-light: 260 65% 70%;
+    --forecast-surface: 260 30% 10%;
+
+    /* Teal — info, neutral insights */
+    --info:          188 60% 46%;
+    --info-light:    188 65% 58%;
+
+    /* Navy depth layers */
+    --navy-deep:     222 35% 8%;
+    --navy-mid:      222 25% 12%;
+    --navy-light:    222 18% 18%;
+
+    /* Chart palette */
+    --chart-1: 42 80% 52%;
+    --chart-2: 210 75% 52%;
+    --chart-3: 145 55% 42%;
+    --chart-4: 5 70% 52%;
+    --chart-5: 260 60% 58%;
+    --chart-6: 188 60% 46%;
   }
 
+  /* Light mode (kept for toggle, rarely used) */
   .light {
-    --background: 220 20% 97%;
-    --foreground: 224 30% 10%;
-    --card: 0 0% 100%;
+    --background:    220 20% 97%;
+    --foreground:    224 30% 10%;
+    --card:          0 0% 100%;
     --card-foreground: 224 30% 10%;
-    --popover: 0 0% 100%;
+    --popover:       0 0% 100%;
     --popover-foreground: 224 30% 10%;
-    --primary: 43 85% 45%;
+    --primary:       42 80% 42%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 220 15% 92%;
+    --secondary:     220 15% 92%;
     --secondary-foreground: 224 20% 20%;
-    --muted: 220 15% 93%;
+    --muted:         220 15% 93%;
     --muted-foreground: 220 10% 45%;
-    --accent: 43 85% 45%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 72% 51%;
+    --accent:        220 15% 92%;
+    --accent-foreground: 224 20% 20%;
+    --destructive:   0 70% 52%;
     --destructive-foreground: 0 0% 98%;
-    --border: 220 15% 85%;
-    --input: 220 15% 90%;
-    --ring: 43 85% 45%;
-    --chart-1: 43 85% 45%;
-    --chart-2: 188 60% 40%;
-    --chart-3: 142 60% 38%;
-    --chart-4: 20 80% 48%;
-    --chart-5: 270 60% 52%;
+    --border:        220 15% 84%;
+    --input:         220 15% 90%;
+    --ring:          42 80% 42%;
+
+    --gold:          42 80% 42%;
+    --gold-light:    42 85% 52%;
+    --gold-dim:      42 60% 32%;
+    --gold-surface:  42 40% 94%;
+    --success:       145 55% 36%;
+    --success-light: 145 60% 44%;
+    --success-surface: 145 40% 93%;
+    --danger:        5 70% 46%;
+    --danger-light:  5 75% 56%;
+    --danger-surface: 5 40% 95%;
+    --intelligence:  210 75% 46%;
+    --intelligence-light: 210 80% 56%;
+    --intelligence-surface: 210 50% 94%;
+    --forecast:      260 60% 52%;
+    --forecast-light: 260 65% 62%;
+    --forecast-surface: 260 40% 94%;
+    --info:          188 60% 38%;
+    --info-light:    188 65% 48%;
+    --navy-deep:     222 35% 14%;
+    --navy-mid:      222 25% 20%;
+    --navy-light:    222 18% 28%;
+    --chart-1: 42 80% 42%;
+    --chart-2: 210 75% 46%;
+    --chart-3: 145 55% 36%;
+    --chart-4: 5 70% 46%;
+    --chart-5: 260 60% 52%;
+    --chart-6: 188 60% 38%;
   }
 }
 
@@ -78,71 +148,209 @@
     @apply border-border;
     box-sizing: border-box;
   }
+
+  html, body, #root {
+    height: 100%;
+  }
+
   body {
     @apply bg-background text-foreground;
     font-family: 'Inter', 'DM Sans', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    line-height: 1.6;
   }
 
-  /* Tabular numbers for financial data */
+  /* Tabular numbers for all financial data */
+  .num-display,
+  [data-financial],
   .tabular-nums {
     font-variant-numeric: tabular-nums lining-nums;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+    letter-spacing: -0.01em;
   }
 
-  /* Dashboard layout */
-  html, body, #root {
-    height: 100%;
-  }
-
-  /* Custom scrollbar */
+  /* Custom scrollbar — ultra thin, elegant */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 4px;
+    height: 4px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
     background: hsl(var(--border));
-    border-radius: 3px;
+    border-radius: 2px;
   }
   ::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--muted-foreground));
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   COMPONENT LAYER — Reusable patterns
+   ───────────────────────────────────────────────────────────────────────────── */
+
 @layer components {
-  /* Gold gradient text */
+
+  /* ── SIDEBAR: New accordion nav ── */
+  .nav-section-header {
+    @apply flex items-center justify-between px-3 py-2.5 w-full rounded-lg
+           text-xs font-semibold uppercase tracking-widest
+           text-muted-foreground hover:text-foreground
+           transition-all duration-150 cursor-pointer select-none;
+  }
+  .nav-section-header.open {
+    @apply text-foreground;
+  }
+  .nav-step-badge {
+    @apply w-5 h-5 rounded flex items-center justify-center
+           text-[10px] font-bold shrink-0;
+  }
+  .nav-step-badge.step-1 { background: hsl(var(--intelligence-surface)); color: hsl(var(--intelligence-light)); }
+  .nav-step-badge.step-2 { background: hsl(var(--gold-surface)); color: hsl(var(--gold-light)); }
+  .nav-step-badge.step-3 { background: hsl(var(--forecast-surface)); color: hsl(var(--forecast-light)); }
+  .nav-step-badge.step-4 { background: hsl(var(--success-surface)); color: hsl(var(--success-light)); }
+
+  .nav-item {
+    @apply flex items-center gap-2.5 pl-8 pr-3 py-2 w-full rounded-lg
+           text-sm text-muted-foreground
+           hover:text-foreground hover:bg-secondary
+           transition-all duration-150 cursor-pointer;
+  }
+  .nav-item.active {
+    color: hsl(var(--foreground));
+    background: hsl(var(--secondary));
+  }
+  .nav-item.active .nav-item-icon {
+    color: hsl(var(--primary));
+  }
+  .nav-item-icon {
+    @apply w-3.5 h-3.5 shrink-0 text-muted-foreground;
+    transition: color 150ms;
+  }
+  .nav-item:hover .nav-item-icon {
+    color: hsl(var(--foreground));
+  }
+
+  /* ── DASHBOARD HERO CARDS ── */
+  .hero-stat-card {
+    @apply rounded-xl p-5 flex flex-col gap-1;
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    transition: border-color 200ms;
+  }
+  .hero-stat-card:hover {
+    border-color: hsl(var(--gold-dim));
+  }
+  .hero-stat-label {
+    @apply text-xs font-semibold uppercase tracking-widest;
+    color: hsl(var(--muted-foreground));
+  }
+  .hero-stat-value {
+    @apply text-xl font-bold num-display;
+    color: hsl(var(--foreground));
+  }
+  .hero-stat-sub {
+    @apply text-xs;
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* ── KPI PILL ── */
+  .kpi-pill {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold;
+  }
+  .kpi-pill.positive {
+    background: hsl(var(--success-surface));
+    color: hsl(var(--success-light));
+  }
+  .kpi-pill.negative {
+    background: hsl(var(--danger-surface));
+    color: hsl(var(--danger-light));
+  }
+  .kpi-pill.neutral {
+    background: hsl(var(--navy-mid));
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* ── NARRATIVE BANNER ── */
+  .narrative-banner {
+    @apply rounded-xl p-5 mb-6;
+    background: linear-gradient(135deg,
+      hsl(222, 25%, 11%) 0%,
+      hsl(222, 22%, 9%) 100%
+    );
+    border: 1px solid hsl(var(--border));
+    border-left: 3px solid hsl(var(--gold));
+  }
+
+  /* ── SECTION DIVIDER with label ── */
+  .section-label {
+    @apply text-xs font-semibold uppercase tracking-widest mb-4;
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* ── COLLAPSIBLE SECTION ── */
+  .collapsible-section {
+    @apply rounded-xl border border-border overflow-hidden;
+    background: hsl(var(--card));
+  }
+  .collapsible-header {
+    @apply flex items-center justify-between p-4 cursor-pointer
+           hover:bg-secondary transition-colors duration-150;
+  }
+  .collapsible-content {
+    @apply border-t border-border;
+  }
+
+  /* ── SEMANTIC STATUS COLORS ── */
+  .text-gold      { color: hsl(var(--gold)); }
+  .text-gold-dim  { color: hsl(var(--gold-dim)); }
+  .text-success   { color: hsl(var(--success)); }
+  .text-success-l { color: hsl(var(--success-light)); }
+  .text-danger    { color: hsl(var(--danger)); }
+  .text-danger-l  { color: hsl(var(--danger-light)); }
+  .text-intel     { color: hsl(var(--intelligence)); }
+  .text-intel-l   { color: hsl(var(--intelligence-light)); }
+  .text-forecast  { color: hsl(var(--forecast)); }
+  .text-forecast-l{ color: hsl(var(--forecast-light)); }
+
+  /* ── BG SURFACES ── */
+  .bg-gold-surface      { background: hsl(var(--gold-surface)); }
+  .bg-success-surface   { background: hsl(var(--success-surface)); }
+  .bg-danger-surface    { background: hsl(var(--danger-surface)); }
+  .bg-intel-surface     { background: hsl(var(--intelligence-surface)); }
+  .bg-forecast-surface  { background: hsl(var(--forecast-surface)); }
+
+  /* ── GOLD GRADIENT TEXT ── */
   .text-gold-gradient {
-    background: linear-gradient(135deg, hsl(43, 85%, 65%), hsl(43, 85%, 45%), hsl(35, 80%, 55%));
+    background: linear-gradient(135deg,
+      hsl(var(--gold-light)),
+      hsl(var(--gold)),
+      hsl(35, 75%, 50%)
+    );
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
-  /* Glassmorphism card */
+  /* ── STEP CONNECTOR (sidebar) ── */
+  .step-connector {
+    @apply absolute left-[18px] w-px bg-border;
+    top: 100%;
+    height: 100%;
+    z-index: 0;
+  }
+
+  /* ── GLASSMORPHISM (used sparingly for hero banner) ── */
   .glass-card {
-    background: rgba(255, 255, 255, 0.04);
-    backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
   }
 
-  /* KPI card highlight */
-  .kpi-positive {
-    @apply text-emerald-400;
-  }
-  .kpi-negative {
-    @apply text-red-400;
-  }
-
-  /* Animated number */
-  .num-display {
-    font-variant-numeric: tabular-nums lining-nums;
-    font-feature-settings: "tnum" 1;
-  }
-
-  /* Premium sidebar */
+  /* ── OLD sidebar-link alias (keeps existing pages working) ── */
   .sidebar-link {
     @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150;
     @apply text-muted-foreground hover:text-foreground hover:bg-secondary;
@@ -154,20 +362,29 @@
     @apply text-primary;
   }
 
-  /* Chart container */
-  .chart-container {
-    @apply w-full;
-  }
+  /* ── KPI POSITIVE/NEGATIVE (for existing pages) ── */
+  .kpi-positive { @apply text-emerald-400; }
+  .kpi-negative { @apply text-red-400; }
+
+  /* ── CHART CONTAINER ── */
+  .chart-container { @apply w-full; }
 }
 
-/* Gold shimmer animation for login */
+/* ─────────────────────────────────────────────────────────────────────────────
+   ANIMATIONS
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Gold shimmer for login and hero accents */
 @keyframes shimmer {
-  0% { background-position: -200% center; }
+  0%   { background-position: -200% center; }
   100% { background-position: 200% center; }
 }
-
 .gold-shimmer {
-  background: linear-gradient(90deg, hsl(43,85%,55%) 0%, hsl(50,100%,70%) 50%, hsl(43,85%,55%) 100%);
+  background: linear-gradient(90deg,
+    hsl(42, 80%, 52%) 0%,
+    hsl(50, 100%, 70%) 50%,
+    hsl(42, 80%, 52%) 100%
+  );
   background-size: 200% auto;
   animation: shimmer 3s linear infinite;
   -webkit-background-clip: text;
@@ -177,33 +394,53 @@
 
 /* Login page gradient */
 .login-bg {
-  background: radial-gradient(ellipse at 20% 50%, hsl(224,40%,12%) 0%, hsl(224,15%,5%) 50%, hsl(224,20%,8%) 100%);
+  background: radial-gradient(
+    ellipse at 20% 50%,
+    hsl(222, 35%, 10%) 0%,
+    hsl(222, 22%, 5%) 50%,
+    hsl(222, 25%, 8%) 100%
+  );
 }
 
 /* Pulse for save indicator */
 @keyframes pulse-save {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50%       { opacity: 0.5; }
 }
 .pulse-save { animation: pulse-save 2s ease-in-out infinite; }
+
+/* Fade up — used on dashboard cards */
+@keyframes fadeUp {
+  from { transform: translateY(12px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.animate-fade-up { animation: fadeUp 0.35s ease-out forwards; }
 
 /* Slide in from right */
 @keyframes slideInRight {
   from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+  to   { transform: translateX(0);    opacity: 1; }
 }
 
-/* Fade up */
-@keyframes fadeUp {
-  from { transform: translateY(16px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+/* Stagger children */
+.stagger-children > * {
+  animation: fadeUp 0.35s ease-out forwards;
+  opacity: 0;
 }
-
-.animate-fade-up {
-  animation: fadeUp 0.4s ease-out forwards;
-}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 60ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 120ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 180ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 300ms; }
 
 /* Recharts overrides */
 .recharts-tooltip-wrapper {
   outline: none !important;
+}
+.recharts-default-tooltip {
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: 8px !important;
+  color: hsl(var(--foreground)) !important;
 }
