@@ -25,6 +25,9 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  LineChart,
+  Line,
+  Legend,
 } from "recharts";
 import {
   TrendingUp,
@@ -115,7 +118,7 @@ export default function DashboardPage() {
   const [lastSync, setLastSync] = useState<string | null>(getLastSync);
   const [ngRefundMode, setNgRefundMode] = useState<"lump-sum" | "payg">("lump-sum");
   const [chartRange, setChartRange] = useState<"1Y" | "3Y" | "10Y" | "Scenario">("10Y");
-  const [mainChartMode, setMainChartMode] = useState<"networth" | "cashflow">("networth");
+  const [mainChartMode, setMainChartMode] = useState<"networth" | "cashflow">("cashflow");
   const cashFlowView = chartView;
 
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -653,26 +656,39 @@ export default function DashboardPage() {
               </ResponsiveContainer>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={masterCFData.slice(0, cashFlowView === "annual" ? 10 : 24)} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="cfI" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="hsl(145,55%,42%)" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="hsl(145,55%,42%)" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="cfB" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="hsl(260,60%,58%)" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="hsl(260,60%,58%)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
+                <LineChart
+                  data={masterCFData.slice(0, cashFlowView === "annual" ? 10 : 24)}
+                  margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(222 15% 18% / 0.5)" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} />
-                  <YAxis tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }} axisLine={false} tickLine={false} width={52} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 9, fill: "hsl(215 12% 48%)" }}
+                    axisLine={false} tickLine={false}
+                    interval={cashFlowView === "annual" ? 0 : 2}
+                  />
+                  <YAxis
+                    tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`}
+                    tick={{ fontSize: 10, fill: "hsl(215 12% 48%)" }}
+                    axisLine={false} tickLine={false} width={52}
+                  />
                   <Tooltip content={<CashflowTooltip />} />
-                  <Area type="monotone" dataKey="income"   name="Income"       stroke="hsl(145,55%,42%)" strokeWidth={1.5} fill="url(#cfI)" dot={false} />
-                  <Area type="monotone" dataKey="expenses" name="Expenses"     stroke="hsl(5,70%,52%)"   strokeWidth={1.5} fill="none"       dot={false} />
-                  <Area type="monotone" dataKey="balance"  name="Cash Balance" stroke="hsl(260,60%,58%)" strokeWidth={2.5} fill="url(#cfB)" dot={false} />
                   <ReferenceLine y={0} stroke="hsl(222 15% 25%)" strokeDasharray="2 2" />
-                </AreaChart>
+                  {/* Income */}
+                  <Line type="monotone" dataKey="income"   name="Income"          stroke="hsl(145,55%,48%)" strokeWidth={2}   dot={false} activeDot={{ r: 4 }} />
+                  {/* Expenses (living) */}
+                  <Line type="monotone" dataKey="expenses" name="Living Expenses"  stroke="hsl(5,70%,52%)"   strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
+                  {/* Mortgage */}
+                  <Line type="monotone" dataKey="mortgage" name="Mortgage"         stroke="hsl(20,80%,55%)"  strokeWidth={1.5} dot={false} strokeDasharray="3 2" />
+                  {/* Rental income */}
+                  <Line type="monotone" dataKey="rental"   name="Rental Income"   stroke="hsl(188,60%,48%)" strokeWidth={1.5} dot={false} />
+                  {/* NG tax refund */}
+                  <Line type="monotone" dataKey="ngRefund" name="NG Refund"        stroke="hsl(43,85%,55%)"  strokeWidth={1.5} dot={false} strokeDasharray="2 3" />
+                  {/* Net cashflow */}
+                  <Line type="monotone" dataKey="netCF"    name="Net Cashflow"    stroke="hsl(260,60%,58%)" strokeWidth={2.5} dot={false} activeDot={{ r: 5 }} />
+                  {/* Cash balance */}
+                  <Line type="monotone" dataKey="balance"  name="Cash Balance"    stroke="hsl(210,75%,60%)" strokeWidth={2}   dot={false} activeDot={{ r: 4 }} strokeDasharray="6 2" />
+                </LineChart>
               </ResponsiveContainer>
             )}
           </div>
@@ -686,9 +702,13 @@ export default function DashboardPage() {
               </>
             ) : (
               <>
-                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(145,55%,42%)" }} />Income</div>
+                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(145,55%,48%)" }} />Income</div>
                 <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(5,70%,52%)" }} />Expenses</div>
-                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(260,60%,58%)" }} />Cash Balance</div>
+                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(20,80%,55%)" }} />Mortgage</div>
+                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(188,60%,48%)" }} />Rental</div>
+                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(43,85%,55%)" }} />NG Refund</div>
+                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(260,60%,58%)" }} />Net CF</div>
+                <div className="db-leg-item"><span className="db-leg-dot" style={{ background: "hsl(210,75%,60%)" }} />Cash Balance</div>
               </>
             )}
           </div>

@@ -26,7 +26,7 @@ import {
 import {
   Plus, Trash2, Edit2, Home, Building, ChevronDown, ChevronUp,
   CheckSquare, Square, MapPin, DollarSign, Calculator, TrendingUp,
-  Wallet, AlertCircle, Calendar,
+  Wallet, AlertCircle, Calendar, ShieldCheck, Target, Info, CheckCircle2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -1053,6 +1053,16 @@ export default function PropertyPage() {
   const [draft, setDraft] = useState<any>({ ...emptyWithDefaults });
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showBulkModal, setShowBulkModal] = useState(false);
+  // IP Purchase Capacity
+  const [ipTargetPrice, setIpTargetPrice] = useState(750000);
+  const [ipMonthsToSave, setIpMonthsToSave] = useState(12);
+  const [ipSafetyBuffer, setIpSafetyBuffer] = useState(30000);
+  const [ipLiquidateStocks, setIpLiquidateStocks] = useState(false);
+  const [ipLiquidateCrypto, setIpLiquidateCrypto] = useState(false);
+  const [ipLiquidateStocksPct, setIpLiquidateStocksPct] = useState(50);
+  const [ipLiquidateCryptoPct, setIpLiquidateCryptoPct] = useState(50);
+  // Per-property funding source
+  const [fundingSource, setFundingSource] = useState<Record<number, string>>({});
 
   // Tab state — detect sessionStorage signal OR #buy-vs-wait in URL hash
   const [activeTab, setActiveTab] = useState<'portfolio' | 'buy-vs-wait' | 'impact'>(() => {
@@ -1292,6 +1302,166 @@ export default function PropertyPage() {
         ))}
       </div>
 
+      {/* ─── IP Purchase Capacity Calculator ──────────────────────────────── */}
+      <div className="rounded-xl border border-primary/20 bg-card p-5 space-y-4">
+        <div className="flex items-center gap-2.5 mb-1">
+          <Calculator className="w-4 h-4 text-primary" />
+          <h3 className="text-sm font-bold">IP Purchase Capacity</h3>
+          <span className="text-xs text-muted-foreground ml-1">— how much can you deploy?</span>
+        </div>
+
+        {/* Inputs row */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div>
+            <p className="text-[10px] text-muted-foreground mb-1">Target Property Price</p>
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-muted-foreground">$</span>
+              <Input
+                type="number"
+                value={ipTargetPrice}
+                onChange={e => setIpTargetPrice(Number(e.target.value))}
+                className="h-8 text-xs font-mono"
+              />
+            </div>
+          </div>
+          <div>
+            <p className="text-[10px] text-muted-foreground mb-1">Months Until Purchase</p>
+            <Input
+              type="number"
+              value={ipMonthsToSave}
+              onChange={e => setIpMonthsToSave(Number(e.target.value))}
+              className="h-8 text-xs font-mono"
+            />
+          </div>
+          <div>
+            <p className="text-[10px] text-muted-foreground mb-1">Safety Buffer ($)</p>
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-muted-foreground">$</span>
+              <Input
+                type="number"
+                value={ipSafetyBuffer}
+                onChange={e => setIpSafetyBuffer(Number(e.target.value))}
+                className="h-8 text-xs font-mono"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 justify-end">
+            <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={ipLiquidateStocks}
+                onChange={e => setIpLiquidateStocks(e.target.checked)}
+                className="w-3.5 h-3.5 accent-primary"
+              />
+              Liquidate Stocks
+            </label>
+            {ipLiquidateStocks && (
+              <div className="flex items-center gap-1">
+                <Input
+                  type="number"
+                  value={ipLiquidateStocksPct}
+                  onChange={e => setIpLiquidateStocksPct(Number(e.target.value))}
+                  min={1} max={100}
+                  className="h-7 text-xs font-mono w-16"
+                />
+                <span className="text-xs text-muted-foreground">%</span>
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col gap-2 justify-end">
+            <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={ipLiquidateCrypto}
+                onChange={e => setIpLiquidateCrypto(e.target.checked)}
+                className="w-3.5 h-3.5 accent-primary"
+              />
+              Liquidate Crypto
+            </label>
+            {ipLiquidateCrypto && (
+              <div className="flex items-center gap-1">
+                <Input
+                  type="number"
+                  value={ipLiquidateCryptoPct}
+                  onChange={e => setIpLiquidateCryptoPct(Number(e.target.value))}
+                  min={1} max={100}
+                  className="h-7 text-xs font-mono w-16"
+                />
+                <span className="text-xs text-muted-foreground">%</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Calculation */}
+        {(() => {
+          const snapCash   = safeNum(snapshot?.cash) || 220000;
+          const snapOffset = safeNum(snapshot?.offset_balance);
+          const snapStocks = safeNum(snapshot?.stocks);
+          const snapCrypto = safeNum(snapshot?.crypto);
+          const monthlySurplusApprox = (safeNum(snapshot?.monthly_income) || 22000) - (safeNum(snapshot?.monthly_expenses) || 14540);
+          const savedByPurchase = Math.max(0, monthlySurplusApprox) * ipMonthsToSave;
+          const stockLiquid  = ipLiquidateStocks ? (snapStocks * ipLiquidateStocksPct / 100) : 0;
+          const cryptoLiquid = ipLiquidateCrypto ? (snapCrypto * ipLiquidateCryptoPct / 100) : 0;
+          const stampDuty    = estimateStampDuty(ipTargetPrice);
+          const acquiCosts   = stampDuty + 3000 + 1000; // stamp duty + legal + inspection
+          const totalFunds   = snapCash + snapOffset + savedByPurchase + stockLiquid + cryptoLiquid - ipSafetyBuffer - acquiCosts;
+          const depositAvail = totalFunds;
+          const depositPct   = ipTargetPrice > 0 ? (depositAvail / ipTargetPrice) * 100 : 0;
+          const loanNeeded   = Math.max(0, ipTargetPrice - depositAvail);
+          const lvr          = ipTargetPrice > 0 ? (loanNeeded / ipTargetPrice) * 100 : 0;
+          const canBuy       = depositPct >= 20;
+          const shortfall    = Math.max(0, ipTargetPrice * 0.2 - depositAvail);
+
+          return (
+            <>
+              {/* Formula breakdown */}
+              <div className="rounded-lg bg-secondary/40 border border-border p-4 space-y-2">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2">Purchase Funds Formula</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1.5 text-xs">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Cash Account</span><span className="font-mono text-foreground">{formatCurrency(snapCash)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Offset Account</span><span className="font-mono text-emerald-400">{formatCurrency(snapOffset)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Monthly savings × {ipMonthsToSave}mo</span><span className="font-mono text-emerald-400">+{formatCurrency(savedByPurchase)}</span></div>
+                  {stockLiquid > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Stock liquidation ({ipLiquidateStocksPct}%)</span><span className="font-mono text-blue-400">+{formatCurrency(stockLiquid)}</span></div>}
+                  {cryptoLiquid > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Crypto liquidation ({ipLiquidateCryptoPct}%)</span><span className="font-mono text-orange-400">+{formatCurrency(cryptoLiquid)}</span></div>}
+                  <div className="flex justify-between"><span className="text-muted-foreground">Safety buffer</span><span className="font-mono text-red-400">−{formatCurrency(ipSafetyBuffer)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Stamp duty + costs</span><span className="font-mono text-red-400">−{formatCurrency(acquiCosts)}</span></div>
+                </div>
+                <div className="border-t border-border/60 pt-2 mt-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-foreground">Available Purchase Funds</span>
+                  <span className={`text-sm font-bold num-display ${canBuy ? 'text-emerald-400' : 'text-amber-400'}`}>{formatCurrency(depositAvail)}</span>
+                </div>
+              </div>
+
+              {/* Result KPIs */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="rounded-xl border border-border bg-secondary/30 p-3">
+                  <p className="text-[10px] text-muted-foreground">Available Funds</p>
+                  <p className={`text-base font-bold num-display mt-0.5 ${depositAvail >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{formatCurrency(depositAvail)}</p>
+                </div>
+                <div className="rounded-xl border border-border bg-secondary/30 p-3">
+                  <p className="text-[10px] text-muted-foreground">Deposit %</p>
+                  <p className={`text-base font-bold num-display mt-0.5 ${depositPct >= 20 ? 'text-emerald-400' : 'text-amber-400'}`}>{depositPct.toFixed(1)}%</p>
+                  <p className="text-[10px] text-muted-foreground">(20% min = {formatCurrency(ipTargetPrice * 0.2, true)})</p>
+                </div>
+                <div className="rounded-xl border border-border bg-secondary/30 p-3">
+                  <p className="text-[10px] text-muted-foreground">Required Loan</p>
+                  <p className="text-base font-bold num-display mt-0.5 text-foreground">{formatCurrency(loanNeeded)}</p>
+                  <p className="text-[10px] text-muted-foreground">LVR {lvr.toFixed(1)}%</p>
+                </div>
+                <div className={`rounded-xl border p-3 ${canBuy ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-amber-500/30 bg-amber-500/10'}`}>
+                  <p className="text-[10px] text-muted-foreground">Readiness</p>
+                  <p className={`text-sm font-bold mt-0.5 ${canBuy ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {canBuy ? '✓ Ready to Buy' : `Need ${formatCurrency(shortfall, true)} more`}
+                  </p>
+                  {!canBuy && <p className="text-[10px] text-muted-foreground">{Math.ceil(shortfall / Math.max(1, monthlySurplusApprox))} months at current surplus</p>}
+                </div>
+              </div>
+            </>
+          );
+        })()}
+      </div>
+
       {/* Add Property Form */}
       {showAdd && (
         <div className="rounded-xl border border-primary/30 bg-card p-5">
@@ -1368,14 +1538,47 @@ export default function PropertyPage() {
       ) : (
         <div className="space-y-3">
           {properties.map((p: any) => (
-            <PropertyCard
-              key={p.id}
-              prop={p}
-              onDelete={(id) => deleteMut.mutate(id)}
-              selected={selected.has(p.id)}
-              onToggleSelect={toggleSelect}
-              privacyMode={privacyMode}
-            />
+            <div key={p.id} className="space-y-1">
+              <PropertyCard
+                prop={p}
+                onDelete={(id) => deleteMut.mutate(id)}
+                selected={selected.has(p.id)}
+                onToggleSelect={toggleSelect}
+                privacyMode={privacyMode}
+              />
+              {/* Funding Source Selector — only for investment properties */}
+              {(p.type === 'investment' || p.property_type === 'IP') && (
+                <div className="rounded-b-xl border border-t-0 border-primary/20 bg-card/60 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold shrink-0">Funding Source:</span>
+                    {[
+                      { key: 'offset',           label: 'Offset Only' },
+                      { key: 'savings',          label: 'Savings Only' },
+                      { key: 'offset+savings',   label: 'Offset + Savings' },
+                      { key: 'sell-stocks',      label: 'Sell Stocks %' },
+                      { key: 'sell-crypto',      label: 'Sell Crypto %' },
+                      { key: 'equity-release',   label: 'Equity Release' },
+                      { key: 'combination',      label: 'Combination' },
+                    ].map(opt => (
+                      <button
+                        key={opt.key}
+                        onClick={() => setFundingSource(prev => ({ ...prev, [p.id]: opt.key }))}
+                        className={`px-2.5 py-1 text-[10px] rounded-full border transition-all font-medium ${
+                          (fundingSource[p.id] ?? 'offset+savings') === opt.key
+                            ? 'border-primary bg-primary/15 text-primary'
+                            : 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                    <span className="text-[10px] text-muted-foreground ml-auto">
+                      Selected: <span className="text-primary font-medium">{fundingSource[p.id] ?? 'Offset + Savings'}</span>
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}

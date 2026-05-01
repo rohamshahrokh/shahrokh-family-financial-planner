@@ -42,7 +42,7 @@ export default function ReportsPage() {
 
   const snap = snapshot ?? {};
 
-  const totalAssets = safeNum(snap.ppor) + safeNum(snap.cash) + safeNum(snap.super_balance) + safeNum(snap.stocks) + safeNum(snap.crypto) + safeNum(snap.cars) + safeNum(snap.iran_property);
+  const totalAssets = safeNum(snap.ppor) + safeNum(snap.cash) + safeNum(snap.offset_balance) + safeNum(snap.super_balance) + safeNum(snap.stocks) + safeNum(snap.crypto) + safeNum(snap.cars) + safeNum(snap.iran_property);
   const totalLiabilities = safeNum(snap.mortgage) + safeNum(snap.other_debts);
   const netWorth = totalAssets - totalLiabilities;
   const surplus = safeNum(snap.monthly_income) - safeNum(snap.monthly_expenses);
@@ -67,7 +67,7 @@ export default function ReportsPage() {
   const projection = cashEngineOut?.annual ?? [];
 
   const assetData = [
-    { name: 'PPOR', value: safeNum(snap.ppor) }, { name: 'Cash', value: safeNum(snap.cash) },
+    { name: 'PPOR', value: safeNum(snap.ppor) }, { name: 'Cash', value: safeNum(snap.cash) + safeNum(snap.offset_balance) },
     { name: 'Super', value: safeNum(snap.super_balance) }, { name: 'Cars', value: safeNum(snap.cars) },
     { name: 'Iran Property', value: safeNum(snap.iran_property) },
   ].filter(d => d.value > 0);

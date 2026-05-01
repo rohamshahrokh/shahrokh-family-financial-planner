@@ -133,6 +133,7 @@ export default function TimelinePage() {
   const snap = useMemo(() => ({
     ppor:             safeNum(snapshot?.ppor)             || 1510000,
     cash:             safeNum(snapshot?.cash)             || 220000,
+    offset_balance:   safeNum(snapshot?.offset_balance),
     super_balance:    safeNum(snapshot?.super_balance)    || 85000,
     stocks:           safeNum(snapshot?.stocks),
     crypto:           safeNum(snapshot?.crypto),
@@ -164,6 +165,18 @@ export default function TimelinePage() {
   const fa = useForecastAssumptions();
   const plannedStockTx = useMemo(() => stockTransactions.filter((t: any) => t.status === 'planned'), [stockTransactions]);
   const plannedCryptoTx = useMemo(() => cryptoTransactions.filter((t: any) => t.status === 'planned'), [cryptoTransactions]);
+
+  // ── Live portfolio values from holdings (same method as dashboard) ─────────
+  const stocksTotal = useMemo(
+    () => stocks.reduce((s: number, st: any) => s + safeNum(st.current_holding) * safeNum(st.current_price), 0),
+    [stocks]
+  );
+  const cryptoTotal = useMemo(
+    () => cryptos.reduce((s: number, c: any) => s + safeNum(c.current_holding) * safeNum(c.current_price), 0),
+    [cryptos]
+  );
+  const liveStocks = stocksTotal > 0 ? stocksTotal : snap.stocks;
+  const liveCrypto = cryptoTotal > 0 ? cryptoTotal : snap.crypto;
 
   // ── NG summary for real cash engine
   const ngSummary = useMemo<NGSummary>(() =>
@@ -198,9 +211,12 @@ export default function TimelinePage() {
       ngRefundMode:        'lump-sum',
       ngAnnualBenefit:     ngSummary.totalAnnualTaxBenefit,
       annualSalaryIncome:  safeNum(snap.monthly_income) * 12,
+      // Live portfolio values — from holdings table (same as dashboard)
+      liveStocksValue:     liveStocks,
+      liveCryptoValue:     liveCrypto,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngSummary.totalAnnualTaxBenefit]
+    [snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngSummary.totalAnnualTaxBenefit, liveStocks, liveCrypto]
   );
 
   // ── Monthly cash flow series ───────────────────────────────────────────────
@@ -254,7 +270,7 @@ export default function TimelinePage() {
   );
 
   // ── Summary KPIs ───────────────────────────────────────────────────────────
-  const currentNW = (snap.ppor + snap.cash + snap.super_balance + snap.stocks + snap.crypto + snap.cars + snap.iran_property)
+  const currentNW = (snap.ppor + snap.cash + snap.offset_balance + snap.super_balance + liveStocks + liveCrypto + snap.cars + snap.iran_property)
     - (snap.mortgage + snap.other_debts);
   const finalYear = projection[projection.length - 1];
   const nwIn10y = finalYear?.endNetWorth ?? 0;
@@ -487,6 +503,11 @@ export default function TimelinePage() {
             <p className="text-xs font-bold mb-3 text-muted-foreground uppercase tracking-wider">
               Cash Flow ({view === 'monthly' ? 'Quarterly sample' : 'Annual'})
             </p>
+            {cashFlowChartData.length === 0 ? (
+              <div className="flex items-center justify-center h-[300px] text-muted-foreground text-xs">
+                Loading cash flow data…
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={cashFlowChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -503,6 +524,7 @@ export default function TimelinePage() {
                 <Line type="monotone" dataKey="Net Cash Flow" stroke="hsl(43,85%,55%)" strokeWidth={2.5} dot={false} strokeDasharray={view === 'monthly' ? undefined : "5 2"} />
               </LineChart>
             </ResponsiveContainer>
+            )}
           </div>
         )}
 

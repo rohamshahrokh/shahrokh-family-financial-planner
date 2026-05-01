@@ -268,6 +268,7 @@ function FireTracker({ snap, stocks, crypto }: { snap: Record<string, number>; s
 
     const currentInvestable =
       safeNum(snap.cash) +
+      safeNum(snap.offset_balance) +
       safeNum(snap.super_balance) +
       safeNum(snap.stocks) +
       safeNum(snap.crypto) +
@@ -768,6 +769,7 @@ function NetWorthSimulator({ snap }: { snap: Record<string, number> }) {
   const baseNW =
     safeNum(snap.ppor) +
     safeNum(snap.cash) +
+    safeNum(snap.offset_balance) +
     safeNum(snap.super_balance) +
     safeNum(snap.stocks) +
     safeNum(snap.crypto) +
@@ -1200,7 +1202,7 @@ function EmergencyScore({ snap }: { snap: Record<string, number> }) {
   const [incomeStreams, setIncomeStreams] = useState(1);
 
   const calc = useMemo(() => {
-    const liquidAssets = safeNum(snap.cash);
+    const liquidAssets = safeNum(snap.cash) + safeNum(snap.offset_balance);
     const monthlyExpenses = safeNum(snap.monthly_expenses);
     const monthlyDebtPayments =
       safeNum(snap.mortgage) / 12 + safeNum(snap.other_debts) * 0.1;
@@ -1494,7 +1496,7 @@ function PropertyExpansion({ snap }: { snap: Record<string, number> }) {
   const [useQldStamp, setUseQldStamp] = useState<string>("yes");
   const monthlySurplus = safeNum(snap.monthly_income) - safeNum(snap.monthly_expenses);
   const pporEquity = safeNum(snap.ppor) - safeNum(snap.mortgage);
-  const cash = safeNum(snap.cash);
+  const cash = safeNum(snap.cash) + safeNum(snap.offset_balance);
 
   const lvrScenarios = [80, 85, 90];
 
@@ -1652,6 +1654,7 @@ function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, nu
 
   const investableAssets =
     safeNum(snap.cash) +
+    safeNum(snap.offset_balance) +
     safeNum(snap.super_balance) +
     safeNum(snap.stocks) +
     safeNum(snap.crypto) +
@@ -2016,7 +2019,7 @@ function HiddenMoney({ snap, expenses }: { snap: Record<string, number>; expense
 
     // 4. Dead cash (above 6-month buffer)
     const buffer6Month = safeNum(snap.monthly_expenses) * 6;
-    const deadCash = Math.max(0, safeNum(snap.cash) - buffer6Month);
+    const deadCash = Math.max(0, safeNum(snap.cash) + safeNum(snap.offset_balance) - buffer6Month);
     if (deadCash > 10000) {
       const lostMonthly = (deadCash * 0.04) / 12;
       result.push({
@@ -2241,6 +2244,7 @@ function AICoach({
   const netWorth =
     safeNum(snap.ppor) +
     safeNum(snap.cash) +
+    safeNum(snap.offset_balance) +
     safeNum(snap.super_balance) +
     safeNum(snap.stocks) +
     safeNum(snap.crypto) +
@@ -2269,6 +2273,7 @@ function AICoach({
 
   const investableAssets =
     safeNum(snap.cash) +
+    safeNum(snap.offset_balance) +
     safeNum(snap.super_balance) +
     safeNum(snap.stocks) +
     safeNum(snap.crypto) +
@@ -2554,6 +2559,7 @@ export default function WealthStrategyPage() {
     return {
       ppor: safeNum(s.ppor),
       cash: safeNum(s.cash),
+      offset_balance: safeNum(s.offset_balance),
       super_balance: safeNum(s.super_balance),
       stocks: safeNum(s.stocks),
       crypto: safeNum(s.crypto),
