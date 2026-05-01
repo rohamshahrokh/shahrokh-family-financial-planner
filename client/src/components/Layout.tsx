@@ -157,10 +157,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = role === "admin";
 
-  // Track which accordion sections are open
-  const initialOpen = getActiveStep(location, isAdmin);
+  // Track which accordion sections are open — all open by default for discoverability
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    [initialOpen]: true,
+    snapshot: true,
+    strategy: true,
+    forecast: false,
+    action: false,
   });
 
   // Auto-open the section that contains the active route

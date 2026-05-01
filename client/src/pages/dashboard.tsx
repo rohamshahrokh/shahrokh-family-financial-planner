@@ -1127,10 +1127,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <BestMoveCard />
-
           <Link href={bestMoveHref}>
-            <button className="ecc-bm-cta">Take Action →</button>
+            <button className="ecc-bm-cta" style={{marginTop: 12}}>Take Action →</button>
           </Link>
         </div>
       </div>
