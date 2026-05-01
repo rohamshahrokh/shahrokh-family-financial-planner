@@ -984,7 +984,7 @@ export default function DashboardPage() {
         </div>
 
         {/* cash projection cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+        <div className="grid grid-cols-2 gap-3 mb-3">
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Current Cash</div>
             <div className="text-lg font-bold text-foreground tabular-nums">{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</div>
@@ -996,15 +996,6 @@ export default function DashboardPage() {
             </div>
             <div className="text-xs text-muted-foreground mt-0.5">
               {nextPropEvent ? nextPropEvent.monthKey : "—"}
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Emergency Buffer</div>
-            <div className={`text-sm font-bold ${(snap.cash + snap.offset_balance) >= snap.monthly_expenses * 3 ? "text-emerald-400" : "text-red-400"}`}>
-              {(snap.cash + snap.offset_balance) >= snap.monthly_expenses * 3 ? "Buffer healthy" : "Buffer low"}
-            </div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              ${Math.round(snap.monthly_expenses * 3 / 1000)}k reserve target
             </div>
           </div>
         </div>
@@ -1064,10 +1055,10 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          WEALTH HEALTH CARDS (8 cards)
+          WEALTH HEALTH CARDS (6 cards — paired evenly on mobile & desktop)
           ═════════════════════════════════════════════════════════════════ */}
       <div className="px-4 pb-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {wealthCards.map((card) => (
             <div
               key={card.label}
@@ -1083,6 +1074,17 @@ export default function DashboardPage() {
               <div className="text-xs text-muted-foreground mt-0.5">{card.sub}</div>
             </div>
           ))}
+          {/* Emergency Buffer — moved here so it pairs with Hidden Money on mobile */}
+          <div className={`rounded-xl border p-4 bg-card ${(snap.cash + snap.offset_balance) < snap.monthly_expenses * 3 ? "border-red-500/30" : "border-border"}`}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Emergency Buffer</span>
+              <Shield className={`w-3.5 h-3.5 ${(snap.cash + snap.offset_balance) < snap.monthly_expenses * 3 ? "text-red-400" : "text-muted-foreground"}`} />
+            </div>
+            <div className={`text-lg font-bold ${(snap.cash + snap.offset_balance) >= snap.monthly_expenses * 3 ? "text-emerald-400" : "text-red-400"}`}>
+              {(snap.cash + snap.offset_balance) >= snap.monthly_expenses * 3 ? "Healthy" : "Low"}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">${Math.round(snap.monthly_expenses * 3 / 1000)}k reserve target</div>
+          </div>
         </div>
       </div>
 
