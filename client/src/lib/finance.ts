@@ -413,7 +413,6 @@ export function projectNetWorth(params: {
   for (const m of _cashSeries) {
     _cashByYear.set(m.year, m.cumulativeBalance);
   }
-
   // ── Initialise mutable state ──────────────────────────────────────────────
   let ppor          = safeNum(s.ppor);
   // Include offset_balance in starting cash so year-0 NW and projections are correct.
@@ -465,7 +464,12 @@ export function projectNetWorth(params: {
       const l = safeNum(p.loan_amount);
       return sum + Math.max(0, v - l);
     }, 0);
-  let prevCash    = safeNum(s.cash) + safeNum(s.offset_balance);  // tracks prior-year closing cash
+  // prevCash: use the current-year closing balance from the ledger if available.
+  // This captures all 2026 events (IP deposit, crypto, stocks) so year-1 savings
+  // reflects the true delta from post-purchase cash, not the pre-purchase snapshot.
+  const _currentYearCash = _cashByYear.get(currentYear);
+  let prevCash = _currentYearCash != null ? _currentYearCash
+                                          : safeNum(s.cash) + safeNum(s.offset_balance);
   let prevEndNW = (
     ppor + cash + superRoham + superFara + stockVal + cryptoVal + cars * 0.8 + iranProp + _initPropEquity
   ) - (mortgage + otherDebts);
@@ -905,9 +909,12 @@ export function buildCashFlowSeries(params: {
   ngAnnualBenefit?: number;            // pre-calculated total NG refund per year (from calcNegativeGearing)
   annualSalaryIncome?: number;         // gross annual salary for tax calc display
 }): CashFlowMonth[] {
-  const START_YEAR = 2025;
-  const START_MONTH = 1;
-  const END_YEAR = 2035;
+  // Start from the current calendar year so we don't double-count past income.
+  // The opening cumulativeBalance already reflects everything that happened before today.
+  const NOW = new Date();
+  const START_YEAR = NOW.getFullYear();
+  const START_MONTH = NOW.getMonth() + 1; // current month — don't re-run past months
+  const END_YEAR = START_YEAR + 9;
   const END_MONTH = 12;
 
   const inflationRate = (params.inflationRate ?? 3) / 100;
