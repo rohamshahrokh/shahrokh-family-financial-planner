@@ -36,6 +36,7 @@ import {
 } from "recharts";
 import {
   TrendingUp,
+  TrendingDown,
   DollarSign,
   Home,
   CreditCard,
@@ -59,6 +60,10 @@ import {
   ChevronDown,
   ChevronRight,
   Zap,
+  Maximize2,
+  ArrowUpRight,
+  ArrowDownRight,
+  Minus,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -810,128 +815,197 @@ export default function DashboardPage() {
           ═══════════════════════════════════════════════════════════════════ */}
       <div className="core-grid">
 
-        {/* 1 · TODAY */}
+        {/* ─── 1 · TODAY — executive snapshot ─────────────────────────────── */}
         <div className="core-card core-today">
           <div className="core-card-header">
             <span className="core-step-num today-num">1</span>
             <span className="core-step-label">Today</span>
+            {surplus >= 0
+              ? <ArrowUpRight className="cc-trend-icon positive" />
+              : <ArrowDownRight className="cc-trend-icon negative" />}
           </div>
-          <div className="core-primary">
-            <div className="core-big-value">{maskValue(formatCurrency(netWorth, true), privacyMode)}</div>
-            <div className="core-big-label">Net Worth</div>
+
+          {/* Primary KPI */}
+          <div className="cc-primary-row">
+            <div>
+              <div className="cc-big-num">{maskValue(formatCurrency(netWorth, true), privacyMode)}</div>
+              <div className="cc-big-label">Net Worth</div>
+            </div>
+            <div className={`cc-delta-badge ${surplus >= 0 ? "up" : "down"}`}>
+              {surplus >= 0 ? "+" : ""}{maskValue(formatCurrency(surplus, true), privacyMode)}/mo
+            </div>
           </div>
-          <div className="core-stats">
-            <div className="core-stat">
-              <span className="core-stat-label">Cash</span>
-              <span className="core-stat-value positive">{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</span>
+
+          {/* Data rows */}
+          <div className="cc-rows">
+            <div className="cc-row">
+              <span className="cc-row-label">Cash + Offset</span>
+              <span className="cc-row-val positive">{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</span>
             </div>
-            <div className="core-stat">
-              <span className="core-stat-label">Debt</span>
-              <span className="core-stat-value negative">{maskValue(formatCurrency(totalLiabilities, true), privacyMode)}</span>
+            <div className="cc-row">
+              <span className="cc-row-label">Total Debt</span>
+              <span className="cc-row-val negative">{maskValue(formatCurrency(totalLiabilities, true), privacyMode)}</span>
             </div>
-            <div className="core-stat">
-              <span className="core-stat-label">Surplus/mo</span>
-              <span className={`core-stat-value ${surplus >= 0 ? "positive" : "negative"}`}>
+            <div className="cc-row">
+              <span className="cc-row-label">Monthly Surplus</span>
+              <span className={`cc-row-val ${surplus >= 0 ? "positive" : "negative"}`}>
                 {maskValue(formatCurrency(surplus, true), privacyMode)}
               </span>
             </div>
-          </div>
-          <div className="core-bar-row">
-            <div className="core-bar-label">Savings Rate</div>
-            <div className="core-bar-track">
-              <div className="core-bar-fill" style={{ width: `${Math.min(100, savingsRate)}%`, background: savingsRate >= 20 ? "hsl(145,55%,42%)" : "hsl(42,80%,52%)" }} />
+            <div className="cc-row">
+              <span className="cc-row-label">Assets</span>
+              <span className="cc-row-val">{maskValue(formatCurrency(totalAssets, true), privacyMode)}</span>
             </div>
-            <span className="core-bar-pct">{savingsRate.toFixed(0)}%</span>
+          </div>
+
+          {/* Savings rate bar */}
+          <div className="cc-bar-section">
+            <div className="cc-bar-header">
+              <span className="cc-bar-label">Savings Rate</span>
+              <span className={`cc-bar-pct ${savingsRate >= 20 ? "positive" : "gold"}`}>{savingsRate.toFixed(0)}%</span>
+            </div>
+            <div className="cc-bar-track">
+              <div className="cc-bar-fill" style={{ width: `${Math.min(100, savingsRate)}%`, background: savingsRate >= 20 ? "hsl(145,55%,42%)" : "hsl(42,80%,52%)" }} />
+              <div className="cc-bar-target" style={{ left: "20%" }} title="20% target" />
+            </div>
           </div>
         </div>
 
-        {/* 2 · PLAN */}
+        {/* ─── 2 · PLAN — mission & milestones ────────────────────────────── */}
         <div className="core-card core-plan">
           <div className="core-card-header">
             <span className="core-step-num plan-num">2</span>
             <span className="core-step-label">Plan</span>
           </div>
-          <div className="core-primary">
-            <div className="core-strategy-text">
-              {snap.cash + snap.offset_balance > 150000
-                ? "Build deposit for next IP"
-                : surplus > 3000
-                  ? "Maximise DCA & super contributions"
-                  : "Reduce monthly expenses first"}
-            </div>
-            <div className="core-big-label">Active strategy</div>
+
+          {/* Mission */}
+          <div className="cc-mission">
+            {snap.cash + snap.offset_balance > 150000
+              ? "Build deposit for next IP"
+              : surplus > 3000
+                ? "Maximise DCA & super"
+                : "Cut expenses first"}
           </div>
-          <div className="core-stats">
-            <div className="core-stat">
-              <span className="core-stat-label">IP Readiness</span>
-              <span className="core-stat-value">{wealthCards.find(c => c.label === "IP Readiness")?.value ?? "—"}</span>
-            </div>
-            <div className="core-stat">
-              <span className="core-stat-label">Emergency</span>
-              <span className={`core-stat-value ${(wealthCards.find(c => c.label === "Emergency")?.alert) ? "negative" : "positive"}`}>
-                {wealthCards.find(c => c.label === "Emergency")?.value ?? "—"}
-              </span>
-            </div>
-            <div className="core-stat">
-              <span className="core-stat-label">Passive Inc</span>
-              <span className="core-stat-value">{maskValue(formatCurrency(passiveIncome, true), privacyMode)}/yr</span>
-            </div>
-          </div>
-          <div className="core-bar-row">
-            <div className="core-bar-label">IP Deposit Progress</div>
-            <div className="core-bar-track">
-              {(() => {
-                const pct = parseInt(wealthCards.find(c => c.label === "IP Readiness")?.value ?? "0");
-                return <div className="core-bar-fill" style={{ width: `${Math.min(100, pct)}%`, background: "hsl(42,80%,52%)" }} />;
-              })()}
-            </div>
-            <span className="core-bar-pct">{wealthCards.find(c => c.label === "IP Readiness")?.value ?? "0%"}</span>
-          </div>
+
+          {/* Deposit progress ring + pct */}
+          {(() => {
+            const ipPct = parseInt(wealthCards.find(c => c.label === "IP Readiness")?.value ?? "0");
+            const targetIP = 750000;
+            const depositNeeded = targetIP * 0.235;
+            const monthsLeft = surplus > 0
+              ? Math.ceil(Math.max(0, depositNeeded - (snap.cash + snap.offset_balance) * 0.7) / surplus)
+              : 99;
+            const goalYear = new Date().getFullYear() + Math.ceil(monthsLeft / 12);
+            return (
+              <div className="cc-plan-body">
+                <div className="cc-ring-wrap">
+                  <svg viewBox="0 0 44 44" className="cc-ring">
+                    <circle cx="22" cy="22" r="18" fill="none" stroke="hsl(var(--border))" strokeWidth="4"/>
+                    <circle cx="22" cy="22" r="18" fill="none" stroke="hsl(42,80%,52%)" strokeWidth="4"
+                      strokeDasharray={`${Math.min(100, ipPct) * 1.131} 113.1`}
+                      strokeLinecap="round"
+                      transform="rotate(-90 22 22)"
+                    />
+                    <text x="22" y="26" textAnchor="middle" fontSize="9" fontWeight="700" fill="hsl(42,85%,65%)">{ipPct}%</text>
+                  </svg>
+                  <span className="cc-ring-label">IP Deposit</span>
+                </div>
+                <div className="cc-plan-rows">
+                  <div className="cc-row">
+                    <span className="cc-row-label">Months to goal</span>
+                    <span className="cc-row-val gold">{monthsLeft >= 99 ? "—" : `${monthsLeft}mo`}</span>
+                  </div>
+                  <div className="cc-row">
+                    <span className="cc-row-label">Goal year</span>
+                    <span className="cc-row-val gold">{monthsLeft >= 99 ? "—" : goalYear}</span>
+                  </div>
+                  <div className="cc-row">
+                    <span className="cc-row-label">Monthly contrib.</span>
+                    <span className="cc-row-val">{maskValue(formatCurrency(Math.max(0, surplus), true), privacyMode)}</span>
+                  </div>
+                  <div className="cc-row">
+                    <span className="cc-row-label">Emergency fund</span>
+                    <span className={`cc-row-val ${wealthCards.find(c => c.label === "Emergency")?.alert ? "negative" : "positive"}`}>
+                      {wealthCards.find(c => c.label === "Emergency")?.sub ?? "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
-        {/* 3 · FUTURE */}
+        {/* ─── 3 · FUTURE — projections ───────────────────────────────────── */}
         <div className="core-card core-future">
           <div className="core-card-header">
             <span className="core-step-num future-num">3</span>
             <span className="core-step-label">Future</span>
           </div>
-          <div className="core-primary">
-            <div className="core-big-value forecast">{maskValue(formatCurrency(year10NW, true), privacyMode)}</div>
-            <div className="core-big-label">Projected 2035</div>
+
+          {/* Primary: 2035 projection */}
+          <div className="cc-primary-row">
+            <div>
+              <div className="cc-big-num forecast">{maskValue(formatCurrency(year10NW, true), privacyMode)}</div>
+              <div className="cc-big-label">2035 Net Worth</div>
+            </div>
+            {(() => {
+              const pct = netWorth > 0 ? Math.round(((year10NW - netWorth) / netWorth) * 100) : 0;
+              return <div className="cc-delta-badge up forecast-badge">+{pct}%</div>;
+            })()}
           </div>
-          <div className="core-stats">
-            <div className="core-stat">
-              <span className="core-stat-label">2030 NW</span>
-              <span className="core-stat-value forecast">
-                {maskValue(formatCurrency(projection[4]?.endNetWorth ?? netWorth, true), privacyMode)}
-              </span>
+
+          <div className="cc-rows">
+            <div className="cc-row">
+              <span className="cc-row-label">2030 NW</span>
+              <span className="cc-row-val forecast">{maskValue(formatCurrency(projection[4]?.endNetWorth ?? netWorth, true), privacyMode)}</span>
             </div>
-            <div className="core-stat">
-              <span className="core-stat-label">FIRE Year</span>
-              <span className="core-stat-value forecast">
-                ~{wealthCards.find(c => c.label === "FIRE Age")?.value?.replace("~", "") ?? "—"}
-              </span>
+            <div className="cc-row">
+              <span className="cc-row-label">FIRE Age</span>
+              <span className="cc-row-val forecast">{wealthCards.find(c => c.label === "FIRE Age")?.value ?? "—"}</span>
             </div>
-            <div className="core-stat">
-              <span className="core-stat-label">Super @60</span>
-              <span className="core-stat-value forecast">
-                {maskValue(formatCurrency(superAt60, true), privacyMode)}
-              </span>
+            <div className="cc-row">
+              <span className="cc-row-label">Super @60</span>
+              <span className="cc-row-val forecast">{maskValue(formatCurrency(superAt60, true), privacyMode)}</span>
             </div>
           </div>
-          {forecastMode === "monte-carlo" && monteCarloResult && (
-            <div className="core-mc-strip">
-              <span className="core-mc-label">MC P10</span>
-              <span className="core-mc-val negative">{maskValue(formatCurrency(monteCarloResult.p10, true), privacyMode)}</span>
-              <span className="core-mc-label">Median</span>
-              <span className="core-mc-val forecast">{maskValue(formatCurrency(monteCarloResult.median, true), privacyMode)}</span>
-              <span className="core-mc-label">P90</span>
-              <span className="core-mc-val positive">{maskValue(formatCurrency(monteCarloResult.p90, true), privacyMode)}</span>
-            </div>
-          )}
+
+          {/* Confidence / scenario strip */}
+          <div className="cc-scenario-strip">
+            {forecastMode === "monte-carlo" && monteCarloResult ? (
+              <>
+                <div className="cc-scenario worst">
+                  <span className="cc-scenario-label">Worst</span>
+                  <span className="cc-scenario-val">{maskValue(formatCurrency(monteCarloResult.p10, true), privacyMode)}</span>
+                </div>
+                <div className="cc-scenario base">
+                  <span className="cc-scenario-label">Base</span>
+                  <span className="cc-scenario-val">{maskValue(formatCurrency(monteCarloResult.median, true), privacyMode)}</span>
+                </div>
+                <div className="cc-scenario best">
+                  <span className="cc-scenario-label">Best</span>
+                  <span className="cc-scenario-val">{maskValue(formatCurrency(monteCarloResult.p90, true), privacyMode)}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="cc-scenario worst">
+                  <span className="cc-scenario-label">Conservative</span>
+                  <span className="cc-scenario-val">{maskValue(formatCurrency(Math.round(year10NW * 0.72), true), privacyMode)}</span>
+                </div>
+                <div className="cc-scenario base">
+                  <span className="cc-scenario-label">Base</span>
+                  <span className="cc-scenario-val forecast">{maskValue(formatCurrency(year10NW, true), privacyMode)}</span>
+                </div>
+                <div className="cc-scenario best">
+                  <span className="cc-scenario-label">Upside</span>
+                  <span className="cc-scenario-val positive">{maskValue(formatCurrency(Math.round(year10NW * 1.28), true), privacyMode)}</span>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
-        {/* 4 · ACTION */}
+        {/* ─── 4 · ACTION — best move summary ─────────────────────────────── */}
         <div className="core-card core-action">
           <div className="core-card-header">
             <span className="core-step-num action-num">4</span>
@@ -954,19 +1028,26 @@ export default function DashboardPage() {
         <div className="main-left">
 
           {/* A — Net Worth Projection */}
-          <div className="chart-panel">
+          <div className="chart-panel chart-panel-expandable">
             <div className="chart-panel-header">
               <div>
                 <h3 className="chart-panel-title">Wealth Projection</h3>
                 <p className="chart-panel-sub">Net worth trajectory 2026 → 2036</p>
               </div>
-              <div className="chart-legend">
-                <span className="legend-dot" style={{ background: "hsl(260,60%,62%)" }} />
-                <span className="legend-label">Net Worth</span>
-                <span className="legend-dot" style={{ background: "hsl(145,55%,42%)", opacity: 0.7 }} />
-                <span className="legend-label">Assets</span>
-                <span className="legend-dot" style={{ background: "hsl(5,70%,52%)", opacity: 0.7 }} />
-                <span className="legend-label">Debt</span>
+              <div className="chart-panel-actions">
+                <div className="chart-legend">
+                  <span className="legend-dot" style={{ background: "hsl(260,60%,62%)" }} />
+                  <span className="legend-label">Net Worth</span>
+                  <span className="legend-dot" style={{ background: "hsl(145,55%,42%)", opacity: 0.7 }} />
+                  <span className="legend-label">Assets</span>
+                  <span className="legend-dot" style={{ background: "hsl(5,70%,52%)", opacity: 0.7 }} />
+                  <span className="legend-label">Debt</span>
+                </div>
+                <Link href="/reports">
+                  <button className="chart-expand-btn" title="Open full Wealth Projection">
+                    <Maximize2 className="w-3.5 h-3.5" />
+                  </button>
+                </Link>
               </div>
             </div>
             <ResponsiveContainer width="100%" height={230}>
@@ -992,33 +1073,80 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           </div>
 
-          {/* B — Cashflow Forecast */}
-          <div className="chart-panel">
+          {/* B — Cashflow Intelligence (premium multi-line area) */}
+          <div className="chart-panel chart-panel-expandable">
             <div className="chart-panel-header">
               <div>
-                <h3 className="chart-panel-title">Cashflow Forecast</h3>
-                <p className="chart-panel-sub">{cashFlowView === "annual" ? "Annual surplus & balance" : "Monthly detail"}</p>
+                <h3 className="chart-panel-title">Cashflow Intelligence</h3>
+                <p className="chart-panel-sub">
+                  {cashFlowView === "annual" ? "Annual income, expenses & balance" : "Monthly cashflow breakdown"}
+                </p>
               </div>
-              {ngSummary.totalAnnualTaxBenefit > 0 && (
-                <span className="ng-badge">
-                  NG Benefit {maskValue(formatCurrency(ngSummary.totalAnnualTaxBenefit, true), privacyMode)}/yr
+              <div className="chart-panel-actions">
+                {ngSummary.totalAnnualTaxBenefit > 0 && (
+                  <span className="ng-badge">
+                    NG {maskValue(formatCurrency(ngSummary.totalAnnualTaxBenefit, true), privacyMode)}/yr
+                  </span>
+                )}
+                <Link href="/reports">
+                  <button className="chart-expand-btn" title="Open full Cashflow Intelligence">
+                    <Maximize2 className="w-3.5 h-3.5" />
+                  </button>
+                </Link>
+              </div>
+            </div>
+
+            {/* Chart overlay legend */}
+            <div className="cf-legend">
+              {[
+                { color: "hsl(145,55%,42%)",  label: "Income" },
+                { color: "hsl(5,65%,52%)",    label: "Expenses" },
+                { color: "hsl(210,70%,55%)",  label: "Net CF" },
+                { color: "hsl(260,60%,62%)",  label: "Balance" },
+              ].map(({ color, label }) => (
+                <span key={label} className="cf-legend-item">
+                  <span className="cf-legend-dot" style={{ background: color }} />
+                  <span className="cf-legend-label">{label}</span>
+                </span>
+              ))}
+              {settlementAnnotations.length > 0 && (
+                <span className="cf-legend-item">
+                  <span className="cf-legend-dot" style={{ background: "hsl(42,80%,52%)", borderRadius: 0 }} />
+                  <span className="cf-legend-label">IP Settlement</span>
                 </span>
               )}
             </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={masterCFData} margin={{ top: 4, right: 12, left: 0, bottom: 0 }} barCategoryGap="35%">
-                <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" strokeOpacity={0.35} vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={(v) => `$${(v/1_000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={40} axisLine={false} tickLine={false} />
+
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={masterCFData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="cfIncome" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="hsl(145,55%,42%)" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="hsl(145,55%,42%)" stopOpacity={0.02} />
+                  </linearGradient>
+                  <linearGradient id="cfExpenses" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="hsl(5,65%,52%)" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="hsl(5,65%,52%)" stopOpacity={0.01} />
+                  </linearGradient>
+                  <linearGradient id="cfBalance" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="hsl(260,60%,62%)" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="hsl(260,60%,62%)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" strokeOpacity={0.3} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis tickFormatter={(v) => `$${(v/1_000).toFixed(0)}k`} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={42} axisLine={false} tickLine={false} />
                 <Tooltip content={<CashflowTooltip />} />
-                <Bar dataKey="income"   name="Income"    fill="hsl(145,55%,42%)" radius={[3,3,0,0]} />
-                <Bar dataKey="expenses" name="Expenses"  fill="hsl(5,65%,48%)"   radius={[3,3,0,0]} opacity={0.85} />
-                <Bar dataKey="netCF"    name="Net CF"    fill="hsl(210,70%,55%)" radius={[3,3,0,0]} />
+                <Area type="monotone" dataKey="income"   name="Income"       stroke="hsl(145,55%,42%)" strokeWidth={2}   fill="url(#cfIncome)"   dot={false} />
+                <Area type="monotone" dataKey="expenses" name="Expenses"     stroke="hsl(5,65%,52%)"  strokeWidth={1.5} fill="url(#cfExpenses)" dot={false} />
+                <Area type="monotone" dataKey="netCF"    name="Net CF"       stroke="hsl(210,70%,55%)" strokeWidth={2}   fill="none" strokeDasharray="5 3" dot={false} />
+                <Area type="monotone" dataKey="balance"  name="Cash Balance" stroke="hsl(260,60%,62%)" strokeWidth={1.5} fill="url(#cfBalance)"  dot={false} />
                 {settlementAnnotations.map((ann) => (
-                  <ReferenceLine key={ann.label} x={ann.label} stroke="hsl(42,80%,52%)" strokeDasharray="3 3"
-                    label={{ value: "IP", position: "top", fontSize: 9, fill: "hsl(42,80%,52%)" }} />
+                  <ReferenceLine key={ann.label} x={ann.label} stroke="hsl(42,80%,52%)" strokeDasharray="3 3" strokeWidth={1.5}
+                    label={{ value: "↓ IP", position: "top", fontSize: 9, fill: "hsl(42,85%,65%)" }}
+                  />
                 ))}
-              </BarChart>
+              </AreaChart>
             </ResponsiveContainer>
           </div>
 
