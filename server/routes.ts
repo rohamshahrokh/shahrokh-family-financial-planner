@@ -2,22 +2,87 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 
+// ─── Supabase helpers (server-side) ────────────────────────────────────────────
+// These mirror the client-side supabaseClient.ts so the server can also read/write
+// the sf_snapshot table directly — enabling cold-start hydration and dual writes.
+const SUPABASE_URL = "https://uoraduyyxhtzixcsaidg.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVvcmFkdXl5eGh0eml4Y3NhaWRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTgsImV4cCI6MjA5MjY5NzAxOH0.qNrqDlG4j0lfGKDsmGyywP8DZeMurB02UWv4bdevW7c";
+const SNAPSHOT_ID  = "shahrokh-family-main";
+const SB_HEADERS   = {
+  "apikey":        SUPABASE_KEY,
+  "Authorization": `Bearer ${SUPABASE_KEY}`,
+  "Content-Type":  "application/json",
+};
+
+async function sbGetSnapshot(): Promise<Record<string, any> | null> {
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/sf_snapshot?id=eq.${SNAPSHOT_ID}&limit=1`;
+    const res  = await fetch(url, { headers: SB_HEADERS });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as any[];
+    return rows?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function sbUpsertSnapshot(data: Record<string, any>): Promise<void> {
+  try {
+    const body = JSON.stringify({
+      id: SNAPSHOT_ID,
+      ...data,
+      updated_at: new Date().toISOString(),
+    });
+    await fetch(`${SUPABASE_URL}/rest/v1/sf_snapshot`, {
+      method:  "POST",
+      headers: { ...SB_HEADERS, "Prefer": "resolution=merge-duplicates,return=minimal" },
+      body,
+    });
+  } catch (err) {
+    console.warn("[server] Supabase snapshot upsert failed:", err);
+  }
+}
+
+// ─── Cold-start hydration ──────────────────────────────────────────────────────
+// On every server start, pull the real Supabase snapshot into SQLite.
+// This means after any redeploy / restart, user data is immediately restored
+// instead of falling back to hardcoded seed defaults.
+sbGetSnapshot()
+  .then(row => {
+    if (row) {
+      storage.updateSnapshot(row);
+      console.log("[server] ✔ SQLite hydrated from Supabase snapshot");
+    } else {
+      console.warn("[server] Supabase snapshot not found — using seed defaults");
+    }
+  })
+  .catch(err => console.warn("[server] Cold-start hydration error:", err));
+
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
-  
-  // ─── Financial Snapshot ────────────────────────────────────────────
+
+  // ─── Financial Snapshot ────────────────────────────────────────────────────
+  // Architecture: Supabase (sf_snapshot) is the source of truth.
+  //   GET  → serve from SQLite (pre-hydrated from Supabase on startup)
+  //   PUT  → write to SQLite (instant reactive) + Supabase (permanent)
+  //   POST → alias of PUT (upsert)
+
   app.get("/api/snapshot", (req, res) => {
     const data = storage.getSnapshot();
     res.json(data || {});
   });
-  
+
   app.put("/api/snapshot", (req, res) => {
+    // 1. Write to SQLite — makes all useQuery(["/api/snapshot"]) hooks react instantly
     const data = storage.updateSnapshot(req.body);
+    // 2. Write to Supabase — permanent, survives restart (fire-and-forget, don't block response)
+    sbUpsertSnapshot(req.body).catch(() => {});
     res.json(data);
   });
 
-  // POST alias for snapshot — same as PUT (upsert)
+  // POST alias for snapshot — same as PUT
   app.post("/api/snapshot", (req, res) => {
     const data = storage.updateSnapshot(req.body);
+    sbUpsertSnapshot(req.body).catch(() => {});
     res.json(data);
   });
 

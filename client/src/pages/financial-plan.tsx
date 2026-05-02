@@ -18,6 +18,7 @@
 import React, { useMemo, useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { localStore } from "@/lib/localStore";
 import { useHashLocation } from "wouter/use-hash-location";
 import { formatCurrency, safeNum } from "@/lib/finance";
 import SaveButton from "@/components/SaveButton";
@@ -233,6 +234,11 @@ export default function MyFinancialPlan() {
   }, []);
 
   // ── Save snapshot sections ──────────────────────────────────────────────────
+  // ARCHITECTURE: Financial Plan is the PRIMARY input source for the central ledger.
+  // Every save must write to BOTH:
+  //   1. SQLite via PUT /api/snapshot  → instant reactive update (all useQuery hooks refetch)
+  //   2. Supabase via localStore.updateSnapshot()  → permanent cloud storage (survives refresh/restart)
+  // The ledger reads from ['/api/snapshot'] which always reflects the latest state after invalidation.
   const saveSnapshot = useCallback(async (fields: Partial<SnapshotDraft>) => {
     // Convert string values to numbers for numeric fields
     const payload: Record<string, any> = {};
@@ -240,9 +246,20 @@ export default function MyFinancialPlan() {
       const n = parseFloat(String(v));
       payload[k] = isNaN(n) ? v : n;
     }
+
+    // 1. Save to SQLite (instant reactive update for all pages this session)
     await apiRequest("PUT", "/api/snapshot", payload);
+
+    // 2. Save to Supabase (permanent — survives server restart / page refresh)
+    //    Run in parallel after SQLite confirms, don't block the UI on it
+    localStore.updateSnapshot(payload).catch(err => {
+      console.warn("[FinancialPlan] Supabase sync failed (SQLite already saved):", err);
+    });
+
+    // 3. Invalidate all pages that read from ['/api/snapshot'] so they reflect changes immediately
     await qc.invalidateQueries({ queryKey: ["/api/snapshot"] });
-    toast({ title: "Saved Successfully", description: "Changes written to central ledger." });
+
+    toast({ title: "Saved Successfully", description: "Saved to ledger and cloud." });
   }, [qc, toast]);
 
   // Derived totals
