@@ -366,12 +366,12 @@ function BillForm({ form, onChange, onSubmit, onCancel, isEditing, isPending }: 
           <label className="text-xs text-muted-foreground mb-1 block">Bill Name *</label>
           <Input value={form.name} onChange={e => onChange("name", e.target.value)}
             placeholder="e.g. Bupa Private, Netflix, AGL Power"
-            className="bg-zinc-900 border-zinc-700 text-white" />
+            className="bg-input border-border text-foreground" />
         </div>
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Category</label>
           <Select value={form.category} onValueChange={v => onChange("category", v)}>
-            <SelectTrigger className="bg-zinc-900 border-zinc-700 text-white"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="bg-input border-border text-foreground"><SelectValue /></SelectTrigger>
             <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
           </Select>
         </div>
@@ -383,12 +383,12 @@ function BillForm({ form, onChange, onSubmit, onCancel, isEditing, isPending }: 
           <label className="text-xs text-muted-foreground mb-1 block">Amount ($)</label>
           <Input type="number" min="0" step="0.01" value={form.amount}
             onChange={e => onChange("amount", e.target.value)}
-            placeholder="0.00" className="bg-zinc-900 border-zinc-700 text-white" />
+            placeholder="0.00" className="bg-input border-border text-foreground" />
         </div>
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Frequency</label>
           <Select value={form.frequency} onValueChange={v => onChange("frequency", v)}>
-            <SelectTrigger className="bg-zinc-900 border-zinc-700 text-white"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="bg-input border-border text-foreground"><SelectValue /></SelectTrigger>
             <SelectContent>{FREQUENCIES.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent>
           </Select>
         </div>
@@ -400,13 +400,13 @@ function BillForm({ form, onChange, onSubmit, onCancel, isEditing, isPending }: 
           <label className="text-xs text-muted-foreground mb-1 block">Next Due Date</label>
           <Input type="date" value={form.next_due_date}
             onChange={e => onChange("next_due_date", e.target.value)}
-            className="bg-zinc-900 border-zinc-700 text-white" />
+            className="bg-input border-border text-foreground" />
         </div>
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Start Date</label>
           <Input type="date" value={form.start_date}
             onChange={e => onChange("start_date", e.target.value)}
-            className="bg-zinc-900 border-zinc-700 text-white" />
+            className="bg-input border-border text-foreground" />
         </div>
       </div>
 
@@ -423,7 +423,7 @@ function BillForm({ form, onChange, onSubmit, onCancel, isEditing, isPending }: 
             <label className="text-xs text-muted-foreground mb-1 block">Remind before due date</label>
             <div className="flex gap-2">
               <Select value={form.reminder_days} onValueChange={v => onChange("reminder_days", v)}>
-                <SelectTrigger className="bg-zinc-900 border-zinc-700 text-white flex-1"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="bg-input border-border text-foreground flex-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {REMINDER_OPTIONS.map(r => (
                     <SelectItem key={r} value={r}>
@@ -435,7 +435,7 @@ function BillForm({ form, onChange, onSubmit, onCancel, isEditing, isPending }: 
               {form.reminder_days === "custom" && (
                 <Input type="number" min="1" value={form.reminder_custom}
                   onChange={e => onChange("reminder_custom", e.target.value)}
-                  placeholder="Days" className="bg-zinc-900 border-zinc-700 text-white w-20" />
+                  placeholder="Days" className="bg-input border-border text-foreground w-20" />
               )}
             </div>
           </div>
@@ -456,7 +456,7 @@ function BillForm({ form, onChange, onSubmit, onCancel, isEditing, isPending }: 
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Overdue reminder</label>
             <Select value={form.overdue_reminder} onValueChange={v => onChange("overdue_reminder", v as OverduePolicy)}>
-              <SelectTrigger className="bg-zinc-900 border-zinc-700 text-white"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="bg-input border-border text-foreground"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="off">Off (default)</SelectItem>
                 <SelectItem value="once">Once only</SelectItem>
@@ -476,14 +476,14 @@ function BillForm({ form, onChange, onSubmit, onCancel, isEditing, isPending }: 
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Member</label>
           <Select value={form.member} onValueChange={v => onChange("member", v)}>
-            <SelectTrigger className="bg-zinc-900 border-zinc-700 text-white"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="bg-input border-border text-foreground"><SelectValue /></SelectTrigger>
             <SelectContent>{MEMBERS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
           </Select>
         </div>
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Priority</label>
           <Select value={form.priority} onValueChange={v => onChange("priority", v)}>
-            <SelectTrigger className="bg-zinc-900 border-zinc-700 text-white"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="bg-input border-border text-foreground"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="high">High (urgent individual alerts)</SelectItem>
               <SelectItem value="normal">Normal</SelectItem>
@@ -518,7 +518,7 @@ function BillForm({ form, onChange, onSubmit, onCancel, isEditing, isPending }: 
               <Input value={form.merchant_keywords}
                 onChange={e => onChange("merchant_keywords", e.target.value)}
                 placeholder="e.g. Bupa, bupa health, HBF"
-                className="bg-zinc-900 border-zinc-700 text-white" />
+                className="bg-input border-border text-foreground" />
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">
@@ -526,7 +526,7 @@ function BillForm({ form, onChange, onSubmit, onCancel, isEditing, isPending }: 
               </label>
               <Input type="number" min="0" max="20" value={form.match_tolerance_pct}
                 onChange={e => onChange("match_tolerance_pct", e.target.value)}
-                placeholder="5" className="bg-zinc-900 border-zinc-700 text-white" />
+                placeholder="5" className="bg-input border-border text-foreground" />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -535,14 +535,14 @@ function BillForm({ form, onChange, onSubmit, onCancel, isEditing, isPending }: 
               <Input value={form.payment_method}
                 onChange={e => onChange("payment_method", e.target.value)}
                 placeholder="e.g. Direct Debit, Credit Card"
-                className="bg-zinc-900 border-zinc-700 text-white" />
+                className="bg-input border-border text-foreground" />
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Notes</label>
               <Input value={form.notes}
                 onChange={e => onChange("notes", e.target.value)}
                 placeholder="Optional notes"
-                className="bg-zinc-900 border-zinc-700 text-white" />
+                className="bg-input border-border text-foreground" />
             </div>
           </div>
         </div>
@@ -1564,7 +1564,7 @@ export default function RecurringBillsPage() {
             <p className="text-sm text-zinc-400">{editDueDateOcc?.bill_name}</p>
             <Input type="date" value={editDueDateVal}
               onChange={e => setEditDueDateVal(e.target.value)}
-              className="bg-zinc-800 border-zinc-700 text-white" />
+              className="bg-input border-border text-foreground" />
             <div className="flex gap-3">
               <Button onClick={handleEditDueDateSave}
                 className="bg-emerald-600 hover:bg-emerald-500 text-white flex-1">

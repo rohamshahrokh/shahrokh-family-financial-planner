@@ -85,7 +85,7 @@ function AddBudgetForm({ selectedYear, selectedMonth, onSuccess }: AddBudgetForm
           placeholder="e.g. Groceries"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          className="bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-500"
+          className="bg-input border-border text-foreground placeholder:text-muted-foreground"
         />
       </div>
       <div className="flex flex-col gap-1">
@@ -95,16 +95,16 @@ function AddBudgetForm({ selectedYear, selectedMonth, onSuccess }: AddBudgetForm
           placeholder="0.00"
           value={budgetAmount}
           onChange={(e) => setBudgetAmount(e.target.value)}
-          className="bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-500"
+          className="bg-input border-border text-foreground placeholder:text-muted-foreground"
         />
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs text-zinc-400 font-medium">Member</label>
         <Select value={member} onValueChange={setMember}>
-          <SelectTrigger className="bg-zinc-800 border-zinc-700 text-zinc-100">
+          <SelectTrigger className="bg-input border-border text-foreground">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="bg-zinc-800 border-zinc-700 text-zinc-100">
+          <SelectContent className="bg-popover border-border text-foreground">
             {MEMBERS.map((m) => (
               <SelectItem key={m} value={m} className="focus:bg-zinc-700">
                 {m}
@@ -119,7 +119,7 @@ function AddBudgetForm({ selectedYear, selectedMonth, onSuccess }: AddBudgetForm
           placeholder="Optional notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          className="bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-500"
+          className="bg-input border-border text-foreground placeholder:text-muted-foreground"
         />
       </div>
       <Button
@@ -184,7 +184,7 @@ function EditRow({ row, onCancel, onSaved }: EditRowProps) {
         <Input
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          className="bg-zinc-800 border-zinc-700 text-zinc-100 h-8 text-sm"
+          className="bg-input border-border text-foreground h-8 text-sm"
         />
       </td>
       <td className="px-3 py-2">
@@ -192,7 +192,7 @@ function EditRow({ row, onCancel, onSaved }: EditRowProps) {
           type="number"
           value={budgetAmount}
           onChange={(e) => setBudgetAmount(e.target.value)}
-          className="bg-zinc-800 border-zinc-700 text-zinc-100 h-8 text-sm w-28"
+          className="bg-input border-border text-foreground h-8 text-sm w-28"
         />
       </td>
       <td className="px-3 py-2 text-zinc-400 text-sm">—</td>
@@ -201,10 +201,10 @@ function EditRow({ row, onCancel, onSaved }: EditRowProps) {
       <td className="px-3 py-2 text-zinc-400 text-sm">—</td>
       <td className="px-3 py-2">
         <Select value={member} onValueChange={setMember}>
-          <SelectTrigger className="bg-zinc-800 border-zinc-700 text-zinc-100 h-8 text-sm w-28">
+          <SelectTrigger className="bg-input border-border text-foreground h-8 text-sm w-28">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="bg-zinc-800 border-zinc-700 text-zinc-100">
+          <SelectContent className="bg-popover border-border text-foreground">
             {MEMBERS.map((m) => (
               <SelectItem key={m} value={m} className="focus:bg-zinc-700 text-sm">
                 {m}
@@ -632,10 +632,10 @@ export default function BudgetPage() {
             value={String(selectedMonth)}
             onValueChange={(v) => setSelectedMonth(Number(v))}
           >
-            <SelectTrigger className="bg-zinc-900 border-zinc-700 text-zinc-100 w-36">
+            <SelectTrigger className="bg-input border-border text-foreground w-36">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
+            <SelectContent className="bg-popover border-border text-foreground">
               {MONTHS.map((name, i) => (
                 <SelectItem key={i + 1} value={String(i + 1)} className="focus:bg-zinc-700">
                   {name}
@@ -648,10 +648,10 @@ export default function BudgetPage() {
             value={String(selectedYear)}
             onValueChange={(v) => setSelectedYear(Number(v))}
           >
-            <SelectTrigger className="bg-zinc-900 border-zinc-700 text-zinc-100 w-24">
+            <SelectTrigger className="bg-input border-border text-foreground w-24">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
+            <SelectContent className="bg-popover border-border text-foreground">
               {[2024, 2025, 2026, 2027].map((y) => (
                 <SelectItem key={y} value={String(y)} className="focus:bg-zinc-700">
                   {y}

@@ -3218,3 +3218,172 @@ td.db-act-rank { padding: 9px 0; }
   .db-fire-action-row { grid-template-columns: 1fr; }
   .db-ng-total-row { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   LIGHT MODE — Global overrides for hardcoded dark patterns
+   These rules run inside .light {} to override any bg-zinc-*, bg-slate-*,
+   text-zinc-*, border-zinc-* etc. that pages use directly without going through
+   theme tokens. This makes Light Mode work app-wide without rewriting every page.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── cmd-strip (Dashboard top strip) ─────────────────────────────────────── */
+.light .cmd-strip {
+  background: hsl(220 20% 97% / 0.97) !important;
+}
+
+/* ── narrative-banner ─────────────────────────────────────────────────────── */
+.light .narrative-banner {
+  background: linear-gradient(135deg, hsl(220,15%,94%) 0%, hsl(220,12%,96%) 100%) !important;
+}
+
+/* ── glass-card ───────────────────────────────────────────────────────────── */
+.light .glass-card {
+  background: rgba(255,255,255,0.7) !important;
+  border: 1px solid hsl(var(--border)) !important;
+}
+
+/* ── kpi-pill neutral ─────────────────────────────────────────────────────── */
+.light .kpi-pill.neutral {
+  background: hsl(var(--secondary)) !important;
+  color: hsl(var(--muted-foreground)) !important;
+}
+
+/* ── Inline bg-zinc/slate/gray/black overrides ───────────────────────────── */
+/* These use attribute + class selectors to catch Tailwind utility classes
+   compiled into the bundle. We override the bg-color by targetting the
+   CSS custom property Tailwind v3 injects. */
+
+/* Page wrappers that use bg-zinc-950 */
+.light .bg-zinc-950,
+.light [class*="bg-zinc-950"] {
+  background-color: hsl(220 20% 97%) !important;
+}
+.light .bg-zinc-900,
+.light [class*="bg-zinc-900"] {
+  background-color: hsl(220 15% 94%) !important;
+}
+.light .bg-zinc-800,
+.light [class*="bg-zinc-800"] {
+  background-color: hsl(220 12% 90%) !important;
+}
+.light .bg-zinc-700,
+.light [class*="bg-zinc-700"] {
+  background-color: hsl(220 10% 82%) !important;
+}
+/* Text in light mode */
+.light .text-zinc-100,
+.light [class*="text-zinc-100"] {
+  color: hsl(224 30% 10%) !important;
+}
+.light .text-zinc-200,
+.light [class*="text-zinc-200"] {
+  color: hsl(224 25% 16%) !important;
+}
+.light .text-zinc-300,
+.light [class*="text-zinc-300"] {
+  color: hsl(224 20% 28%) !important;
+}
+.light .text-zinc-400,
+.light [class*="text-zinc-400"] {
+  color: hsl(220 12% 42%) !important;
+}
+.light .text-zinc-500,
+.light [class*="text-zinc-500"] {
+  color: hsl(220 10% 52%) !important;
+}
+.light .text-white {
+  color: hsl(224 30% 10%) !important;
+}
+/* Borders */
+.light .border-zinc-700,
+.light [class*="border-zinc-700"] {
+  border-color: hsl(220 15% 78%) !important;
+}
+.light .border-zinc-800,
+.light [class*="border-zinc-800"] {
+  border-color: hsl(220 12% 84%) !important;
+}
+/* Inputs with hardcoded dark backgrounds */
+.light input.bg-zinc-900,
+.light input[class*="bg-zinc-900"],
+.light input.bg-zinc-800,
+.light input[class*="bg-zinc-800"],
+.light .bg-zinc-900 input,
+.light .bg-zinc-800 input {
+  background-color: hsl(0 0% 100%) !important;
+  color: hsl(224 30% 10%) !important;
+  border-color: hsl(220 15% 80%) !important;
+}
+/* Select triggers */
+.light .bg-zinc-900[role="combobox"],
+.light .bg-zinc-800[role="combobox"],
+.light [class*="bg-zinc-900"][data-radix-select-trigger],
+.light [class*="bg-zinc-800"][data-radix-select-trigger] {
+  background-color: hsl(0 0% 100%) !important;
+  color: hsl(224 30% 10%) !important;
+}
+/* Dividers and stat pills */
+.light .divide-zinc-800\/60 > * + * {
+  border-color: hsl(220 12% 88%) !important;
+}
+
+/* ── slate overrides (FIREPathCard, some pages) ───────────────────────────── */
+.light .bg-slate-900,
+.light [class*="bg-slate-900"] {
+  background-color: hsl(220 15% 94%) !important;
+}
+.light .bg-slate-800,
+.light [class*="bg-slate-800"] {
+  background-color: hsl(220 12% 90%) !important;
+}
+.light .text-slate-100,
+.light [class*="text-slate-100"],
+.light .text-slate-200,
+.light [class*="text-slate-200"] {
+  color: hsl(224 30% 10%) !important;
+}
+.light .text-slate-400,
+.light [class*="text-slate-400"],
+.light .text-slate-500,
+.light [class*="text-slate-500"] {
+  color: hsl(220 12% 44%) !important;
+}
+.light .border-slate-700,
+.light [class*="border-slate-700"],
+.light .border-slate-700\/50,
+.light .border-slate-700\/40,
+.light .border-slate-700\/30 {
+  border-color: hsl(220 15% 78%) !important;
+}
+
+/* ── /60, /40 opacity bg patches ─────────────────────────────────────────── */
+.light .bg-zinc-900\/60 {
+  background-color: hsl(220 15% 96% / 0.9) !important;
+}
+.light .bg-zinc-900\/40 {
+  background-color: hsl(220 15% 96% / 0.8) !important;
+}
+
+/* ── Status badge overrides for light mode ────────────────────────────────── */
+.light .bg-zinc-800.text-zinc-300 {
+  background-color: hsl(220 12% 88%) !important;
+  color: hsl(224 25% 22%) !important;
+}
+
+/* ── Placeholder text in light mode ──────────────────────────────────────── */
+.light input::placeholder,
+.light textarea::placeholder {
+  color: hsl(220 10% 58%) !important;
+}
+
+/* ── Recharts overrides for light mode ────────────────────────────────────── */
+.light .recharts-cartesian-grid-horizontal line,
+.light .recharts-cartesian-grid-vertical line {
+  stroke: hsl(220 15% 84%) !important;
+}
+
+/* ── Settings appearance section ─────────────────────────────────────────── */
+.theme-btn-group {
+  display: flex;
+  gap: 6px;
+}

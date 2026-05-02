@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useAppStore } from "@/lib/store";
 import {
-  Settings as SettingsIcon, Download, Upload, RefreshCw, User, Moon, Sun, Shield,
+  Settings as SettingsIcon, Download, Upload, RefreshCw, User, Moon, Sun, SunMoon, Shield,
   Send, Bell, BellOff, CheckCircle2, XCircle, MessageSquare, Heart, Clock,
   Zap, TrendingDown, AlertTriangle, CreditCard, DollarSign, BarChart2, Lock,
   UserPlus, KeyRound, UserCheck, UserX, ChevronDown, ChevronUp, Eye, EyeOff,
@@ -914,7 +914,7 @@ function CFOSettingsSection() {
 
 export default function SettingsPage() {
   const { toast } = useToast();
-  const { theme, toggleTheme, role } = useAppStore();
+  const { theme, toggleTheme, setTheme, role } = useAppStore();
   const isAdmin = role === "admin";
   const qc = useQueryClient();
 
@@ -1102,19 +1102,29 @@ export default function SettingsPage() {
             <Input value={userSettings.timezone} readOnly className="h-8 text-sm mt-1 opacity-60" />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Theme</label>
+            <label className="text-xs text-muted-foreground">Theme Mode</label>
             <div className="flex gap-2 mt-1">
-              <Button size="sm" variant={theme === 'dark' ? 'default' : 'outline'} className="gap-1.5 flex-1 h-8"
-                onClick={() => theme !== 'dark' && toggleTheme()}
-                style={theme === 'dark' ? { background: 'hsl(43,85%,55%)', color: 'hsl(224,40%,8%)', border: 'none' } : {}}>
-                <Moon className="w-3.5 h-3.5" /> Dark
-              </Button>
               <Button size="sm" variant={theme === 'light' ? 'default' : 'outline'} className="gap-1.5 flex-1 h-8"
-                onClick={() => theme !== 'light' && toggleTheme()}
+                onClick={() => setTheme('light')}
                 style={theme === 'light' ? { background: 'hsl(43,85%,45%)', color: 'white', border: 'none' } : {}}>
                 <Sun className="w-3.5 h-3.5" /> Light
               </Button>
+              <Button size="sm" variant={theme === 'dark' ? 'default' : 'outline'} className="gap-1.5 flex-1 h-8"
+                onClick={() => setTheme('dark')}
+                style={theme === 'dark' ? { background: 'hsl(43,85%,55%)', color: 'hsl(224,40%,8%)', border: 'none' } : {}}>
+                <Moon className="w-3.5 h-3.5" /> Dark
+              </Button>
+              <Button size="sm" variant={theme === 'auto' ? 'default' : 'outline'} className="gap-1.5 flex-1 h-8"
+                onClick={() => setTheme('auto')}
+                style={theme === 'auto' ? { background: 'hsl(220,80%,55%)', color: 'white', border: 'none' } : {}}>
+                <SunMoon className="w-3.5 h-3.5" /> Auto
+              </Button>
             </div>
+            {theme === 'auto' && (
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Auto: Light 7 AM – 6 PM · Dark 6 PM – 7 AM (local time)
+              </p>
+            )}
           </div>
         </div>
         <SaveButton label="Save Settings" onSave={async () => {

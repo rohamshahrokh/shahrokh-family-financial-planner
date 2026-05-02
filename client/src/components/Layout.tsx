@@ -10,6 +10,7 @@ import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { useAppStore } from "@/lib/store";
+import { applyTheme, resolveAutoTheme } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
   // Step 1 — Snapshot
@@ -24,7 +25,7 @@ import {
   // Support / System
   HelpCircle, Settings,
   // UI chrome
-  LogOut, Sun, Moon, Menu, X, Clock, Eye, EyeOff,
+  LogOut, Sun, Moon, SunMoon, Menu, X, Clock, Eye, EyeOff,
   ChevronDown, ChevronRight, Database, Newspaper,
 } from "lucide-react";
 
@@ -166,8 +167,15 @@ function WealthOSLogo() {
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const [, navigate] = useHashLocation();
-  const { theme, toggleTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role } =
+  const { theme, toggleTheme, setTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role } =
     useAppStore();
+
+  // Auto-theme: re-evaluate every minute when mode is "auto"
+  useEffect(() => {
+    if (theme !== "auto") return;
+    const id = setInterval(() => applyTheme("auto"), 60_000);
+    return () => clearInterval(id);
+  }, [theme]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = role === "admin";
 
@@ -415,11 +423,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         )}
         <button className="sidebar-link w-full" onClick={toggleTheme} data-testid="button-theme-toggle">
-          {theme === "dark"
-            ? <Sun className="w-4 h-4" />
-            : <Moon className="w-4 h-4" />
-          }
-          <span>{theme === "dark" ? "Light Mode" : "Dark Mode"}</span>
+          {theme === "dark"  ? <Sun className="w-4 h-4" /> :
+           theme === "light" ? <Moon className="w-4 h-4" /> :
+           <SunMoon className="w-4 h-4" />}
+          <span>
+            {theme === "dark"  ? "Light Mode" :
+             theme === "light" ? "Auto Mode"  : "Dark Mode"}
+          </span>
         </button>
         <button
           className="sidebar-link w-full"
@@ -440,12 +450,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <aside
         className={`
           fixed lg:static inset-y-0 left-0 z-50
-          flex flex-col w-52 shrink-0
+          flex flex-col w-52 shrink-0 bg-background
           transform transition-transform duration-200
           ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
         `}
         style={{
-          background: "hsl(222 25% 6%)",
           borderRight: "1px solid hsl(var(--border) / 0.7)",
         }}
       >
@@ -523,11 +532,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               className="w-7 h-7"
               onClick={toggleTheme}
               data-testid="button-theme-header"
+              title={theme === "dark" ? "Switch to Light" : theme === "light" ? "Switch to Auto" : "Switch to Dark"}
             >
-              {theme === "dark"
-                ? <Sun className="w-3.5 h-3.5" />
-                : <Moon className="w-3.5 h-3.5" />
-              }
+              {theme === "dark"  ? <Sun className="w-3.5 h-3.5" /> :
+               theme === "light" ? <Moon className="w-3.5 h-3.5" /> :
+               <SunMoon className="w-3.5 h-3.5" />}
             </Button>
 
             {/* User avatar */}

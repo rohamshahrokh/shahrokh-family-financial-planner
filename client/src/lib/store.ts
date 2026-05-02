@@ -8,10 +8,25 @@ import { persist, createJSONStorage } from "zustand/middleware";
 
 type CurrentUser = "Roham" | "Fara";
 export type UserRole = "admin" | "family_user";
+export type ThemeMode = "dark" | "light" | "auto";
+
+/** Apply the resolved theme class to <html>. Auto resolves by local time. */
+export function applyTheme(mode: ThemeMode) {
+  const resolved = mode === "auto" ? resolveAutoTheme() : mode;
+  const html = document.documentElement;
+  html.classList.toggle("light", resolved === "light");
+  html.dataset.theme = mode; // store raw mode for UI display
+}
+
+/** Auto theme: light 7 AM – 6 PM, dark otherwise (local time) */
+export function resolveAutoTheme(): "dark" | "light" {
+  const h = new Date().getHours();
+  return h >= 7 && h < 18 ? "light" : "dark";
+}
 
 interface AppState {
   isAuthenticated: boolean;
-  theme: "dark" | "light";
+  theme: ThemeMode;
   lastSaved: string | null;
   chartView: "monthly" | "annual";
   privacyMode: boolean;       // true = numbers hidden (default for new users)
@@ -20,6 +35,7 @@ interface AppState {
   login: () => void;
   logout: () => void;
   toggleTheme: () => void;
+  setTheme: (mode: ThemeMode) => void;
   setLastSaved: (time: string) => void;
   setChartView: (view: "monthly" | "annual") => void;
   togglePrivacy: () => void;
@@ -49,9 +65,18 @@ export const useAppStore = create<AppState>()(
 
       toggleTheme: () =>
         set((state) => {
-          const newTheme = state.theme === "dark" ? "light" : "dark";
-          document.documentElement.classList.toggle("light", newTheme === "light");
-          return { theme: newTheme };
+          // Cycle: dark → light → auto → dark
+          const next: ThemeMode =
+            state.theme === "dark"  ? "light" :
+            state.theme === "light" ? "auto"  : "dark";
+          applyTheme(next);
+          return { theme: next };
+        }),
+
+      setTheme: (mode: ThemeMode) =>
+        set(() => {
+          applyTheme(mode);
+          return { theme: mode };
         }),
 
       setLastSaved: (time: string) => set({ lastSaved: time }),

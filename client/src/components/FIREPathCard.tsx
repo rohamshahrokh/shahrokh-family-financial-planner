@@ -1,11 +1,6 @@
 /**
  * FIREPathCard.tsx — Dashboard compact card for FIRE Fastest Path Optimizer
- *
- * Shows:
- *  - Fastest FIRE path + year
- *  - 4 scenario pills with years
- *  - Progress bar toward best scenario
- *  - "Full Analysis" CTA → /wealth-strategy#fire-path tab
+ * v2: Uses CSS theme tokens throughout (no hardcoded slate/zinc classes)
  */
 
 import { useMemo } from "react";
@@ -62,24 +57,24 @@ export default function FIREPathCard() {
   const fmt  = (n: number) => `$${n >= 1_000_000 ? (n / 1_000_000).toFixed(1) + 'M' : n >= 1000 ? (n / 1000).toFixed(0) + 'K' : n.toFixed(0)}`;
 
   return (
-    <div
-      className="rounded-2xl border border-slate-700/50 bg-slate-900/60 backdrop-blur-sm overflow-hidden"
-      style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.3)' }}
-    >
+    <div className="rounded-2xl border border-border bg-card overflow-hidden"
+      style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.12)' }}>
+
       {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-slate-700/40">
+      <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-orange-500/15 border border-orange-500/25 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center"
+            style={{ background: 'rgba(249,115,22,0.15)', border: '1px solid rgba(249,115,22,0.25)' }}>
             <Flame size={15} className="text-orange-400" />
           </div>
           <div>
-            <p className="text-[13px] font-semibold text-slate-100">FIRE Path Optimizer</p>
-            <p className="text-[10px] text-slate-500">Fastest path to financial independence</p>
+            <p className="text-[13px] font-semibold text-foreground">FIRE Path Optimizer</p>
+            <p className="text-[10px] text-muted-foreground">Fastest path to financial independence</p>
           </div>
         </div>
         <Link href="/wealth-strategy">
           <button
-            className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-orange-400 transition-colors"
+            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-orange-400 transition-colors"
             onClick={() => sessionStorage.setItem('wealth-strategy-tab', 'fire-path')}
           >
             Full Analysis <ChevronRight size={12} />
@@ -88,43 +83,42 @@ export default function FIREPathCard() {
       </div>
 
       {/* Best path callout */}
-      <div className="px-4 py-3 border-b border-slate-700/30">
+      <div className="px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2 mb-1">
           <Zap size={12} className="text-orange-400 shrink-0" />
           <p className="text-[11px] font-semibold text-orange-400 uppercase tracking-wider">Fastest Path</p>
         </div>
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-bold text-slate-100">
+            <p className="text-sm font-bold text-foreground">
               Option {best.id === 'property' ? 'A' : best.id === 'etf' ? 'B' : best.id === 'mixed' ? 'C' : 'D'} — {best.label}
             </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">FIRE in <span className="text-orange-400 font-semibold">{best.fire_year}</span> · {best.years_to_fire}y away · {best.primary_vehicle}</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              FIRE in <span className="text-orange-400 font-semibold">{best.fire_year}</span> · {best.years_to_fire}y away · {best.primary_vehicle}
+            </p>
           </div>
-          <div
-            className="text-center px-3 py-2 rounded-xl"
-            style={{ background: 'rgba(249,115,22,0.12)', border: '1px solid rgba(249,115,22,0.25)' }}
-          >
+          <div className="text-center px-3 py-2 rounded-xl"
+            style={{ background: 'rgba(249,115,22,0.12)', border: '1px solid rgba(249,115,22,0.25)' }}>
             <p className="text-lg font-black text-orange-400">{best.fire_year}</p>
-            <p className="text-[9px] text-slate-500">FIRE Year</p>
+            <p className="text-[9px] text-muted-foreground">FIRE Year</p>
           </div>
         </div>
 
-        {/* Progress bar toward best scenario */}
+        {/* Progress bar */}
         <div className="mt-2.5">
-          <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+          <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
             <span>Progress toward FIRE target</span>
             <span className="text-orange-400 font-medium">{result.current_progress_pct}%</span>
           </div>
-          <div className="h-1.5 rounded-full bg-slate-700/50 overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-700"
+          <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
+            <div className="h-full rounded-full transition-all duration-700"
               style={{
                 width: `${result.current_progress_pct}%`,
                 background: 'linear-gradient(90deg, #f97316, #fb923c)',
               }}
             />
           </div>
-          <p className="text-[10px] text-slate-500 mt-1">
+          <p className="text-[10px] text-muted-foreground mt-1">
             Target: {mv(fmt(result.target_capital))} · Semi-FIRE: {result.semi_fire_year}
           </p>
         </div>
@@ -132,44 +126,37 @@ export default function FIREPathCard() {
 
       {/* 4 Scenario pills */}
       <div className="px-4 py-3">
-        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">All Scenarios</p>
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">All Scenarios</p>
         <div className="grid grid-cols-2 gap-1.5">
           {result.scenarios.map((s, i) => {
             const letter = ['A', 'B', 'C', 'D'][i];
             const isBest = s.id === result.best_scenario;
             return (
-              <div
-                key={s.id}
-                className="rounded-xl px-2.5 py-2 relative"
+              <div key={s.id} className="rounded-xl px-2.5 py-2 relative"
                 style={{
                   background: isBest ? 'rgba(249,115,22,0.10)' : RISK_BG[s.risk_color],
                   border: `1px solid ${isBest ? 'rgba(249,115,22,0.30)' : RISK_COLORS[s.risk_color] + '30'}`,
-                }}
-              >
+                }}>
                 {isBest && (
-                  <div
-                    className="absolute top-1.5 right-1.5 text-[8px] font-bold px-1.5 py-0.5 rounded-full"
-                    style={{ background: 'rgba(249,115,22,0.20)', color: '#f97316' }}
-                  >
+                  <div className="absolute top-1.5 right-1.5 text-[8px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{ background: 'rgba(249,115,22,0.20)', color: '#f97316' }}>
                     BEST
                   </div>
                 )}
-                <p className="text-[10px] text-slate-500 mb-0.5">{letter}. {s.label}</p>
-                <p
-                  className="text-sm font-bold"
-                  style={{ color: isBest ? '#f97316' : RISK_COLORS[s.risk_color] }}
-                >
+                <p className="text-[10px] text-muted-foreground mb-0.5">{letter}. {s.label}</p>
+                <p className="text-sm font-bold"
+                  style={{ color: isBest ? '#f97316' : RISK_COLORS[s.risk_color] }}>
                   {s.fire_year}
                 </p>
-                <p className="text-[9px] text-slate-500">{s.risk_level} risk</p>
+                <p className="text-[9px] text-muted-foreground">{s.risk_level} risk</p>
               </div>
             );
           })}
         </div>
 
         {result.fastest_vs_slowest_years > 0 && (
-          <p className="text-[10px] text-slate-500 mt-2 text-center">
-            Strategy choice spans <span className="text-slate-300 font-medium">{result.fastest_vs_slowest_years} years</span> difference in FIRE date
+          <p className="text-[10px] text-muted-foreground mt-2 text-center">
+            Strategy choice spans <span className="text-foreground font-medium">{result.fastest_vs_slowest_years} years</span> difference in FIRE date
           </p>
         )}
       </div>
