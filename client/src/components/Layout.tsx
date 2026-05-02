@@ -19,7 +19,7 @@ import {
   // Step 2 — Strategy
   Home, Bitcoin, CreditCard, Calculator, Target, ClipboardList, Briefcase,
   // Step 3 — Forecast
-  BarChart2, Activity, Sigma, Zap, Map, FlaskConical,
+  BarChart2, Activity, Sigma, Zap, Map, FlaskConical, FileText,
   // Step 4 — Action
   Lightbulb, Bell, Calendar, BrainCircuit,
   // Support / System
@@ -73,10 +73,10 @@ const NAV_STEPS = [
     sublabel: "Model & Project",
     badgeClass: "step-3",
     items: [
-      { href: "/reports",            label: "Wealth Projection",  icon: TrendingUp,    adminOnly: false },
-      { href: "/ai-forecast-engine", label: "Forecast Engine",    icon: Sigma,         adminOnly: true  },
-      { href: "/scenario-compare",   label: "Scenario Compare Lab", icon: FlaskConical, adminOnly: false },
-      { href: "/market-news",        label: "Market News",        icon: Newspaper,     adminOnly: false },
+      { href: "/ai-forecast-engine", label: "Forecast Engine",      icon: Sigma,         adminOnly: true  },
+      { href: "/scenario-compare",   label: "Scenario Compare Lab",   icon: FlaskConical,  adminOnly: false },
+      { href: "/market-news",        label: "Market News",            icon: Newspaper,     adminOnly: false },
+      { href: "/reports",            label: "Reports",                icon: FileText,      adminOnly: false },
     ],
   },
   {

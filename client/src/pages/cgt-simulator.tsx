@@ -598,10 +598,9 @@ export default function CGTSimulatorPage() {
   const maskVal = (s: string) => privacyMode ? "••••••" : s;
 
   return (
-    <div className="min-h-screen pb-20" style={{ background: "hsl(222,25%,5%)" }}>
+    <div className="min-h-screen pb-20 bg-background">
       {/* Header */}
-      <div className="sticky top-0 z-10 px-4 pt-4 pb-3 border-b border-border/50"
-        style={{ background: "hsl(222,25%,5%)", backdropFilter: "blur(12px)" }}>
+      <div className="sticky top-0 z-10 px-4 pt-4 pb-3 border-b border-border/50 bg-background/95 backdrop-blur-md">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div className="flex items-center gap-2">

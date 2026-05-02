@@ -78,7 +78,7 @@ function ScoreRing({
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-[11px] font-black text-white">{c}</span>
+          <span className="text-[11px] font-black text-foreground">{c}</span>
         </div>
       </div>
       <span className="text-[9px] text-slate-500 text-center">{label}</span>
@@ -231,10 +231,10 @@ export default function CFODashboardWidget() {
   // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="rounded-2xl border border-white/10 bg-[#0d1421] p-6 mb-6">
+      <div className="rounded-2xl border border-border/40 bg-card p-6 mb-6">
         <div className="flex items-center gap-2 mb-4">
           <BrainCircuit size={17} className="text-cyan-400" />
-          <span className="text-sm font-semibold text-white">Saturday Morning Bulletin</span>
+          <span className="text-sm font-semibold text-foreground">Saturday Morning Bulletin</span>
         </div>
         <div className="flex items-center justify-center py-8">
           <Loader2 size={22} className="animate-spin text-cyan-400" />
@@ -246,10 +246,10 @@ export default function CFODashboardWidget() {
   // ── Error ────────────────────────────────────────────────────────────────────
   if (error) {
     return (
-      <div className="rounded-2xl border border-white/10 bg-[#0d1421] p-6 mb-6">
+      <div className="rounded-2xl border border-border/40 bg-card p-6 mb-6">
         <div className="flex items-center gap-2 mb-3">
           <BrainCircuit size={17} className="text-cyan-400" />
-          <span className="text-sm font-semibold text-white">Saturday Morning Bulletin</span>
+          <span className="text-sm font-semibold text-foreground">Saturday Morning Bulletin</span>
         </div>
         <div className="flex items-center gap-2 text-red-400 text-sm mb-3">
           <AlertCircle size={13} />
@@ -265,10 +265,10 @@ export default function CFODashboardWidget() {
   // ── No report yet ────────────────────────────────────────────────────────────
   if (!report) {
     return (
-      <div className="rounded-2xl border border-dashed border-cyan-900/60 bg-[#0d1421] p-6 mb-6">
+      <div className="rounded-2xl border border-dashed border-border bg-card p-6 mb-6">
         <div className="flex items-center gap-2 mb-2">
           <BrainCircuit size={17} className="text-cyan-400" />
-          <span className="text-sm font-semibold text-white">Saturday Morning Bulletin</span>
+          <span className="text-sm font-semibold text-foreground">Saturday Morning Bulletin</span>
         </div>
         <p className="text-slate-400 text-sm mb-4">
           No bulletin generated yet. Run your first weekly briefing to see your financial score,
@@ -296,13 +296,13 @@ export default function CFODashboardWidget() {
   const scoreLabel = scores.overall >= 75 ? "Excellent" : scores.overall >= 55 ? "Fair" : "Needs Attention";
 
   return (
-    <div className="rounded-2xl border border-cyan-900/40 bg-[#090e1a] mb-6 overflow-hidden">
+    <div className="rounded-2xl border border-border bg-card mb-6 overflow-hidden">
 
       {/* Header */}
       <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-white/[0.05]">
         <div className="flex items-center gap-2">
           <BrainCircuit size={17} className="text-cyan-400" />
-          <span className="text-sm font-semibold text-white">Saturday Morning Bulletin</span>
+          <span className="text-sm font-semibold text-foreground">Saturday Morning Bulletin</span>
           <span className="text-[10px] text-slate-600 ml-1">
             Week of {fmtShort(report.week_date)}
           </span>
@@ -363,7 +363,7 @@ export default function CFODashboardWidget() {
               {/* Net Worth */}
               <div className="rounded-xl bg-white/[0.04] px-2.5 py-2">
                 <div className="text-[9px] text-slate-500 uppercase tracking-wider">Net Worth</div>
-                <div className="text-xs font-bold text-white mt-0.5">{mv(fmt(snap.net_worth))}</div>
+                <div className="text-xs font-bold text-foreground mt-0.5">{mv(fmt(snap.net_worth))}</div>
                 <div className={`text-[10px] mt-0.5 ${nwUp ? "text-emerald-400" : "text-red-400"}`}>
                   {nwUp ? "▲" : "▼"} {mv(fmt(Math.abs(snap.net_worth_delta)))}
                 </div>
@@ -371,7 +371,7 @@ export default function CFODashboardWidget() {
               {/* Liquid Cash */}
               <div className="rounded-xl bg-white/[0.04] px-2.5 py-2">
                 <div className="text-[9px] text-slate-500 uppercase tracking-wider">Liquid Cash</div>
-                <div className="text-xs font-bold text-white mt-0.5">{mv(fmt(snap.liquid_cash))}</div>
+                <div className="text-xs font-bold text-foreground mt-0.5">{mv(fmt(snap.liquid_cash))}</div>
                 <div className="text-[10px] text-slate-500 mt-0.5">Offset: {mv(fmt(snap.offset_balance))}</div>
               </div>
               {/* Surplus */}

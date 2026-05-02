@@ -86,7 +86,7 @@ function ScoreRing({
           className="-rotate-90"
           viewBox="0 0 48 48"
         >
-          <circle cx="24" cy="24" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="4" />
+          <circle cx="24" cy="24" r={r} fill="none" stroke="hsl(var(--secondary))" strokeWidth="4" />
           <circle
             cx="24" cy="24" r={r} fill="none" stroke={color} strokeWidth="4"
             strokeLinecap="round"
@@ -96,10 +96,10 @@ function ScoreRing({
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="font-black text-white" style={{ fontSize: size * 0.22 }}>{c}</span>
+          <span className="font-black text-foreground" style={{ fontSize: size * 0.22 }}>{c}</span>
         </div>
       </div>
-      <span className="text-slate-400 text-center" style={{ fontSize: 10 }}>{label}</span>
+      <span className="text-muted-foreground text-center" style={{ fontSize: 10 }}>{label}</span>
     </div>
   );
 }
@@ -135,14 +135,14 @@ function Section({
     amber:  "border-amber-900/40",
   };
   return (
-    <div className={`rounded-2xl border bg-[#0d1421] mb-3 overflow-hidden ${borderClass[accent]}`}>
+    <div className={`rounded-2xl border bg-card mb-3 overflow-hidden ${borderClass[accent]}`}>
       <button
-        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-white/[0.02] transition-colors"
+        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-secondary/20 transition-colors"
         onClick={() => setOpen(o => !o)}
       >
         <div className={`flex items-center gap-2 ${accentClass[accent]}`}>
           {icon}
-          <span className="font-semibold text-sm text-white">{title}</span>
+          <span className="font-semibold text-sm text-foreground">{title}</span>
           {badge && (
             <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-current/10 ${accentClass[accent]}`}>
               {badge}
@@ -151,7 +151,7 @@ function Section({
         </div>
         <ChevronDown
           size={14}
-          className={`text-slate-500 transition-transform duration-200 ${open ? "" : "-rotate-90"}`}
+          className={`text-muted-foreground transition-transform duration-200 ${open ? "" : "-rotate-90"}`}
         />
       </button>
       {open && <div className="px-5 pb-4">{children}</div>}
@@ -166,10 +166,10 @@ function KpiTile({
   label: string; value: string; sub?: string; color?: string; accent?: string;
 }) {
   return (
-    <div className={`rounded-xl bg-white/[0.04] border p-3 ${accent ? accent : "border-white/[0.06]"}`}>
-      <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">{label}</div>
-      <div className={`text-base font-bold ${color ?? "text-white"}`}>{value}</div>
-      {sub && <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">{sub}</div>}
+    <div className={`rounded-xl bg-secondary/30 border p-3 ${accent ? accent : "border-border/40"}`}>
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">{label}</div>
+      <div className={`text-base font-bold ${color ?? "text-foreground"}`}>{value}</div>
+      {sub && <div className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{sub}</div>}
     </div>
   );
 }
@@ -191,7 +191,7 @@ function ProgressBar({
   value: number; color?: string; height?: number;
 }) {
   return (
-    <div className="w-full bg-white/[0.05] rounded-full overflow-hidden" style={{ height }}>
+    <div className="w-full bg-secondary/40 rounded-full overflow-hidden" style={{ height }}>
       <div
         className="h-full rounded-full transition-all duration-700 ease-out"
         style={{ width: `${Math.min(100, Math.max(0, value))}%`, background: color }}
@@ -217,11 +217,11 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
     <div>
 
       {/* ── Executive Scoreboard ─────────────────────────────────────────── */}
-      <div className="rounded-2xl border border-cyan-900/50 bg-gradient-to-br from-[#080f1c] to-[#0c1628] p-5 mb-4">
+      <div className="rounded-2xl border border-cyan-900/50 bg-card p-5 mb-4">
         <div className="flex items-center gap-2 mb-4 text-cyan-400">
           <BrainCircuit size={16} />
-          <h3 className="font-semibold text-sm text-white">Executive Scoreboard</h3>
-          <span className="ml-auto text-[11px] text-slate-500">Week of {fmtShort(report.week_date)}</span>
+          <h3 className="font-semibold text-sm text-foreground">Executive Scoreboard</h3>
+          <span className="ml-auto text-[11px] text-muted-foreground">Week of {fmtShort(report.week_date)}</span>
         </div>
         <div className="flex items-center gap-5 flex-wrap">
           {/* Big overall score */}
@@ -233,10 +233,10 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
               {scores.overall}
             </div>
             <div className="text-[11px] font-semibold mt-1" style={{ color: scoreColor }}>{scoreLabel}</div>
-            <div className="text-[10px] text-slate-600 mt-0.5">CFO Score</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">CFO Score</div>
           </div>
 
-          <div className="w-px bg-white/[0.06] self-stretch hidden sm:block" />
+          <div className="w-px bg-border self-stretch hidden sm:block" />
 
           {/* 5 sub-scores */}
           <div className="flex gap-3 flex-wrap flex-1">
@@ -250,8 +250,8 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
 
         {/* CFO insight line */}
         {report.cfo_insight && (
-          <div className="mt-4 border-t border-white/[0.05] pt-3">
-            <p className="text-xs text-slate-400 italic leading-relaxed">
+          <div className="mt-4 border-t border-border/40 pt-3">
+            <p className="text-xs text-muted-foreground italic leading-relaxed">
               <span className="text-cyan-400 not-italic font-medium mr-1">CFO:</span>
               {report.cfo_insight}
             </p>
@@ -279,14 +279,14 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
             sub={snap.net_worth_delta !== 0
               ? `${((Math.abs(snap.net_worth_delta) / Math.max(snap.net_worth - snap.net_worth_delta, 1)) * 100).toFixed(1)}% move`
               : "No prior bulletin"}
-            color={nwUp ? "text-emerald-400" : snap.net_worth_delta === 0 ? "text-slate-400" : "text-red-400"}
+            color={nwUp ? "text-emerald-400" : snap.net_worth_delta === 0 ? "text-muted-foreground" : "text-red-400"}
           />
           {/* KPI 3: Liquid Cash */}
           <KpiTile
             label="Liquid Cash"
             value={mv(fmt(snap.liquid_cash))}
             sub={`Everyday: ${mv(fmt(snap.cash_everyday))}`}
-            color="text-white"
+            color="text-foreground"
           />
           {/* KPI 4: Offset Balance */}
           <KpiTile
@@ -297,18 +297,18 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
             accent="border-cyan-900/40"
           />
           {/* KPI 5: Monthly Surplus — with income/expense breakdown as subtitle */}
-          <div className={`rounded-xl bg-white/[0.04] border p-3 ${surplusUp ? "border-emerald-900/40" : "border-red-900/40"}`}>
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Monthly Surplus</div>
+          <div className={`rounded-xl bg-secondary/30 border p-3 ${surplusUp ? "border-emerald-900/40" : "border-red-900/40"}`}>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Monthly Surplus</div>
             <div className={`text-base font-bold ${surplusUp ? "text-emerald-400" : "text-red-400"}`}>
               {mv(fmt(snap.monthly_surplus))}
             </div>
             {/* Only show income/expense breakdown if both values are available */}
             {snap.monthly_income > 0 ? (
-              <div className="text-[11px] text-slate-400 mt-0.5 leading-snug" title="Income minus Expenses (matches Dashboard calculation)">
+              <div className="text-[11px] text-muted-foreground mt-0.5 leading-snug" title="Income minus Expenses (matches Dashboard calculation)">
                 {mv(fmt(snap.monthly_income))}&nbsp;in&nbsp;−&nbsp;{mv(fmt(snap.monthly_expenses))}&nbsp;out
               </div>
             ) : (
-              <div className="text-[11px] text-slate-500 mt-0.5">Regenerate for breakdown</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Regenerate for breakdown</div>
             )}
           </div>
           {/* KPI 6: Debt Ratio */}
@@ -330,13 +330,13 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
             label="Years to Freedom"
             value={snap.years_to_fire > 0 ? `${snap.years_to_fire.toFixed(1)}y` : "Achieved"}
             sub={snap.years_to_fire > 0 ? `Est. FIRE in ${snap.fire_year}` : "FIRE target reached"}
-            color={snap.years_to_fire <= 5 ? "text-emerald-400" : snap.years_to_fire <= 15 ? "text-amber-400" : "text-white"}
+            color={snap.years_to_fire <= 5 ? "text-emerald-400" : snap.years_to_fire <= 15 ? "text-amber-400" : "text-foreground"}
           />
         </div>
 
         {/* Cash breakdown */}
-        <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-3.5 mb-3">
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Cash Allocation Breakdown</div>
+        <div className="rounded-xl bg-secondary/20 border border-border/40 p-3.5 mb-3">
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Cash Allocation Breakdown</div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             {[
               { label: "Everyday", value: snap.cash_everyday },
@@ -346,14 +346,14 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
               { label: "Mortgage Offset", value: snap.offset_balance, color: "text-cyan-400" },
             ].map(({ label, value, color }) => (
               <div key={label} className="text-center">
-                <div className="text-[10px] text-slate-500 mb-0.5">{label}</div>
-                <div className={`text-sm font-bold ${color ?? "text-white"}`}>{mv(fmt(value))}</div>
+                <div className="text-[10px] text-muted-foreground mb-0.5">{label}</div>
+                <div className={`text-sm font-bold ${color ?? "text-foreground"}`}>{mv(fmt(value))}</div>
               </div>
             ))}
           </div>
-          <div className="mt-2 pt-2 border-t border-white/[0.05] flex justify-between text-xs">
-            <span className="text-slate-500">Total Liquid Cash</span>
-            <span className="text-white font-semibold">{mv(fmt(snap.liquid_cash))}</span>
+          <div className="mt-2 pt-2 border-t border-border/40 flex justify-between text-xs">
+            <span className="text-muted-foreground">Total Liquid Cash</span>
+            <span className="text-foreground font-semibold">{mv(fmt(snap.liquid_cash))}</span>
           </div>
           {snap.offset_interest_saving > 0 && (
             <div className="mt-1 text-[11px] text-emerald-400">
@@ -371,17 +371,17 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
         badge={report.top_expenses.length > 0 ? `${report.top_expenses.length}` : undefined}
       >
         {report.top_expenses.length === 0 ? (
-          <p className="text-slate-500 text-sm py-2">No expenses recorded in the last 7 days.</p>
+          <p className="text-muted-foreground text-sm py-2">No expenses recorded in the last 7 days.</p>
         ) : (
           <div className="space-y-2">
             {report.top_expenses.map((e, i) => (
               <div
                 key={i}
-                className="flex items-center justify-between rounded-xl bg-white/[0.03] border border-white/[0.05] px-4 py-3"
+                className="flex items-center justify-between rounded-xl bg-secondary/20 border border-border/40 px-4 py-3"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-semibold text-white">{e.category}</span>
+                    <span className="text-xs font-semibold text-foreground">{e.category}</span>
                     {e.flag !== "normal" && (
                       <span
                         className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
@@ -395,9 +395,9 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                     )}
                   </div>
                   {e.description && (
-                    <div className="text-[11px] text-slate-400 mt-0.5 truncate">{e.description}</div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5 truncate">{e.description}</div>
                   )}
-                  <div className="text-[10px] text-slate-500 mt-0.5">{e.member} · {e.date}</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">{e.member} · {e.date}</div>
                 </div>
                 <div className="text-base font-bold text-red-400 ml-4 shrink-0">{mv(fmt(e.amount))}</div>
               </div>
@@ -407,7 +407,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
         {report.spending_insight && (
           <div className="mt-3 flex gap-2 items-start rounded-xl bg-violet-500/10 border border-violet-500/20 px-4 py-3">
             <Lightbulb size={13} className="text-violet-400 mt-0.5 shrink-0" />
-            <p className="text-xs text-slate-200 leading-relaxed">{report.spending_insight}</p>
+            <p className="text-xs text-foreground/90 leading-relaxed">{report.spending_insight}</p>
           </div>
         )}
       </Section>
@@ -416,16 +416,16 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
       <Section icon={<Calendar size={15} />} title="3. Bills & Cashflow — Next 7 Days" accent="blue" defaultOpen>
         {/* Traffic-light summary */}
         <div className="grid grid-cols-3 gap-2.5 mb-3">
-          <div className="rounded-xl bg-white/[0.04] border border-emerald-900/30 p-3 text-center">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Income (7d)</div>
+          <div className="rounded-xl bg-secondary/30 border border-emerald-900/30 p-3 text-center">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Income (7d)</div>
             <div className="text-base font-bold text-emerald-400">{mv(fmt(cashflow.income_expected))}</div>
           </div>
-          <div className="rounded-xl bg-white/[0.04] border border-red-900/30 p-3 text-center">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Bills Due (7d)</div>
+          <div className="rounded-xl bg-secondary/30 border border-red-900/30 p-3 text-center">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Bills Due (7d)</div>
             <div className="text-base font-bold text-red-400">{mv(fmt(cashflow.bills_total))}</div>
           </div>
           <div
-            className={`rounded-xl bg-white/[0.04] border p-3 text-center ${
+            className={`rounded-xl bg-secondary/30 border p-3 text-center ${
               cashflow.status === "green"
                 ? "border-emerald-900/50"
                 : cashflow.status === "amber"
@@ -433,7 +433,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                 : "border-red-900/50"
             }`}
           >
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Net (7d)</div>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Net (7d)</div>
             <div
               className={`text-base font-bold flex items-center justify-center gap-1 ${
                 cashflow.status === "green"
@@ -450,17 +450,17 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
         </div>
 
         {cashflow.bills.length === 0 ? (
-          <p className="text-slate-500 text-sm">No bills due in the next 7 days.</p>
+          <p className="text-muted-foreground text-sm">No bills due in the next 7 days.</p>
         ) : (
           <div className="space-y-1.5">
             {(showAllBills ? cashflow.bills : cashflow.bills.slice(0, 6)).map((b, i) => (
               <div
                 key={i}
-                className="flex items-center justify-between rounded-xl bg-white/[0.03] border border-white/[0.05] px-4 py-2.5"
+                className="flex items-center justify-between rounded-xl bg-secondary/20 border border-border/40 px-4 py-2.5"
               >
                 <div>
-                  <div className="text-xs font-medium text-white">{b.bill_name}</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">
+                  <div className="text-xs font-medium text-foreground">{b.bill_name}</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
                     {b.due_date}
                     {" · "}
                     {b.days_away === 0 ? (
@@ -479,7 +479,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
             {cashflow.bills.length > 6 && (
               <button
                 onClick={() => setShowAllBills(v => !v)}
-                className="w-full mt-1 py-2 text-xs text-slate-400 hover:text-white rounded-xl border border-white/[0.05] bg-white/[0.02] hover:bg-white/[0.05] transition-colors"
+                className="w-full mt-1 py-2 text-xs text-muted-foreground hover:text-foreground rounded-xl border border-border/40 bg-secondary/20 hover:bg-secondary/40 transition-colors"
               >
                 {showAllBills
                   ? "Show less"
@@ -493,12 +493,12 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
       {/* ── Section 4: Smart Action ──────────────────────────────────────── */}
       <Section icon={<Zap size={15} />} title="4. Smart Action of the Week" accent="cyan" defaultOpen>
         <div className="rounded-xl bg-gradient-to-r from-cyan-500/10 to-violet-500/10 border border-cyan-500/20 px-4 py-4">
-          <p className="text-sm font-semibold text-white leading-relaxed mb-2">{report.smart_action}</p>
+          <p className="text-sm font-semibold text-foreground leading-relaxed mb-2">{report.smart_action}</p>
           {report.smart_action_value && (
             <p className="text-xs text-cyan-300 font-medium">{report.smart_action_value}</p>
           )}
         </div>
-        <p className="text-[11px] text-slate-600 mt-2">Highest-ROI single action for your household this week.</p>
+        <p className="text-[11px] text-muted-foreground mt-2">Highest-ROI single action for your household this week.</p>
       </Section>
 
       {/* ── Section 4b: Best Move Right Now ───────────────────────────────── */}
@@ -506,7 +506,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
         <Section icon={<span className="text-amber-400">⚡</span>} title="Best Move Right Now" accent="amber" defaultOpen>
           <div className="rounded-xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 px-4 py-4">
             <div className="flex items-start justify-between gap-2 mb-2">
-              <p className="text-sm font-bold text-white leading-snug flex-1">{(report as any).best_move.action}</p>
+              <p className="text-sm font-bold text-foreground leading-snug flex-1">{(report as any).best_move.action}</p>
               <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide border ${
                 (report as any).best_move.risk === 'Low' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                 : (report as any).best_move.risk === 'Med' ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
@@ -516,13 +516,13 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
             <div className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-3 py-0.5 mb-3">
               <span className="text-xs font-semibold text-emerald-400 font-mono">{mv((report as any).best_move.benefit_label)}</span>
             </div>
-            <p className="text-xs text-slate-400 leading-relaxed">{(report as any).best_move.reason}</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">{(report as any).best_move.reason}</p>
             {(report as any).best_move.alternatives?.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-white/[0.05]">
-                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-2">Alternative options</p>
+              <div className="mt-3 pt-3 border-t border-border/40">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2">Alternative options</p>
                 {(report as any).best_move.alternatives.slice(0, 3).map((alt: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0">
-                    <span className="text-xs text-slate-300">{alt.action}</span>
+                  <div key={i} className="flex items-center justify-between py-1.5 border-b border-border/30 last:border-0">
+                    <span className="text-xs text-foreground/80">{alt.action}</span>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span className="text-[11px] font-mono text-emerald-400">{mv(alt.benefit_label)}</span>
                       <span className={`text-[10px] font-semibold ${
@@ -534,42 +534,42 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
               </div>
             )}
           </div>
-          <p className="text-[11px] text-slate-600 mt-2">Ranked by risk-adjusted annual benefit across 8 action types.</p>
+          <p className="text-[11px] text-muted-foreground mt-2">Ranked by risk-adjusted annual benefit across 8 action types.</p>
         </Section>
       )}
 
       {/* ── Section 5: Property Watch ────────────────────────────────────── */}
       <Section icon={<Home size={15} />} title="5. Property Watch" accent="green" defaultOpen={false}>
         <div className="grid grid-cols-2 gap-2.5 mb-3">
-          <div className="rounded-xl bg-white/[0.04] border border-emerald-900/30 p-3">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Buy Signal</div>
-            <div className="text-2xl font-black text-emerald-400">{pw.buy_score}<span className="text-sm font-normal text-slate-500">/10</span></div>
+          <div className="rounded-xl bg-secondary/30 border border-emerald-900/30 p-3">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Buy Signal</div>
+            <div className="text-2xl font-black text-emerald-400">{pw.buy_score}<span className="text-sm font-normal text-muted-foreground">/10</span></div>
           </div>
-          <div className="rounded-xl bg-white/[0.04] border border-amber-900/30 p-3">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Wait Signal</div>
-            <div className="text-2xl font-black text-amber-400">{pw.wait_score}<span className="text-sm font-normal text-slate-500">/10</span></div>
+          <div className="rounded-xl bg-secondary/30 border border-amber-900/30 p-3">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Wait Signal</div>
+            <div className="text-2xl font-black text-amber-400">{pw.wait_score}<span className="text-sm font-normal text-muted-foreground">/10</span></div>
           </div>
-          <div className="rounded-xl bg-white/[0.04] border border-white/[0.05] p-3">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Borrowing Power</div>
-            <div className="text-base font-bold text-slate-400">{pw.borrowing_power === -1 ? 'Needs setup' : mv(fmt(pw.borrowing_power))}</div>
+          <div className="rounded-xl bg-secondary/30 border border-border/40 p-3">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Borrowing Power</div>
+            <div className="text-base font-bold text-muted-foreground">{pw.borrowing_power === -1 ? 'Needs setup' : mv(fmt(pw.borrowing_power))}</div>
           </div>
-          <div className="rounded-xl bg-white/[0.04] border border-white/[0.05] p-3">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Deposit Readiness</div>
-            <div className="text-base font-bold text-white">{pw.deposit_ready.toFixed(0)}%</div>
+          <div className="rounded-xl bg-secondary/30 border border-border/40 p-3">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Deposit Readiness</div>
+            <div className="text-base font-bold text-foreground">{pw.deposit_ready.toFixed(0)}%</div>
             <ProgressBar value={pw.deposit_ready} color="#34d399" height={4} />
           </div>
         </div>
-        <div className="rounded-xl bg-white/[0.03] border border-white/[0.05] px-4 py-3">
-          <p className="text-xs text-slate-300 leading-relaxed">{pw.market_summary}</p>
+        <div className="rounded-xl bg-secondary/20 border border-border/40 px-4 py-3">
+          <p className="text-xs text-foreground/80 leading-relaxed">{pw.market_summary}</p>
         </div>
       </Section>
 
       {/* ── Section 6: Investment Update ─────────────────────────────────── */}
       <Section icon={<BarChart3 size={15} />} title="6. Investment Update" accent="violet" defaultOpen={false}>
         <div className="grid grid-cols-2 gap-2.5 mb-3">
-          <div className="rounded-xl bg-white/[0.04] border border-white/[0.06] p-3">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Stocks</div>
-            <div className="text-base font-bold text-white">{mv(fmt(investment.stocks_value))}</div>
+          <div className="rounded-xl bg-secondary/30 border border-border/40 p-3">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Stocks</div>
+            <div className="text-base font-bold text-foreground">{mv(fmt(investment.stocks_value))}</div>
             {investment.stocks_delta !== 0 && (
               <div className={`text-xs mt-1 flex items-center gap-1 ${investment.stocks_delta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {investment.stocks_delta >= 0
@@ -587,9 +587,9 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
               <div className="text-[10px] text-red-400">Worst: {investment.worst_stock}</div>
             )}
           </div>
-          <div className="rounded-xl bg-white/[0.04] border border-white/[0.06] p-3">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Crypto</div>
-            <div className="text-base font-bold text-white">{mv(fmt(investment.crypto_value))}</div>
+          <div className="rounded-xl bg-secondary/30 border border-border/40 p-3">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Crypto</div>
+            <div className="text-base font-bold text-foreground">{mv(fmt(investment.crypto_value))}</div>
             {investment.crypto_delta !== 0 && (
               <div className={`text-xs mt-1 flex items-center gap-1 ${investment.crypto_delta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {investment.crypto_delta >= 0
@@ -602,25 +602,25 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
             )}
           </div>
         </div>
-        <div className="rounded-xl bg-white/[0.03] border border-white/[0.05] p-3">
+        <div className="rounded-xl bg-secondary/20 border border-border/40 p-3">
           <div className="flex items-center justify-between text-xs mb-1">
-            <span className="text-slate-500">Total Portfolio</span>
+            <span className="text-muted-foreground">Total Portfolio</span>
             <span className="font-bold text-violet-400">{mv(fmt(investment.portfolio_total))}</span>
           </div>
           {investment.dca_active.length > 0 && (
-            <div className="text-[11px] text-slate-400 mt-1.5">
-              <span className="text-slate-500">DCA active: </span>
+            <div className="text-[11px] text-muted-foreground mt-1.5">
+              <span className="text-muted-foreground">DCA active: </span>
               {investment.dca_active.join(", ")}
             </div>
           )}
           {investment.planned_buys.length > 0 && (
-            <div className="text-[11px] text-slate-400 mt-1">
-              <span className="text-slate-500">Planned buys (30d): </span>
+            <div className="text-[11px] text-muted-foreground mt-1">
+              <span className="text-muted-foreground">Planned buys (30d): </span>
               {investment.planned_buys.join(", ")}
             </div>
           )}
           {investment.dca_active.length === 0 && investment.planned_buys.length === 0 && (
-            <div className="text-[11px] text-slate-500">No active DCA or upcoming planned investments.</div>
+            <div className="text-[11px] text-muted-foreground">No active DCA or upcoming planned investments.</div>
           )}
         </div>
       </Section>
@@ -653,8 +653,8 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                 {risk_radar.overall_score}
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-100">{risk_radar.overall_label}</p>
-                <p className="text-[11px] text-slate-500">Fragility index: {risk_radar.fragility_index} / 100 · Lower is safer</p>
+                <p className="text-sm font-semibold text-foreground">{risk_radar.overall_label}</p>
+                <p className="text-[11px] text-muted-foreground">Fragility index: {risk_radar.fragility_index} / 100 · Lower is safer</p>
               </div>
             </div>
 
@@ -674,7 +674,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                   }}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] text-slate-400">{cat.icon} {cat.label}</span>
+                    <span className="text-[11px] text-muted-foreground">{cat.icon} {cat.label}</span>
                     <span
                       className="text-xs font-bold"
                       style={{ color: cat.level === 'green' ? '#22c55e' : cat.level === 'amber' ? '#f59e0b' : '#ef4444' }}
@@ -683,7 +683,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                     </span>
                   </div>
                   {/* Score bar */}
-                  <div className="h-1 rounded-full bg-slate-700/50 overflow-hidden">
+                  <div className="h-1 rounded-full bg-secondary/60 overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all"
                       style={{
@@ -692,7 +692,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                       }}
                     />
                   </div>
-                  <p className="text-[10px] text-slate-500 mt-1 leading-snug line-clamp-2">{cat.summary}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1 leading-snug line-clamp-2">{cat.summary}</p>
                 </div>
               ))}
             </div>
@@ -700,7 +700,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
             {/* Top 3 risks */}
             {risk_radar.top_risks.length > 0 && (
               <div>
-                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Top Risks</p>
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Top Risks</p>
                 <div className="space-y-2">
                   {risk_radar.top_risks.map((r, i) => (
                     <div
@@ -714,7 +714,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                       }}
                     >
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-slate-200">{r.label}</span>
+                        <span className="text-xs font-medium text-foreground/90">{r.label}</span>
                         <span
                           className="text-[11px] font-mono font-bold"
                           style={{ color: r.level === 'red' ? '#ef4444' : '#f59e0b' }}
@@ -722,8 +722,8 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                           {mv(r.value)}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 leading-snug">{r.finding}</p>
-                      <p className="text-[10px] text-slate-500 mt-1">→ {r.action}</p>
+                      <p className="text-[11px] text-muted-foreground leading-snug">{r.finding}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1">→ {r.action}</p>
                     </div>
                   ))}
                 </div>
@@ -739,7 +739,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                     className="flex gap-2.5 rounded-xl bg-amber-500/[0.07] border border-amber-500/20 px-3.5 py-2.5"
                   >
                     <AlertCircle size={12} className="text-amber-400 mt-0.5 shrink-0" />
-                    <p className="text-[11px] text-slate-300 leading-relaxed">{a}</p>
+                    <p className="text-[11px] text-foreground/80 leading-relaxed">{a}</p>
                   </div>
                 ))}
               </div>
@@ -758,7 +758,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                 className="flex gap-2.5 rounded-xl bg-red-500/[0.08] border border-red-500/20 px-4 py-3"
               >
                 <AlertCircle size={13} className="text-red-400 mt-0.5 shrink-0" />
-                <p className="text-xs text-slate-200 leading-relaxed">{a}</p>
+                <p className="text-xs text-foreground/90 leading-relaxed">{a}</p>
               </div>
             ))}
           </div>
@@ -798,7 +798,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
           />
         </div>
         <div className="mb-2">
-          <div className="flex justify-between text-[11px] text-slate-500 mb-1.5">
+          <div className="flex justify-between text-[11px] text-muted-foreground mb-1.5">
             <span>{mv(fmt(fire.investable))} of {mv(fmt(fire.target_capital))}</span>
             <span>{fire.progress_pct.toFixed(1)}%</span>
           </div>
@@ -827,10 +827,10 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
               <Zap size={12} className="text-orange-400" />
               <p className="text-[11px] font-semibold text-orange-400 uppercase tracking-wider">Fastest Path to FIRE</p>
             </div>
-            <p className="text-xs font-bold text-slate-100 mb-1">
+            <p className="text-xs font-bold text-foreground mb-1">
               Option {fire_path.best_scenario === 'etf' ? 'B' : fire_path.best_scenario === 'property' ? 'A' : fire_path.best_scenario === 'mixed' ? 'C' : 'D'} — {fire_path.best_label} → FIRE in {fire_path.best_fire_year}
             </p>
-            <p className="text-[11px] text-slate-400 leading-relaxed mb-2">{fire_path.recommendation}</p>
+            <p className="text-[11px] text-muted-foreground leading-relaxed mb-2">{fire_path.recommendation}</p>
             <div className="grid grid-cols-2 gap-2">
               {(fire_path.scenarios as any[]).map((s: any, i: number) => {
                 const letters = ['A','B','C','D'];
@@ -846,11 +846,11 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                     }}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400">{letters[i]}. {s.label}</span>
+                      <span className="text-[10px] text-muted-foreground">{letters[i]}. {s.label}</span>
                       {isBest && <span className="text-[8px] text-orange-400 font-bold">⚡</span>}
                     </div>
                     <p className="text-sm font-bold" style={{ color: isBest ? '#f97316' : colors[i] }}>{s.fire_year}</p>
-                    <p className="text-[9px] text-slate-500">{s.risk_level} risk</p>
+                    <p className="text-[9px] text-muted-foreground">{s.risk_level} risk</p>
                   </div>
                 );
               })}
@@ -892,16 +892,16 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
         {/* Top strategies */}
         {(tax_alpha.top_strategies ?? []).length > 0 && (
           <div className="space-y-2 mb-3">
-            <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Top Actions</p>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Top Actions</p>
             {(tax_alpha.top_strategies ?? []).map((s: any, i: number) => (
               <div key={i} className="flex items-start justify-between gap-3 rounded-xl bg-emerald-500/[0.07] border border-emerald-500/20 px-3 py-2.5">
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide">{s.title}</p>
-                  <p className="text-xs text-slate-200 leading-snug mt-0.5">{s.action}</p>
+                  <p className="text-xs text-foreground/90 leading-snug mt-0.5">{s.action}</p>
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-sm font-black text-emerald-400">{mv(s.annual_saving_label)}</p>
-                  <p className="text-[9px] text-slate-500">{s.risk} risk</p>
+                  <p className="text-[9px] text-muted-foreground">{s.risk} risk</p>
                 </div>
               </div>
             ))}
@@ -913,7 +913,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
             {tax_alpha.tips.map((tip: string, i: number) => (
               <div key={i} className="flex gap-2 rounded-xl bg-emerald-500/[0.07] border border-emerald-500/20 px-4 py-3">
                 <Lightbulb size={12} className="text-emerald-400 mt-0.5 shrink-0" />
-                <p className="text-xs text-slate-200 leading-relaxed">{tip}</p>
+                <p className="text-xs text-foreground/90 leading-relaxed">{tip}</p>
               </div>
             ))}
           </div>
@@ -930,7 +930,7 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
                 className="flex gap-2.5 rounded-xl bg-violet-500/[0.08] border border-violet-500/20 px-4 py-3"
               >
                 <ArrowUpRight size={13} className="text-violet-400 mt-0.5 shrink-0" />
-                <p className="text-xs text-slate-200 leading-relaxed">{o}</p>
+                <p className="text-xs text-foreground/90 leading-relaxed">{o}</p>
               </div>
             ))}
           </div>
@@ -941,10 +941,10 @@ function BulletinViewer({ report }: { report: CFOBulletin }) {
       <div className="rounded-2xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/[0.07] to-violet-500/[0.07] p-5 mt-1">
         <div className="flex items-center gap-2 mb-3 text-cyan-400">
           <MessageSquare size={15} />
-          <h3 className="font-semibold text-sm text-white">11. Family CFO Insight</h3>
+          <h3 className="font-semibold text-sm text-foreground">11. Family CFO Insight</h3>
         </div>
-        <p className="text-sm text-slate-100 leading-relaxed font-medium">{report.cfo_insight}</p>
-        <p className="text-[11px] text-slate-600 mt-2">
+        <p className="text-sm text-foreground leading-relaxed font-medium">{report.cfo_insight}</p>
+        <p className="text-[11px] text-muted-foreground mt-2">
           Generated {new Date(report.generated_at).toLocaleString("en-AU", { timeZone: "Australia/Brisbane" })} AEST
         </p>
       </div>
@@ -1157,21 +1157,21 @@ export default function AIWeeklyCFOPage() {
   }, [qc, toast]);
 
   return (
-    <div className="p-4 pb-20 max-w-3xl mx-auto">
+    <div className="p-4 pb-20 max-w-3xl mx-auto bg-background min-h-screen">
       {/* Page header */}
       <div className="flex items-start justify-between mb-5">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <BrainCircuit size={20} className="text-cyan-400" />
-            <h1 className="text-xl font-bold text-white">Saturday Morning Bulletin</h1>
+            <h1 className="text-xl font-bold text-foreground">Saturday Morning Bulletin</h1>
           </div>
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-muted-foreground">
             Automated weekly family financial briefing — every Saturday at 8:00 AM AEST.
           </p>
         </div>
         <Button
           size="sm"
-          className="bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-semibold text-xs shrink-0"
+          className="bg-cyan-500 hover:bg-cyan-400 text-background font-semibold text-xs shrink-0"
           onClick={handleGenerate}
           disabled={generating}
         >
@@ -1192,15 +1192,15 @@ export default function AIWeeklyCFOPage() {
 
       {/* No reports yet */}
       {!isLoading && rows.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-cyan-900/60 bg-[#0d1421] p-10 text-center">
+        <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center">
           <BrainCircuit size={38} className="mx-auto text-cyan-600 mb-3" />
-          <h2 className="text-white font-semibold mb-2">No bulletins yet</h2>
-          <p className="text-slate-400 text-sm mb-5 max-w-sm mx-auto">
+          <h2 className="text-foreground font-semibold mb-2">No bulletins yet</h2>
+          <p className="text-muted-foreground text-sm mb-5 max-w-sm mx-auto">
             Run your first bulletin to get a premium 11-section financial briefing — scores,
             cash breakdown, 7-day cashflow, FIRE tracker, property watch, tax alpha, and more.
           </p>
           <Button
-            className="bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-semibold"
+            className="bg-cyan-500 hover:bg-cyan-400 text-background font-semibold"
             onClick={handleGenerate}
             disabled={generating}
           >
@@ -1219,7 +1219,7 @@ export default function AIWeeklyCFOPage() {
           {/* History sidebar */}
           {rows.length > 1 && (
             <div className="lg:w-44 shrink-0">
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mb-2 px-1">
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-2 px-1">
                 <History size={11} /> History
               </div>
               <div className="space-y-1">
@@ -1234,7 +1234,7 @@ export default function AIWeeklyCFOPage() {
                       className={`w-full text-left rounded-xl px-3 py-2.5 text-xs transition-colors ${
                         isActive
                           ? "bg-cyan-500/15 border border-cyan-500/30 text-cyan-300"
-                          : "bg-white/[0.04] border border-transparent text-slate-400 hover:bg-white/[0.08]"
+                          : "bg-secondary/30 border border-transparent text-muted-foreground hover:bg-secondary/50"
                       }`}
                     >
                       <div className="font-medium">{fmtShort(row.week_date)}</div>
@@ -1259,7 +1259,7 @@ export default function AIWeeklyCFOPage() {
             {report ? (
               <BulletinViewer report={report} />
             ) : (
-              <div className="text-slate-500 text-sm text-center py-10">
+              <div className="text-muted-foreground text-sm text-center py-10">
                 Select a bulletin from the history to view it.
               </div>
             )}

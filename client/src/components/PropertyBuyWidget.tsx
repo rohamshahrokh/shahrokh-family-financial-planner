@@ -84,7 +84,7 @@ export default function PropertyBuyWidget() {
 
   if (loading && !result) {
     return (
-      <div className="rounded-2xl bg-white/[0.03] border border-white/[0.07] p-4 flex items-center gap-3">
+      <div className="rounded-2xl bg-card border border-border p-4 flex items-center gap-3">
         <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
         <p className="text-sm text-slate-400">Analysing property scenarios…</p>
       </div>
@@ -98,14 +98,14 @@ export default function PropertyBuyWidget() {
   const horizon = result.buy_now.yearly.length;
 
   return (
-    <div className="rounded-2xl bg-white/[0.03] border border-white/[0.07] overflow-hidden">
+    <div className="rounded-2xl bg-card border border-border overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-white/[0.05]">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-emerald-500/15 flex items-center justify-center">
             <Home className="w-3.5 h-3.5 text-emerald-400" />
           </div>
-          <span className="text-sm font-bold text-white">Property: Buy vs Wait</span>
+          <span className="text-sm font-bold text-foreground">Property: Buy vs Wait</span>
         </div>
         <span className="text-[10px] text-slate-500">{result.confidence}/100 confidence</span>
       </div>
@@ -135,11 +135,11 @@ export default function PropertyBuyWidget() {
                 result.best_scenario === 'wait_6m' && s!.label === result.wait_6m.label ||
                 result.best_scenario === 'wait_12m' && s!.label === result.wait_12m?.label
                   ? 'bg-emerald-500/10 border-emerald-500/25'
-                  : 'bg-white/[0.04] border-white/[0.06]'
+                  : 'bg-secondary/30 border-border/40'
               }`}
             >
               <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-1 truncate">{s!.label}</p>
-              <p className="text-sm font-black text-white font-mono">{(s!.irr * 100).toFixed(1)}%</p>
+              <p className="text-sm font-black text-foreground font-mono">{(s!.irr * 100).toFixed(1)}%</p>
               <p className="text-[10px] text-slate-400">IRR</p>
               <p className="text-[10px] text-emerald-400 mt-0.5">{mv(fmt(s!.equity_end))}</p>
               <p className="text-[9px] text-slate-600">{horizon}yr equity</p>

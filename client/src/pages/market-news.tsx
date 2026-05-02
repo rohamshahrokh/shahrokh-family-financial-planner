@@ -163,7 +163,7 @@ function PulseCard({
   const isPos = change >= 0;
   const hasData = price > 0;
   return (
-    <div className="flex-shrink-0 min-w-[120px] bg-zinc-900 border border-zinc-800 rounded-lg p-3 hover:border-zinc-600 transition-colors">
+    <div className="flex-shrink-0 min-w-[120px] bg-card border border-border rounded-lg p-3 hover:border-primary/40 transition-colors">
       <div className="text-xs text-zinc-500 font-mono uppercase tracking-wider mb-1">{label}</div>
       <div className="text-sm font-bold text-zinc-100 font-mono">
         {hasData ? formatPrice(price, decimals) : <span className="text-zinc-600">—</span>}
@@ -203,7 +203,7 @@ function WatchlistRow({
   };
 
   return (
-    <tr className="border-b border-zinc-800 hover:bg-zinc-900/60 transition-colors">
+    <tr className="border-b border-border hover:bg-secondary/20 transition-colors">
       <td className="px-4 py-3">
         <span className="font-mono font-bold text-zinc-100 text-sm">{asset.symbol}</span>
       </td>
@@ -231,7 +231,7 @@ function WatchlistRow({
         </span>
       </td>
       <td className="px-4 py-3">
-        <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-1 rounded">{asset.sector}</span>
+        <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded">{asset.sector}</span>
       </td>
     </tr>
   );
@@ -239,7 +239,7 @@ function WatchlistRow({
 
 function ArticleCard({ article }: { article: NewsArticle }) {
   return (
-    <div className="border-b border-zinc-800 py-3 hover:bg-zinc-900/40 transition-colors px-2 -mx-2 rounded">
+    <div className="border-b border-border py-3 hover:bg-secondary/20 transition-colors px-2 -mx-2 rounded">
       <a
         href={article.link || "#"}
         target="_blank"
@@ -293,7 +293,7 @@ function SignalBadge({ type }: { type: "buy" | "alert" | "risk" | "breakout" | "
     alert: "bg-red-900/40 border-red-700 text-red-400",
     risk: "bg-orange-900/40 border-orange-700 text-orange-400",
     breakout: "bg-blue-900/40 border-blue-700 text-blue-400",
-    info: "bg-zinc-800 border-zinc-700 text-zinc-400",
+    info: "bg-secondary border-border text-muted-foreground",
   };
   const icons = {
     buy: <TrendingUp size={14} />,
@@ -315,14 +315,14 @@ function SignalBadge({ type }: { type: "buy" | "alert" | "risk" | "breakout" | "
 
 function LoadingSkeleton() {
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center gap-6 p-8">
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-6 p-8">
       <div className="flex items-center gap-3">
         <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
         <span className="text-zinc-400 font-mono text-lg tracking-wide">Loading market data…</span>
       </div>
       <div className="w-full max-w-4xl space-y-3">
         {[...Array(5)].map((_, i) => (
-          <div key={i} className="h-12 bg-zinc-800/60 rounded-lg animate-pulse" style={{ opacity: 1 - i * 0.15 }} />
+          <div key={i} className="h-12 bg-secondary/60 rounded-lg animate-pulse" style={{ opacity: 1 - i * 0.15 }} />
         ))}
       </div>
     </div>
@@ -441,7 +441,7 @@ export default function MarketNewsPage() {
 
   if (error && !marketData) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-8">
+      <div className="min-h-screen bg-background flex items-center justify-center p-8">
         <div className="text-center space-y-4 max-w-md">
           <AlertTriangle className="w-12 h-12 text-red-400 mx-auto" />
           <h2 className="text-xl font-bold text-zinc-100">Failed to load market data</h2>
@@ -472,9 +472,9 @@ export default function MarketNewsPage() {
   })();
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 pb-12">
+    <div className="min-h-screen bg-background text-foreground pb-12">
       {/* ── Header ── */}
-      <div className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
+      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border px-4 py-3">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
             <div className="bg-emerald-900/40 border border-emerald-700 p-2 rounded-lg">
@@ -506,7 +506,7 @@ export default function MarketNewsPage() {
               className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors font-semibold ${
                 privacyMode
                   ? "bg-amber-900/40 border-amber-700 text-amber-400"
-                  : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+                  : "bg-secondary border-border text-muted-foreground hover:text-foreground"
               }`}
             >
               {privacyMode ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -514,7 +514,7 @@ export default function MarketNewsPage() {
             </button>
             <button
               onClick={handleRefresh}
-              className="flex items-center gap-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors font-semibold"
+              className="flex items-center gap-1.5 text-xs bg-secondary hover:bg-secondary/70 border border-border text-foreground px-3 py-1.5 rounded-lg transition-colors font-semibold"
             >
               <RefreshCw size={13} />
               Refresh
@@ -586,10 +586,10 @@ export default function MarketNewsPage() {
               <Activity className="text-blue-400 w-4 h-4" />
               <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Portfolio Watchlist</h2>
             </div>
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="border-b border-zinc-800 bg-zinc-900/80">
+                  <tr className="border-b border-border bg-secondary/30">
                     <th className="px-4 py-2.5 text-xs font-bold text-zinc-500 uppercase tracking-wider">Symbol</th>
                     <th className="px-4 py-2.5 text-xs font-bold text-zinc-500 uppercase tracking-wider">Name</th>
                     <th className="px-4 py-2.5 text-xs font-bold text-zinc-500 uppercase tracking-wider">Price</th>
@@ -620,7 +620,7 @@ export default function MarketNewsPage() {
                 <Zap className="text-amber-400 w-4 h-4" />
                 <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Fear & Greed</h2>
               </div>
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
+              <div className="bg-card border border-border rounded-xl p-6 text-center">
                 {fearGreed !== null ? (
                   <>
                     <div className={`text-6xl font-black font-mono mb-2 ${fgColor(fearGreed)}`}>
@@ -630,7 +630,7 @@ export default function MarketNewsPage() {
                       {fearGreedLabel || fgLabel(fearGreed)}
                     </div>
                     {/* Bar */}
-                    <div className="relative h-3 bg-zinc-800 rounded-full overflow-hidden mb-2">
+                    <div className="relative h-3 bg-secondary rounded-full overflow-hidden mb-2">
                       <div
                         className={`h-full rounded-full transition-all ${fgBg(fearGreed)}`}
                         style={{ width: `${fearGreed}%` }}
@@ -668,7 +668,7 @@ export default function MarketNewsPage() {
                 <AlertTriangle className="text-orange-400 w-4 h-4" />
                 <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Signals & Alerts</h2>
               </div>
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-2">
+              <div className="bg-card border border-border rounded-xl p-4 space-y-2">
                 {signals.map((sig, i) => (
                   <div key={i} className="flex items-start gap-2">
                     <SignalBadge type={sig.type} />
@@ -707,18 +707,18 @@ export default function MarketNewsPage() {
               <Zap className="text-blue-400 w-4 h-4" />
               <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Daily Market Brief</h2>
             </div>
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
+            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
               {marketBrief ? (
                 <>
                   <div>
                     <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">What happened</p>
                     <p className="text-sm text-zinc-300 leading-relaxed">{marketBrief.indexSummary}</p>
                   </div>
-                  <div className="border-t border-zinc-800 pt-4">
+                  <div className="border-t border-border pt-4">
                     <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Portfolio focus</p>
                     <p className="text-sm text-zinc-300 leading-relaxed">{marketBrief.topMoverStr}</p>
                   </div>
-                  <div className="border-t border-zinc-800 pt-4">
+                  <div className="border-t border-border pt-4">
                     <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Action</p>
                     <p className="text-sm text-zinc-300 leading-relaxed">{marketBrief.actionStr}</p>
                   </div>
@@ -738,7 +738,7 @@ export default function MarketNewsPage() {
           </div>
 
           {/* Tab bar */}
-          <div className="flex gap-1 mb-4 overflow-x-auto border-b border-zinc-800 pb-px">
+          <div className="flex gap-1 mb-4 overflow-x-auto border-b border-border pb-px">
             {NEWS_TABS.map((tab) => (
               <button
                 key={tab.key}
@@ -755,7 +755,7 @@ export default function MarketNewsPage() {
           </div>
 
           {/* Article list */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+          <div className="bg-card border border-border rounded-xl p-4">
             {(() => {
               const articles = news[activeNewsTab] ?? [];
               if (articles.length === 0) {

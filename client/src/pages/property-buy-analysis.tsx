@@ -67,7 +67,7 @@ function NumField({
           type="number"
           value={value || ''}
           onChange={e => onChange(safeNum(e.target.value))}
-          className={`h-8 text-xs bg-white/[0.04] border-white/[0.08] text-white ${prefix ? 'pl-6' : 'pl-3'} ${suffix ? 'pr-8' : ''}`}
+          className={`h-8 text-xs bg-input border-border text-foreground ${prefix ? 'pl-6' : 'pl-3'} ${suffix ? 'pr-8' : ''}`}
         />
         {suffix && (
           <span className="absolute right-2.5 text-xs text-slate-500 pointer-events-none">{suffix}</span>
@@ -103,13 +103,13 @@ function ScenarioCard({
     <div className={`rounded-2xl border p-4 transition-all ${
       isBest
         ? 'bg-emerald-500/5 border-emerald-500/30'
-        : 'bg-white/[0.03] border-white/[0.07]'
+        : 'bg-card border-border'
     }`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           {isBest && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
-          <h3 className={`text-sm font-bold ${isBest ? 'text-emerald-300' : 'text-white'}`}>
+          <h3 className={`text-sm font-bold ${isBest ? 'text-emerald-300' : 'text-foreground'}`}>
             {result.label}
           </h3>
           {isBest && (
@@ -131,9 +131,9 @@ function ScenarioCard({
           { label: 'IRR',             val: fmtPct(result.irr) },
           { label: 'Avg Monthly CF',  val: mv(fmtCF(result.avg_monthly_cashflow)) },
         ].map(({ label, val }) => (
-          <div key={label} className="rounded-xl bg-white/[0.04] border border-white/[0.05] p-2.5">
+          <div key={label} className="rounded-xl bg-input border border-white/[0.05] p-2.5">
             <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">{label}</p>
-            <p className="text-sm font-bold text-white font-mono">{val}</p>
+            <p className="text-sm font-bold text-foreground font-mono">{val}</p>
           </div>
         ))}
       </div>
@@ -142,9 +142,9 @@ function ScenarioCard({
       <div className="mb-3">
         <div className="flex items-center justify-between mb-1">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider">Confidence</span>
-          <span className="text-xs font-semibold text-white">{result.confidence}/100</span>
+          <span className="text-xs font-semibold text-foreground">{result.confidence}/100</span>
         </div>
-        <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+        <div className="h-1.5 bg-secondary/40 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all ${
               result.confidence >= 70 ? 'bg-emerald-400' : result.confidence >= 50 ? 'bg-amber-400' : 'bg-red-400'
@@ -165,7 +165,7 @@ function ScenarioCard({
       {/* Year-by-year toggle */}
       <button
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between text-[10px] text-slate-500 hover:text-slate-300 transition-colors py-1"
+        className="w-full flex items-center justify-between text-[10px] text-slate-500 hover:text-foreground/70 transition-colors py-1"
       >
         <span className="font-medium uppercase tracking-wider">Year-by-year breakdown</span>
         {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -274,15 +274,15 @@ export default function PropertyBuyAnalysisPage() {
             <div className="w-8 h-8 rounded-xl bg-emerald-500/15 flex items-center justify-center">
               <Home className="w-4 h-4 text-emerald-400" />
             </div>
-            <h1 className="text-xl font-black text-white tracking-tight">Property Buy vs Wait</h1>
+            <h1 className="text-xl font-black text-foreground tracking-tight">Property Buy vs Wait</h1>
           </div>
           <p className="text-xs text-slate-500 ml-10">AU-specific scenario analysis — IRR, equity, cashflow, negative gearing</p>
         </div>
       </div>
 
       {/* ── Inputs ──────────────────────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-white/[0.03] border border-white/[0.07] p-4">
-        <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+      <div className="rounded-2xl bg-card border border-border p-4">
+        <h2 className="text-sm font-bold text-foreground mb-4 flex items-center gap-2">
           <Calculator className="w-4 h-4 text-slate-400" />
           Property Inputs
         </h2>
@@ -293,7 +293,7 @@ export default function PropertyBuyAnalysisPage() {
           <div>
             <label className="block text-[10px] text-slate-500 uppercase tracking-wider mb-1">State</label>
             <Select value={inp.state} onValueChange={v => set('state', v as any)}>
-              <SelectTrigger className="h-8 text-xs bg-white/[0.04] border-white/[0.08] text-white">
+              <SelectTrigger className="h-8 text-xs bg-input border-border text-foreground">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -308,7 +308,7 @@ export default function PropertyBuyAnalysisPage() {
           <div>
             <label className="block text-[10px] text-slate-500 uppercase tracking-wider mb-1">Loan Type</label>
             <Select value={inp.loan_type} onValueChange={v => set('loan_type', v as any)}>
-              <SelectTrigger className="h-8 text-xs bg-white/[0.04] border-white/[0.08] text-white">
+              <SelectTrigger className="h-8 text-xs bg-input border-border text-foreground">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -345,7 +345,7 @@ export default function PropertyBuyAnalysisPage() {
               value={inp.has_depreciation ? 'yes' : 'no'}
               onValueChange={v => set('has_depreciation', v === 'yes')}
             >
-              <SelectTrigger className="h-8 text-xs bg-white/[0.04] border-white/[0.08] text-white">
+              <SelectTrigger className="h-8 text-xs bg-input border-border text-foreground">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -383,7 +383,7 @@ export default function PropertyBuyAnalysisPage() {
                 <Input
                   value={altLabel}
                   onChange={e => setAltLabel(e.target.value)}
-                  className="h-8 text-xs bg-white/[0.04] border-white/[0.08] text-white"
+                  className="h-8 text-xs bg-input border-border text-foreground"
                 />
               </div>
               <NumField label="Alternative Price" value={altPrice} onChange={setAltPrice} />
@@ -420,14 +420,14 @@ export default function PropertyBuyAnalysisPage() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <h2 className="text-base font-black text-white">
+                  <h2 className="text-base font-black text-foreground">
                     Recommendation: {result.best_label}
                   </h2>
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/[0.08] text-slate-300">
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-secondary/40 text-foreground/70">
                     {result.confidence}/100 confidence
                   </span>
                 </div>
-                <p className="text-sm text-slate-300 leading-relaxed">{result.key_insight}</p>
+                <p className="text-sm text-foreground/70 leading-relaxed">{result.key_insight}</p>
               </div>
             </div>
           </div>
@@ -449,15 +449,15 @@ export default function PropertyBuyAnalysisPage() {
           </div>
 
           {/* Comparison table */}
-          <div className="rounded-2xl bg-white/[0.03] border border-white/[0.07] overflow-hidden">
+          <div className="rounded-2xl bg-card border border-border overflow-hidden">
             <div className="px-4 pt-4 pb-2 flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-slate-400" />
-              <h2 className="text-sm font-bold text-white">Comparison Table</h2>
+              <h2 className="text-sm font-bold text-foreground">Comparison Table</h2>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-white/[0.07] bg-white/[0.03]">
+                  <tr className="border-b border-border bg-card">
                     <th className="text-left px-4 py-2.5 text-[10px] text-slate-500 uppercase tracking-wider font-semibold w-40">Metric</th>
                     {[result.buy_now, result.wait_6m, result.wait_12m].filter(Boolean).map(s => (
                       <th key={s!.label} className={`text-right px-4 py-2.5 text-[10px] uppercase tracking-wider font-semibold ${
@@ -479,11 +479,11 @@ export default function PropertyBuyAnalysisPage() {
                 </thead>
                 <tbody>
                   {result.comparison_table.map((row, i) => (
-                    <tr key={row.metric} className={`border-b border-white/[0.04] ${i % 2 === 0 ? '' : 'bg-white/[0.01]'}`}>
+                    <tr key={row.metric} className={`border-b border-border/30 ${i % 2 === 0 ? '' : 'bg-secondary/10'}`}>
                       <td className="px-4 py-2.5 text-slate-400 font-medium">{row.metric}</td>
-                      <td className="px-4 py-2.5 text-right text-white font-mono">{mv(row.buy_now)}</td>
-                      <td className="px-4 py-2.5 text-right text-white font-mono">{mv(row.wait_6m)}</td>
-                      <td className="px-4 py-2.5 text-right text-white font-mono">{mv(row.wait_12m)}</td>
+                      <td className="px-4 py-2.5 text-right text-foreground font-mono">{mv(row.buy_now)}</td>
+                      <td className="px-4 py-2.5 text-right text-foreground font-mono">{mv(row.wait_6m)}</td>
+                      <td className="px-4 py-2.5 text-right text-foreground font-mono">{mv(row.wait_12m)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -492,8 +492,8 @@ export default function PropertyBuyAnalysisPage() {
           </div>
 
           {/* Equity growth chart */}
-          <div className="rounded-2xl bg-white/[0.03] border border-white/[0.07] p-4">
-            <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+          <div className="rounded-2xl bg-card border border-border p-4">
+            <h2 className="text-sm font-bold text-foreground mb-4 flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-emerald-400" />
               Equity Growth Over Time
             </h2>
@@ -529,8 +529,8 @@ export default function PropertyBuyAnalysisPage() {
           </div>
 
           {/* Monthly cashflow chart */}
-          <div className="rounded-2xl bg-white/[0.03] border border-white/[0.07] p-4">
-            <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+          <div className="rounded-2xl bg-card border border-border p-4">
+            <h2 className="text-sm font-bold text-foreground mb-4 flex items-center gap-2">
               <DollarSign className="w-4 h-4 text-amber-400" />
               Monthly Net Cashflow (after NG benefit)
             </h2>

@@ -67,10 +67,10 @@ function AltRow({ opt, mv }: { opt: BestMoveOption; mv: (v: string) => string })
   return (
     <div className="flex items-start justify-between gap-3 py-2.5 border-t border-white/[0.05]">
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-slate-300 leading-snug">
+        <p className="text-xs font-medium text-foreground/70 leading-snug">
           #{opt.rank} {opt.action}
         </p>
-        <p className="text-[10px] text-slate-500 mt-0.5 leading-snug line-clamp-2">
+        <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">
           {opt.reason}
         </p>
       </div>
@@ -117,11 +117,11 @@ export default function BestMoveCard() {
   // ── Loading state ─────────────────────────────────────────────────────────
   if (loading && !result) {
     return (
-      <div className="rounded-2xl bg-white/[0.03] border border-white/[0.07] p-4 flex items-center gap-3">
+      <div className="rounded-2xl bg-card border border-border p-4 flex items-center gap-3">
         <Loader2 className="w-5 h-5 text-amber-400 animate-spin shrink-0" />
         <div>
-          <p className="text-sm font-semibold text-white">Analysing your finances…</p>
-          <p className="text-xs text-slate-500">Computing risk-adjusted options</p>
+          <p className="text-sm font-semibold text-foreground">Analysing your finances…</p>
+          <p className="text-xs text-muted-foreground">Computing risk-adjusted options</p>
         </div>
       </div>
     );
@@ -152,19 +152,19 @@ export default function BestMoveCard() {
   const { best, alternatives } = result;
 
   return (
-    <div className="rounded-2xl bg-white/[0.03] border border-white/[0.07] overflow-hidden">
+    <div className="rounded-2xl bg-card border border-border overflow-hidden">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-4 pt-4 pb-0">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-amber-500/15 flex items-center justify-center">
             <Zap className="w-4 h-4 text-amber-400" />
           </div>
-          <span className="text-sm font-bold text-white tracking-tight">Best Move Right Now</span>
+          <span className="text-sm font-bold text-foreground tracking-tight">Best Move Right Now</span>
         </div>
         <button
           onClick={() => load(true)}
           disabled={loading}
-          className="p-1.5 rounded-lg hover:bg-white/[0.06] transition-colors text-slate-500 hover:text-slate-300 disabled:opacity-40"
+          className="p-1.5 rounded-lg hover:bg-secondary/40 transition-colors text-muted-foreground hover:text-foreground/70 disabled:opacity-40"
           title="Refresh"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -175,7 +175,7 @@ export default function BestMoveCard() {
       <div className="px-4 pt-3 pb-4">
         {/* Action title + risk */}
         <div className="flex items-start justify-between gap-2 mb-2">
-          <h3 className="text-base font-bold text-white leading-snug flex-1">
+          <h3 className="text-base font-bold text-foreground leading-snug flex-1">
             {best.action}
           </h3>
           <RiskBadge risk={best.risk} />
@@ -218,7 +218,7 @@ export default function BestMoveCard() {
       {alternatives.length > 0 && (
         <div className="border-t border-white/[0.05]">
           <button
-            className="w-full flex items-center justify-between px-4 py-2.5 text-xs text-slate-500 hover:text-slate-300 hover:bg-white/[0.03] transition-colors"
+            className="w-full flex items-center justify-between px-4 py-2.5 text-xs text-muted-foreground hover:text-foreground/70 hover:bg-card transition-colors"
             onClick={() => setExpanded(v => !v)}
           >
             <span className="font-medium">Alternative options</span>

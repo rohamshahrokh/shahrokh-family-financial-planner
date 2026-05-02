@@ -3387,3 +3387,123 @@ td.db-act-rank { padding: 9px 0; }
   display: flex;
   gap: 6px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LIGHT MODE EXPANDED OVERRIDES v2
+   Covers: Recharts tooltips, page min-h-screen roots, inline-style patches,
+   MonteCarlo/FIRE overlays, score ring SVG tracks
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Page-level roots that were bg-zinc-950 ──────────────────────────────── */
+.light .bg-zinc-950,
+.light [class*="bg-zinc-950"] {
+  background-color: hsl(var(--background)) !important;
+}
+.light .min-h-screen.bg-zinc-950,
+.light .min-h-screen.bg-background {
+  background-color: hsl(var(--background)) !important;
+}
+
+/* ── bg-zinc-900 cards / panels ──────────────────────────────────────────── */
+.light .bg-zinc-900,
+.light [class*="bg-zinc-900"] {
+  background-color: hsl(220 18% 97%) !important;
+  color: hsl(224 30% 12%) !important;
+}
+.light .bg-zinc-800,
+.light [class*="bg-zinc-800"] {
+  background-color: hsl(220 15% 93%) !important;
+  color: hsl(224 30% 12%) !important;
+}
+
+/* ── Recharts tooltip override ───────────────────────────────────────────── */
+.light .recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: hsl(0 0% 100%) !important;
+  border-color: hsl(220 15% 82%) !important;
+  color: hsl(224 30% 12%) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08) !important;
+}
+.light .recharts-tooltip-item {
+  color: hsl(224 30% 12%) !important;
+}
+.light .recharts-tooltip-label {
+  color: hsl(224 30% 12%) !important;
+}
+
+/* ── Saturday Bulletin Section cards (was bg-[#0d1421], now bg-card) ────── */
+.light .bg-card {
+  background-color: hsl(0 0% 100%) !important;
+  color: hsl(224 30% 10%) !important;
+}
+.light [class*="border-cyan-900"] {
+  border-color: hsl(220 15% 82%) !important;
+}
+
+/* ── ScoreRing SVG track (stroke="hsl(var(--secondary))") ───────────────── */
+.light circle[stroke="hsl(var(--secondary))"] {
+  stroke: hsl(220 15% 88%) !important;
+}
+
+/* ── Gradient backgrounds that were dark ─────────────────────────────────── */
+.light [class*="from-[#080f1c]"],
+.light [class*="to-[#0c1628]"],
+.light [class*="from-[#0d1421]"] {
+  background: hsl(0 0% 100%) !important;
+}
+
+/* ── bg-secondary (used for muted areas) ─────────────────────────────────── */
+.light .bg-secondary {
+  background-color: hsl(220 14% 92%) !important;
+}
+.light .bg-secondary\/20,
+.light .bg-secondary\/30,
+.light .bg-secondary\/40,
+.light .bg-secondary\/60 {
+  background-color: hsl(220 14% 90% / 0.6) !important;
+}
+
+/* ── border-border and dividers ─────────────────────────────────────────── */
+.light .border-border,
+.light [class*="border-border"] {
+  border-color: hsl(220 15% 84%) !important;
+}
+
+/* ── Tab active indicator in market-news / bulletin ─────────────────────── */
+.light [class*="border-primary"] {
+  border-color: hsl(var(--primary)) !important;
+}
+
+/* ── text-muted-foreground stays readable in light mode ─────────────────── */
+.light .text-muted-foreground,
+.light [class*="text-muted-foreground"] {
+  color: hsl(220 12% 44%) !important;
+}
+
+/* ── text-foreground ─────────────────────────────────────────────────────── */
+.light .text-foreground,
+.light [class*="text-foreground"] {
+  color: hsl(224 30% 10%) !important;
+}
+
+/* ── CFO/Bulletin progress bars ─────────────────────────────────────────── */
+.light .bg-secondary\/60 {
+  background-color: hsl(220 14% 88%) !important;
+}
+
+/* ── Score ring labels (text-[10px] text-muted-foreground) ──────────────── */
+.light [style*="fontSize: 10"] {
+  color: hsl(220 12% 44%) !important;
+}
+
+/* ── Overflow/inline-style background patches for charts ─────────────────── */
+/* Recharts cartesian grid lines already covered above */
+
+/* ── Hover bg on rows and items ─────────────────────────────────────────── */
+.light .hover\:bg-secondary\/20:hover {
+  background-color: hsl(220 14% 90%) !important;
+}
+.light .hover\:bg-secondary\/40:hover {
+  background-color: hsl(220 14% 86%) !important;
+}
+
