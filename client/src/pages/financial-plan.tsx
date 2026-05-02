@@ -240,7 +240,7 @@ export default function MyFinancialPlan() {
       const n = parseFloat(String(v));
       payload[k] = isNaN(n) ? v : n;
     }
-    await apiRequest("POST", "/api/snapshot", payload);
+    await apiRequest("PUT", "/api/snapshot", payload);
     await qc.invalidateQueries({ queryKey: ["/api/snapshot"] });
     toast({ title: "Saved Successfully", description: "Changes written to central ledger." });
   }, [qc, toast]);

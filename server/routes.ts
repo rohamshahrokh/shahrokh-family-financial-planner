@@ -15,6 +15,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(data);
   });
 
+  // POST alias for snapshot — same as PUT (upsert)
+  app.post("/api/snapshot", (req, res) => {
+    const data = storage.updateSnapshot(req.body);
+    res.json(data);
+  });
+
   // ─── Expenses ──────────────────────────────────────────────────────
   app.get("/api/expenses", (req, res) => {
     res.json(storage.getExpenses());

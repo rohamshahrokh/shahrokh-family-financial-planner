@@ -288,7 +288,7 @@ export default function DashboardPage() {
   });
 
   const updateSnap = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/snapshot", data).then((r) => r.json()),
+    mutationFn: (data: any) => apiRequest("PUT", "/api/snapshot", data).then((r) => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/snapshot"] }),
   });
 
