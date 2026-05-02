@@ -59,6 +59,7 @@ const NAV_STEPS = [
       { href: "/crypto",          label: "Crypto Plan",         icon: Bitcoin,         adminOnly: false },
       { href: "/debt-strategy",   label: "Debt Strategy",       icon: CreditCard,      adminOnly: false },
       { href: "/tax",             label: "Tax Strategy",        icon: Calculator,      adminOnly: false },
+      { href: "/cgt-simulator",    label: "CGT Simulator",       icon: BarChart2,       adminOnly: false },
       { href: "/wealth-strategy", label: "Wealth Strategy",     icon: Briefcase,       adminOnly: false },
     ],
   },
