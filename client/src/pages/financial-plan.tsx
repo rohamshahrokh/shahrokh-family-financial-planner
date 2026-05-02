@@ -199,32 +199,35 @@ export default function MyFinancialPlan() {
   const snapshotLoaded = useRef(false);
   if (snapshot && !snapshotLoaded.current) {
     snapshotLoaded.current = true;
+    // Round all numeric values on load — eliminates display of floats like 32652.2566...
+    // that may be stored from old saves before this fix was applied.
+    const ri = (val: any, fallback: number): number => Math.round(parseFloat(String(val ?? fallback)) || fallback);
     setDraft({
-      cash:                       snapshot.cash                     ?? 220000,
-      offset_balance:             snapshot.offset_balance           ?? 0,
-      super_balance:              snapshot.super_balance            ?? 85000,
-      roham_super_balance:        snapshot.roham_super_balance      ?? 0,
-      fara_super_balance:         snapshot.fara_super_balance       ?? 0,
-      stocks:                     snapshot.stocks                   ?? 0,
-      crypto:                     snapshot.crypto                   ?? 0,
-      ppor:                       snapshot.ppor                     ?? 1510000,
-      cars:                       snapshot.cars                     ?? 65000,
-      iran_property:              snapshot.iran_property            ?? 150000,
-      mortgage:                   snapshot.mortgage                 ?? 1200000,
-      other_debts:                snapshot.other_debts              ?? 19000,
-      monthly_income:             snapshot.monthly_income           ?? 22000,
-      roham_monthly_income:       snapshot.roham_monthly_income     ?? 0,
-      fara_monthly_income:        snapshot.fara_monthly_income      ?? 0,
-      rental_income_total:        snapshot.rental_income_total      ?? 0,
-      other_income:               snapshot.other_income             ?? 0,
-      monthly_expenses:           snapshot.monthly_expenses         ?? 14540,
-      childcare_monthly:          snapshot.childcare_monthly        ?? 0,
-      insurance_monthly:          snapshot.insurance_monthly        ?? 0,
-      utilities_monthly:          snapshot.utilities_monthly        ?? 0,
-      subscriptions_monthly:      snapshot.subscriptions_monthly    ?? 0,
-      fire_target_age:            snapshot.fire_target_age          ?? 55,
-      fire_target_monthly_income: snapshot.fire_target_monthly_income ?? 20000,
-      property_savings_monthly:   snapshot.property_savings_monthly ?? 0,
+      cash:                       ri(snapshot.cash,                       220000),
+      offset_balance:             ri(snapshot.offset_balance,             0),
+      super_balance:              ri(snapshot.super_balance,              85000),
+      roham_super_balance:        ri(snapshot.roham_super_balance,        0),
+      fara_super_balance:         ri(snapshot.fara_super_balance,         0),
+      stocks:                     ri(snapshot.stocks,                     0),
+      crypto:                     ri(snapshot.crypto,                     0),
+      ppor:                       ri(snapshot.ppor,                       1510000),
+      cars:                       ri(snapshot.cars,                       65000),
+      iran_property:              ri(snapshot.iran_property,              150000),
+      mortgage:                   ri(snapshot.mortgage,                   1200000),
+      other_debts:                ri(snapshot.other_debts,               19000),
+      monthly_income:             ri(snapshot.monthly_income,             22000),
+      roham_monthly_income:       ri(snapshot.roham_monthly_income,       0),
+      fara_monthly_income:        ri(snapshot.fara_monthly_income,        0),
+      rental_income_total:        ri(snapshot.rental_income_total,        0),
+      other_income:               ri(snapshot.other_income,              0),
+      monthly_expenses:           ri(snapshot.monthly_expenses,          14540),
+      childcare_monthly:          ri(snapshot.childcare_monthly,         0),
+      insurance_monthly:          ri(snapshot.insurance_monthly,         0),
+      utilities_monthly:          ri(snapshot.utilities_monthly,         0),
+      subscriptions_monthly:      ri(snapshot.subscriptions_monthly,     0),
+      fire_target_age:            ri(snapshot.fire_target_age,           55),
+      fire_target_monthly_income: ri(snapshot.fire_target_monthly_income, 20000),
+      property_savings_monthly:   ri(snapshot.property_savings_monthly,  0),
     });
   }
 
@@ -240,11 +243,11 @@ export default function MyFinancialPlan() {
   //   2. Supabase via localStore.updateSnapshot()  → permanent cloud storage (survives refresh/restart)
   // The ledger reads from ['/api/snapshot'] which always reflects the latest state after invalidation.
   const saveSnapshot = useCallback(async (fields: Partial<SnapshotDraft>) => {
-    // Convert string values to numbers for numeric fields
+    // Convert string values to numbers and ROUND to integers — prevents float decimals like 32652.266...
     const payload: Record<string, any> = {};
     for (const [k, v] of Object.entries(fields)) {
       const n = parseFloat(String(v));
-      payload[k] = isNaN(n) ? v : n;
+      payload[k] = isNaN(n) ? v : Math.round(n);
     }
 
     // 1. Save to SQLite (instant reactive update for all pages this session)
@@ -452,7 +455,7 @@ export default function MyFinancialPlan() {
       ═══════════════════════════════════════════════════════════════════ */}
       <SectionCard title="Income" icon={<Briefcase className="w-4 h-4 text-emerald-400" />}>
         <div className="pt-3">
-          <FieldRow label="Combined Monthly Income" value={draft.monthly_income} onChange={upd("monthly_income")} hint="Used by forecast engine (primary field)" />
+          <FieldRow label="Combined Monthly Income" value={draft.monthly_income} onChange={upd("monthly_income")} hint="MASTER FIELD — this is what all pages (ledger, dashboard, FIRE) read" />
           <FieldRow label="Roham — Monthly Net Salary" value={draft.roham_monthly_income} onChange={upd("roham_monthly_income")} hint="Roham's after-tax monthly income" />
           <FieldRow label="Fara — Monthly Net Salary" value={draft.fara_monthly_income} onChange={upd("fara_monthly_income")} hint="Fara's after-tax monthly income" />
           <FieldRow label="Rental Income (total monthly)" value={draft.rental_income_total} onChange={upd("rental_income_total")} hint="All IPs combined gross rental" />
@@ -460,21 +463,32 @@ export default function MyFinancialPlan() {
 
           {totalIncome > 0 && (
             <div className="mt-3 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-              <p className="text-xs text-emerald-400">Computed total: <span className="font-semibold">{formatCurrency(totalIncome)}/mo</span> — will override combined field on save</p>
+              <p className="text-xs text-emerald-400">
+                Sub-field total: <span className="font-semibold">{formatCurrency(Math.round(totalIncome))}/mo</span>
+                {" — "}
+                <span className="text-muted-foreground">Combined Monthly Income field above is your master save value</span>
+              </p>
             </div>
           )}
 
           <div className="mt-4 pt-3 border-t border-border/60 flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">Total Income: <span className="text-emerald-400 font-semibold">{formatCurrency(totalIncome > 0 ? totalIncome : safeNum(draft.monthly_income))}/mo</span></p>
+            <p className="text-xs text-muted-foreground">Total Income: <span className="text-emerald-400 font-semibold">{formatCurrency(safeNum(draft.monthly_income))}/mo</span></p>
             <SaveButton
               label="Save Income"
-              onSave={() => saveSnapshot({
-                monthly_income: totalIncome > 0 ? String(totalIncome) : draft.monthly_income,
-                roham_monthly_income: draft.roham_monthly_income,
-                fara_monthly_income: draft.fara_monthly_income,
-                rental_income_total: draft.rental_income_total,
-                other_income: draft.other_income,
-              })}
+              onSave={() => {
+                // CRITICAL FIX: monthly_income is ALWAYS the master field — use what the user typed.
+                // Never auto-override with totalIncome (which can produce repeating decimals from
+                // weekly→monthly rental conversions). Sub-fields are saved alongside for reference
+                // but the ledger always reads monthly_income as the authoritative combined income.
+                const masterIncome = Math.round(safeNum(draft.monthly_income));
+                return saveSnapshot({
+                  monthly_income:       masterIncome,
+                  roham_monthly_income: draft.roham_monthly_income,
+                  fara_monthly_income:  draft.fara_monthly_income,
+                  rental_income_total:  draft.rental_income_total,
+                  other_income:         draft.other_income,
+                });
+              }}
             />
           </div>
         </div>

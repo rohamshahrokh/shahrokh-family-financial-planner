@@ -43,14 +43,27 @@ async function sbUpsertSnapshot(data: Record<string, any>): Promise<void> {
   }
 }
 
-// SQLite financial_snapshot only has these core columns.
-// Supabase sf_snapshot has many more (super fields, offset_balance, DCA settings, etc.).
-// We strip unknown columns before writing to SQLite to avoid "no such column" errors.
-// The extra Supabase fields are handled client-side via localStore.
+// SQLite financial_snapshot columns — expanded to include all income/expense/goal sub-fields
+// after the ALTER TABLE migration in storage.ts runs.
+// Supabase sf_snapshot may have additional DCA / market-news fields handled client-side.
 const SQLITE_SNAPSHOT_COLS = new Set([
+  // Core assets & liabilities
   "ppor", "cash", "super_balance", "stocks", "crypto",
   "cars", "iran_property", "mortgage", "other_debts",
-  "monthly_income", "monthly_expenses", "updated_at",
+  // Income
+  "monthly_income", "roham_monthly_income", "fara_monthly_income",
+  "rental_income_total", "other_income",
+  // Expenses
+  "monthly_expenses", "childcare_monthly", "insurance_monthly",
+  "utilities_monthly", "subscriptions_monthly",
+  // Goals & FIRE
+  "fire_target_age", "fire_target_monthly_income", "property_savings_monthly",
+  // Super per-person
+  "roham_super_balance", "fara_super_balance",
+  // Cash split
+  "offset_balance",
+  // Timestamp
+  "updated_at",
 ]);
 
 function toSQLiteSnapshot(row: Record<string, any>): Record<string, any> {

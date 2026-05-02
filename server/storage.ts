@@ -162,6 +162,32 @@ sqlite.exec(`
   );
 `);
 
+// ─── Schema migrations — add missing columns (try/catch per column; SQLite doesn't support ADD COLUMN IF NOT EXISTS)
+const _missingCols: Array<[string, string]> = [
+  ["offset_balance",              "REAL DEFAULT 0"],
+  ["roham_monthly_income",        "REAL DEFAULT 0"],
+  ["fara_monthly_income",         "REAL DEFAULT 0"],
+  ["rental_income_total",         "REAL DEFAULT 0"],
+  ["other_income",                "REAL DEFAULT 0"],
+  ["childcare_monthly",           "REAL DEFAULT 0"],
+  ["insurance_monthly",           "REAL DEFAULT 0"],
+  ["utilities_monthly",           "REAL DEFAULT 0"],
+  ["subscriptions_monthly",       "REAL DEFAULT 0"],
+  ["fire_target_age",             "REAL DEFAULT 55"],
+  ["fire_target_monthly_income",  "REAL DEFAULT 20000"],
+  ["property_savings_monthly",    "REAL DEFAULT 0"],
+  ["roham_super_balance",         "REAL DEFAULT 0"],
+  ["fara_super_balance",          "REAL DEFAULT 0"],
+];
+for (const [col, def] of _missingCols) {
+  try {
+    sqlite.prepare(`ALTER TABLE financial_snapshot ADD COLUMN ${col} ${def}`).run();
+    console.log(`[storage] ✔ Added column: financial_snapshot.${col}`);
+  } catch {
+    // Column already exists — safe to ignore
+  }
+}
+
 // Seed default snapshot if empty
 const snapshotCount = sqlite.prepare("SELECT COUNT(*) as c FROM financial_snapshot").get() as { c: number };
 if (snapshotCount.c === 0) {
