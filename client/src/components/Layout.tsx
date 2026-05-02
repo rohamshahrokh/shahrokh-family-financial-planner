@@ -20,7 +20,9 @@ import {
   // Step 3 — Forecast
   BarChart2, Activity, Sigma, Zap, Map, FlaskConical,
   // Step 4 — Action
-  Lightbulb, Bell, Calendar, Star, BrainCircuit, CheckSquare,
+  Lightbulb, Bell, Calendar, BrainCircuit,
+  // Support / System
+  HelpCircle, Settings,
   // UI chrome
   LogOut, Sun, Moon, Menu, X, Clock, Eye, EyeOff,
   ChevronDown, ChevronRight, Database, Newspaper,
@@ -85,10 +87,15 @@ const NAV_STEPS = [
     items: [
       { href: "/ai-weekly-cfo",  label: "Sat. Bulletin",       icon: BrainCircuit,    adminOnly: true  },
       { href: "/ai-insights",    label: "AI Insights",         icon: Lightbulb,       adminOnly: true  },
-      { href: "/help",           label: "Help",                icon: CheckSquare,     adminOnly: false },
-      { href: "/settings",       label: "Settings",            icon: Star,            adminOnly: false },
     ],
   },
+];
+
+// ─── Support / System links (outside the four workflow steps) ─────────────────
+
+const SUPPORT_LINKS = [
+  { href: "/help",     label: "Help",     icon: HelpCircle, adminOnly: false },
+  { href: "/settings", label: "Settings", icon: Settings,   adminOnly: false },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -107,6 +114,11 @@ function getActiveStep(location: string, isAdmin: boolean): string {
     }
   }
   return "snapshot"; // default open
+}
+
+// Is the current route a support page?
+function isSupportActive(location: string): boolean {
+  return SUPPORT_LINKS.some(l => isPathActive(l.href, location));
 }
 
 // ─── Logo ─────────────────────────────────────────────────────────────────────
@@ -259,7 +271,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* ACCORDION NAV — ref attached here for scroll preservation */}
-      <nav ref={sidebarScrollRef} className="flex-1 px-3 py-2 overflow-y-auto space-y-1">
+      <nav ref={sidebarScrollRef} className="flex-1 px-3 py-2 overflow-y-auto space-y-1 pb-2">
         {NAV_STEPS.map((stepDef) => {
           const visibleItems = stepDef.items.filter(i => !i.adminOnly || isAdmin);
           if (visibleItems.length === 0) return null;
@@ -358,6 +370,37 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </div>
           );
         })}
+
+        {/* ─── SUPPORT / SYSTEM ─────────────────────────────────────────── */}
+        <div
+          className="mt-3 pt-3"
+          style={{ borderTop: "1px solid hsl(var(--border) / 0.5)" }}
+        >
+          <p className="px-3 mb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50 select-none">
+            Support
+          </p>
+          {SUPPORT_LINKS.filter(l => !l.adminOnly || isAdmin).map(({ href, label, icon: Icon }) => {
+            const active = isPathActive(href, location);
+            return (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setMobileOpen(false)}
+                data-testid={`nav-${label.toLowerCase()}`}
+                className={`nav-item${active ? " active" : ""}`}
+              >
+                <Icon
+                  className="nav-item-icon"
+                  style={active ? { color: "hsl(var(--muted-foreground))" } : {}}
+                />
+                <span className="text-[13px]">{label}</span>
+                {active && (
+                  <ChevronRight className="w-3 h-3 ml-auto shrink-0 text-muted-foreground" />
+                )}
+              </Link>
+            );
+          })}
+        </div>
       </nav>
 
       {/* Bottom bar */}
@@ -535,9 +578,16 @@ function TopBarBreadcrumb({ location, isAdmin }: { location: string; isAdmin: bo
     }
   }
 
+  // Check support links if not found in workflow steps
   if (!pageLabel) {
-    stepLabel = "Snapshot";
-    pageLabel = "Overview";
+    const supportMatch = SUPPORT_LINKS.find(l => isPathActive(l.href, location));
+    if (supportMatch) {
+      stepLabel = "Support";
+      pageLabel = supportMatch.label;
+    } else {
+      stepLabel = "Snapshot";
+      pageLabel = "Overview";
+    }
   }
 
   const stepColorMap: Record<string, string> = {
@@ -545,6 +595,7 @@ function TopBarBreadcrumb({ location, isAdmin }: { location: string; isAdmin: bo
     Strategy: "hsl(var(--gold-light))",
     Forecast: "hsl(var(--forecast-light))",
     Action:   "hsl(var(--success-light))",
+    Support:  "hsl(var(--muted-foreground))",
   };
 
   return (
