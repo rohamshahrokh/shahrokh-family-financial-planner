@@ -19,6 +19,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import TaxAlphaPage from "./tax-alpha";
+import CgtSimulatorPage from "./cgt-simulator";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum } from "@/lib/finance";
@@ -438,7 +439,7 @@ export default function Tax() {
     },
   });
 
-  const [pageTab, setPageTab] = useState<'calculator' | 'alpha'>('calculator');
+  const [pageTab, setPageTab] = useState<'calculator' | 'alpha' | 'cgt'>('calculator');
   const [activeTab, setActiveTab] = useState<"roham" | "fara" | "household">("roham");
   const [chartPeriod, setChartPeriod] = useState<"annual" | "monthly">("monthly");
 
@@ -528,6 +529,7 @@ export default function Tax() {
         {([
           { key: 'calculator', label: 'Tax Calculator' },
           { key: 'alpha',      label: 'Tax Alpha ⚡ (Savings)' },
+          { key: 'cgt',        label: 'Capital Gains Simulator' },
         ] as const).map(({ key, label }) => (
           <button
             key={key}
@@ -545,6 +547,9 @@ export default function Tax() {
 
       {/* ── Tax Alpha tab ── */}
       {pageTab === 'alpha' && <TaxAlphaPage />}
+
+      {/* ── Capital Gains Simulator tab ── */}
+      {pageTab === 'cgt' && <CgtSimulatorPage />}
 
       {/* ── Calculator tab ── */}
       {pageTab === 'calculator' && <>

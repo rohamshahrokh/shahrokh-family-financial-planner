@@ -44,6 +44,7 @@ import AIForecastEnginePage from "./pages/ai-forecast-engine";
 import AIWeeklyCFOPage         from "./pages/ai-weekly-cfo";
 import MyFinancialPlanPage     from "./pages/financial-plan";
 import LedgerAuditPage         from "./pages/ledger-audit";
+import CgtSimulatorPage        from "./pages/cgt-simulator";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -173,6 +174,9 @@ function AppRouter() {
         </Route>
         <Route path="/ledger-audit">
           <ProtectedRoute component={LedgerAuditPage} title="Ledger Audit" />
+        </Route>
+        <Route path="/cgt-simulator">
+          <ProtectedRoute component={CgtSimulatorPage} title="Capital Gains Simulator" />
         </Route>
         {/* 404 */}
         <Route component={NotFound} />
