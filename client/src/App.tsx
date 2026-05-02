@@ -45,6 +45,7 @@ import AIWeeklyCFOPage         from "./pages/ai-weekly-cfo";
 import MyFinancialPlanPage     from "./pages/financial-plan";
 import LedgerAuditPage         from "./pages/ledger-audit";
 import CGTSimulatorPage        from "./pages/cgt-simulator";
+import ScenarioComparePage     from "./pages/scenario-compare";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -177,6 +178,9 @@ function AppRouter() {
         </Route>
         <Route path="/cgt-simulator">
           <ProtectedRoute component={CGTSimulatorPage} title="CGT Simulator" />
+        </Route>
+        <Route path="/scenario-compare">
+          <ProtectedRoute component={ScenarioComparePage} title="Scenario Compare Lab" />
         </Route>
         {/* 404 */}
         <Route component={NotFound} />

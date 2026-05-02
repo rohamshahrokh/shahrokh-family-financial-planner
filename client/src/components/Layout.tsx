@@ -18,7 +18,7 @@ import {
   // Step 2 — Strategy
   Home, Bitcoin, CreditCard, Calculator, Target, ClipboardList, Briefcase,
   // Step 3 — Forecast
-  BarChart2, Activity, Sigma, Zap, Map,
+  BarChart2, Activity, Sigma, Zap, Map, FlaskConical,
   // Step 4 — Action
   Lightbulb, Bell, Calendar, Star, BrainCircuit, CheckSquare,
   // UI chrome
@@ -72,6 +72,7 @@ const NAV_STEPS = [
     items: [
       { href: "/reports",            label: "Wealth Projection",  icon: TrendingUp,    adminOnly: false },
       { href: "/ai-forecast-engine", label: "Forecast Engine",    icon: Sigma,         adminOnly: true  },
+      { href: "/scenario-compare",   label: "Scenario Compare Lab", icon: FlaskConical, adminOnly: false },
       { href: "/market-news",        label: "Market News",        icon: Newspaper,     adminOnly: false },
     ],
   },
