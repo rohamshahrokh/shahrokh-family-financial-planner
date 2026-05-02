@@ -270,6 +270,7 @@ function setLastSync() {
 // string fields pass through as-is). Any field NOT listed here still passes
 // through via the spread at the end of normaliseSnapshot.
 const SUPER_NUM_FIELDS = [
+  // Super — per-person
   'roham_super_balance', 'roham_super_salary', 'roham_employer_contrib',
   'roham_salary_sacrifice', 'roham_super_personal_contrib', 'roham_super_annual_topup',
   'roham_super_growth_rate', 'roham_super_fee_pct', 'roham_super_insurance_pa',
@@ -278,7 +279,14 @@ const SUPER_NUM_FIELDS = [
   'fara_salary_sacrifice', 'fara_super_personal_contrib', 'fara_super_annual_topup',
   'fara_super_growth_rate', 'fara_super_fee_pct', 'fara_super_insurance_pa',
   'fara_retirement_age',
+  // Cash
   'offset_balance',
+  // Income sub-fields (now columns in sf_snapshot after migration)
+  'roham_monthly_income', 'fara_monthly_income', 'rental_income_total', 'other_income',
+  // Expense sub-fields
+  'childcare_monthly', 'insurance_monthly', 'utilities_monthly', 'subscriptions_monthly',
+  // Goals
+  'fire_target_age', 'fire_target_monthly_income', 'property_savings_monthly',
 ] as const;
 
 const SUPER_STR_FIELDS = [
@@ -286,29 +294,32 @@ const SUPER_STR_FIELDS = [
   'fara_super_option',  'fara_super_provider',  'fara_super_contrib_freq',
 ] as const;
 
+// rn = round-number: safeNum + Math.round to eliminate float decimals like 32652.2566...
+function rn(v: any): number { return Math.round(safeNum(v)); }
+
 function normaliseSnapshot(raw: any): Snapshot {
-  // Start with the core required fields (always coerced)
+  // Start with the core required fields (always coerced + rounded to integers)
   const base: Snapshot = {
     id:               raw?.id ?? "shahrokh-family-main",
-    ppor:             safeNum(raw?.ppor),
-    cash:             safeNum(raw?.cash),
-    super_balance:    safeNum(raw?.super_balance),
-    stocks:           safeNum(raw?.stocks),
-    crypto:           safeNum(raw?.crypto),
-    cars:             safeNum(raw?.cars),
-    iran_property:    safeNum(raw?.iran_property),
-    other_assets:     safeNum(raw?.other_assets),
-    mortgage:         safeNum(raw?.mortgage),
-    other_debts:      safeNum(raw?.other_debts),
-    monthly_income:   safeNum(raw?.monthly_income),
-    monthly_expenses: safeNum(raw?.monthly_expenses),
+    ppor:             rn(raw?.ppor),
+    cash:             rn(raw?.cash),
+    super_balance:    rn(raw?.super_balance),
+    stocks:           rn(raw?.stocks),
+    crypto:           rn(raw?.crypto),
+    cars:             rn(raw?.cars),
+    iran_property:    rn(raw?.iran_property),
+    other_assets:     rn(raw?.other_assets),
+    mortgage:         rn(raw?.mortgage),
+    other_debts:      rn(raw?.other_debts),
+    monthly_income:   rn(raw?.monthly_income),
+    monthly_expenses: rn(raw?.monthly_expenses),
     updated_at:       raw?.updated_at ?? new Date().toISOString(),
   };
 
-  // Apply super numeric fields — only if present in raw (undefined stays undefined,
+  // Apply extended numeric fields — only if present in raw (undefined stays undefined,
   // not defaulted to 0, so form shows blank rather than a misleading zero)
   for (const f of SUPER_NUM_FIELDS) {
-    if (raw?.[f] !== undefined && raw?.[f] !== null) base[f] = safeNum(raw[f]);
+    if (raw?.[f] !== undefined && raw?.[f] !== null) base[f] = rn(raw[f]);
   }
 
   // Apply super string fields

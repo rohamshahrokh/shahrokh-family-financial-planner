@@ -109,6 +109,44 @@ async function sbDelete(table: string, id: number): Promise<void> {
 
 const SNAPSHOT_ID = "shahrokh-family-main";
 
+// All snapshot columns that exist in sf_snapshot (Supabase).
+// Any key NOT in this set is stripped before upsert to prevent PGRST204 errors.
+// Update this list whenever a new column is added via migration.
+const SF_SNAPSHOT_COLS = new Set([
+  "id", "updated_at",
+  // Assets
+  "ppor", "cash", "super_balance", "stocks", "crypto", "cars", "iran_property",
+  "other_assets", "mortgage", "other_debts",
+  // Cash split
+  "offset_balance", "savings_cash", "emergency_cash", "other_cash",
+  // Income (master + sub-fields)
+  "monthly_income", "roham_monthly_income", "fara_monthly_income",
+  "rental_income_total", "other_income",
+  // Expenses (master + sub-fields)
+  "monthly_expenses", "childcare_monthly", "insurance_monthly",
+  "utilities_monthly", "subscriptions_monthly",
+  // Goals
+  "fire_target_age", "fire_target_monthly_income", "property_savings_monthly",
+  // Super — Roham
+  "roham_super_balance", "roham_super_salary", "roham_employer_contrib",
+  "roham_salary_sacrifice", "roham_super_personal_contrib", "roham_super_annual_topup",
+  "roham_super_growth_rate", "roham_super_fee_pct", "roham_super_insurance_pa",
+  "roham_super_option", "roham_super_provider", "roham_retirement_age", "roham_super_contrib_freq",
+  // Super — Fara
+  "fara_super_balance", "fara_super_salary", "fara_employer_contrib",
+  "fara_salary_sacrifice", "fara_super_personal_contrib", "fara_super_annual_topup",
+  "fara_super_growth_rate", "fara_super_fee_pct", "fara_super_insurance_pa",
+  "fara_super_option", "fara_super_provider", "fara_retirement_age", "fara_super_contrib_freq",
+]);
+
+function toSFSnapshot(data: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (SF_SNAPSHOT_COLS.has(k)) out[k] = v;
+  }
+  return out;
+}
+
 export const sbSnapshot = {
   async get(): Promise<any | null> {
     try {
@@ -117,9 +155,12 @@ export const sbSnapshot = {
     } catch { return null; }
   },
   async upsert(data: object): Promise<any | null> {
-    try {
-      return await sbUpsert("sf_snapshot", { id: SNAPSHOT_ID, ...data, updated_at: new Date().toISOString() });
-    } catch { return null; }
+    // Strip unknown columns BEFORE sending to Supabase to prevent PGRST204 errors.
+    // Unknown columns were previously swallowed silently, preventing all income
+    // sub-field saves from reaching the database.
+    const safe = toSFSnapshot(data as Record<string, any>);
+    // Re-throw so localStore.updateSnapshot() can surface the error properly.
+    return await sbUpsert("sf_snapshot", { id: SNAPSHOT_ID, ...safe, updated_at: new Date().toISOString() });
   },
 };
 
