@@ -571,3 +571,368 @@ export async function dispatchWeeklyCFO(): Promise<void> {
   // ── Save bulletin to Supabase (also updates last_run_at — dedup guard) ──────
   await saveCFOReport(report, telegramSent);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BILL OCCURRENCE-AWARE REMINDER ENGINE (v3)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Design principles:
+//  1. One clean daily digest at 8 AM AEST (not individual bill spam)
+//  2. Per-occurrence dedup: each stage (before_due / due_today / overdue) fires
+//     once per cycle and marks sent_at on the occurrence row in Supabase.
+//  3. Individual urgent messages only for: high-priority + overdue + overdue
+//     policy = "once" or "daily".
+//  4. Daily digest deduplication: sf_daily_digest_log table (one row per date).
+// ─────────────────────────────────────────────────────────────────────────────
+
+import type { BillOccurrence } from '../pages/recurring-bills';
+
+const DIGEST_URL = `${SUPABASE_URL}/rest/v1/sf_daily_digest_log`;
+const OCC_URL    = `${SUPABASE_URL}/rest/v1/sf_bill_occurrences`;
+const NOTIF_URL  = `${SUPABASE_URL}/rest/v1/sf_bill_notification_log`;
+
+// ── Log a notification to sf_bill_notification_log ─────────────────────────
+
+async function logBillNotif(data: {
+  occurrence_id?: number | null;
+  bill_id?: number | null;
+  bill_name: string;
+  due_date?: string | null;
+  stage: string;
+  channel: string;
+  status: string;
+  message_text?: string;
+}): Promise<void> {
+  try {
+    await fetch(NOTIF_URL, {
+      method: 'POST',
+      headers: SB_HEADERS,
+      body: JSON.stringify({ ...data, sent_at: new Date().toISOString(), created_at: new Date().toISOString() }),
+    });
+  } catch {}
+}
+
+// ── Mark a sent_at timestamp on a bill occurrence ──────────────────────────
+
+async function markOccurrenceSent(
+  occId: number,
+  field: 'reminder_before_sent_at' | 'due_today_sent_at' | 'overdue_sent_at' | 'digest_included_at'
+): Promise<void> {
+  try {
+    await fetch(`${OCC_URL}?id=eq.${occId}`, {
+      method: 'PATCH',
+      headers: SB_HEADERS,
+      body: JSON.stringify({ [field]: new Date().toISOString(), updated_at: new Date().toISOString() }),
+    });
+  } catch {}
+}
+
+// ── Check if daily digest already sent today ──────────────────────────────
+
+async function digestAlreadySentToday(): Promise<boolean> {
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  try {
+    const res = await fetch(`${DIGEST_URL}?digest_date=eq.${today}`, { headers: SB_HEADERS });
+    if (!res.ok) return false;
+    const rows = await res.json();
+    return Array.isArray(rows) && rows.length > 0;
+  } catch { return false; }
+}
+
+// ── Record daily digest sent ──────────────────────────────────────────────
+
+async function recordDigestSent(messageText: string): Promise<void> {
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    await fetch(DIGEST_URL, {
+      method: 'POST',
+      headers: { ...SB_HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({
+        digest_date:  today,
+        sent_at:      new Date().toISOString(),
+        message_text: messageText,
+        status:       'sent',
+        created_at:   new Date().toISOString(),
+      }),
+    });
+  } catch {}
+}
+
+// ── Check if it is 8 AM AEST window (within 30 minutes) ──────────────────
+
+function isDigestTime(): boolean {
+  const now = new Date();
+  const aest = new Date(now.toLocaleString('en-US', { timeZone: 'Australia/Brisbane' }));
+  const h = aest.getHours();
+  const m = aest.getMinutes();
+  return h === 8 && m <= 30;
+}
+
+/**
+ * sendBillsDigest — sends a pre-built digest message via Telegram.
+ * Called manually from the UI (Preview Digest → Send) or by the auto engine.
+ * Deduplicates by date — won't send twice in the same calendar day.
+ */
+export async function sendBillsDigest(
+  messageText: string,
+  occurrences: BillOccurrence[]
+): Promise<void> {
+  if (await digestAlreadySentToday()) return; // already sent today
+
+  const settings = await getTelegramSettings();
+  if (!settings?.enabled || !settings.bot_token) return;
+
+  const ok = await sendTelegram(
+    settings.bot_token,
+    settings.roham_chat_id,
+    messageText
+  );
+
+  if (ok) {
+    // Record digest sent (dedup guard)
+    await recordDigestSent(messageText);
+
+    // Mark each included occurrence as digest-sent
+    for (const occ of occurrences) {
+      if (!occ.digest_included_at) {
+        await markOccurrenceSent(occ.id, 'digest_included_at');
+      }
+    }
+
+    // Log to notification log
+    await logBillNotif({
+      bill_name:    'Daily Digest',
+      stage:        'digest',
+      channel:      'telegram',
+      status:       'sent',
+      message_text: messageText,
+    });
+  }
+}
+
+/**
+ * checkBillReminders — called on app mount (e.g. from App.tsx after bills load).
+ *
+ * For each bill occurrence, fires the appropriate reminder stage exactly once:
+ *   - "before_due":  when days_until <= reminder_days_before AND not yet sent
+ *   - "due_today":   when days_until === 0, remind_on_due_date=true, not yet sent
+ *   - "overdue":     when days_until < 0, overdue_reminder≠"off", not yet sent (or daily)
+ *
+ * Paid/skipped occurrences are completely ignored.
+ *
+ * All individual urgent messages (overdue high-priority) are sent directly.
+ * Everything else is batched into the 8 AM daily digest.
+ *
+ * The daily digest is sent by dispatchDailyBillDigest() — call that separately
+ * from the 8 AM schedule check.
+ */
+export async function checkBillReminders(
+  bills: Array<{
+    id: number;
+    bill_name: string;
+    amount: number;
+    frequency: string;
+    reminder_days_before: number;
+    remind_on_due_date: boolean;
+    overdue_reminder: string;
+    priority: string;
+    active: boolean;
+  }>,
+  occurrences: BillOccurrence[]
+): Promise<void> {
+  const settings = await getTelegramSettings();
+  if (!settings?.alert_bills_due || !settings.enabled || !settings.bot_token) return;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  for (const bill of bills) {
+    if (!bill.active) continue;
+
+    // Find the current (unpaid/non-skipped) occurrence
+    const occ = occurrences.find(o =>
+      o.bill_id === bill.id &&
+      o.payment_status !== 'paid' &&
+      o.payment_status !== 'skipped'
+    );
+    if (!occ) continue;
+
+    const due  = new Date(occ.due_date); due.setHours(0,0,0,0);
+    const days = Math.round((due.getTime() - today.getTime()) / 86400000);
+
+    // ── Before due reminder ─────────────────────────────────────────────────
+    // Fire once if: days >= 0 AND days <= reminder_days_before AND not yet sent
+    if (
+      days >= 0 &&
+      days <= (bill.reminder_days_before ?? 3) &&
+      !occ.reminder_before_sent_at
+    ) {
+      await markOccurrenceSent(occ.id, 'reminder_before_sent_at');
+      await logBillNotif({
+        occurrence_id: occ.id,
+        bill_id:       bill.id,
+        bill_name:     bill.bill_name,
+        due_date:      occ.due_date,
+        stage:         'before_due',
+        channel:       'telegram',
+        status:        'queued_for_digest',
+      });
+      // High-priority bills also get an individual urgent message
+      if (bill.priority === 'high' && days <= 1) {
+        const when = days === 0 ? 'today' : 'tomorrow';
+        const msg = `⚠️ <b>Bill due ${when}</b>\n\n📋 ${bill.bill_name}\n💰 ${formatCurrencyTg(occ.amount)}\n📅 ${occ.due_date}`;
+        await sendTelegram(settings.bot_token, settings.roham_chat_id, msg);
+        await logBillNotif({
+          occurrence_id: occ.id,
+          bill_id:       bill.id,
+          bill_name:     bill.bill_name,
+          due_date:      occ.due_date,
+          stage:         'before_due_urgent',
+          channel:       'telegram',
+          status:        'sent',
+          message_text:  msg,
+        });
+      }
+    }
+
+    // ── Due today reminder ──────────────────────────────────────────────────
+    if (days === 0 && bill.remind_on_due_date && !occ.due_today_sent_at) {
+      await markOccurrenceSent(occ.id, 'due_today_sent_at');
+      await logBillNotif({
+        occurrence_id: occ.id,
+        bill_id:       bill.id,
+        bill_name:     bill.bill_name,
+        due_date:      occ.due_date,
+        stage:         'due_today',
+        channel:       'telegram',
+        status:        'queued_for_digest',
+      });
+    }
+
+    // ── Overdue reminder ────────────────────────────────────────────────────
+    if (days < 0 && bill.overdue_reminder !== 'off') {
+      const alreadySent = !!occ.overdue_sent_at;
+      const isDaily     = bill.overdue_reminder === 'daily';
+      const isOnce      = bill.overdue_reminder === 'once';
+
+      // "once" → fire only if never sent; "daily" → fire every day
+      const shouldFire = isDaily || (isOnce && !alreadySent);
+      if (!shouldFire) continue;
+
+      // Check: for daily, don't send again if already sent in last 20 hours
+      if (isDaily && alreadySent) {
+        const lastSent = new Date(occ.overdue_sent_at!).getTime();
+        if (Date.now() - lastSent < 20 * 3600 * 1000) continue;
+      }
+
+      await markOccurrenceSent(occ.id, 'overdue_sent_at');
+
+      const daysOverdue = Math.abs(days);
+      const msg = `🚨 <b>Bill OVERDUE — ${daysOverdue} day${daysOverdue !== 1 ? 's' : ''}</b>\n\n📋 ${bill.bill_name}\n💰 ${formatCurrencyTg(occ.amount)}\n📅 Was due: ${occ.due_date}\n\nMark as paid in FamilyWealthLab if settled.`;
+      const ok = await sendTelegram(settings.bot_token, settings.roham_chat_id, msg);
+      await logBillNotif({
+        occurrence_id: occ.id,
+        bill_id:       bill.id,
+        bill_name:     bill.bill_name,
+        due_date:      occ.due_date,
+        stage:         'overdue',
+        channel:       'telegram',
+        status:        ok ? 'sent' : 'failed',
+        message_text:  msg,
+      });
+    }
+  }
+}
+
+/**
+ * dispatchDailyBillDigest — builds and sends the 8 AM daily digest.
+ * Call this from App.tsx schedule checks (same pattern as dispatchFamilyMessages).
+ *
+ * Conditions:
+ *  1. It is 8 AM AEST (within 30-minute window)
+ *  2. Digest not already sent today (sf_daily_digest_log dedup)
+ *  3. There are bills worth reporting (due in next 7 days OR overdue)
+ */
+export async function dispatchDailyBillDigest(
+  bills: Array<{
+    id: number; bill_name: string; amount: number;
+    reminder_days_before: number; active: boolean;
+    priority: string;
+  }>,
+  occurrences: BillOccurrence[],
+  snapshot?: { cash?: number; offset_balance?: number }
+): Promise<void> {
+  if (!isDigestTime())              return;
+  if (await digestAlreadySentToday()) return;
+
+  const settings = await getTelegramSettings();
+  if (!settings?.alert_bills_due || !settings.enabled || !settings.bot_token) return;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const in7   = new Date(today); in7.setDate(today.getDate() + 7);
+
+  // Collect relevant occurrences
+  const relevant = occurrences
+    .filter(o => ['upcoming','due_soon','due_today','overdue'].includes(o.payment_status))
+    .filter(o => {
+      const d = new Date(o.due_date); d.setHours(0,0,0,0);
+      return d >= new Date(today.getTime() - 7*86400000) && d <= in7; // -7 days (overdue) to +7
+    })
+    .sort((a,b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime());
+
+  if (relevant.length === 0) return; // Nothing to report
+
+  const billLines = relevant.map(o => {
+    const d   = new Date(o.due_date); d.setHours(0,0,0,0);
+    const days = Math.round((d.getTime() - today.getTime()) / 86400000);
+    const when = days < 0  ? `${Math.abs(days)}d overdue` :
+                 days === 0 ? 'due TODAY' :
+                 days === 1 ? 'due tomorrow' :
+                 `due in ${days}d`;
+    return `• ${o.bill_name} — ${when} — $${safeNum(o.amount).toFixed(0)}`;
+  });
+
+  const next7Total = relevant
+    .filter(o => {
+      const d = new Date(o.due_date); d.setHours(0,0,0,0);
+      return d >= today && d <= in7;
+    })
+    .reduce((s,o) => s + safeNum(o.amount), 0);
+
+  const cash = snapshot ? (safeNum(snapshot.cash ?? 0) + safeNum(snapshot.offset_balance ?? 0)) : 0;
+
+  const lines = [
+    '🏠 <b>Family Wealth Daily Check</b>',
+    '',
+    '📋 <b>Bills (next 7 days + overdue):</b>',
+    ...billLines,
+    '',
+    '💰 <b>Cash:</b>',
+    `  • Expected bills next 7 days: <b>$${next7Total.toFixed(0)}</b>`,
+    ...(cash > 0 ? [`  • Current cash/offset: <b>$${cash.toLocaleString('en-AU', { maximumFractionDigits: 0 })}</b>`] : []),
+  ];
+
+  const msg = lines.join('\n');
+  const ok  = await sendTelegram(settings.bot_token, settings.roham_chat_id, msg);
+
+  if (ok) {
+    await recordDigestSent(msg);
+    for (const occ of relevant) {
+      await markOccurrenceSent(occ.id, 'digest_included_at');
+    }
+    await logBillNotif({
+      bill_name:    'Daily Digest',
+      stage:        'digest',
+      channel:      'telegram',
+      status:       'sent',
+      message_text: msg,
+    });
+  }
+}
+
+/** Format currency for Telegram (no symbol, just $XX,XXX) */
+function formatCurrencyTg(v: number): string {
+  const n = parseFloat(String(v)) || 0;
+  return `$${n.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function safeNum(v: any): number { return parseFloat(v) || 0; }

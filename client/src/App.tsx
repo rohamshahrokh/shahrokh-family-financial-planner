@@ -212,18 +212,26 @@ export default function App() {
     const runChecks = () => {
       // Only run when tab is visible — prevents firing on hidden background tabs.
       if (document.hidden) return;
-      import("./lib/notifications").then(async ({ dispatchFamilyMessages, checkUpcomingBills }) => {
+      import("./lib/notifications").then(async ({ dispatchFamilyMessages, checkBillReminders, dispatchDailyBillDigest }) => {
         // 1. Family motivational messages (Supabase-deduped, 20hr cooldown)
         dispatchFamilyMessages().catch(() => {/* silent */});
-        // 2. Bill due reminders
+        // 2. Bill occurrence-aware reminders + daily digest
         try {
-          const res = await fetch(
-            `${SB_URL}/rest/v1/sf_recurring_bills?active=eq.true&select=bill_name,amount,next_due_date,reminder_days_before,active`,
-            { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
-          );
-          if (res.ok) {
-            const bills = await res.json();
-            checkUpcomingBills(bills).catch(() => {/* silent */});
+          const headers = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' };
+          // Fetch bills with all reminder config fields
+          const [billsRes, occsRes, snapRes] = await Promise.all([
+            fetch(`${SB_URL}/rest/v1/sf_recurring_bills?active=eq.true&select=id,bill_name,amount,frequency,reminder_days_before,remind_on_due_date,overdue_reminder,priority,active`, { headers }),
+            fetch(`${SB_URL}/rest/v1/sf_bill_occurrences?payment_status=neq.paid&payment_status=neq.skipped&order=due_date.asc&limit=100`, { headers }),
+            fetch(`${SB_URL}/rest/v1/sf_snapshot?id=eq.shahrokh-family-main&select=cash,offset_balance`, { headers }),
+          ]);
+          if (billsRes.ok && occsRes.ok) {
+            const bills = await billsRes.json();
+            const occs  = await occsRes.json();
+            const snap  = snapRes.ok ? (await snapRes.json())[0] ?? {} : {};
+            // Per-occurrence reminder stage checks (before_due, due_today, overdue)
+            checkBillReminders(bills, occs).catch(() => {/* silent */});
+            // 8 AM daily digest (dedup: one per day)
+            dispatchDailyBillDigest(bills, occs, snap).catch(() => {/* silent */});
           }
         } catch {/* silent */}
       }).catch(() => {/* silent */});
