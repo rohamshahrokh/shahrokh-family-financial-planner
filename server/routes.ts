@@ -43,6 +43,24 @@ async function sbUpsertSnapshot(data: Record<string, any>): Promise<void> {
   }
 }
 
+// SQLite financial_snapshot only has these core columns.
+// Supabase sf_snapshot has many more (super fields, offset_balance, DCA settings, etc.).
+// We strip unknown columns before writing to SQLite to avoid "no such column" errors.
+// The extra Supabase fields are handled client-side via localStore.
+const SQLITE_SNAPSHOT_COLS = new Set([
+  "ppor", "cash", "super_balance", "stocks", "crypto",
+  "cars", "iran_property", "mortgage", "other_debts",
+  "monthly_income", "monthly_expenses", "updated_at",
+]);
+
+function toSQLiteSnapshot(row: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (SQLITE_SNAPSHOT_COLS.has(k)) out[k] = v;
+  }
+  return out;
+}
+
 // ─── Cold-start hydration ──────────────────────────────────────────────────────
 // On every server start, pull the real Supabase snapshot into SQLite.
 // This means after any redeploy / restart, user data is immediately restored
@@ -50,10 +68,10 @@ async function sbUpsertSnapshot(data: Record<string, any>): Promise<void> {
 sbGetSnapshot()
   .then(row => {
     if (row) {
-      storage.updateSnapshot(row);
-      console.log("[server] ✔ SQLite hydrated from Supabase snapshot");
+      storage.updateSnapshot(toSQLiteSnapshot(row));
+      console.log("[server] \u2714 SQLite hydrated from Supabase snapshot");
     } else {
-      console.warn("[server] Supabase snapshot not found — using seed defaults");
+      console.warn("[server] Supabase snapshot not found \u2014 using seed defaults");
     }
   })
   .catch(err => console.warn("[server] Cold-start hydration error:", err));
@@ -72,16 +90,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.put("/api/snapshot", (req, res) => {
-    // 1. Write to SQLite — makes all useQuery(["/api/snapshot"]) hooks react instantly
-    const data = storage.updateSnapshot(req.body);
-    // 2. Write to Supabase — permanent, survives restart (fire-and-forget, don't block response)
+    // 1. Write to SQLite (strip unknown columns) — instant reactive update for all pages
+    const data = storage.updateSnapshot(toSQLiteSnapshot(req.body));
+    // 2. Write full payload to Supabase — permanent, includes all extended fields
     sbUpsertSnapshot(req.body).catch(() => {});
     res.json(data);
   });
 
   // POST alias for snapshot — same as PUT
   app.post("/api/snapshot", (req, res) => {
-    const data = storage.updateSnapshot(req.body);
+    const data = storage.updateSnapshot(toSQLiteSnapshot(req.body));
     sbUpsertSnapshot(req.body).catch(() => {});
     res.json(data);
   });
