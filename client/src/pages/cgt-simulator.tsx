@@ -158,8 +158,17 @@ interface HoldingCalcResult {
   annualTaxableLoss: number;         // < 0 if NG
   ngBenefitPerYear: number;          // tax refund per year
   totalNgBenefit: number;            // over hold period
-  // Combined
-  totalOutOfPocket: number;          // repayments + costs − income − NG benefit
+  // ── Net Holding Cashflow Loss (TRUE cash expense during hold) ──────────────
+  // RULE: Interest = expense. Principal repayment = equity transfer, NOT expense.
+  // Principal repaid during hold reduces loanPayout (recovered at settlement).
+  // Deducting it from trueNetProfit would double-count it against cashToBank.
+  totalInterestExpense: number;      // interest paid during hold (cash expense)
+  totalHoldingExpense: number;       // interest + other holding costs (cash expenses only)
+  netHoldingCashflowLoss: number;    // totalHoldingExpense − netRentalIncome − totalNgBenefit
+  //                                    (used for trueNetProfit — principal excluded)
+  totalOutOfPocket: number;          // LEGACY: kept for display of actual cash paid out
+  //                                    = total repayments + other costs − rental − NG
+  //                                    Principal included here for cash-flow display only
 }
 
 interface StructureResult {
@@ -316,7 +325,25 @@ function calcHolding(s: Scenario): HoldingCalcResult {
   const ngBenefitPerYear = annualTaxableLoss < 0 ? Math.abs(annualTaxableLoss) * marginal1 : 0;
   const totalNgBenefit   = ngBenefitPerYear * holdYears;
 
-  // Total out of pocket during hold = loan repayments + costs - rental income - NG benefit
+  // ── Cash expense fields ──────────────────────────────────────────────────────
+  //
+  // RULE: Interest = true cash expense (reduces profit).
+  //       Principal repayment = equity transfer — NOT an expense.
+  //         It reduces the loanPayout at settlement (already reflected in cashToBank).
+  //         Counting it again in totalOutOfPocket would double-penalise P&I holders.
+  //
+  // totalInterestExpense: only the interest component of repayments (cash gone forever)
+  const totalInterestExpense = loan.totalInterestPaid;
+
+  // totalHoldingExpense: all true cash expenses during hold (interest + running costs)
+  const totalHoldingExpense = totalInterestExpense + totalOtherHoldingCosts;
+
+  // netHoldingCashflowLoss: what the property actually cost you to hold, after income/NG
+  // This is the figure deducted in trueNetProfit — principal is intentionally excluded.
+  const netHoldingCashflowLoss = totalHoldingExpense - netRentalIncome - totalNgBenefit;
+
+  // totalOutOfPocket: actual cash paid out of your bank account during hold
+  // (kept for cash-flow display; includes principal repayments as they were real outflows)
   const totalOutOfPocket = loan.totalRepayments + totalOtherHoldingCosts - netRentalIncome - totalNgBenefit;
 
   return {
@@ -340,6 +367,9 @@ function calcHolding(s: Scenario): HoldingCalcResult {
     annualTaxableLoss,
     ngBenefitPerYear,
     totalNgBenefit,
+    totalInterestExpense,
+    totalHoldingExpense,
+    netHoldingCashflowLoss,
     totalOutOfPocket,
   };
 }
@@ -436,15 +466,33 @@ function calcStructure(s: Scenario, structure: Structure, forceDiscount = false)
   const loanPayout  = Math.max(0, holding.loan.remainingBalance);
   const cashToBank  = s.salePrice - s.sellingCosts - loanPayout - totalTax;
 
-  // True Net Profit
-  const totalCashIn  = s.deposit + s.buyingCosts + holding.totalOutOfPocket;
-  const trueNetProfit = cashToBank - s.deposit - s.buyingCosts - holding.totalOutOfPocket;
+  // ── True Net Profit formula ─────────────────────────────────────────────
+  //   Cash to Bank at Settlement
+  //   − Initial Deposit
+  //   − Buying Costs
+  //   − Net Holding Cashflow Loss (interest + running costs − rental − NG benefit)
+  //   = True Net Profit
+  //
+  // NOTE: Principal repayments are EXCLUDED from holding loss.
+  //   Reason: principal repaid during hold reduces loanPayout at settlement.
+  //   cashToBank = salePrice − sellingCosts − loanPayout − tax
+  //   loanPayout = original loan − principal repaid
+  //   So principal repaid ALREADY benefits cashToBank. Deducting it again
+  //   in holding loss would double-count it against profit.
+  //
+  // holding.netHoldingCashflowLoss = totalInterestExpense + totalOtherHoldingCosts
+  //                                 − netRentalIncome − totalNgBenefit
+  const trueNetProfit = cashToBank - s.deposit - s.buyingCosts - holding.netHoldingCashflowLoss;
+
+  // Legacy totalCashIn for reference (includes principal outflows from bank account)
+  const totalCashIn = s.deposit + s.buyingCosts + holding.totalOutOfPocket;
 
   const roi            = costBase > 0 ? sn((cashToBank - (costBase - loanPayout)) / costBase) : 0;
   const annualisedReturn = holdYears > 0 ? sn(Math.pow(1 + Math.max(-0.99, roi), 1 / holdYears) - 1) : 0;
 
-  // True ROI = trueNetProfit / total cash invested
-  const totalInvested  = s.deposit + s.buyingCosts + Math.max(0, holding.totalOutOfPocket);
+  // True ROI = trueNetProfit / total cash actually invested
+  // Denominator uses netHoldingCashflowLoss (not totalOutOfPocket) for consistency
+  const totalInvested  = s.deposit + s.buyingCosts + Math.max(0, holding.netHoldingCashflowLoss);
   const trueROI        = totalInvested > 0 ? sn(trueNetProfit / totalInvested) : 0;
   const trueAnnualisedReturn = holdYears > 0 ? sn(Math.pow(1 + Math.max(-0.99, trueROI), 1 / holdYears) - 1) : 0;
 
@@ -1082,18 +1130,35 @@ function HoldingSummaryCard({ res, mv }: { res: StructureResult; mv: (v: string)
             </div>
           )}
 
-          {/* Total out of pocket */}
-          <div className="rounded-xl border border-border p-4 bg-secondary/10">
+          {/* Holding cost summary — two rows: cash-flow view + profit view */}
+          <div className="rounded-xl border border-border p-4 bg-secondary/10 space-y-2">
+            {/* Cash actually left your account (includes principal) */}
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-xs font-bold text-foreground">Total Out-of-Pocket During Holding</div>
+                <div className="text-xs font-semibold text-foreground">Total Cash Out During Holding</div>
                 <div className="text-[10px] text-muted-foreground mt-0.5">
-                  Repayments + Costs − Rental Income − NG Benefit
+                  All repayments (incl. principal) + costs − rental − NG benefit
+                </div>
+              </div>
+              <div className="text-sm font-bold tabular-nums"
+                style={{ color: h.totalOutOfPocket > 0 ? "hsl(20,75%,55%)" : "hsl(142,60%,52%)" }}>
+                {mv($(h.totalOutOfPocket))}
+              </div>
+            </div>
+            {/* Net Holding Cashflow Loss — what is charged against profit */}
+            <div className="border-t border-border/30 pt-2 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-foreground">Net Holding Cashflow Loss <span className="text-[9px] font-normal text-muted-foreground">(used for True Net Profit)</span></div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  Interest ({mv($(h.totalInterestExpense))}) + Costs − Rental − NG benefit
+                  {h.loan.totalPrincipalRepaid > 0 && (
+                    <span className="ml-1 text-sky-400/70"> • Principal {mv($(h.loan.totalPrincipalRepaid))} excluded</span>
+                  )}
                 </div>
               </div>
               <div className="text-lg font-bold tabular-nums"
-                style={{ color: h.totalOutOfPocket > 0 ? "hsl(0,65%,55%)" : "hsl(142,60%,52%)" }}>
-                {mv($(h.totalOutOfPocket))}
+                style={{ color: h.netHoldingCashflowLoss > 0 ? "hsl(0,65%,55%)" : "hsl(142,60%,52%)" }}>
+                {mv($(h.netHoldingCashflowLoss))}
               </div>
             </div>
           </div>
@@ -1131,7 +1196,7 @@ function FinalResultCard({ s, res, mv }: { s: Scenario; res: StructureResult; mv
         {[
           { label: "Cash to Bank at Settlement", value: mv($(res.cashToBank)),       color: "hsl(210,80%,65%)" },
           { label: "ATO Tax Payable",            value: mv($(res.totalTax)),          color: "hsl(0,65%,55%)" },
-          { label: "Out-of-Pocket While Holding", value: mv($(h.totalOutOfPocket)),  color: "hsl(20,75%,55%)" },
+          { label: "Net Holding Costs (excl. principal)", value: mv($(Math.max(0, h.netHoldingCashflowLoss))),  color: "hsl(20,75%,55%)" },
           { label: "TRUE NET PROFIT",            value: mv($(res.trueNetProfit)),      color: isProfit ? "hsl(142,60%,52%)" : "hsl(0,65%,52%)", big: true },
         ].map(k => (
           <div key={k.label} className="bg-card px-4 py-4">
@@ -1145,17 +1210,23 @@ function FinalResultCard({ s, res, mv }: { s: Scenario; res: StructureResult; mv
       {/* Formula row */}
       <div className="px-5 py-2.5 border-t border-border/30 text-[10px] text-muted-foreground flex items-center gap-1.5 flex-wrap"
         style={{ background: isProfit ? "hsl(142,55%,4%)" : "hsl(0,55%,4%)" }}>
-        <span style={{ color: "hsl(210,80%,65%)" }}>Cash to Bank</span>
+        <span style={{ color: "hsl(210,80%,65%)" }}>Cash to Bank ({mv($(res.cashToBank))})</span>
         <ArrowRight className="w-3 h-3" />
         <span>− Deposit ({mv($(s.deposit))})</span>
         <ArrowRight className="w-3 h-3" />
         <span>− Buying Costs ({mv($(s.buyingCosts))})</span>
         <ArrowRight className="w-3 h-3" />
-        <span>− Out-of-Pocket ({mv($(h.totalOutOfPocket))})</span>
+        <span>− Net Holding Costs ({mv($(Math.max(0, h.netHoldingCashflowLoss)))})</span>
         <ArrowRight className="w-3 h-3" />
         <span className="font-bold" style={{ color: isProfit ? "hsl(142,60%,52%)" : "hsl(0,65%,52%)" }}>
           = {mv($(res.trueNetProfit))} True Net Profit
         </span>
+        {res.holding.loan.totalPrincipalRepaid > 0 && (
+          <span className="ml-2 text-muted-foreground/60"
+            title="Principal repaid during hold reduces your loanPayout at settlement. It is NOT an expense — deducting it again would double-count it against cashToBank.">
+            ⓘ Principal ({mv($(res.holding.loan.totalPrincipalRepaid))}) excluded — equity transfer, not expense
+          </span>
+        )}
       </div>
 
       {/* True ROI metrics */}
@@ -1312,7 +1383,10 @@ function ResultsPanel({ s, res, mv, onForecast, saving }: {
                     <td className="px-4 py-3 font-bold font-mono" style={{ color: isBestCash ? "hsl(142,60%,52%)" : "hsl(43,85%,55%)" }}>
                       {mv($(r.cashToBank))}
                     </td>
-                    <td className="px-4 py-3 font-mono" style={{ color: "hsl(20,75%,55%)" }}>{mv($(r.holding.totalOutOfPocket))}</td>
+                    <td className="px-4 py-3 font-mono" style={{ color: "hsl(20,75%,55%)" }}
+                      title={`Interest: ${mv($(r.holding.totalInterestExpense))} + Other: ${mv($(r.holding.totalOtherHoldingCosts))} − Rental: ${mv($(r.holding.netRentalIncome))} − NG: ${mv($(r.holding.totalNgBenefit))}\nPrincipal ${mv($(r.holding.loan.totalPrincipalRepaid))} excluded — equity transfer`}>
+                      {mv($(Math.max(0, r.holding.netHoldingCashflowLoss)))}
+                    </td>
                     <td className="px-4 py-3 font-bold font-mono"
                       style={{ color: r.trueNetProfit >= 0 ? (isBestTrue ? "hsl(142,60%,52%)" : "hsl(43,85%,55%)") : "hsl(0,65%,52%)" }}>
                       {mv($(r.trueNetProfit))}
@@ -1556,8 +1630,12 @@ function ResultsPanel({ s, res, mv, onForecast, saving }: {
             <WRow label="Cash to Bank (above)"        value={mv($(res.cashToBank))}               color="hsl(142,60%,52%)" />
             <WRow label="− Initial Deposit"           value={mv(`−${$(s.deposit, true)}`)}        color="hsl(0,65%,52%)" />
             <WRow label="− Buying Costs"              value={mv(`−${$(s.buyingCosts, true)}`)}    color="hsl(0,65%,52%)" />
-            <WRow label="− Out-of-Pocket During Hold" value={mv(`−${$(Math.max(0, holding.totalOutOfPocket), true)}`)} color="hsl(0,65%,52%)"
-              sub={`Repayments + Costs − Rental − NG Benefit`} />
+            <WRow label="− Net Holding Cashflow Loss" value={mv(`−${$(Math.max(0, holding.netHoldingCashflowLoss), true)}`)} color="hsl(0,65%,52%)"
+              sub={`Interest (${mv($(holding.totalInterestExpense))}) + Other Costs (${mv($(holding.totalOtherHoldingCosts))}) − Rental (${mv($(holding.netRentalIncome))}) − NG Benefit (${mv($(holding.totalNgBenefit))})`} />
+            {holding.loan.totalPrincipalRepaid > 0 && (
+              <WRow label="  Principal repaid (excluded)" value={mv($(holding.loan.totalPrincipalRepaid))} color="hsl(210,60%,60%)"
+                sub="Equity transfer — recovered via reduced loanPayout at settlement. Not an expense." />
+            )}
             <WRow label="= TRUE NET PROFIT"            value={mv($(res.trueNetProfit))}
               color={res.trueNetProfit >= 0 ? "hsl(142,60%,52%)" : "hsl(0,65%,52%)"} big />
           </div>
@@ -1808,7 +1886,7 @@ export default function CGTSimulatorPage() {
               <table className="w-full text-xs" style={{ minWidth: 780 }}>
                 <thead>
                   <tr className="border-b border-border/50 bg-secondary/20">
-                    {["Scenario", "Structure", "Holding", "Gross Gain", "Tax", "Cash to Bank", "Out-of-Pocket", "True Net Profit", "True ROI", "Ann. Return"].map(h => (
+                    {["Scenario", "Structure", "Holding", "Gross Gain", "Tax", "Cash to Bank", "Net Holding Costs", "True Net Profit", "True ROI", "Ann. Return"].map(h => (
                       <th key={h} className="text-left px-4 py-2.5 text-muted-foreground font-semibold whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -1839,7 +1917,10 @@ export default function CGTSimulatorPage() {
                         <td className="px-4 py-3 font-mono" style={{ color: r.grossGain >= 0 ? "hsl(142,60%,52%)" : "hsl(0,65%,52%)" }}>{mv($(r.grossGain))}</td>
                         <td className="px-4 py-3 font-mono" style={{ color: "hsl(0,65%,52%)" }}>{mv($(r.totalTax))}</td>
                         <td className="px-4 py-3 font-bold font-mono" style={{ color: "hsl(43,85%,55%)" }}>{mv($(r.cashToBank))}</td>
-                        <td className="px-4 py-3 font-mono" style={{ color: "hsl(20,75%,55%)" }}>{mv($(r.holding.totalOutOfPocket))}</td>
+                        <td className="px-4 py-3 font-mono" style={{ color: "hsl(20,75%,55%)" }}
+                          title={`Interest: ${mv($(r.holding.totalInterestExpense))} + Other: ${mv($(r.holding.totalOtherHoldingCosts))} − Rental: ${mv($(r.holding.netRentalIncome))} − NG: ${mv($(r.holding.totalNgBenefit))}\nPrincipal ${mv($(r.holding.loan.totalPrincipalRepaid))} excluded — equity transfer`}>
+                          {mv($(Math.max(0, r.holding.netHoldingCashflowLoss)))}
+                        </td>
                         <td className="px-4 py-3 font-bold font-mono"
                           style={{ color: isBest ? "hsl(142,60%,52%)" : (r.trueNetProfit >= 0 ? "hsl(43,85%,55%)" : "hsl(0,65%,52%)") }}>
                           {mv($(r.trueNetProfit))}

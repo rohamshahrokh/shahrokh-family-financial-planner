@@ -91,6 +91,14 @@ interface ScenarioOverrides {
   sellPropertyOwnerPct:  number;  // % Roham (0-100)
   sellPropertyMonth:    number;   // months from today
   sellPropertyBaseIncome: number; // Roham taxable income in sale year
+  // Loan + holding inputs (used for True Net Profit in calcCGT)
+  sellPropertyDeposit:      number; // initial deposit paid
+  sellPropertyBuyingCosts:  number; // stamp duty, legals, etc.
+  sellPropertyLoanAmount:   number; // loan balance
+  sellPropertyLoanRatePct:  number; // % pa interest rate
+  sellPropertyLoanType:     "io" | "pi"; // interest-only or P&I
+  sellPropertyWeeklyRent:   number; // weekly rent (0 if vacant)
+  sellPropertyAnnualCosts:  number; // council + insurance + other annual costs
 }
 
 interface ScenarioCard {
@@ -140,8 +148,14 @@ interface CGTSummary {
   taxUnder12:      number;
   taxOver12:       number;
   taxSaved:        number;
-  netProceedsU12:  number;
-  netProceedsO12:  number;
+  netProceedsU12:  number;  // sale price − selling costs − tax (cash at settlement)
+  netProceedsO12:  number;  // same, with 50% CGT discount
+  // ── True Net Profit (profit-grade — deducts deposit, buying costs, interest-only holding costs) ──
+  trueNetProfitU12: number; // netProceedsU12 − deposit − buyingCosts − netHoldingCosts
+  trueNetProfitO12: number; // netProceedsO12 − deposit − buyingCosts − netHoldingCosts
+  netHoldingCosts: number;  // interest expense only (principal excluded) + other costs − rental
+  interestExpense: number;  // interest paid during hold
+  principalRepaid: number;  // excluded from profit calc — equity transfer
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -204,6 +218,14 @@ function defaultOverrides(): ScenarioOverrides {
     sellPropertyOwnerPct:  50,
     sellPropertyMonth:     3,
     sellPropertyBaseIncome: 185000,
+    // Loan + holding defaults for True Net Profit
+    sellPropertyDeposit:     140000,  // 20% of $700k
+    sellPropertyBuyingCosts: 30000,   // ~4.3% stamp + legals
+    sellPropertyLoanAmount:  560000,  // 80% of $700k
+    sellPropertyLoanRatePct: 6.5,
+    sellPropertyLoanType:    "pi",
+    sellPropertyWeeklyRent:  500,
+    sellPropertyAnnualCosts: 8000,
   };
 }
 
@@ -231,42 +253,102 @@ function defaultScenarios(): ScenarioCard[] {
 // ─── CGT Calculator ──────────────────────────────────────────────────────────
 
 function calcCGT(ov: ScenarioOverrides): CGTSummary {
-  const gain   = ov.sellPropertySalePrice - ov.sellPropertyBuyPrice;
-  const costs  = ov.sellPropertySalePrice * 0.025; // 2.5% selling costs
-  const grossGain = Math.max(0, gain - costs);
-  const rohamPct  = ov.sellPropertyOwnerPct / 100;
-  const faraPct   = 1 - rohamPct;
+  const sellingCosts = ov.sellPropertySalePrice * 0.025; // 2.5% agent + legals
+  const gain         = ov.sellPropertySalePrice - ov.sellPropertyBuyPrice;
+  const grossGain    = Math.max(0, gain - sellingCosts);
+  const rohamPct     = ov.sellPropertyOwnerPct / 100;
+  const faraPct      = 1 - rohamPct;
 
   function taxForPerson(gainShare: number, discount: boolean, baseIncome: number) {
-    const tg = discount ? gainShare * 0.5 : gainShare;
+    const tg       = discount ? gainShare * 0.5 : gainShare;
     const totalInc = baseIncome + tg;
-    const taxB  = calcIncomeTax(baseIncome,  "2025-26");
-    const taxA  = calcIncomeTax(totalInc,    "2025-26");
-    const litoB = Math.min(calcLITO(baseIncome, "2025-26"), taxB);
-    const litoA = Math.min(calcLITO(totalInc,   "2025-26"), taxA);
-    const medB  = calcMedicareLevy(baseIncome, "2025-26");
-    const medA  = calcMedicareLevy(totalInc,   "2025-26");
+    const taxB     = calcIncomeTax(baseIncome, "2025-26");
+    const taxA     = calcIncomeTax(totalInc,   "2025-26");
+    const litoB    = Math.min(calcLITO(baseIncome, "2025-26"), taxB);
+    const litoA    = Math.min(calcLITO(totalInc,   "2025-26"), taxA);
+    const medB     = calcMedicareLevy(baseIncome, "2025-26");
+    const medA     = calcMedicareLevy(totalInc,   "2025-26");
     return Math.max(0, (taxA - litoA + medA) - (taxB - litoB + medB));
   }
 
   const baseIncome = ov.sellPropertyBaseIncome;
-  // Under 12 months — no discount
   const u12R = taxForPerson(grossGain * rohamPct, false, baseIncome);
   const u12F = taxForPerson(grossGain * faraPct,  false, baseIncome * 0.8);
-  // Over 12 months — 50% discount
-  const o12R = taxForPerson(grossGain * rohamPct, true, baseIncome);
-  const o12F = taxForPerson(grossGain * faraPct,  true, baseIncome * 0.8);
-
+  const o12R = taxForPerson(grossGain * rohamPct, true,  baseIncome);
+  const o12F = taxForPerson(grossGain * faraPct,  true,  baseIncome * 0.8);
   const taxUnder12 = u12R + u12F;
   const taxOver12  = o12R + o12F;
+
+  // ── Loan amortisation ───────────────────────────────────────────────────────
+  const P           = safeNum(ov.sellPropertyLoanAmount);
+  const holdMonths  = Math.max(0, safeNum(ov.sellPropertyHoldMonths));
+  const ratePA      = safeNum(ov.sellPropertyLoanRatePct);
+  const r           = ratePA / 100 / 12; // monthly rate
+  const n           = 30 * 12;           // 30-year term
+
+  let interestExpense = 0;
+  let principalRepaid = 0;
+  let remainingBal    = P;
+
+  if (ov.sellPropertyLoanType === "io") {
+    // IO: only interest, balance never reduces
+    interestExpense = P * r * holdMonths;
+    principalRepaid = 0;
+    remainingBal    = P;
+  } else {
+    // P&I: amortise over holdMonths
+    const mp = r > 0
+      ? P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1)
+      : P / n;
+    const months = Math.min(holdMonths, n);
+    let bal = P;
+    for (let m = 0; m < months; m++) {
+      const intPmt  = bal * r;
+      const prinPmt = mp - intPmt;
+      interestExpense += intPmt;
+      principalRepaid += Math.max(0, prinPmt);
+      bal = Math.max(0, bal - Math.max(0, prinPmt));
+    }
+    remainingBal = bal;
+  }
+
+  // ── Holding costs (interest-only — principal excluded per rule) ───────────
+  const holdYears       = holdMonths / 12;
+  const otherCosts      = safeNum(ov.sellPropertyAnnualCosts) * holdYears;
+  const weeksInHold     = (holdMonths / 12) * 52;
+  const grossRental     = safeNum(ov.sellPropertyWeeklyRent) * weeksInHold;
+  // Net rental after 5% vacancy + 8% management fee
+  const netRental       = grossRental * 0.95 * 0.92;
+  // Net holding cashflow loss = interest + other costs − net rental
+  // Principal is NOT an expense: already recovered via reduced remainingBal at settlement
+  const netHoldingCosts = interestExpense + otherCosts - netRental;
+
+  // ── Settlement cashflows ─────────────────────────────────────────────────
+  const loanPayout      = Math.max(0, remainingBal);
+  const deposit         = safeNum(ov.sellPropertyDeposit);
+  const buyingCosts     = safeNum(ov.sellPropertyBuyingCosts);
+
+  const netProceedsU12  = ov.sellPropertySalePrice - sellingCosts - loanPayout - taxUnder12;
+  const netProceedsO12  = ov.sellPropertySalePrice - sellingCosts - loanPayout - taxOver12;
+
+  // ── True Net Profit ───────────────────────────────────────────────────
+  //  Cash to Bank − Deposit − Buying Costs − Net Holding Cashflow Loss
+  //  (principal excluded from holding costs per rule above)
+  const trueNetProfitU12 = netProceedsU12 - deposit - buyingCosts - Math.max(0, netHoldingCosts);
+  const trueNetProfitO12 = netProceedsO12 - deposit - buyingCosts - Math.max(0, netHoldingCosts);
 
   return {
     grossGain,
     taxUnder12,
     taxOver12,
-    taxSaved: taxUnder12 - taxOver12,
-    netProceedsU12: ov.sellPropertySalePrice - costs - taxUnder12,
-    netProceedsO12: ov.sellPropertySalePrice - costs - taxOver12,
+    taxSaved:       taxUnder12 - taxOver12,
+    netProceedsU12,
+    netProceedsO12,
+    trueNetProfitU12,
+    trueNetProfitO12,
+    netHoldingCosts,
+    interestExpense,
+    principalRepaid,
   };
 }
 
@@ -1068,6 +1150,20 @@ export default function ScenarioCompareLab() {
                 <FieldRow label="Hold Period (months)" value={active.overrides.sellPropertyHoldMonths}
                   onChange={v => updateOverride("sellPropertyHoldMonths", parseInt(v) || 0)}
                   prefix="" hint="≥12 = 50% CGT discount" />
+                <FieldRow label="Initial Deposit Paid" value={active.overrides.sellPropertyDeposit}
+                  onChange={v => updateOverride("sellPropertyDeposit", parseFloat(v) || 0)} />
+                <FieldRow label="Buying Costs (stamp duty etc.)" value={active.overrides.sellPropertyBuyingCosts}
+                  onChange={v => updateOverride("sellPropertyBuyingCosts", parseFloat(v) || 0)} />
+                <FieldRow label="Loan Amount" value={active.overrides.sellPropertyLoanAmount}
+                  onChange={v => updateOverride("sellPropertyLoanAmount", parseFloat(v) || 0)} />
+                <FieldRow label="Loan Interest Rate (%pa)" value={active.overrides.sellPropertyLoanRatePct}
+                  onChange={v => updateOverride("sellPropertyLoanRatePct", parseFloat(v) || 6.5)}
+                  prefix="" suffix="%" />
+                <FieldRow label="Weekly Rent" value={active.overrides.sellPropertyWeeklyRent}
+                  onChange={v => updateOverride("sellPropertyWeeklyRent", parseFloat(v) || 0)} />
+                <FieldRow label="Annual Holding Costs" value={active.overrides.sellPropertyAnnualCosts}
+                  onChange={v => updateOverride("sellPropertyAnnualCosts", parseFloat(v) || 0)}
+                  hint="Council + insurance + other" />
                 <FieldRow label="Roham Ownership %" value={active.overrides.sellPropertyOwnerPct}
                   onChange={v => updateOverride("sellPropertyOwnerPct", parseFloat(v) || 50)}
                   prefix="" suffix="%" />
@@ -1106,35 +1202,76 @@ export default function ScenarioCompareLab() {
               icon={DollarSign} color="#a855f7" />
 
             {/* Active CGT result */}
-            {activeResult?.cgtResult && (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-1.5 mt-2">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                  <DollarSign className="w-3 h-3" /> CGT Tax Test
-                </p>
-                <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-                  <div>
-                    <p className="text-muted-foreground">Gross Gain</p>
-                    <p className="font-mono font-semibold text-foreground">{formatCurrency(activeResult.cgtResult.grossGain)}</p>
+            {activeResult?.cgtResult && (() => {
+              const cgt = activeResult.cgtResult;
+              const ov  = active.overrides;
+              const useO12 = ov.sellPropertyHoldMonths >= 12;
+              const cashToBank   = useO12 ? cgt.netProceedsO12 : cgt.netProceedsU12;
+              const trueNetProfit = useO12 ? cgt.trueNetProfitO12 : cgt.trueNetProfitU12;
+              const tax           = useO12 ? cgt.taxOver12 : cgt.taxUnder12;
+              return (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2 mt-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                    <DollarSign className="w-3 h-3" />
+                    CGT Tax Test — {ov.sellPropertyHoldMonths}mo hold
+                    {useO12 && <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-400">50% discount</span>}
+                    {!useO12 && <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-red-500/20 text-red-400">No discount</span>}
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                    <div>
+                      <p className="text-muted-foreground">Gross Gain</p>
+                      <p className="font-mono font-semibold text-foreground">{formatCurrency(cgt.grossGain)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Tax Saved (vs &lt;12mo)</p>
+                      <p className="font-mono font-semibold text-emerald-400">{formatCurrency(cgt.taxSaved)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">ATO Tax</p>
+                      <p className="font-mono text-red-400">{formatCurrency(tax)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Net Holding Costs</p>
+                      <p className="font-mono text-orange-400"
+                        title={`Interest: ${formatCurrency(cgt.interestExpense)} + Other costs \u2212 rental\nPrincipal ${formatCurrency(cgt.principalRepaid)} excluded \u2014 equity transfer`}>
+                        {formatCurrency(Math.max(0, cgt.netHoldingCosts))}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground">Tax Saved (&gt;12mo)</p>
-                    <p className="font-mono font-semibold text-emerald-400">{formatCurrency(activeResult.cgtResult.taxSaved)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Tax (&lt;12 months)</p>
-                    <p className="font-mono text-red-400">{formatCurrency(activeResult.cgtResult.taxUnder12)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Tax (&gt;12 months)</p>
-                    <p className="font-mono text-emerald-400">{formatCurrency(activeResult.cgtResult.taxOver12)}</p>
-                  </div>
-                  <div className="col-span-2 border-t border-amber-500/20 pt-1.5">
-                    <p className="text-muted-foreground text-[10px]">Net Proceeds after CGT discount</p>
-                    <p className="font-mono font-bold text-foreground text-sm">{formatCurrency(activeResult.cgtResult.netProceedsO12)}</p>
+                  {/* True Net Profit formula breakdown */}
+                  <div className="border-t border-amber-500/20 pt-2 space-y-0.5">
+                    <p className="text-[9px] font-bold uppercase tracking-wider text-amber-400/60">True Net Profit Formula</p>
+                    <div className="text-[10px] text-muted-foreground space-y-0.5 font-mono">
+                      <div className="flex justify-between">
+                        <span className="text-sky-400">Cash to Bank</span>
+                        <span className="text-sky-400">{formatCurrency(cashToBank)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>− Deposit</span>
+                        <span className="text-red-400">−{formatCurrency(ov.sellPropertyDeposit)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>− Buying Costs</span>
+                        <span className="text-red-400">−{formatCurrency(ov.sellPropertyBuyingCosts)}</span>
+                      </div>
+                      <div className="flex justify-between" title={`Interest ${formatCurrency(cgt.interestExpense)} + costs \u2212 rental. Principal ${formatCurrency(cgt.principalRepaid)} excluded.`}>
+                        <span>− Net Holding Costs <span className="text-[9px] text-muted-foreground/50">(interest only)</span></span>
+                        <span className="text-orange-400">−{formatCurrency(Math.max(0, cgt.netHoldingCosts))}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-amber-500/20 pt-1 font-bold">
+                        <span style={{ color: trueNetProfit >= 0 ? "hsl(142,60%,52%)" : "hsl(0,65%,52%)" }}>= True Net Profit</span>
+                        <span style={{ color: trueNetProfit >= 0 ? "hsl(142,60%,52%)" : "hsl(0,65%,52%)" }}>{formatCurrency(trueNetProfit)}</span>
+                      </div>
+                      {cgt.principalRepaid > 0 && (
+                        <div className="text-[9px] text-sky-400/60 pt-0.5">
+                          ⓘ Principal {formatCurrency(cgt.principalRepaid)} excluded — equity transfer recovered in cashToBank
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Quick score summary */}
             <div className="rounded-xl border border-border bg-card p-3 space-y-2">
