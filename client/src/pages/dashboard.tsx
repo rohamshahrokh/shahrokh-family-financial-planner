@@ -935,55 +935,7 @@ export default function DashboardPage() {
   const dpTotal           = depositPowerResult?.totalDepositPower ?? 0;
   const dpReadiness       = depositPowerResult?.readinessPct ?? 0;
 
-  const inlineBestMove = useMemo(() => {
-    if (!snapshot) return null;
-    // Build bills array from billsRaw — pass to engine
-    const bestMoveLedger: BestMoveLedger = {
-      cash:                 snap.cash,
-      offsetBalance:        snap.offset_balance,
-      mortgage:             snap.mortgage,
-      otherDebts:           snap.other_debts,
-      monthlyIncome:        snap.monthly_income,
-      monthlyExpenses:      snap.monthly_expenses,
-      ppor:                 snap.ppor,
-      plannedStockTotal:    plannedStockTotal + plannedStockTxTotal,
-      plannedCryptoTotal:   plannedCryptoTotal + plannedCryptoTxTotal,
-      billsRaw:             billsRaw as any[],
-      properties:           properties as any[],
-      emergencyBuffer,
-      maxRefinanceLVR,
-      mortgageRate:         (snap.mortgage_rate ?? 6.5) / 100,
-      etfExpectedReturn:    (fa.flat.stocks_return ?? 9.5) / 100,
-      cryptoExpectedReturn: (fa.flat.crypto_return ?? 20) / 100,
-      lowestFutureCash,
-      negativeCashMonths,
-      rohamGrossAnnual:     snap.monthly_income * 12,
-      superContribAnnual:   safeNum((snapshot as any).roham_salary_sacrifice) * 12
-                              + snap.monthly_income * 12 * 0.115,
-      stocksValue:          stocksTotal,
-      cryptoValue:          cryptoTotal,
-      depositPowerResult:   depositPowerResult ? {
-        totalDepositPower:   depositPowerResult.totalDepositPower,
-        readinessPct:        depositPowerResult.readinessPct,
-        isReady:             depositPowerResult.isReady,
-        totalUsableEquity:   depositPowerResult.totalUsableEquity,
-        deployableCash:      Math.max(0, (depositPowerResult.totalDepositPower - (depositPowerResult.totalUsableEquity ?? 0))),
-        fundingSources:      depositPowerResult.fundingSources ?? [],
-      } : null,
-    };
-    return getBestMoveRecommendation(bestMoveLedger);
-  }, [
-    snapshot, snap, plannedStockTotal, plannedStockTxTotal, plannedCryptoTotal, plannedCryptoTxTotal,
-    billsRaw, properties, emergencyBuffer, maxRefinanceLVR, lowestFutureCash, negativeCashMonths,
-    stocksTotal, cryptoTotal, depositPowerResult, fa.flat.stocks_return, fa.flat.crypto_return,
-  ]);
-
-  // Derived short labels for inline mini-card
-  const bestMoveTitle   = inlineBestMove?.best.action   ?? "Analysing…";
-  const bestMoveImpact  = inlineBestMove?.best.benefit_label ?? "";
-  const bestMoveUrgency = inlineBestMove?.best.risk === "Low" ? "Medium" :
-                          inlineBestMove?.best.risk === "Med" ? "Medium" : "High";
-  const bestMoveHref    = inlineBestMove?.best.cta_route ?? "/dashboard";
+  // inlineBestMove declared after lowestFutureCash / negativeCashMonths below
 
   // ─── Risk score ───────────────────────────────────────────────────────────
   const riskScore = Math.min(100, Math.max(0, Math.round(
@@ -1171,6 +1123,53 @@ export default function DashboardPage() {
     .slice(0, 5)
     .map((m: any) => m.label || m.monthKey);
   const hasLiquidityStress = negativeCashMonths.length > 0;
+
+  // ─── Best Move V2 — placed HERE so lowestFutureCash + negativeCashMonths are in scope ─────
+  const inlineBestMove = useMemo(() => {
+    if (!snapshot) return null;
+    const bestMoveLedger: BestMoveLedger = {
+      cash:                 snap.cash,
+      offsetBalance:        snap.offset_balance,
+      mortgage:             snap.mortgage,
+      otherDebts:           snap.other_debts,
+      monthlyIncome:        snap.monthly_income,
+      monthlyExpenses:      snap.monthly_expenses,
+      ppor:                 snap.ppor,
+      plannedStockTotal:    plannedStockTotal + plannedStockTxTotal,
+      plannedCryptoTotal:   plannedCryptoTotal + plannedCryptoTxTotal,
+      billsRaw:             billsRaw as any[],
+      properties:           properties as any[],
+      emergencyBuffer,
+      maxRefinanceLVR,
+      mortgageRate:         (snap.mortgage_rate ?? 6.5) / 100,
+      etfExpectedReturn:    (fa.flat.stocks_return ?? 9.5) / 100,
+      cryptoExpectedReturn: (fa.flat.crypto_return ?? 20) / 100,
+      lowestFutureCash,
+      negativeCashMonths,
+      rohamGrossAnnual:     snap.monthly_income * 12,
+      superContribAnnual:   safeNum((snapshot as any).roham_salary_sacrifice) * 12
+                              + snap.monthly_income * 12 * 0.115,
+      stocksValue:          stocksTotal,
+      cryptoValue:          cryptoTotal,
+      depositPowerResult:   depositPowerResult ? {
+        totalDepositPower:  depositPowerResult.totalDepositPower,
+        readinessPct:       depositPowerResult.readinessPct,
+        isReady:            depositPowerResult.isReady,
+        totalUsableEquity:  depositPowerResult.totalUsableEquity,
+        deployableCash:     Math.max(0, depositPowerResult.totalDepositPower - (depositPowerResult.totalUsableEquity ?? 0)),
+        fundingSources:     depositPowerResult.fundingSources ?? [],
+      } : null,
+    };
+    return getBestMoveRecommendation(bestMoveLedger);
+  }, [
+    snapshot, snap, plannedStockTotal, plannedStockTxTotal, plannedCryptoTotal, plannedCryptoTxTotal,
+    billsRaw, properties, emergencyBuffer, maxRefinanceLVR, lowestFutureCash, negativeCashMonths,
+    stocksTotal, cryptoTotal, depositPowerResult, fa.flat.stocks_return, fa.flat.crypto_return,
+  ]);
+  // Derived labels for inline mini-card
+  const bestMoveTitle   = inlineBestMove?.best.action       ?? "Analysing…";
+  const bestMoveImpact  = inlineBestMove?.best.benefit_label ?? "";
+  const bestMoveHref    = inlineBestMove?.best.cta_route     ?? "/dashboard";
 
   const upcomingBillsCount = (billsRaw ?? []).filter((b: any) => {
     if (!b.next_due_date) return false;
