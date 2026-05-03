@@ -75,6 +75,7 @@ import AIInsightsCard from "@/components/AIInsightsCard";
 import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import CFODashboardWidget from "@/components/CFODashboardWidget";
 import BestMoveCard from "@/components/BestMoveCard";
+import DepositPowerCard from "@/components/DepositPowerCard";
 import FIREPathCard from "@/components/FIREPathCard";
 import TaxAlphaCard from "@/components/TaxAlphaCard";
 import RiskRadarCard from "@/components/RiskRadarCard";
@@ -1855,6 +1856,11 @@ export default function DashboardPage() {
       {/* BEST MOVE CARD — Saturday Morning Bulletin removed from homepage (lives in Actions menu) */}
       <div className="px-4 pb-4">
         <BestMoveCard />
+      </div>
+
+      {/* DEPOSIT POWER — cash + offset + usable equity across all properties */}
+      <div className="px-4 pb-4">
+        <DepositPowerCard compact />
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════

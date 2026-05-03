@@ -95,6 +95,9 @@ export default function BestMoveCard() {
   const [error, setError]     = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
+  // Pull deposit-power inputs from the forecast store
+  const maxLvr = useForecastStore(s => s.maxLvr);
+
   const load = useCallback(async (force = false) => {
     if (!force) {
       const cached = loadCache();
@@ -103,7 +106,7 @@ export default function BestMoveCard() {
     setLoading(true);
     setError(null);
     try {
-      const r = await computeBestMove();
+      const r = await computeBestMove({ maxLvr });
       saveCache(r);
       setResult(r);
     } catch (e: any) {
@@ -111,7 +114,7 @@ export default function BestMoveCard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [maxLvr]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -131,7 +134,7 @@ export default function BestMoveCard() {
     }
     try { sessionStorage.removeItem(CACHE_KEY); } catch { /* noop */ }
     load(true);
-  }, [forecastMode, forecastProfile, mcSignature, load]);
+  }, [forecastMode, forecastProfile, mcSignature, maxLvr, load]);
 
   // ── Loading state ─────────────────────────────────────────────────────────
   if (loading && !result) {

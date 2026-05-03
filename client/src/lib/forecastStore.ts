@@ -194,7 +194,7 @@ export async function sbSaveAssumptions(rows: YearAssumptions[]): Promise<void> 
   );
 }
 
-export async function sbLoadSettings(): Promise<{ forecast_mode: ForecastMode; profile: ForecastProfile } | null> {
+export async function sbLoadSettings(): Promise<{ forecast_mode: ForecastMode; profile: ForecastProfile; max_lvr?: number } | null> {
   const res = await fetch(
     `${SB_URL}/rest/v1/sf_forecast_settings?owner_id=eq.${OWNER}&limit=1`,
     { headers: HEADERS }
@@ -204,13 +204,13 @@ export async function sbLoadSettings(): Promise<{ forecast_mode: ForecastMode; p
   return rows[0] ?? null;
 }
 
-export async function sbSaveSettings(mode: ForecastMode, profile: ForecastProfile): Promise<void> {
+export async function sbSaveSettings(mode: ForecastMode, profile: ForecastProfile, maxLvr: number = 80): Promise<void> {
   await fetch(
     `${SB_URL}/rest/v1/sf_forecast_settings?on_conflict=owner_id`,
     {
       method: 'POST',
       headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=representation' },
-      body: JSON.stringify({ owner_id: OWNER, forecast_mode: mode, profile, updated_at: new Date().toISOString() }),
+      body: JSON.stringify({ owner_id: OWNER, forecast_mode: mode, profile, max_lvr: maxLvr, updated_at: new Date().toISOString() }),
     }
   );
 }
@@ -251,12 +251,15 @@ interface ForecastStoreState {
   yearlyAssumptions: YearAssumptions[];  // 2026–2035
   monteCarloResult: MonteCarloResult | null;
   mcVolatility: MCVolatilityParams;      // per-asset volatility + event params
+  /** Max LVR % used to compute usable equity / deposit power. Default 80. */
+  maxLvr: number;
   isRunningMC: boolean;
   isSaving: boolean;
 
   // Actions
   setForecastMode: (mode: ForecastMode) => void;
   setProfile: (profile: ForecastProfile) => void;
+  setMaxLvr: (lvr: number) => void;
   setYearAssumption: (year: number, field: keyof Omit<YearAssumptions, 'year'>, value: number) => void;
   setAllYearlyAssumptions: (rows: YearAssumptions[]) => void;
   generateFromProfile: (profile: ForecastProfile) => void;
@@ -294,17 +297,25 @@ export const useForecastStore = create<ForecastStoreState>()(
       yearlyAssumptions: DEFAULT_YEARLY,
       monteCarloResult: null,
       mcVolatility: { ...DEFAULT_MC_VOLATILITY },
+      maxLvr: 80,
       isRunningMC: false,
       isSaving: false,
 
       setForecastMode: (mode) => {
         set({ forecastMode: mode });
-        sbSaveSettings(mode, get().profile).catch(() => {});
+        sbSaveSettings(mode, get().profile, get().maxLvr).catch(() => {});
       },
 
       setProfile: (profile) => {
         set({ profile });
-        sbSaveSettings(get().forecastMode, profile).catch(() => {});
+        sbSaveSettings(get().forecastMode, profile, get().maxLvr).catch(() => {});
+      },
+
+      setMaxLvr: (lvr) => {
+        // Clamp 0–95; LMI starts >80, hard cap is ~95.
+        const clamped = Math.max(0, Math.min(95, Math.round(lvr * 100) / 100));
+        set({ maxLvr: clamped });
+        sbSaveSettings(get().forecastMode, get().profile, clamped).catch(() => {});
       },
 
       setYearAssumption: (year, field, value) => {
@@ -330,12 +341,12 @@ export const useForecastStore = create<ForecastStoreState>()(
       resetMCVolatility: () => set({ mcVolatility: { ...DEFAULT_MC_VOLATILITY } }),
 
       saveToSupabase: async () => {
-        const { yearlyAssumptions, forecastMode, profile } = get();
+        const { yearlyAssumptions, forecastMode, profile, maxLvr } = get();
         set({ isSaving: true });
         try {
           await Promise.all([
             sbSaveAssumptions(yearlyAssumptions),
-            sbSaveSettings(forecastMode, profile),
+            sbSaveSettings(forecastMode, profile, maxLvr),
           ]);
         } finally {
           set({ isSaving: false });
@@ -355,6 +366,7 @@ export const useForecastStore = create<ForecastStoreState>()(
             set({
               forecastMode: settings.forecast_mode,
               profile: settings.profile,
+              maxLvr: typeof settings.max_lvr === 'number' ? settings.max_lvr : 80,
             });
           }
         } catch { /* silent — localStorage cache used as fallback */ }
@@ -396,6 +408,7 @@ export const useForecastStore = create<ForecastStoreState>()(
         yearlyAssumptions:  state.yearlyAssumptions,
         monteCarloResult:   state.monteCarloResult,
         mcVolatility:       state.mcVolatility,
+        maxLvr:             state.maxLvr,
       }),
     }
   )

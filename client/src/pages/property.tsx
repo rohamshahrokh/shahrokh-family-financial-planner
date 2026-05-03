@@ -16,6 +16,7 @@ import SaveButton from "@/components/SaveButton";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
+import DepositPowerCard from "@/components/DepositPowerCard";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -1245,6 +1246,13 @@ export default function PropertyPage() {
           <Plus className="w-4 h-4" /> Add Property
         </Button>
       </div>
+
+      {/* Deposit Power — usable equity (PPOR + IPs) + deployable cash */}
+      <DepositPowerCard
+        defaultTargetPrice={ipTargetPrice || 750_000}
+        state="QLD"
+        buffer={ipSafetyBuffer || 30_000}
+      />
 
       {/* ─── Tab switcher ────────────────────────────────────────────────── */}
       <div className="flex gap-1 p-1 rounded-xl bg-secondary/60 border border-border w-full sm:w-auto inline-flex">

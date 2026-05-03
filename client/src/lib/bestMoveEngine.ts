@@ -17,6 +17,7 @@
  */
 
 import { safeNum } from './finance';
+import { computeDepositPower } from './depositPower';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,10 @@ export interface BestMoveConfig {
   sgRate?: number;
   /** Emergency buffer in months, e.g. 3 — from sf_forecast_assumptions */
   monthsBufferTarget?: number;
+  /** Max LVR (%) for usable-equity calc, default 80. From forecastStore. */
+  maxLvr?: number;
+  /** Target purchase price for next IP — used by deposit-power readiness. */
+  ipTargetPrice?: number;
 }
 
 // ─── Runtime config (merged defaults + caller overrides) ──────────────────────
@@ -72,6 +77,8 @@ function resolveConfig(cfg: BestMoveConfig = {}): Required<BestMoveConfig> {
     personalDebtRate:     cfg.personalDebtRate      ?? 0.17,
     sgRate:               cfg.sgRate                ?? 0.115,
     monthsBufferTarget:   cfg.monthsBufferTarget    ?? 3,
+    maxLvr:               cfg.maxLvr                ?? 80,
+    ipTargetPrice:        cfg.ipTargetPrice         ?? 0,
   };
 }
 
@@ -372,29 +379,52 @@ export async function computeBestMove(cfg: BestMoveConfig = {}): Promise<BestMov
     data_reliable: true,
   });
 
-  // ── H. Property deposit timing (if deposit readiness is high) ─────────────
+  // ── H. Property deposit timing (uses USABLE-EQUITY-AWARE deposit power) ───
+  // Previous logic used liquidCash only — materially wrong for AU investors
+  // because owned property equity can be released as deposit via top-up loan.
   const superCombined = (safeNum(snap.roham_super_balance) || safeNum(snap.super_balance) * 0.6)
     + (safeNum(snap.fara_super_balance) || safeNum(snap.super_balance) * 0.4);
   const totalAssets = ppor + cash + offsetBal + superCombined + stocksValue + cryptoValue + cars + iranProp;
   const netWorth    = totalAssets - (mortgage + otherDebts);
-  const depositTarget = ppor > 0 ? ppor * 0.20 : 400_000;  // 20% of current PPOR as proxy IP target
-  const depositReady  = liquidCash / depositTarget;
 
-  if (depositReady >= 0.5 && mortgage > 0) {
-    const propertyBenefit = (ppor * 0.06);  // 6% avg AU property capital growth
+  // Target purchase price: caller override → PPOR-based proxy → $750k default
+  const ipTarget = _cfg.ipTargetPrice > 0
+    ? _cfg.ipTargetPrice
+    : (ppor > 0 ? Math.max(500_000, Math.min(1_500_000, ppor)) : 750_000);
+  const requiredDeposit = ipTarget * 0.20;  // 20% deposit target
+
+  const dp = computeDepositPower({
+    cash,
+    offset:           offsetBal,
+    properties:       Array.isArray(propRows) ? propRows : [],
+    default_max_lvr:  _cfg.maxLvr,
+    target_price:     ipTarget,
+    state:            'QLD',
+    buffer:           bufferTarget,
+  });
+
+  const depositPower  = dp.next_deposit_capacity;
+  const equityShare   = dp.total_usable_equity;
+  const depositReady  = requiredDeposit > 0 ? depositPower / requiredDeposit : 0;
+
+  if (depositReady >= 0.5) {
+    const propertyBenefit = ipTarget * 0.06;  // 6% avg AU property capital growth
+    const equityNote = equityShare > 0
+      ? `Includes ${fmt(equityShare)} usable equity from owned property at ${_cfg.maxLvr}% LVR (top-up loan), plus ${fmt(dp.deployable_cash)} deployable cash.`
+      : `Based on ${fmt(dp.deployable_cash)} deployable cash (no extractable property equity yet).`;
     candidates.push({
       id: 'property_deposit',
       action: `Plan next property purchase (deposit ${(depositReady * 100).toFixed(0)}% ready)`,
-      reason: `Your liquid cash of ${fmt(liquidCash)} is ${(depositReady * 100).toFixed(0)}% of a 20% deposit target. ` +
-        `If purchasing an investment property, long-run AU property capital growth (~6%) on a ${fmt(ppor)}-equivalent asset ` +
-        `generates ${fmt(propertyBenefit)}/year in equity, plus rental yield and negative gearing offsets. ` +
+      reason: `Your total deposit power is ${fmt(depositPower)} — ${(depositReady * 100).toFixed(0)}% of a 20% deposit on a ${fmt(ipTarget)} purchase ` +
+        `(stamp duty + costs already deducted). ${equityNote} ` +
+        `Long-run AU property capital growth (~6%) generates ~${fmt(propertyBenefit)}/year in equity, plus rental yield and negative gearing. ` +
         `Requires bank pre-approval and tax planning first.`,
-      annual_benefit: propertyBenefit * (depositReady),  // discounted by readiness
-      benefit_label: `~${fmt(propertyBenefit * depositReady)}/yr (equity growth, varies)`,
+      annual_benefit: propertyBenefit * Math.min(1, depositReady),  // discounted by readiness, capped
+      benefit_label: `~${fmt(propertyBenefit * Math.min(1, depositReady))}/yr (equity growth, varies)`,
       risk: 'Med',
       cta: 'Go to Property',
       cta_route: '/property',
-      data_reliable: depositReady >= 0.5,
+      data_reliable: depositReady >= 0.5 && (cash + offsetBal + equityShare) > 0,
     });
   }
 
