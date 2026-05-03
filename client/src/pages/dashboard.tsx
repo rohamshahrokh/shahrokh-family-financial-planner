@@ -955,8 +955,8 @@ export default function DashboardPage() {
     try {
       return runCashEngine({
         snapshot: {
-          cash:             snap.cash,
-          offset_balance:   snap.offset_balance,  // total liquid = cash + offset
+          cash:             totalLiquidCash,  // all 4 buckets + offset (canonical)
+          offset_balance:   0,               // already folded into totalLiquidCash above
           monthly_income:   snap.monthly_income,
           monthly_expenses: snap.monthly_expenses,
           mortgage:         snap.mortgage,

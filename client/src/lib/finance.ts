@@ -426,13 +426,24 @@ export function projectNetWorth(params: {
   const currentYear = new Date().getFullYear();
 
   // ── Real Cash Balance via buildCashFlowSeries ─────────────────────────────
+  // Total liquid cash opening = all 4 buckets + offset (canonical formula).
+  // Dedup guard: if other_cash === offset_balance it was contaminated — zero it.
+  const _rawOtherCash   = safeNum((s as any).other_cash);
+  const _rawOffset      = safeNum((s as any).offset_balance);
+  const _safeOtherCash  = (_rawOtherCash > 0 && _rawOtherCash === _rawOffset) ? 0 : _rawOtherCash;
+  const _totalLiquidCashOpening = safeNum(s.cash)
+    + safeNum((s as any).savings_cash)
+    + safeNum((s as any).emergency_cash)
+    + _safeOtherCash
+    + _rawOffset;
+
   const _cashSeries = buildCashFlowSeries({
     snapshot: {
       monthly_income:   safeNum(s.monthly_income),
       monthly_expenses: safeNum(s.monthly_expenses),
       mortgage:         safeNum(s.mortgage),
       other_debts:      safeNum(s.other_debts),
-      cash:             safeNum(s.cash) + safeNum(s.offset_balance),
+      cash:             _totalLiquidCashOpening,
     },
     expenses:            params.expenses            ?? [],
     properties:          params.properties          as any[],
@@ -497,8 +508,8 @@ export function projectNetWorth(params: {
   }
   // ── Initialise mutable state ──────────────────────────────────────────────
   let ppor          = safeNum(s.ppor);
-  // Include offset_balance in starting cash so year-0 NW and projections are correct.
-  let cash          = safeNum(s.cash) + safeNum(s.offset_balance);
+  // Use _totalLiquidCashOpening (all 4 buckets + offset) so year-0 NW is correct.
+  let cash          = _totalLiquidCashOpening;
   // Use live holdings sum when provided — it reflects actual portfolio value.
   // Fall back to snapshot field (manual entry) if holdings table is empty.
   let stockVal      = params.liveStocksValue != null && params.liveStocksValue >= 0
@@ -551,7 +562,7 @@ export function projectNetWorth(params: {
   // reflects the true delta from post-purchase cash, not the pre-purchase snapshot.
   const _currentYearCash = _cashByYear.get(currentYear);
   let prevCash = _currentYearCash != null ? _currentYearCash
-                                          : safeNum(s.cash) + safeNum(s.offset_balance);
+                                          : _totalLiquidCashOpening;
   let prevEndNW = (
     ppor + cash + superRoham + superFara + stockVal + cryptoVal + cars * 0.8 + iranProp + _initPropEquity
   ) - (mortgage + otherDebts);
@@ -641,17 +652,42 @@ export function projectNetWorth(params: {
     for (const prop of params.properties) {
       if (prop.type === 'ppor') continue;
       const settleDateStr = prop.settlement_date || prop.purchase_date;
-      const settleYear = settleDateStr ? new Date(settleDateStr).getFullYear() : todayYear;
+      const settleYear  = settleDateStr ? new Date(settleDateStr).getFullYear() : todayYear;
+      const settleMonth = settleDateStr ? new Date(settleDateStr).getMonth() + 1 : 1; // 1-based
       if (year < settleYear) continue;
 
       const yearsSinceSettle = year - settleYear;
+
+      // ── Growth rate: ALWAYS use effectivePporGrowth (conservative/base/aggressive mode) ──
+      // This ensures conservative mode 4% applies to ALL properties, not just PPOR.
+      // Only fall back to prop.capital_growth if no per-year assumption is set.
+      const growthRate = effectivePporGrowth / 100;
+
+      // ── Mid-year purchase timing: prorate first-year growth ──
+      // IP bought in July gets 6/12 = 0.5 years of growth in year 1 (not full year).
+      // For already-settled properties (yearsSinceSettle > 0), full-year growth applies.
+      let projValue: number;
       const startValue = safeNum(prop.purchase_price) || safeNum(prop.current_value);
-      const growthRate = (safeNum(prop.capital_growth) || 6) / 100;
-      const projValue  = startValue * Math.pow(1 + growthRate, yearsSinceSettle + 1);
-      const loanBal    = Math.max(0, calcLoanBalance(
+      if (yearsSinceSettle === 0) {
+        // Purchase year: only months from settlement to Dec count
+        const monthsInFirstYear = Math.max(1, 12 - settleMonth + 1); // settleMonth=7 → 6 months
+        const fractionalYear = monthsInFirstYear / 12;
+        projValue = startValue * (1 + growthRate * fractionalYear); // linear proration in purchase year
+      } else {
+        // Full years of growth AFTER the purchase year, compounded
+        // e.g. for settleYear=2026, in 2027 (yearsSinceSettle=1):
+        //   value = purchaseValue * (1 + growthRate*6/12) * (1+growthRate) = settled value * growth
+        const firstYearMonths = Math.max(1, 12 - settleMonth + 1);
+        const firstYearGrowth = 1 + growthRate * (firstYearMonths / 12);
+        projValue = startValue * firstYearGrowth * Math.pow(1 + growthRate, yearsSinceSettle);
+      }
+
+      // ── Loan balance: use forecast interest rate ──
+      const ipInterestRate = safeNum(prop.interest_rate) || effectiveInterestRate;
+      const loanBal = Math.max(0, calcLoanBalance(
         safeNum(prop.loan_amount),
-        safeNum(prop.interest_rate) || 6.5,
-        safeNum(prop.loan_term)     || 30,
+        ipInterestRate,
+        safeNum(prop.loan_term) || 30,
         (yearsSinceSettle + 1) * 12
       ));
 
@@ -674,7 +710,7 @@ export function projectNetWorth(params: {
         propRent += annualRent;
       }
       const annualLoanRepayment = calcMonthlyRepayment(
-        safeNum(prop.loan_amount), safeNum(prop.interest_rate) || 6.5, safeNum(prop.loan_term) || 30
+        safeNum(prop.loan_amount), ipInterestRate, safeNum(prop.loan_term) || 30
       ) * 12;
       propertyDetails.push({
         id:   prop.id,
@@ -689,9 +725,15 @@ export function projectNetWorth(params: {
     // ── Stocks projection ─────────────────────────────────────────────────────
     // BUG FIX: compound stockRunning forward each year instead of re-projecting
     // from snapshot value. This ensures year-N value = year-(N-1) value * (1+r) + DCA.
-    const avgStockReturn = params.stocks?.length > 0
+    // Stock return: yAss (conservative/base/aggressive mode) takes priority.
+    // If no per-stock expected_return is set (e.g. holdings table empty), fall back to yAss rate.
+    // Never default to hardcoded 10% when conservative mode is active.
+    const _avgStockFromHoldings = params.stocks?.length > 0
       ? params.stocks.reduce((acc: number, st: any) => acc + safeNum(st.expected_return), 0) / params.stocks.length
-      : (yAss?.stocks_return ?? 10);
+      : 0;
+    const avgStockReturn = yAss?.stocks_return != null
+      ? yAss.stocks_return                             // mode assumption wins
+      : (_avgStockFromHoldings > 0 ? _avgStockFromHoldings : 6); // fallback to holdings or 6%
     const dcaYear = year;
 
     // Step 1: apply market return to last year's stock value
@@ -741,9 +783,13 @@ export function projectNetWorth(params: {
 
     // ── Crypto projection ─────────────────────────────────────────────────────
     // BUG FIX: same pattern as stocks — compound cryptoRunning forward each year.
-    const avgCryptoReturn = params.cryptos?.length > 0
+    // Crypto return: same pattern as stocks — yAss mode wins, never hardcoded 20%.
+    const _avgCryptoFromHoldings = params.cryptos?.length > 0
       ? params.cryptos.reduce((acc: number, c: any) => acc + safeNum(c.expected_return), 0) / params.cryptos.length
-      : (yAss?.crypto_return ?? 20);
+      : 0;
+    const avgCryptoReturn = yAss?.crypto_return != null
+      ? yAss.crypto_return
+      : (_avgCryptoFromHoldings > 0 ? _avgCryptoFromHoldings : 5); // conservative fallback 5%
     const monthlyCryptoRate = avgCryptoReturn / 100 / 12;
 
     let cryptoTotal = cryptoRunning;
