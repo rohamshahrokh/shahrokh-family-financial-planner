@@ -81,6 +81,7 @@ import AIInsightsCard from "@/components/AIInsightsCard";
 import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import CFODashboardWidget from "@/components/CFODashboardWidget";
 import BestMoveCard from "@/components/BestMoveCard";
+import { getBestMoveRecommendation, type BestMoveLedger } from "@/lib/bestMoveEngine";
 import DepositPowerCard from "@/components/DepositPowerCard";
 import FIREPathCard from "@/components/FIREPathCard";
 import TaxAlphaCard from "@/components/TaxAlphaCard";
@@ -922,31 +923,67 @@ export default function DashboardPage() {
   const missionMonths   = Math.max(1, Math.round((100 - depositPct) * 1.8));
   const missionContrib  = Math.round(surplus * 0.7);
 
-  // ─── Best move ────────────────────────────────────────────────────────────
-  const offsetBalance = snap.offset_balance;
-  const totalLiquid = snap.cash + snap.offset_balance;
-  const savingsIdleForOffset = totalLiquid > snap.monthly_expenses * 6 ? totalLiquid - snap.monthly_expenses * 6 : 0;
-  const dpReady            = depositPowerResult?.isReady ?? false;
-  const dpTotal            = depositPowerResult?.totalDepositPower ?? 0;
-  const dpShortfall        = depositPowerResult?.readySurplusOrShortfall ?? 0;
-  const dpReadiness        = depositPowerResult?.readinessPct ?? 0;
-  const totalUsableEquity  = depositPowerResult?.totalUsableEquity ?? 0;
-  const bestMoveTitle = dpReady
-    ? `Ready for next IP — $${Math.round(dpTotal / 1000)}k deposit power`
-    : totalUsableEquity > 50000
-    ? `Unlock $${Math.round(totalUsableEquity / 1000)}k equity for IP deposit`
-    : offsetBalance > 0 && snap.mortgage > 0
-    ? `Move $${Math.round(savingsIdleForOffset / 1000)}k to offset`
-    : surplus > 4000 ? "Increase IP deposit savings" : "Review expense categories";
-  const bestMoveImpact = dpReady
-    ? `Deposit power covers purchase — $${Math.round(Math.abs(dpShortfall) / 1000)}k surplus`
-    : totalUsableEquity > 50000
-    ? `Equity refinance + cash = ${Math.round(dpReadiness)}% of deposit ready`
-    : offsetBalance > 0
-    ? `Save ~$${Math.round(savingsIdleForOffset * 0.065 / 1000)}k/yr interest`
-    : `$${Math.round(surplus * 0.3 / 1000)}k additional savings`;
-  const bestMoveUrgency = surplus < 2000 ? "High" : dpReady ? "Strategic" : "Medium";
-  const bestMoveHref = dpReady || totalUsableEquity > 50000 ? "/property" : snap.mortgage > 0 ? "/debt-strategy" : "/wealth-strategy";
+  // ─── Best move V2 — uses getBestMoveRecommendation(ledger) ─────────────────
+  // Build once per snapshot change. Uses data already in component state — no extra Supabase fetch.
+  const offsetBalance        = snap.offset_balance;
+  const totalUsableEquity    = depositPowerResult?.totalUsableEquity ?? 0;
+  const dpReady              = depositPowerResult?.isReady ?? false;
+  // savingsIdleForOffset — used in smartActions table below
+  const savingsIdleForOffset = (snap.cash + snap.offset_balance) > snap.monthly_expenses * 6
+    ? (snap.cash + snap.offset_balance) - snap.monthly_expenses * 6
+    : 0;
+  const dpTotal           = depositPowerResult?.totalDepositPower ?? 0;
+  const dpReadiness       = depositPowerResult?.readinessPct ?? 0;
+
+  const inlineBestMove = useMemo(() => {
+    if (!snapshot) return null;
+    // Build bills array from billsRaw — pass to engine
+    const bestMoveLedger: BestMoveLedger = {
+      cash:                 snap.cash,
+      offsetBalance:        snap.offset_balance,
+      mortgage:             snap.mortgage,
+      otherDebts:           snap.other_debts,
+      monthlyIncome:        snap.monthly_income,
+      monthlyExpenses:      snap.monthly_expenses,
+      ppor:                 snap.ppor,
+      plannedStockTotal:    plannedStockTotal + plannedStockTxTotal,
+      plannedCryptoTotal:   plannedCryptoTotal + plannedCryptoTxTotal,
+      billsRaw:             billsRaw as any[],
+      properties:           properties as any[],
+      emergencyBuffer,
+      maxRefinanceLVR,
+      mortgageRate:         (snap.mortgage_rate ?? 6.5) / 100,
+      etfExpectedReturn:    (fa.flat.stocks_return ?? 9.5) / 100,
+      cryptoExpectedReturn: (fa.flat.crypto_return ?? 20) / 100,
+      lowestFutureCash,
+      negativeCashMonths,
+      rohamGrossAnnual:     snap.monthly_income * 12,
+      superContribAnnual:   safeNum((snapshot as any).roham_salary_sacrifice) * 12
+                              + snap.monthly_income * 12 * 0.115,
+      stocksValue:          stocksTotal,
+      cryptoValue:          cryptoTotal,
+      depositPowerResult:   depositPowerResult ? {
+        totalDepositPower:   depositPowerResult.totalDepositPower,
+        readinessPct:        depositPowerResult.readinessPct,
+        isReady:             depositPowerResult.isReady,
+        totalUsableEquity:   depositPowerResult.totalUsableEquity,
+        deployableCash:      Math.max(0, (depositPowerResult.totalDepositPower - (depositPowerResult.totalUsableEquity ?? 0))),
+        fundingSources:      depositPowerResult.fundingSources ?? [],
+      } : null,
+    };
+    return getBestMoveRecommendation(bestMoveLedger);
+  }, [
+    snapshot, snap, plannedStockTotal, plannedStockTxTotal, plannedCryptoTotal, plannedCryptoTxTotal,
+    billsRaw, properties, emergencyBuffer, maxRefinanceLVR, lowestFutureCash, negativeCashMonths,
+    stocksTotal, cryptoTotal, depositPowerResult, fa.flat.stocks_return, fa.flat.crypto_return,
+  ]);
+
+  // Derived short labels for inline mini-card
+  const bestMoveTitle   = inlineBestMove?.best.action   ?? "Analysing…";
+  const bestMoveImpact  = inlineBestMove?.best.benefit_label ?? "";
+  const bestMoveUrgency = inlineBestMove?.best.risk === "Low" ? "Medium" :
+                          inlineBestMove?.best.risk === "Med" ? "Medium" : "High";
+  const bestMoveHref    = inlineBestMove?.best.cta_route ?? "/dashboard";
 
   // ─── Risk score ───────────────────────────────────────────────────────────
   const riskScore = Math.min(100, Math.max(0, Math.round(
@@ -2000,7 +2037,11 @@ export default function DashboardPage() {
               <div className="text-sm font-semibold text-foreground leading-snug mb-1">{bestMoveTitle}</div>
               <div className="text-xs text-muted-foreground">{bestMoveImpact}</div>
               <div className="mt-2.5 flex items-center justify-between">
-                <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${bestMoveUrgency === "High" ? "bg-red-500/15 text-red-400" : bestMoveUrgency === "Strategic" ? "bg-blue-500/15 text-blue-400" : "bg-amber-500/15 text-amber-400"}`}>{bestMoveUrgency} Priority</span>
+                <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${
+                  inlineBestMove?.best.risk === "High" ? "bg-red-500/15 text-red-400" :
+                  inlineBestMove?.best.risk === "Low"  ? "bg-emerald-500/15 text-emerald-400" :
+                  "bg-amber-500/15 text-amber-400"
+                }`}>{inlineBestMove?.best.risk ?? ""} Risk</span>
                 <Link href={bestMoveHref}><span className="text-xs text-primary hover:underline">Take Action →</span></Link>
               </div>
             </div>
@@ -2282,6 +2323,62 @@ export default function DashboardPage() {
                   </span>
                 </div>
               </div>
+
+              {/* ────────────────────────────────────────────────────────────
+                  RECOMMENDATION INPUTS VALIDATION
+                  ─────────────────────────────────────────────────────────── */}
+              {inlineBestMove?.ledgerInputs && (() => {
+                const li = inlineBestMove.ledgerInputs;
+                const recRows = [
+                  { label: "Cash (everyday)",           value: li.cashOutsideOffset,          color: "hsl(210,80%,65%)",  note: "" },
+                  { label: "Offset balance",            value: li.offsetBalance,              color: "hsl(210,80%,65%)",  note: "" },
+                  { label: "Emergency buffer",          value: -li.emergencyBuffer,           color: "hsl(0,72%,58%)",    note: "Reserved" },
+                  { label: "Upcoming bills (12mo)",     value: -li.upcomingBills12mo,         color: "hsl(0,72%,58%)",    note: "Reserved" },
+                  { label: "Planned investments",       value: -li.plannedInvestmentsTotal,   color: "hsl(0,72%,58%)",    note: "Reserved" },
+                  { label: "Property deposit reserve", value: -li.propertyDepositReserve,    color: "hsl(0,72%,58%)",    note: "Reserved" },
+                  { label: "Tax reserve",              value: -li.taxReserve,                color: "hsl(0,72%,58%)",    note: "Reserved" },
+                  { label: "Forecast shortfall reserve",value: -li.forecastShortfallReserve, color: "hsl(0,72%,58%)",    note: "Reserved" },
+                  { label: "Free cash for offset",     value: li.freeCashForOffset,          color: li.freeCashForOffset > 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)", note: li.freeCashForOffset > 0 ? "✓ Available" : "✕ Fully committed", bold: true },
+                  { label: "Monthly surplus",          value: li.surplus,                    color: li.surplus >= 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)", note: "" },
+                  { label: "Deposit power",            value: li.depositPower,               color: "hsl(43,90%,62%)",   note: `${Math.round(li.depositReadinessPct)}% ready` },
+                ];
+                return (
+                  <div className="border-t border-border">
+                    <div className="px-5 py-2 bg-background/30 flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "hsl(43,90%,62%)" }}>Recommendation Inputs</span>
+                      <span className="text-[10px] text-muted-foreground">— all values used by Best Move V2 engine</span>
+                      <span className={`ml-auto text-[10px] px-2 py-0.5 rounded font-semibold ${
+                        li.freeCashForOffset > 0 ? "bg-emerald-500/15 text-emerald-400" : "bg-amber-500/15 text-amber-400"
+                      }`}>
+                        {li.freeCashForOffset > 0 ? `✓ ${formatCurrency(li.freeCashForOffset, true)} free` : "⚠ No idle cash"}
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[10px]">
+                        <thead>
+                          <tr className="border-b border-border">
+                            {["Input", "Value", "Status"].map(h => (
+                              <th key={h} className="px-4 py-1.5 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {recRows.map((r: any, i: number) => (
+                            <tr key={i} className={`border-b border-border/30 ${r.bold ? "bg-background/60" : "hover:bg-muted/10"}`}>
+                              <td className={`px-4 py-1 whitespace-nowrap ${r.bold ? "font-semibold text-foreground/90" : "text-muted-foreground"}`}>{r.label}</td>
+                              <td className="px-4 py-1 font-mono tabular-nums whitespace-nowrap" style={{ color: r.color, fontWeight: r.bold ? 700 : 400 }}>
+                                {r.value < 0 ? "−" : ""}{maskValue(formatCurrency(Math.abs(r.value), true), privacyMode)}
+                              </td>
+                              <td className="px-4 py-1 text-muted-foreground whitespace-nowrap">{r.note}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+
             </div>
           );
         })()}
