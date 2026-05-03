@@ -483,7 +483,7 @@ export default function DashboardPage() {
     const stockByYear = new Map<number, { count: number; totalAmt: number }>();
     (ordersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date).forEach((o: any) => {
       const yr = new Date(o.planned_date).getFullYear();
-      const amt = o.total_cost ?? o.amount ?? 0;
+      const amt = safeNum(o.amount_aud);
       const existing = stockByYear.get(yr) ?? { count: 0, totalAmt: 0 };
       stockByYear.set(yr, { count: existing.count + 1, totalAmt: existing.totalAmt + amt });
     });
@@ -497,7 +497,7 @@ export default function DashboardPage() {
     const cryptoByYear = new Map<number, { count: number; totalAmt: number }>();
     (cryptoOrdersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date).forEach((o: any) => {
       const yr = new Date(o.planned_date).getFullYear();
-      const amt = o.total_cost ?? o.amount ?? 0;
+      const amt = safeNum(o.amount_aud);
       const existing = cryptoByYear.get(yr) ?? { count: 0, totalAmt: 0 };
       cryptoByYear.set(yr, { count: existing.count + 1, totalAmt: existing.totalAmt + amt });
     });
@@ -1348,22 +1348,46 @@ export default function DashboardPage() {
                         color: "hsl(188,65%,52%)",
                         active: false,
                       }))),
-                      ...((ordersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date).slice(0,2).map((o: any) => ({
-                        year: new Date(o.planned_date).getFullYear(),
-                        icon: "📈",
-                        label: `Stocks — ${maskValue(formatCurrency(o.total_cost ?? o.amount ?? 0, true), privacyMode)}`,
-                        sub: new Date(o.planned_date).toLocaleDateString("en-AU", { month: "short", year: "numeric" }),
-                        color: "hsl(210,80%,65%)",
-                        active: false,
-                      }))),
-                      ...((cryptoOrdersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date).slice(0,2).map((o: any) => ({
-                        year: new Date(o.planned_date).getFullYear(),
-                        icon: "₿",
-                        label: `Crypto — ${maskValue(formatCurrency(o.total_cost ?? o.amount ?? 0, true), privacyMode)}`,
-                        sub: new Date(o.planned_date).toLocaleDateString("en-AU", { month: "short", year: "numeric" }),
-                        color: "hsl(262,70%,65%)",
-                        active: false,
-                      }))),
+                      ...(() => {
+                        // Group planned stock orders by month — collapses 8 tickers in Nov 2026 into single "Stocks — $30,000" row
+                        const stockByMonth = new Map<string, { date: Date; total: number; count: number }>();
+                        (ordersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date && o.action === "buy").forEach((o: any) => {
+                          const d = new Date(o.planned_date);
+                          const key = `${d.getFullYear()}-${d.getMonth()}`;
+                          const cur = stockByMonth.get(key) ?? { date: new Date(d.getFullYear(), d.getMonth(), 1), total: 0, count: 0 };
+                          cur.total += safeNum(o.amount_aud);
+                          cur.count += 1;
+                          stockByMonth.set(key, cur);
+                        });
+                        return Array.from(stockByMonth.values()).map(({ date, total, count }) => ({
+                          year: date.getFullYear(),
+                          icon: "📈",
+                          label: `Stocks — ${maskValue(formatCurrency(total, true), privacyMode)}`,
+                          sub: `${date.toLocaleDateString("en-AU", { month: "short", year: "numeric" })}${count > 1 ? ` · ${count} orders` : ""}`,
+                          color: "hsl(210,80%,65%)",
+                          active: false,
+                        }));
+                      })(),
+                      ...(() => {
+                        // Group planned crypto orders by month
+                        const cryptoByMonth = new Map<string, { date: Date; total: number; count: number }>();
+                        (cryptoOrdersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date && o.action === "buy").forEach((o: any) => {
+                          const d = new Date(o.planned_date);
+                          const key = `${d.getFullYear()}-${d.getMonth()}`;
+                          const cur = cryptoByMonth.get(key) ?? { date: new Date(d.getFullYear(), d.getMonth(), 1), total: 0, count: 0 };
+                          cur.total += safeNum(o.amount_aud);
+                          cur.count += 1;
+                          cryptoByMonth.set(key, cur);
+                        });
+                        return Array.from(cryptoByMonth.values()).map(({ date, total, count }) => ({
+                          year: date.getFullYear(),
+                          icon: "₿",
+                          label: `Crypto — ${maskValue(formatCurrency(total, true), privacyMode)}`,
+                          sub: `${date.toLocaleDateString("en-AU", { month: "short", year: "numeric" })}${count > 1 ? ` · ${count} orders` : ""}`,
+                          color: "hsl(262,70%,65%)",
+                          active: false,
+                        }));
+                      })(),
                       { year: new Date().getFullYear()+4, icon: "🔄", label: "Refinance", sub: "Review loan structure", color: "hsl(43,90%,58%)", active: false },
                       { year: new Date().getFullYear()+6, icon: "✅", label: "Debt Reduction", sub: "Aggressive paydown begins", color: "hsl(142,60%,52%)", active: false },
                       { year: parseInt(fireCard?.value?.replace("~","") ?? String(new Date().getFullYear()+9)), icon: "🔥", label: "FIRE Ready", sub: `Target age ${fireCard?.value ?? "—"} · ${maskValue(formatCurrency(fireTargetAmt, true), privacyMode)} portfolio`, color: "hsl(20,90%,60%)", active: false },

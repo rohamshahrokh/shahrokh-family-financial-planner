@@ -221,6 +221,152 @@ function SummaryCards({ snapshot, properties, stockDCA, cryptoDCA, plannedStock,
   );
 }
 
+// ─── Section: Planned Investment Reconciliation ─────────────────────────────
+//
+// Compares the source-of-truth (sf_planned_investments) against the deductions
+// the cashEngine registered as events. Catches drift caused by:
+//  — cashflow engine ignoring planned orders
+//  — wrong field name lookups (e.g. total_cost instead of amount_aud)
+//  — status filter mismatches
+
+function PlannedInvestmentReconciliation({
+  plannedStock,
+  plannedCrypto,
+  events,
+  privacyMode,
+}: {
+  plannedStock: any[];
+  plannedCrypto: any[];
+  events: any[];
+  privacyMode: boolean;
+}) {
+  const mv = (s: string) => privacyMode ? "••••" : s;
+
+  // Group source-of-truth orders by month
+  const groupByMonth = (orders: any[]) => {
+    const m = new Map<string, { date: Date; total: number; count: number; tickers: string[] }>();
+    for (const o of orders) {
+      if (o.status !== "planned" || !o.planned_date || o.action !== "buy") continue;
+      const d = new Date(o.planned_date);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const cur = m.get(key) ?? { date: new Date(d.getFullYear(), d.getMonth(), 1), total: 0, count: 0, tickers: [] };
+      cur.total += safeNum(o.amount_aud);
+      cur.count += 1;
+      if (o.ticker) cur.tickers.push(o.ticker);
+      m.set(key, cur);
+    }
+    return m;
+  };
+
+  const stockByMonth  = groupByMonth(plannedStock ?? []);
+  const cryptoByMonth = groupByMonth(plannedCrypto ?? []);
+
+  const stockSrcTotal  = Array.from(stockByMonth.values()).reduce((s, x) => s + x.total, 0);
+  const cryptoSrcTotal = Array.from(cryptoByMonth.values()).reduce((s, x) => s + x.total, 0);
+  const totalSrc       = stockSrcTotal + cryptoSrcTotal;
+
+  // Sum the same orders as registered in the engine events. cashEngine emits events
+  // typed "stock_buy"/"crypto_buy" for planned orders (DCA events get a different source tag).
+  const sumEventAbs = (typeNeedle: string) => (events ?? [])
+    .filter((e: any) => typeof e.type === "string" && e.type.toLowerCase().includes(typeNeedle) && e.source !== "dca")
+    .reduce((s: number, e: any) => s + Math.abs(safeNum(e.amount)), 0);
+
+  const stockEventTotal  = sumEventAbs("stock_buy");
+  const cryptoEventTotal = sumEventAbs("crypto_buy");
+  const totalEvents      = stockEventTotal + cryptoEventTotal;
+
+  const stockDelta  = Math.round(stockSrcTotal  - stockEventTotal);
+  const cryptoDelta = Math.round(cryptoSrcTotal - cryptoEventTotal);
+  const totalDelta  = Math.round(totalSrc - totalEvents);
+
+  const tolerance = 1; // allow $1 rounding
+  const stockOK   = Math.abs(stockDelta)  <= tolerance;
+  const cryptoOK  = Math.abs(cryptoDelta) <= tolerance;
+  const totalOK   = Math.abs(totalDelta)  <= tolerance;
+
+  const allMonthKeys = Array.from(new Set([...stockByMonth.keys(), ...cryptoByMonth.keys()])).sort();
+  const monthRows = allMonthKeys.map(key => {
+    const s = stockByMonth.get(key);
+    const c = cryptoByMonth.get(key);
+    const date = (s?.date ?? c?.date)!;
+    return {
+      key,
+      monthLabel: date.toLocaleDateString("en-AU", { month: "short", year: "numeric" }),
+      stocks: s ? { total: s.total, count: s.count, tickers: s.tickers } : null,
+      crypto: c ? { total: c.total, count: c.count, tickers: c.tickers } : null,
+    };
+  });
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+        <div className="flex items-center gap-2 font-semibold text-sm">
+          <Calendar className="w-4 h-4 text-primary" />
+          Planned Investment Reconciliation
+        </div>
+        <div className={`flex items-center gap-1.5 text-xs font-semibold ${totalOK ? "text-emerald-400" : "text-amber-400"}`}>
+          {totalOK ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+          {totalOK ? "Ledger total = Forecast deduction" : `Mismatch: ${formatCurrency(totalDelta, true)}`}
+        </div>
+      </div>
+
+      {monthRows.length === 0 ? (
+        <div className="px-5 py-6 text-xs text-muted-foreground text-center">
+          No planned buy orders found in sf_planned_investments.
+        </div>
+      ) : (
+        <>
+          <div className="divide-y divide-border">
+            {monthRows.map(row => (
+              <div key={row.key} className="px-5 py-2.5 text-xs">
+                <div className="font-semibold text-muted-foreground mb-1">{row.monthLabel}</div>
+                <div className="space-y-0.5 pl-3">
+                  {row.crypto && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-foreground">{"\u20BF"} Crypto purchase{row.crypto.count > 1 ? ` (${row.crypto.count})` : ""}</span>
+                      <span className="font-mono font-semibold text-purple-300">{mv(formatCurrency(row.crypto.total, true))}</span>
+                    </div>
+                  )}
+                  {row.stocks && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-foreground">{"\uD83D\uDCC8"} Stock purchase{row.stocks.count > 1 ? ` (${row.stocks.count})` : ""}</span>
+                      <span className="font-mono font-semibold text-blue-300">{mv(formatCurrency(row.stocks.total, true))}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="border-t border-border bg-secondary/30 px-5 py-3 space-y-1.5 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Source ledger total (sf_planned_investments):</span>
+              <span className="font-mono font-semibold text-foreground">{mv(formatCurrency(totalSrc, true))}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Forecast deduction total (cashEngine events):</span>
+              <span className="font-mono font-semibold text-foreground">{mv(formatCurrency(totalEvents, true))}</span>
+            </div>
+            <div className="flex items-center justify-between pt-1.5 border-t border-border">
+              <span className="font-semibold">Variance:</span>
+              <span className={`font-mono font-bold ${totalOK ? "text-emerald-400" : "text-amber-400"}`}>
+                {totalOK ? "\u2713 In sync" : mv(formatCurrency(totalDelta, true))}
+              </span>
+            </div>
+            {!totalOK && (
+              <div className="flex flex-col gap-0.5 pt-1.5 text-[11px] text-muted-foreground">
+                {!stockOK  && <div>Stocks variance: {formatCurrency(stockDelta,  true)} (source {formatCurrency(stockSrcTotal,  true)} vs events {formatCurrency(stockEventTotal,  true)})</div>}
+                {!cryptoOK && <div>Crypto variance: {formatCurrency(cryptoDelta, true)} (source {formatCurrency(cryptoSrcTotal, true)} vs events {formatCurrency(cryptoEventTotal, true)})</div>}
+                <div className="text-amber-300 mt-1">If non-zero, the cashflow forecast is not deducting the full amount of planned orders.</div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Section: Validation Panel ────────────────────────────────────────────────
 
 function ValidationPanel({ snapshot, properties, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, expenses }: any) {
@@ -890,6 +1036,14 @@ export default function LedgerAuditPage() {
             bills={bills}
             annual={engineOut?.annual ?? []}
             events={engineOut?.events ?? []}
+          />
+
+          {/* Planned Investment Reconciliation */}
+          <PlannedInvestmentReconciliation
+            plannedStock={plannedStock}
+            plannedCrypto={plannedCrypto}
+            events={engineOut?.events ?? []}
+            privacyMode={privacyMode}
           />
 
           {/* Validation */}
