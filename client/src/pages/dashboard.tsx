@@ -15,7 +15,7 @@ import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import { maskValue } from "@/components/PrivacyMask";
 import SaveButton, { useSaveOnEnter } from "@/components/SaveButton";
-import { useState, useMemo, useCallback, useRef, Fragment } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from "react";
 import {
   AreaChart,
   Area,
@@ -278,7 +278,15 @@ export default function DashboardPage() {
   const qc = useQueryClient();
   const { chartView, setChartView, privacyMode, togglePrivacy, currentUser } = useAppStore();
   const { forecastMode, profile, monteCarloResult } = useForecastStore();
+  const loadForecastFromSupabase = useForecastStore(s => s.loadFromSupabase);
   const fa = useForecastAssumptions();
+
+  // Pull latest forecast settings from Supabase on dashboard mount so values are
+  // in sync across devices / fresh sessions.
+  useEffect(() => {
+    loadForecastFromSupabase().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [editSnap, setEditSnap] = useState(false);
   const [snapDraft, setSnapDraft] = useState<any>(null);
@@ -463,6 +471,9 @@ export default function DashboardPage() {
   }, [snapshot, properties, snap.monthly_income, ngRefundMode]);
 
   // ─── Projection ───────────────────────────────────────────────────────────
+  // BUG FIX: previously did NOT pass forecast assumptions → dashboard ignored
+  // Conservative/Base/Aggressive/MonteCarlo selection. Now reads `fa` from
+  // useForecastAssumptions() so changes in Forecast Engine flow through everywhere.
   const projection = useMemo(() => {
     if (!snapshot) return [];
     return projectNetWorth({
@@ -476,7 +487,15 @@ export default function DashboardPage() {
       cryptoTransactions: plannedCryptoTx,
       stockDCASchedules, cryptoDCASchedules,
       plannedStockOrders, plannedCryptoOrders,
+      bills: billsRaw as any[],
+      ngRefundMode,
       ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
+      annualSalaryIncome: snap.monthly_income * 12,
+      // Forecast assumptions — reactive to Forecast Engine selection
+      years:             10,
+      inflation:         fa.flat.inflation,
+      ppor_growth:       fa.flat.property_growth,
+      yearlyAssumptions: fa.yearly,
     });
   }, [snapshot, snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
   const year10NW      = projection[9]?.endNetWorth || netWorth;
@@ -515,8 +534,13 @@ export default function DashboardPage() {
         cryptoTransactions: plannedCryptoTx,
         stockDCASchedules, cryptoDCASchedules,
         plannedStockOrders, plannedCryptoOrders,
+        bills: billsRaw as any[],
         ngRefundMode,
-        ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
+        ngAnnualBenefit:    ngSummary.totalAnnualTaxBenefit,
+        annualSalaryIncome: snap.monthly_income * 12,
+        // Forecast assumptions
+        inflationRate:    fa.flat.inflation,
+        incomeGrowthRate: fa.flat.income_growth,
       });
     } catch { return null; }
   }, [snapshot, snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
@@ -554,7 +578,12 @@ export default function DashboardPage() {
       cryptoTransactions: plannedCryptoTx,
       stockDCASchedules, cryptoDCASchedules,
       plannedStockOrders, plannedCryptoOrders,
+      bills: billsRaw as any[],
       ngRefundMode, ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
+      annualSalaryIncome: snap.monthly_income * 12,
+      // Forecast assumptions
+      inflationRate:    fa.flat.inflation,
+      incomeGrowthRate: fa.flat.income_growth,
     });
   }, [snapshot, snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
   const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
@@ -1010,12 +1039,43 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Income source badge */}
-        <div className="mt-3">
+        {/* Income source + Forecast Mode badges */}
+        <div className="mt-3 flex flex-wrap gap-2">
           <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             Income source: Income Tracker ({activeIncomeSources > 0 ? activeIncomeSources : 3} active sources · {formatCurrency(snap.monthly_income, true)}/mo)
           </span>
+          <Link href="/ai-forecast-engine">
+            <span
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer transition-all hover:brightness-110 ${
+                forecastMode === "monte-carlo"
+                  ? "bg-purple-500/10 border border-purple-500/30 text-purple-300"
+                  : forecastMode === "year-by-year"
+                  ? "bg-sky-500/10 border border-sky-500/30 text-sky-300"
+                  : profile === "aggressive"
+                  ? "bg-rose-500/10 border border-rose-500/30 text-rose-300"
+                  : profile === "conservative"
+                  ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
+                  : "bg-blue-500/10 border border-blue-500/30 text-blue-300"
+              }`}
+              data-testid="badge-forecast-mode"
+              title="Click to open Forecast Engine"
+            >
+              <Activity className="w-3 h-3" />
+              Forecast: {
+                forecastMode === "monte-carlo"
+                  ? `Monte Carlo${monteCarloResult ? " (median)" : " (not run)"}`
+                  : forecastMode === "year-by-year"
+                  ? "Year-by-Year (custom)"
+                  : profile === "aggressive"
+                  ? "Aggressive"
+                  : profile === "conservative"
+                  ? "Conservative"
+                  : "Base (Moderate)"
+              }
+              <ChevronRight className="w-3 h-3 opacity-70" />
+            </span>
+          </Link>
         </div>
       </div>
 

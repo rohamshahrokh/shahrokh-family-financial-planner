@@ -11,7 +11,7 @@
  *  - Cached in sessionStorage so it doesn't re-run on every render
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'wouter';
 import {
   Zap, ChevronDown, ChevronUp, RefreshCw,
@@ -21,6 +21,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { maskValue } from '@/components/PrivacyMask';
 import { useAppStore } from '@/lib/store';
+import { useForecastStore } from '@/lib/forecastStore';
 import { computeBestMove, type BestMoveResult, type BestMoveOption } from '@/lib/bestMoveEngine';
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
@@ -113,6 +114,24 @@ export default function BestMoveCard() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Recompute Best Move whenever forecast mode/profile/MC result changes — bust
+  // sessionStorage cache so the new assumptions are reflected immediately.
+  const forecastMode    = useForecastStore(s => s.forecastMode);
+  const forecastProfile = useForecastStore(s => s.profile);
+  const mcSignature     = useForecastStore(s =>
+    s.monteCarloResult ? `${s.monteCarloResult.ran_at}-${s.monteCarloResult.simulations}` : 'none'
+  );
+  const isFirstForecastRun = useRef(true);
+  useEffect(() => {
+    if (isFirstForecastRun.current) {
+      // Skip the initial mount — `load()` above already runs.
+      isFirstForecastRun.current = false;
+      return;
+    }
+    try { sessionStorage.removeItem(CACHE_KEY); } catch { /* noop */ }
+    load(true);
+  }, [forecastMode, forecastProfile, mcSignature, load]);
 
   // ── Loading state ─────────────────────────────────────────────────────────
   if (loading && !result) {
