@@ -1287,10 +1287,6 @@ export default function DashboardPage() {
   const offsetBalance        = snap.offset_balance;
   const totalUsableEquity    = depositPowerResult?.totalUsableEquity ?? 0;
   const dpReady              = depositPowerResult?.isReady ?? false;
-  // savingsIdleForOffset — used in smartActions table below
-  const savingsIdleForOffset = (totalLiquidCash) > snap.monthly_expenses * 6
-    ? (totalLiquidCash) - snap.monthly_expenses * 6
-    : 0;
   const dpTotal           = depositPowerResult?.totalDepositPower ?? 0;
   const dpReadiness       = depositPowerResult?.readinessPct ?? 0;
 
@@ -1300,21 +1296,6 @@ export default function DashboardPage() {
     50 + (savingsRate - 20) * 1.5 - (snap.other_debts > 50000 ? 15 : 0) + (firePct - 20) * 0.5
   )));
   const riskLabel = riskScore >= 70 ? "Strong" : riskScore >= 50 ? "Moderate" : "Watch";
-
-  // ─── Smart actions ────────────────────────────────────────────────────────
-  const smartActions = [
-    offsetBalance > 0 && savingsIdleForOffset > 20000
-      ? { rank: 1, title: `Offset $${Math.round(savingsIdleForOffset / 1000)}k → save $${Math.round(savingsIdleForOffset * 0.065 / 1000)}k/yr`, impact: `$${Math.round(savingsIdleForOffset * 0.065 / 1000)}k/yr interest saved`, difficulty: "Easy", time: "1 day", href: "/debt-strategy", priority: "high" as const }
-      : null,
-    surplus > 2000
-      ? { rank: 2, title: `Extra $${Math.round(Math.min(surplus * 0.4, 2000)).toLocaleString()} mortgage → FIRE −2 yrs`, impact: "Reduce loan term, save interest", difficulty: "Easy", time: "1 week", href: "/debt-strategy", priority: "medium" as const }
-      : null,
-    { rank: 3, title: "Buy ETF monthly $2,000 DCA", impact: "Projected +$180k over 10 years", difficulty: "Easy", time: "Ongoing", href: "/stocks", priority: "medium" as const },
-    emergencyCard?.alert
-      ? { rank: 4, title: "Build emergency fund to 6mo", impact: `Currently ${emergencyCard?.sub}`, difficulty: "Medium", time: "6–12mo", href: "/expenses", priority: "high" as const }
-      : { rank: 4, title: "Review recurring subscriptions", impact: "Potential $200–$500/mo savings", difficulty: "Easy", time: "1 hour", href: "/recurring-bills", priority: "low" as const },
-    { rank: 5, title: "Refinance mortgage rate review", impact: "Current rates may save $3k–$8k/yr", difficulty: "Medium", time: "2–4 weeks", href: "/property", priority: "strategic" as const },
-  ].filter(Boolean) as Array<{ rank: number; title: string; impact: string; difficulty: string; time: string; href: string; priority: string }>;
 
   // ─── Module tiles ─────────────────────────────────────────────────────────
   const deepModules = [
@@ -1501,6 +1482,38 @@ export default function DashboardPage() {
     billsRaw, properties, emergencyBuffer, maxRefinanceLVR, _lowestFutureCash, _negativeCashMonths,
     stocksTotal, cryptoTotal, depositPowerResult, fa.flat.stocks_return, fa.flat.crypto_return,
   ]);
+
+  // ─── Smart actions — sourced from bestMoveEngine (same engine as Best Move Now card) ──
+  // MUST be after inlineBestMove_hook and before loading guard (Rules of Hooks).
+  const smartActions = useMemo(() => {
+    if (!inlineBestMove_hook) return [];
+    const riskToDifficulty = (risk: string) =>
+      risk === 'Low' ? 'Easy' : risk === 'Med' ? 'Moderate' : 'Advanced';
+    const riskToPriority = (_risk: string, rank: number): string => {
+      if (rank === 1) return 'high';
+      if (_risk === 'High') return 'strategic';
+      return 'medium';
+    };
+    const benefitToTime = (id: string) => {
+      if (id === 'move_to_offset' || id === 'setup_hisa') return '1 day';
+      if (id === 'paydown_personal_debt') return '1 week';
+      if (id === 'property_deposit') return '2–4 weeks';
+      if (id === 'super_sacrifice') return '1–2 weeks';
+      if (id === 'build_buffer') return '3–6 months';
+      if (id === 'dca_etf_surplus' || id === 'invest_etf') return 'Ongoing';
+      return 'Ongoing';
+    };
+    const all = [inlineBestMove_hook.best, ...inlineBestMove_hook.alternatives];
+    return all.map((opt, i) => ({
+      rank:       i + 1,
+      title:      opt.action,
+      impact:     opt.benefit_label,
+      difficulty: riskToDifficulty(opt.risk),
+      time:       benefitToTime(opt.id),
+      href:       opt.cta_route,
+      priority:   riskToPriority(opt.risk, i + 1),
+    }));
+  }, [inlineBestMove_hook]);
 
   if (snapLoading || !snapshot) {
     return (
