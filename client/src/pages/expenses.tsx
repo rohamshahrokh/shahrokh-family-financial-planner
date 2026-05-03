@@ -9,6 +9,7 @@ import AutoImportPanel from "@/components/AutoImportPanel";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SmartNumInput } from "@/components/ui/smart-num-input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -240,22 +241,12 @@ function ExpenseForm({ data, onChange }: ExpenseFormProps) {
       </div>
       <div>
         <label className="text-xs text-muted-foreground">Amount (AUD)</label>
-        <Input
-          inputMode="decimal"
-          type="text"
-          pattern="[0-9]*\.?[0-9]*"
-          value={data.amount === 0 || data.amount === "0" ? "" : String(data.amount)}
+        <SmartNumInput
+          value={parseFloat(String(data.amount)) || 0}
+          onChange={v => onChange({ ...data, amount: v })}
           placeholder="0.00"
-          onFocus={e => { e.target.select(); setTimeout(() => { try { e.target.setSelectionRange(0, e.target.value.length); } catch {} }, 0); }}
-          onChange={e => {
-            let s = e.target.value.replace(/^0+([0-9])/, "$1");
-            if (s === "" || /^[0-9]*\.?[0-9]*$/.test(s)) onChange({ ...data, amount: s });
-          }}
-          onBlur={e => {
-            const n = parseFloat(String(data.amount));
-            if (isNaN(n)) onChange({ ...data, amount: 0 });
-          }}
-          className="h-8 text-sm num-display"
+          heightClass="h-8"
+          min={0}
         />
       </div>
       <div>
@@ -353,22 +344,12 @@ function IncomeForm({ data, onChange }: IncomeFormProps) {
       </div>
       <div>
         <label className="text-xs text-muted-foreground">Amount (AUD)</label>
-        <Input
-          inputMode="decimal"
-          type="text"
-          pattern="[0-9]*\.?[0-9]*"
-          value={data.amount === 0 || data.amount === "0" ? "" : String(data.amount)}
+        <SmartNumInput
+          value={parseFloat(String(data.amount)) || 0}
+          onChange={v => onChange({ ...data, amount: v })}
           placeholder="0.00"
-          onFocus={e => { e.target.select(); setTimeout(() => { try { e.target.setSelectionRange(0, e.target.value.length); } catch {} }, 0); }}
-          onChange={e => {
-            let s = e.target.value.replace(/^0+([0-9])/, "$1");
-            if (s === "" || /^[0-9]*\.?[0-9]*$/.test(s)) onChange({ ...data, amount: s });
-          }}
-          onBlur={e => {
-            const n = parseFloat(String(data.amount));
-            if (isNaN(n)) onChange({ ...data, amount: 0 });
-          }}
-          className="h-8 text-sm num-display"
+          heightClass="h-8"
+          min={0}
         />
       </div>
       <div>

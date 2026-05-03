@@ -18,37 +18,9 @@ if (!window.location.hash) {
   window.location.hash = "#/";
 }
 
-// ── Global: numeric inputs select-all on focus, strip leading zeros on change ─
-// This covers every <input type="number"> and inputMode="decimal" in the app.
-document.addEventListener("focusin", (e) => {
-  const el = e.target as HTMLInputElement;
-  if (!el || el.tagName !== "INPUT") return;
-  if (el.type !== "number" && el.inputMode !== "decimal") return;
-  // Select all so typing replaces current value
-  el.select();
-  setTimeout(() => {
-    try { el.setSelectionRange(0, el.value.length); } catch {}
-  }, 0);
-});
-
-// Strip leading zeros on input (e.g. 0600000 → 600000)
-document.addEventListener("input", (e) => {
-  const el = e.target as HTMLInputElement;
-  if (!el || el.tagName !== "INPUT") return;
-  if (el.type !== "number" && el.inputMode !== "decimal") return;
-  // Only strip if not a decimal being entered ("0." is fine)
-  const v = el.value;
-  if (/^0[0-9]/.test(v)) {
-    const stripped = v.replace(/^0+([0-9])/, "$1");
-    // Use nativeInputValueSetter to avoid React synthetic event issues
-    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-    if (nativeInputValueSetter) {
-      nativeInputValueSetter.call(el, stripped);
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-    } else {
-      el.value = stripped;
-    }
-  }
-});
+// NOTE: Numeric input select-all / leading-zero handling is done inside
+// SmartNumInput (touchstart + rAF focus trick) which is iOS-safe.
+// Global listeners are NOT used — they conflict with React synthetic events
+// and cause double-fire on iOS Safari PWA.
 
 createRoot(document.getElementById("root")!).render(<App />);

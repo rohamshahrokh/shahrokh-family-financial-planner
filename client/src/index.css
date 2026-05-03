@@ -3527,9 +3527,9 @@ input[type="number"] {
   .max-w-lg.rounded-2xl,
   .max-w-xl.rounded-2xl {
     padding: 1rem !important;
-    margin: 0.5rem;
-    max-height: 92vh;
-    overflow-y: auto;
+    margin: 0.5rem !important;
+    max-height: 92vh !important;
+    overflow-y: auto !important;
   }
 
   /* Modal action buttons wrap cleanly */
@@ -3548,4 +3548,81 @@ input[type="number"] {
 .grid.grid-cols-1 > *,
 .grid.grid-cols-2 > * {
   min-width: 0;
+}
+
+/* ── iPhone PWA / iOS Safari: safe-area insets for notch + home indicator ── */
+/* Applied to the root shell so content is never hidden behind system UI      */
+#root {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* ── iPhone PWA (≤480px): force single-column inside ALL form grids ───────── */
+/* This is the critical fix for iPhone PWA field overlap.                     */
+/* Breakpoint 480px targets iPhone 14 Pro Max (430px) and smaller.            */
+@media (max-width: 480px) {
+  /* Any CSS grid inside a Radix Dialog collapses to 1 column */
+  [data-radix-dialog-content] .grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Override Tailwind's sm: responsive variants that fire at 640px */
+  [data-radix-dialog-content] .sm\:grid-cols-2,
+  [data-radix-dialog-content] .sm\:grid-cols-3,
+  [data-radix-dialog-content] .lg\:grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Inline form grids (CGT, My Financial Plan, etc.) also collapse */
+  .grid.sm\:grid-cols-2,
+  .grid.sm\:grid-cols-3,
+  .grid.lg\:grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Inputs take full width — no truncation */
+  [data-radix-dialog-content] input,
+  [data-radix-dialog-content] select,
+  [data-radix-dialog-content] textarea,
+  [data-radix-dialog-content] [data-radix-select-trigger] {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* Modals even tighter on very small screens */
+  .max-w-2xl.rounded-2xl,
+  .max-w-lg.rounded-2xl,
+  .max-w-xl.rounded-2xl {
+    padding: 0.875rem !important;
+    margin: 0.375rem !important;
+    max-height: 88vh !important;
+    overflow-y: auto !important;
+    /* Extra bottom padding for iOS home indicator */
+    padding-bottom: max(0.875rem, env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* Update the ≤640px section for safe-area bottom padding */
+@media (max-width: 640px) {
+  .max-w-2xl.rounded-2xl,
+  .max-w-lg.rounded-2xl,
+  .max-w-xl.rounded-2xl {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* ── iOS PWA: prevent horizontal overscroll ─────────────────────────────── */
+body {
+  overscroll-behavior-y: contain;
+  overflow-x: hidden;
+}
+
+/* ── iOS PWA: input zoom prevention (font-size < 16px triggers auto-zoom) ── */
+/* All inputs must be ≥16px on mobile to stop iOS zooming in on tap           */
+@media (max-width: 768px) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
 }
