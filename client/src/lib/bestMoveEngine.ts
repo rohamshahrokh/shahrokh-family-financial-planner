@@ -30,7 +30,7 @@ export interface BestMoveOption {
   benefit_label:    string;       // human-readable, e.g. "$4,200/yr guaranteed"
   risk:             RiskLevel;
   cta:              string;       // action button label
-  cta_route:        string;       // wouter hash route
+  cta_route:        string;       // wouter clean path (e.g. /dashboard)
   rank:             number;       // 1 = best
   data_reliable:    boolean;      // false → show "Needs setup" caveat
 }

@@ -80,7 +80,7 @@ import TaxAlphaCard from "@/components/TaxAlphaCard";
 import RiskRadarCard from "@/components/RiskRadarCard";
 import KpiCard from "@/components/KpiCard";
 import WealthFlowBanner from "@/components/WealthFlowBanner";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import familyImg from "@assets/family.jpeg";
@@ -280,6 +280,7 @@ export default function DashboardPage() {
   const { forecastMode, profile, monteCarloResult } = useForecastStore();
   const loadForecastFromSupabase = useForecastStore(s => s.loadFromSupabase);
   const fa = useForecastAssumptions();
+  const [, navigate] = useLocation();
 
   // Pull latest forecast settings from Supabase on dashboard mount so values are
   // in sync across devices / fresh sessions.
@@ -1896,7 +1897,7 @@ export default function DashboardPage() {
                   <tr
                     key={idx}
                     className={`db-action-row priority-${action.priority} border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer`}
-                    onClick={() => window.location.hash = `#${action.href}`}
+                    onClick={() => navigate(action.href)}
                   >
                     <td className="px-3 py-2 font-bold text-muted-foreground">{idx + 1}</td>
                     <td className="px-3 py-2 font-medium text-foreground">{action.title}</td>

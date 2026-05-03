@@ -1,0 +1,25 @@
+{
+  "name": "Family Wealth Lab",
+  "short_name": "FamilyWealthLab",
+  "description": "Family Net Worth Command Center — wealth, cash flow, FIRE planning.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#080f1c",
+  "theme_color": "#080f1c",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

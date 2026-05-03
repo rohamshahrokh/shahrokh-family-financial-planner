@@ -3,7 +3,7 @@ import { useAppStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { useHashLocation } from "wouter/use-hash-location";
+import { useLocation } from "wouter";
 import familyImg from "@assets/family.jpeg";
 import { sbUsers } from "@/lib/supabaseClient";
 import type { UserRole } from "@/lib/store";
@@ -14,7 +14,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const { login, setCurrentUser, setRole } = useAppStore();
   const { toast } = useToast();
-  const [, navigate] = useHashLocation();
+  const [, navigate] = useLocation();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

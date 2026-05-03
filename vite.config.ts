@@ -12,7 +12,10 @@ export default defineConfig({
     },
   },
   root: path.resolve(import.meta.dirname, "client"),
-  base: "./",
+  // Absolute base — required for clean (non-hash) BrowserRouter URLs so deep
+  // routes like /dashboard or /property load assets from /assets/... rather
+  // than relative paths.
+  base: "/",
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,

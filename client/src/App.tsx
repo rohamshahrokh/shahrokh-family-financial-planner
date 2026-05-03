@@ -1,21 +1,20 @@
 /**
- * App.tsx — Root application with hash-based SPA routing.
+ * App.tsx — Root application with clean URL (BrowserRouter-style) SPA routing.
  *
- * Hash routing (/#/dashboard, /#/property …) is used so that:
- *   1. Vercel static hosting needs only one rewrite rule: * → index.html
- *   2. Page refreshes never result in a 404 — the server always serves index.html
- *      and the client reads the hash to render the correct page.
+ * Clean URLs (/dashboard, /property …) require:
+ *   1. Vercel rewrite rule: /(.*) → /index.html (already in vercel.json)
+ *   2. Page refreshes on any deep route serve index.html, then wouter’s
+ *      default browser-history hook reads window.location.pathname.
  *
  * Auth flow:
- *   - Unauthenticated users always see /login (hash /#/login)
- *   - After login, redirect to /#/dashboard
- *   - Protected routes redirect to /#/login when not authenticated
- *   - Logout clears auth and returns to /#/login
+ *   - Unauthenticated users always see /login
+ *   - After login, redirect to /dashboard
+ *   - Protected routes redirect to /login when not authenticated
+ *   - Logout clears auth and returns to /login
  */
 
 import { Switch, Route, Router, Redirect } from "wouter";
 import PwaInstallBanner from "@/components/PwaInstallBanner";
-import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
@@ -102,7 +101,7 @@ function AppRouter() {
   const { isAuthenticated } = useAppStore();
 
   return (
-    <Router hook={useHashLocation}>
+    <Router>
       <Switch>
         {/* Login */}
         <Route path="/login" component={LoginWrapper} />

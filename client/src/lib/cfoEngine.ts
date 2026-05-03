@@ -1055,7 +1055,7 @@ export async function generateCFOReport(
     } : {
       action: 'Data unavailable', reason: '', annual_benefit: 0,
       benefit_label: 'Needs setup', risk: 'Low' as const,
-      cta: 'Dashboard', cta_route: '/#/dashboard',
+      cta: 'Dashboard', cta_route: '/dashboard',
       alternatives: [], summary: '',
     },
     cfo_insight:       cfoInsight,
@@ -1312,7 +1312,7 @@ ${tax_alpha.tips.length > 0 ? `
 <!-- Footer -->
 <div style="text-align:center;font-size:11px;color:#484f58;">
   Family Wealth Lab · Automated Saturday Morning CFO Bulletin<br>
-  <a href="https://familywealthlab.net/#/settings" style="color:#58a6ff;">Manage delivery settings</a>
+  <a href="https://familywealthlab.net/settings" style="color:#58a6ff;">Manage delivery settings</a>
 </div>
 
 </div></body></html>`;

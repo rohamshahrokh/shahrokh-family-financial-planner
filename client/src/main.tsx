@@ -14,8 +14,12 @@ try {
   // default dark if nothing stored
 }
 
-if (!window.location.hash) {
-  window.location.hash = "#/";
+// One-time migration: if we land on a hash-routed URL (legacy bookmarks, old
+// PWA installs, push notifications), rewrite it to a clean path before React
+// boots so wouter’s browser-history hook sees the right pathname.
+if (window.location.hash.startsWith("#/")) {
+  const cleanPath = window.location.hash.slice(1) || "/";
+  window.history.replaceState(null, "", cleanPath);
 }
 
 // NOTE: Numeric input select-all / leading-zero handling is done inside

@@ -8,7 +8,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
 import { useAppStore } from "@/lib/store";
 import { applyTheme, resolveAutoTheme } from "@/lib/store";
 import { Button } from "@/components/ui/button";
@@ -165,8 +164,7 @@ function WealthOSLogo() {
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 export default function Layout({ children }: { children: React.ReactNode }) {
-  const [location] = useLocation();
-  const [, navigate] = useHashLocation();
+  const [location, navigate] = useLocation();
   const { theme, toggleTheme, setTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role } =
     useAppStore();
 

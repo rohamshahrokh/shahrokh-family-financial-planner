@@ -19,7 +19,7 @@ import React, { useMemo, useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { localStore } from "@/lib/localStore";
-import { useHashLocation } from "wouter/use-hash-location";
+import { useLocation } from "wouter";
 import { formatCurrency, safeNum } from "@/lib/finance";
 import SaveButton from "@/components/SaveButton";
 import {
@@ -158,7 +158,7 @@ function fmtDate(d: string | null | undefined): string {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function MyFinancialPlan() {
-  const [, navigate] = useHashLocation();
+  const [, navigate] = useLocation();
   const { toast } = useToast();
   const qc = useQueryClient();
 
