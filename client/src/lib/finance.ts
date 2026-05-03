@@ -327,6 +327,46 @@ export interface YearlyProjection {
   // Other
   passiveIncome: number;         // net rent + dividends + crypto yield
   monthlyCashFlow: number;       // income + passive - expenses - repayments
+
+  // ── Reconciliation bridges (year-by-year audit) ─────────────────────────
+  // Each bridge’s components MUST sum to the year’s closing balance.
+  cashBridge: {
+    startCash:           number;  // opening cash + offset
+    income:              number;  // gross annual income (salary)
+    livingExpenses:      number;  // ledger expenses + recurring bills (annual)
+    pporRepayments:      number;  // PPOR mortgage P+I repayments (annual)
+    investmentRepayments:number;  // investment-property loan P+I repayments (annual)
+    propertyDeposits:    number;  // deposits paid at IP settlements this year
+    buyingCosts:         number;  // stamp duty + acquisition costs at IP settlement
+    rentalIncome:        number;  // gross rent received
+    plannedStockBuys:    number;  // sf_planned_investments outflows (stocks)
+    plannedCryptoBuys:   number;  // sf_planned_investments outflows (crypto)
+    dcaOutflows:         number;  // recurring DCA contributions (stock + crypto)
+    taxRefundOrPayment:  number;  // signed; positive = refund inflow
+    other:               number;  // reconciling delta vs ledger (catches unmodeled flows)
+    endCash:             number;  // closing balance (matches `cash` field)
+  };
+
+  propertyBridge: {
+    startValue:    number;        // opening value of all properties (PPOR + IP)
+    marketGrowth:  number;        // appreciation from capital growth rates
+    newPurchases:  number;        // value of properties settled this year
+    endValue:      number;        // matches `propertyValue`
+  };
+
+  liabilityBridge: {
+    openingDebt:  number;         // PPOR mortgage + IP loans + other debts (start)
+    newLoans:     number;         // new investment-property loans drawn this year
+    repayments:   number;         // principal reduction across all loans
+    closingDebt:  number;         // matches `totalLiabilities`
+  };
+
+  passiveIncomeBreakdown: {
+    netRent:        number;       // rent net of vacancy + management; gross of mortgage
+    dividends:      number;       // 2% of stock value (estimate)
+    cryptoYield:    number;       // 1% of crypto value (estimate)
+    total:          number;       // matches `passiveIncome`
+  };
 }
 
 export function projectNetWorth(params: {
@@ -412,6 +452,48 @@ export function projectNetWorth(params: {
   const _cashByYear = new Map<number, number>();
   for (const m of _cashSeries) {
     _cashByYear.set(m.year, m.cumulativeBalance);
+  }
+
+  // ── Per-year aggregation of monthly cash bridge components ──────────────────────────
+  // Sum every monthly row's components into a per-year bucket so the projection
+  // loop can build a precise cash bridge (start → end) for the audit table.
+  type YearAgg = {
+    income: number; livingExpenses: number; rentalIncome: number;
+    pporRepayments: number; investmentRepayments: number;
+    propertyDeposits: number; buyingCosts: number;
+    plannedStockBuys: number; plannedCryptoBuys: number;
+    plannedStockSells: number; plannedCryptoSells: number;
+    stockDCAOutflow: number; cryptoDCAOutflow: number;
+    billsOutflow: number; ngTaxBenefit: number;
+  };
+  const _yearAgg = new Map<number, YearAgg>();
+  for (const m of _cashSeries) {
+    let a = _yearAgg.get(m.year);
+    if (!a) {
+      a = { income: 0, livingExpenses: 0, rentalIncome: 0,
+            pporRepayments: 0, investmentRepayments: 0,
+            propertyDeposits: 0, buyingCosts: 0,
+            plannedStockBuys: 0, plannedCryptoBuys: 0,
+            plannedStockSells: 0, plannedCryptoSells: 0,
+            stockDCAOutflow: 0, cryptoDCAOutflow: 0,
+            billsOutflow: 0, ngTaxBenefit: 0 };
+      _yearAgg.set(m.year, a);
+    }
+    a.income               += m.income;
+    a.livingExpenses       += m.totalExpenses;
+    a.rentalIncome         += m.rentalIncome;
+    a.pporRepayments       += m.mortgageRepayment;
+    a.investmentRepayments += m.investmentLoanRepayment;
+    a.propertyDeposits     += (m as any).propertyDeposit     ?? 0;
+    a.buyingCosts          += (m as any).propertyBuyingCosts ?? 0;
+    a.plannedStockBuys     += (m as any).plannedStockBuy     ?? 0;
+    a.plannedCryptoBuys    += (m as any).plannedCryptoBuy    ?? 0;
+    a.plannedStockSells    += (m as any).plannedStockSell    ?? 0;
+    a.plannedCryptoSells   += (m as any).plannedCryptoSell   ?? 0;
+    a.stockDCAOutflow      += (m as any).stockDCAOutflow     ?? 0;
+    a.cryptoDCAOutflow     += (m as any).cryptoDCAOutflow    ?? 0;
+    a.billsOutflow         += (m as any).billsOutflow        ?? 0;
+    a.ngTaxBenefit         += m.ngTaxBenefit;
   }
   // ── Initialise mutable state ──────────────────────────────────────────────
   let ppor          = safeNum(s.ppor);
@@ -754,6 +836,95 @@ export function projectNetWorth(params: {
     const monthlyMortgageRepayment = calcMonthlyRepayment(s.mortgage, effectiveInterestRate, 30);
     const monthlyCF = monthlyIncome + passiveIncome / 12 - monthlyExpenses - monthlyMortgageRepayment;
 
+    // ── Reconciliation bridges ────────────────────────────────────────────────
+    // Cash bridge: start + (income + rent + tax refund + planned sells)
+    //              − (expenses + repayments + deposits + buying costs
+    //                + planned buys + DCA + bills) + other (reconciling) = end
+    const agg = _yearAgg.get(year);
+    const startCashYear = prevCash;
+    const endCashYear   = cash;
+    const cashBridge = (() => {
+      if (!agg) {
+        return {
+          startCash: Math.round(startCashYear),
+          income: 0, livingExpenses: 0, pporRepayments: 0, investmentRepayments: 0,
+          propertyDeposits: 0, buyingCosts: 0, rentalIncome: 0,
+          plannedStockBuys: 0, plannedCryptoBuys: 0, dcaOutflows: 0,
+          taxRefundOrPayment: 0, other: Math.round(endCashYear - startCashYear),
+          endCash: Math.round(endCashYear),
+        };
+      }
+      const dcaOutflows = agg.stockDCAOutflow + agg.cryptoDCAOutflow;
+      const inflows  = agg.income + agg.rentalIncome + agg.ngTaxBenefit
+                     + agg.plannedStockSells + agg.plannedCryptoSells;
+      const outflows = agg.livingExpenses + agg.pporRepayments + agg.investmentRepayments
+                     + agg.propertyDeposits + agg.buyingCosts
+                     + agg.plannedStockBuys + agg.plannedCryptoBuys
+                     + dcaOutflows + agg.billsOutflow;
+      const expectedDelta = inflows - outflows;
+      const actualDelta   = endCashYear - startCashYear;
+      const other         = actualDelta - expectedDelta;
+      return {
+        startCash:            Math.round(startCashYear),
+        income:               Math.round(agg.income),
+        livingExpenses:       Math.round(agg.livingExpenses),
+        pporRepayments:       Math.round(agg.pporRepayments),
+        investmentRepayments: Math.round(agg.investmentRepayments),
+        propertyDeposits:     Math.round(agg.propertyDeposits),
+        buyingCosts:          Math.round(agg.buyingCosts),
+        rentalIncome:         Math.round(agg.rentalIncome),
+        plannedStockBuys:     Math.round(agg.plannedStockBuys  - agg.plannedStockSells),
+        plannedCryptoBuys:    Math.round(agg.plannedCryptoBuys - agg.plannedCryptoSells),
+        dcaOutflows:          Math.round(dcaOutflows),
+        taxRefundOrPayment:   Math.round(agg.ngTaxBenefit),
+        other:                Math.round(other),
+        endCash:              Math.round(endCashYear),
+      };
+    })();
+
+    // Property bridge: start + market growth + new purchases = end
+    let newPurchasesValue = 0;
+    let newLoansThisYear  = 0;
+    for (const prop of params.properties) {
+      if (prop.type === 'ppor') continue;
+      const settleDateStr = prop.settlement_date || prop.purchase_date;
+      if (!settleDateStr) continue;
+      const settleYear = new Date(settleDateStr).getFullYear();
+      if (settleYear === year) {
+        newPurchasesValue += safeNum(prop.purchase_price) || safeNum(prop.current_value);
+        newLoansThisYear  += safeNum(prop.loan_amount);
+      }
+    }
+    const propStartValue = prevPpor + prevPropVal;
+    const propEndValue   = ppor + propValue;
+    const marketGrowth   = propEndValue - propStartValue - newPurchasesValue;
+    const propertyBridge = {
+      startValue:   Math.round(propStartValue),
+      marketGrowth: Math.round(marketGrowth),
+      newPurchases: Math.round(newPurchasesValue),
+      endValue:     Math.round(propEndValue),
+    };
+
+    // Liability bridge: opening + new loans − repayments = closing
+    const openingDebt = prevLiab;
+    const closingDebt = totalLiabilities;
+    const liabilityBridge = {
+      openingDebt:  Math.round(openingDebt),
+      newLoans:     Math.round(newLoansThisYear),
+      repayments:   Math.round(openingDebt + newLoansThisYear - closingDebt),
+      closingDebt:  Math.round(closingDebt),
+    };
+
+    // Passive income breakdown
+    const dividends   = stocksTotal * 0.02;
+    const cryptoYield = cryptoTotal * 0.01;
+    const passiveIncomeBreakdown = {
+      netRent:     Math.round(propRent),
+      dividends:   Math.round(dividends),
+      cryptoYield: Math.round(cryptoYield),
+      total:       Math.round(propRent + dividends + cryptoYield),
+    };
+
     // ── Carry forward ─────────────────────────────────────────────────────────
     prevEndNW      = endNW;
     prevPpor       = ppor;
@@ -796,6 +967,10 @@ export function projectNetWorth(params: {
       realGrowthPct:      parseFloat(realGrowthPct.toFixed(2)),
       passiveIncome:      Math.round(passiveIncome),
       monthlyCashFlow:    Math.round(monthlyCF),
+      cashBridge,
+      propertyBridge,
+      liabilityBridge,
+      passiveIncomeBreakdown,
     });
   }
 
@@ -854,6 +1029,18 @@ export interface CashFlowMonth {
   // Summary
   netCashFlow: number;       // income + rental + ngTaxBenefit - expenses - mortgages - tax
   cumulativeBalance: number; // running cumulative
+
+  // ── Audit / bridge breakdown ──────────────────────────────────────────
+  // Exposed so the year-by-year projection can build a full cash bridge.
+  propertyDeposit?: number;       // deposits paid at IP settlement this month
+  propertyBuyingCosts?: number;   // stamp duty + legal + reno + inspection + setup
+  plannedStockBuy?: number;       // |buy delta| in this month (positive outflow)
+  plannedCryptoBuy?: number;      // |buy delta| in this month (positive outflow)
+  plannedStockSell?: number;      // sell inflow in this month (positive)
+  plannedCryptoSell?: number;     // sell inflow in this month (positive)
+  stockDCAOutflow?: number;       // monthly stock DCA contributions (positive outflow)
+  cryptoDCAOutflow?: number;      // monthly crypto DCA contributions (positive outflow)
+  billsOutflow?: number;          // recurring forecasted bills (positive outflow)
 }
 
 export function buildCashFlowSeries(params: {
@@ -1000,6 +1187,8 @@ export function buildCashFlowSeries(params: {
 
       // Track one-time cash outflows for this month
       let oneTimeCashOutflow = 0;
+      let propertyDeposit = 0;       // deposit only (IP settlement month)
+      let propertyBuyingCosts = 0;   // stamp duty + legal + reno + inspection + setup
 
       for (const prop of investmentProps) {
         // Prefer settlement_date over purchase_date
@@ -1027,12 +1216,15 @@ export function buildCashFlowSeries(params: {
           monthDate.getMonth() === settleDate.getMonth()
         );
         if (isSettlementMonth) {
-          oneTimeCashOutflow += safeNum(prop.deposit)
-            + safeNum(prop.stamp_duty)
-            + safeNum(prop.legal_fees)
-            + safeNum(prop.renovation_costs)
-            + safeNum(prop.building_inspection)
-            + safeNum(prop.loan_setup_fees);
+          const deposit       = safeNum(prop.deposit);
+          const buyingCosts   = safeNum(prop.stamp_duty)
+                              + safeNum(prop.legal_fees)
+                              + safeNum(prop.renovation_costs)
+                              + safeNum(prop.building_inspection)
+                              + safeNum(prop.loan_setup_fees);
+          propertyDeposit     += deposit;
+          propertyBuyingCosts += buyingCosts;
+          oneTimeCashOutflow  += deposit + buyingCosts;
         }
 
         // Loan repayment: starts from settlement month
@@ -1201,6 +1393,16 @@ export function buildCashFlowSeries(params: {
         ngBenefitSpread: Math.round(ngBenefitSpread),
         netCashFlow: Math.round(netCashFlow),
         cumulativeBalance: Math.round(cumulativeBalance),
+        // ── Audit / bridge breakdown ──
+        propertyDeposit:     Math.round(propertyDeposit),
+        propertyBuyingCosts: Math.round(propertyBuyingCosts),
+        plannedStockBuy:     Math.round(Math.max(0, -plannedStockCashDelta)  + Math.max(0, -plannedStockOrderDelta)),
+        plannedCryptoBuy:    Math.round(Math.max(0, -plannedCryptoCashDelta) + Math.max(0, -plannedCryptoOrderDelta)),
+        plannedStockSell:    Math.round(Math.max(0,  plannedStockCashDelta)  + Math.max(0,  plannedStockOrderDelta)),
+        plannedCryptoSell:   Math.round(Math.max(0,  plannedCryptoCashDelta) + Math.max(0,  plannedCryptoOrderDelta)),
+        stockDCAOutflow:     Math.round(stockDCAOutflow),
+        cryptoDCAOutflow:    Math.round(cryptoDCAOutflow),
+        billsOutflow:        Math.round(billsOutflow),
       });
 
       monthIndex++;

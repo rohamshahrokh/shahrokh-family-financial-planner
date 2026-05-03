@@ -15,7 +15,7 @@ import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import { maskValue } from "@/components/PrivacyMask";
 import SaveButton, { useSaveOnEnter } from "@/components/SaveButton";
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, Fragment } from "react";
 import {
   AreaChart,
   Area,
@@ -167,7 +167,113 @@ const MilestoneDot = (props: any) => {
   );
 };
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ─── Year-by-Year Reconciliation Detail Panel ─────────────────────────────
+const YearDetailPanel = ({ row, privacyMode, checkDelta, checkOk }: {
+  row: any;
+  privacyMode: boolean;
+  checkDelta: number;
+  checkOk: boolean;
+}) => {
+  const cb = row.cashBridge;
+  const pb = row.propertyBridge;
+  const lb = row.liabilityBridge;
+  const pi = row.passiveIncomeBreakdown;
+  const fmt  = (n: number | undefined) => maskValue(formatCurrency(n ?? 0, true), privacyMode);
+  const sign = (n: number | undefined) => (n ?? 0) >= 0 ? "+" : "−";
+  const abs  = (n: number | undefined) => Math.abs(n ?? 0);
+  const cellRow = "flex items-center justify-between border-b border-border/30 py-1";
+  const muted   = "text-muted-foreground";
+  const card    = "rounded-lg border border-border bg-background/40 p-3";
+  const heading = "text-[11px] font-bold uppercase tracking-wide mb-2 text-foreground flex items-center gap-1.5";
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+      {/* CASH BRIDGE */}
+      <div className={card}>
+        <div className={heading}><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />Cash Bridge</div>
+        {cb ? (
+          <div className="text-[11px] font-mono">
+            <div className={cellRow}><span className={muted}>Start cash</span><span>{fmt(cb.startCash)}</span></div>
+            <div className={cellRow}><span className={muted}>+ Salary income</span><span className="text-emerald-400">{fmt(cb.income)}</span></div>
+            <div className={cellRow}><span className={muted}>+ Rental income</span><span className="text-emerald-400">{fmt(cb.rentalIncome)}</span></div>
+            <div className={cellRow}><span className={muted}>+ Tax refund (NG)</span><span className="text-emerald-400">{fmt(cb.taxRefundOrPayment)}</span></div>
+            <div className={cellRow}><span className={muted}>− Living expenses</span><span className="text-red-400">{fmt(cb.livingExpenses)}</span></div>
+            <div className={cellRow}><span className={muted}>− Recurring bills</span><span className="text-red-400">{fmt((cb as any).billsOutflow ?? 0)}</span></div>
+            <div className={cellRow}><span className={muted}>− PPOR repayments</span><span className="text-red-400">{fmt(cb.pporRepayments)}</span></div>
+            <div className={cellRow}><span className={muted}>− Investment loan repayments</span><span className="text-red-400">{fmt(cb.investmentRepayments)}</span></div>
+            <div className={cellRow}><span className={muted}>− Property deposits</span><span className="text-red-400">{fmt(cb.propertyDeposits)}</span></div>
+            <div className={cellRow}><span className={muted}>− Stamp duty / buying costs</span><span className="text-red-400">{fmt(cb.buyingCosts)}</span></div>
+            <div className={cellRow}><span className={muted}>− Stock buys (planned)</span><span className="text-red-400">{fmt(cb.plannedStockBuys)}</span></div>
+            <div className={cellRow}><span className={muted}>− Crypto buys (planned)</span><span className="text-red-400">{fmt(cb.plannedCryptoBuys)}</span></div>
+            <div className={cellRow}><span className={muted}>− DCA outflows</span><span className="text-red-400">{fmt(cb.dcaOutflows)}</span></div>
+            {(cb.other ?? 0) !== 0 && (
+              <div className={cellRow}><span className={muted}>{sign(cb.other)} Other / unmodeled</span><span className="text-amber-400">{fmt(abs(cb.other))}</span></div>
+            )}
+            <div className="flex items-center justify-between pt-1.5 mt-1 border-t border-border">
+              <span className="font-bold text-foreground">End cash</span>
+              <span className="font-bold text-amber-400">{fmt(cb.endCash)}</span>
+            </div>
+          </div>
+        ) : <div className="text-[11px] text-muted-foreground">No cash bridge data.</div>}
+      </div>
+
+      {/* PROPERTY BRIDGE */}
+      <div className={card}>
+        <div className={heading}><span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />Property Value Bridge</div>
+        {pb ? (
+          <div className="text-[11px] font-mono">
+            <div className={cellRow}><span className={muted}>Start value (PPOR + IP)</span><span>{fmt(pb.startValue)}</span></div>
+            <div className={cellRow}><span className={muted}>+ Market growth</span><span className="text-emerald-400">{fmt(pb.marketGrowth)}</span></div>
+            <div className={cellRow}><span className={muted}>+ New purchases</span><span className="text-blue-400">{fmt(pb.newPurchases)}</span></div>
+            <div className="flex items-center justify-between pt-1.5 mt-1 border-t border-border">
+              <span className="font-bold text-foreground">End value</span>
+              <span className="font-bold text-cyan-400">{fmt(pb.endValue)}</span>
+            </div>
+          </div>
+        ) : <div className="text-[11px] text-muted-foreground">No property bridge data.</div>}
+      </div>
+
+      {/* LIABILITY BRIDGE */}
+      <div className={card}>
+        <div className={heading}><span className="w-1.5 h-1.5 rounded-full bg-red-400" />Liability Bridge</div>
+        {lb ? (
+          <div className="text-[11px] font-mono">
+            <div className={cellRow}><span className={muted}>Opening debt</span><span>{fmt(lb.openingDebt)}</span></div>
+            <div className={cellRow}><span className={muted}>+ New loans drawn</span><span className="text-red-400">{fmt(lb.newLoans)}</span></div>
+            <div className={cellRow}><span className={muted}>− Principal repayments</span><span className="text-emerald-400">{fmt(lb.repayments)}</span></div>
+            <div className="flex items-center justify-between pt-1.5 mt-1 border-t border-border">
+              <span className="font-bold text-foreground">Closing debt</span>
+              <span className="font-bold text-red-400">{fmt(lb.closingDebt)}</span>
+            </div>
+          </div>
+        ) : <div className="text-[11px] text-muted-foreground">No liability bridge data.</div>}
+      </div>
+
+      {/* PASSIVE INCOME + RECONCILIATION */}
+      <div className={card}>
+        <div className={heading}><span className="w-1.5 h-1.5 rounded-full bg-purple-400" />Passive Income (annual)</div>
+        {pi ? (
+          <div className="text-[11px] font-mono mb-3">
+            <div className={cellRow}><span className={muted}>Net rent (after vacancy + mgmt)</span><span>{fmt(pi.netRent)}</span></div>
+            <div className={cellRow}><span className={muted}>Dividends (≈2% of stocks)</span><span>{fmt(pi.dividends)}</span></div>
+            <div className={cellRow}><span className={muted}>Crypto yield (≈1%)</span><span>{fmt(pi.cryptoYield)}</span></div>
+            <div className="flex items-center justify-between pt-1.5 mt-1 border-t border-border">
+              <span className="font-bold text-foreground">Total passive / yr</span>
+              <span className="font-bold text-purple-400">{fmt(pi.total)}</span>
+            </div>
+          </div>
+        ) : <div className="text-[11px] text-muted-foreground mb-3">No passive income breakdown.</div>}
+
+        <div className={`text-[10.5px] font-mono p-2 rounded border ${checkOk ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400" : "border-amber-500/40 bg-amber-500/10 text-amber-400"}`}>
+          <div className="font-bold mb-0.5">{checkOk ? "✓ Reconciled" : "⚠ Mismatch"}</div>
+          <div>Total Assets − Liabilities = End NW</div>
+          <div className="opacity-80">delta = {fmt(checkDelta)}</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function DashboardPage() {
   const qc = useQueryClient();
   const { chartView, setChartView, privacyMode, togglePrivacy, currentUser } = useAppStore();
@@ -183,6 +289,7 @@ export default function DashboardPage() {
   const [mainChartMode, setMainChartMode] = useState<"networth" | "cashflow">("cashflow");
   const [cfChartAnnotations, setCfChartAnnotations] = useState(true);
   const [wdcTab, setWdcTab] = useState<"CASH" | "EVENTS" | "WEALTH" | "RISK">("CASH");
+  const [expandedYear, setExpandedYear] = useState<number | null>(null);
   const [wdcChartType, setWdcChartType] = useState<"combo" | "line" | "candlestick">("combo");
   const cashFlowView = chartView;
 
@@ -765,8 +872,13 @@ export default function DashboardPage() {
       liab: p.totalLiabilities,
       endNW: p.endNetWorth,
       growth: p.growth,
+      growthPct: p.growthPct,
       passive: p.passiveIncome,
       monthlyCF: p.monthlyCashFlow,
+      cashBridge: p.cashBridge,
+      propertyBridge: p.propertyBridge,
+      liabilityBridge: p.liabilityBridge,
+      passiveIncomeBreakdown: p.passiveIncomeBreakdown,
     }));
   }, [projection, snapshot]);
 
@@ -1620,38 +1732,61 @@ export default function DashboardPage() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
-                  {["Year","Start NW","Income","Expenses","Prop. Value","Prop. Loans","Equity","Stocks","Crypto","Cash","Total Assets","Liabilities","End NW","Growth","Passive Income","Mthly CF"].map(h => (
+                  {["","Year","Start NW","Income","Expenses","Prop. Value","Prop. Loans","Equity","Stocks","Crypto","Cash","Total Assets","Liabilities","End NW","Growth %","Passive Income","Mthly CF"].map(h => (
                     <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {yrRowsFull.map((r, idx) => (
-                  <tr key={r.year} className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${idx === 0 ? "bg-amber-500/5" : ""}`}>
-                    <td className="px-3 py-2 font-bold text-foreground whitespace-nowrap">{r.year}{idx === 0 ? " ★" : ""}</td>
-                    <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.startNW ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.income ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.expenses ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.propValue ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.propLoans ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.equity ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono text-blue-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.stocks ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono text-purple-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.crypto ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.cash ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.totalAssets ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.liab ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono text-amber-400 font-bold tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.endNW ?? 0, true), privacyMode)}</td>
-                    <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap" style={{ color: (r.growth ?? 0) >= 0 ? "hsl(142,60%,45%)" : "hsl(5,70%,52%)" }}>
-                      {(r.growth ?? 0) >= 0 ? "+" : ""}{((r.growth ?? 0) * 100).toFixed(1)}%
-                    </td>
-                    <td className="px-3 py-2 font-mono text-purple-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.passive ?? 0, true), privacyMode)}/yr</td>
-                    <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap" style={{ color: (r.monthlyCF ?? 0) >= 0 ? "hsl(142,60%,45%)" : "hsl(5,70%,52%)" }}>
-                      {maskValue(formatCurrency(r.monthlyCF ?? 0, true), privacyMode)}
-                    </td>
-                  </tr>
-                ))}
+                {yrRowsFull.map((r, idx) => {
+                  const isOpen = expandedYear === r.year;
+                  const growthPct = r.growthPct ?? 0;
+                  const checkDelta = (r.totalAssets ?? 0) - (r.liab ?? 0) - (r.endNW ?? 0);
+                  const checkOk = Math.abs(checkDelta) <= 1;
+                  return (
+                    <Fragment key={r.year}>
+                      <tr
+                        className={`border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer ${idx === 0 ? "bg-amber-500/5" : ""}`}
+                        onClick={() => setExpandedYear(isOpen ? null : r.year)}
+                      >
+                        <td className="px-2 py-2 text-muted-foreground whitespace-nowrap select-none" style={{ width: 18 }}>{isOpen ? "▾" : "▸"}</td>
+                        <td className="px-3 py-2 font-bold text-foreground whitespace-nowrap">{r.year}{idx === 0 ? " ★" : ""}</td>
+                        <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.startNW ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.income ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.expenses ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.propValue ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.propLoans ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.equity ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-blue-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.stocks ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-purple-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.crypto ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.cash ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.totalAssets ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.liab ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-amber-400 font-bold tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.endNW ?? 0, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap" style={{ color: growthPct >= 0 ? "hsl(142,60%,45%)" : "hsl(5,70%,52%)" }}>
+                          {growthPct >= 0 ? "+" : ""}{growthPct.toFixed(1)}%
+                        </td>
+                        <td className="px-3 py-2 font-mono text-purple-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.passive ?? 0, true), privacyMode)}/yr</td>
+                        <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap" style={{ color: (r.monthlyCF ?? 0) >= 0 ? "hsl(142,60%,45%)" : "hsl(5,70%,52%)" }}>
+                          {maskValue(formatCurrency(r.monthlyCF ?? 0, true), privacyMode)}
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="bg-muted/10 border-b border-border">
+                          <td colSpan={17} className="px-4 py-4">
+                            <YearDetailPanel row={r} privacyMode={privacyMode} checkDelta={checkDelta} checkOk={checkOk} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
+          </div>
+          <div className="px-4 py-2 text-[10px] text-muted-foreground border-t border-border bg-muted/5">
+            Click any row to view its full reconciliation bridge (cash → property → liabilities → passive income).
+            Growth % uses (End NW − Start NW) / Start NW × 100. Sanity check: Total Assets − Liabilities = End NW.
           </div>
         </div>
       </div>
