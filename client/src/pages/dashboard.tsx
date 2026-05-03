@@ -848,9 +848,20 @@ export default function DashboardPage() {
 
   // ─── Equity Engine ─────────────────────────────────────────────────────────
   // Investment properties (all non-PPOR from /api/properties)
+  // Used for FORECAST / equityTimeline — includes future planned IPs
   const ipPropertiesForEquity = useMemo(() =>
     (properties as any[]).filter((p: any) => p.type !== 'ppor' && p.type !== 'owner_occupied'),
   [properties]);
+
+  // Current (settled/active) IPs only — used for TODAY SNAPSHOT deposit power
+  // Excludes any IP whose settlement_date is in the future (planned but not yet owned)
+  const currentIpProperties = useMemo(() =>
+    (properties as any[]).filter((p: any) =>
+      p.type !== 'ppor' &&
+      p.type !== 'owner_occupied' &&
+      (!(p as any).settlement_date || (p as any).settlement_date <= todayStr)
+    ),
+  [properties, todayStr]);
 
   const depositPowerResult = useMemo(() => {
     if (!snapshot) return null;
@@ -859,7 +870,9 @@ export default function DashboardPage() {
       offset_balance:  snap.offset_balance,
       ppor_value:      snap.ppor,
       ppor_loan:       snap.mortgage,
-      ipProperties:    ipPropertiesForEquity.map((p: any) => ({
+      // Use currentIpProperties (settled only) so future planned IPs
+      // do NOT inflate today's snapshot (IPs Held, IP Equity, Deposit Power)
+      ipProperties:    currentIpProperties.map((p: any) => ({
         id:             p.id ?? p.address ?? 'ip',
         label:          p.label ?? (p.address ?? '').split(',')[0] ?? 'IP',
         current_value:  safeNum(p.current_value ?? p.purchase_price),
@@ -877,7 +890,7 @@ export default function DashboardPage() {
         return safeNum(nextIP?.purchase_price) || 900000;
       })(),
     });
-  }, [snapshot, snap, ipPropertiesForEquity, maxRefinanceLVR, emergencyBuffer, surplus, properties]);
+  }, [snapshot, snap, currentIpProperties, maxRefinanceLVR, emergencyBuffer, surplus, properties]);
 
   // Equity timeline (10 years)
   const equityTimeline = useMemo(() => {
