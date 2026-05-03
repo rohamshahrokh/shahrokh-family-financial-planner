@@ -1282,6 +1282,71 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-background text-foreground pb-16 db-mobile-stack">
 
       {/* ══════════════════════════════════════════════════════════════════
+          ABOVE-FOLD KPI STRIP (mobile: order 1 — first thing on screen)
+          4 cards: Net Worth / Cash Today / Monthly Surplus / Deposit Power
+          + Forecast selector badge
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pt-3 pb-2 db-section-hero-kpis">
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          {/* Net Worth */}
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400/70 mb-0.5">Net Worth</div>
+            <div className="text-base font-extrabold tabular-nums text-amber-400 leading-tight">{maskValue(formatCurrency(netWorth, true), privacyMode)}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Total · Brisbane QLD</div>
+          </div>
+          {/* Cash Today */}
+          <div className="rounded-xl border border-border bg-card px-3 py-2.5">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">Cash Today</div>
+            <div className="text-base font-extrabold tabular-nums leading-tight" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Everyday + Offset</div>
+          </div>
+          {/* Monthly Surplus */}
+          <div className="rounded-xl border border-border bg-card px-3 py-2.5">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">Monthly Surplus</div>
+            <div className="text-base font-extrabold tabular-nums leading-tight" style={{ color: surplus >= 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)" }}>{maskValue(formatCurrency(surplus, true), privacyMode)}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">{maskValue(formatCurrency(surplus * 12, true), privacyMode)}/yr</div>
+          </div>
+          {/* Deposit Power */}
+          <div className="rounded-xl border px-3 py-2.5" style={{ borderColor: "hsl(43,90%,30%)", background: "hsl(43,90%,6%)" }}>
+            <div className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: "hsl(43,90%,50%)" }}>Deposit Power</div>
+            <div className="text-base font-extrabold tabular-nums leading-tight" style={{ color: "hsl(43,90%,62%)" }}>{maskValue(formatCurrency(dpTotal, true), privacyMode)}</div>
+            <div className="text-[10px] mt-0.5" style={{ color: "hsl(43,70%,45%)" }}>{Math.round(dpReadiness)}% IP ready</div>
+          </div>
+        </div>
+        {/* Forecast selector badge — always visible */}
+        <Link href="/ai-forecast-engine">
+          <span
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer transition-all hover:brightness-110 ${
+              forecastMode === "monte-carlo"
+                ? "bg-purple-500/10 border border-purple-500/30 text-purple-300"
+                : forecastMode === "year-by-year"
+                ? "bg-sky-500/10 border border-sky-500/30 text-sky-300"
+                : profile === "aggressive"
+                ? "bg-rose-500/10 border border-rose-500/30 text-rose-300"
+                : profile === "conservative"
+                ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
+                : "bg-blue-500/10 border border-blue-500/30 text-blue-300"
+            }`}
+            title="Tap to change forecast mode"
+          >
+            <Activity className="w-3 h-3" />
+            Forecast: {
+              forecastMode === "monte-carlo"
+                ? `Monte Carlo${monteCarloResult ? " (median)" : " (not run)"}`
+                : forecastMode === "year-by-year"
+                ? "Year-by-Year (custom)"
+                : profile === "aggressive"
+                ? "Aggressive"
+                : profile === "conservative"
+                ? "Conservative"
+                : "Base (Moderate)"
+            }
+            <ChevronRight className="w-3 h-3 opacity-70" />
+          </span>
+        </Link>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
           WEALTH FLOW BANNER
           ═════════════════════════════════════════════════════════════════ */}
       <div className="db-section-networth"><WealthFlowBanner /></div>
@@ -1335,8 +1400,8 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Income source + Forecast Mode badges */}
-        <div className="mt-3 flex flex-wrap gap-2">
+        {/* Income source + Forecast Mode badges — hidden on mobile (shown in hero-kpis strip instead) */}
+        <div className="mt-3 flex flex-wrap gap-2 db-hero-badges">
           <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             Income source: Income Tracker ({activeIncomeSources > 0 ? activeIncomeSources : 3} active sources · {formatCurrency(snap.monthly_income, true)}/mo)
@@ -1468,58 +1533,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Liquidity stress alert */}
-        {hasLiquidityStress && (
-          <div className="mb-3 rounded-xl border border-red-500/40 bg-red-500/8 p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-              <span className="text-sm font-bold text-red-400">Liquidity Stress Detected</span>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              Cash goes negative in: {negativeCashMonths.join(", ")}
-            </div>
-          </div>
-        )}
-
-        {/* 4 quick metric tiles */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2">
-          <div className="rounded-xl border border-border bg-card p-3 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
-              <Calendar className="w-4 h-4 text-amber-400" />
-            </div>
-            <div>
-              <div className="text-lg font-bold text-foreground tabular-nums">{upcomingBillsCount}</div>
-              <div className="text-xs text-muted-foreground">Upcoming Bills</div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-3 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-              <Target className="w-4 h-4 text-emerald-400" />
-            </div>
-            <div>
-              <div className="text-lg font-bold text-foreground tabular-nums">{budgetsSetCount}</div>
-              <div className="text-xs text-muted-foreground">Budget Status</div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-3 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
-              <Activity className="w-4 h-4 text-blue-400" />
-            </div>
-            <div>
-              <div className="text-lg font-bold text-foreground tabular-nums">{alertsSent24h}</div>
-              <div className="text-xs text-muted-foreground">Alerts Sent</div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-3 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-              <DollarSign className="w-4 h-4 text-emerald-400" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-foreground tabular-nums">{maskValue(formatCurrency(cashAfterBills, true), privacyMode)}</div>
-              <div className="text-xs text-muted-foreground">Cash After Bills</div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
@@ -1552,6 +1565,59 @@ export default function DashboardPage() {
               {(snap.cash + snap.offset_balance) >= snap.monthly_expenses * 3 ? "Healthy" : "Low"}
             </div>
             <div className="text-xs text-muted-foreground mt-0.5">${Math.round(snap.monthly_expenses * 3 / 1000)}k reserve target</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ALERTS / WARNINGS (mobile: order 3 — floats above cashflow chart)
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pb-2 db-section-alerts">
+        {hasLiquidityStress && (
+          <div className="mb-2 rounded-xl border border-red-500/40 bg-red-500/8 px-4 py-3 flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <div>
+              <div className="text-sm font-bold text-red-400">Liquidity Stress Detected</div>
+              <div className="text-xs text-muted-foreground mt-0.5">Cash goes negative in: {negativeCashMonths.join(", ")}</div>
+            </div>
+          </div>
+        )}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
+              <Calendar className="w-3.5 h-3.5 text-amber-400" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-foreground tabular-nums">{upcomingBillsCount}</div>
+              <div className="text-[10px] text-muted-foreground">Upcoming Bills</div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+              <Target className="w-3.5 h-3.5 text-emerald-400" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-foreground tabular-nums">{budgetsSetCount}</div>
+              <div className="text-[10px] text-muted-foreground">Budget Status</div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+              <Activity className="w-3.5 h-3.5 text-blue-400" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-foreground tabular-nums">{alertsSent24h}</div>
+              <div className="text-[10px] text-muted-foreground">Alerts Sent</div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+              <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-foreground tabular-nums">{maskValue(formatCurrency(cashAfterBills, true), privacyMode)}</div>
+              <div className="text-[10px] text-muted-foreground">Cash After Bills</div>
+            </div>
           </div>
         </div>
       </div>
@@ -2385,7 +2451,7 @@ export default function DashboardPage() {
       {/* ══════════════════════════════════════════════════════════════════
           LEDGER AUDIT SECTION
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 db-section-ledger">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Database className="w-4 h-4" style={{ color: "hsl(210,80%,65%)" }} />
@@ -2554,31 +2620,31 @@ export default function DashboardPage() {
         })()}
       </div>
 
-      {/* BEST MOVE CARD — Saturday Morning Bulletin removed from homepage (lives in Actions menu) */}
-      <div className="px-4 pb-4">
+      {/* BEST MOVE CARD */}
+      <div className="px-4 pb-4 db-section-bestmove-card">
         <BestMoveCard />
       </div>
 
       {/* DEPOSIT POWER — cash + offset + usable equity across all properties */}
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 db-section-deposit-card">
         <DepositPowerCard compact />
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
           FIRE PATH OPTIMIZER + PORTFOLIO LIVE RETURN
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 db-section-fire">
         <FIREPathCard />
       </div>
 
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 db-section-fire">
         <PortfolioLiveReturn />
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
           ACTION CENTER (smart actions table)
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 db-section-fire">
         <div className="rounded-2xl border border-border bg-card p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -2630,7 +2696,7 @@ export default function DashboardPage() {
       {/* ══════════════════════════════════════════════════════════════════
           AI INSIGHTS
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 db-section-ai">
         <AIInsightsCard
           pageKey="dashboard"
           pageLabel="Dashboard Overview"

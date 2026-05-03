@@ -3591,15 +3591,46 @@ input[type="number"] {
   }
 }
 
-/* ── Mobile dashboard section ordering via CSS order ────────────────────── */
+/* ── Mobile dashboard section ordering via CSS order ───────────────────────────────────── */
+/*
+  MOBILE ORDER (<=768px):
+  1.  hero-kpis      - Net Worth / Cash / Surplus / Deposit Power + Forecast badge
+  2.  networth       - WealthFlow banner + family hero card
+  3.  alerts         - Liquidity stress + bills/alerts tiles
+  4.  bestmove       - Best Move sidebar (inline in cashflow flex row)
+  5.  cashflow       - Wealth Decision Center (CASH/EVENTS/WEALTH/RISK tabs)
+  6.  keycards       - KPI cards, wealth split, wealth health
+  7.  equity         - (reserved)
+  8.  year           - Year-by-year table
+  9.  bestmove-card  - BestMoveCard + DepositPowerCard standalone
+  10. ledger         - Ledger Audit
+  11. fire           - FIRE Path + Portfolio + Action Center
+  12. ai             - AI Insights
+*/
+
+/* Hero KPI strip: hidden on desktop by default */
+.db-section-hero-kpis { display: none; }
+
+/* Hero badges row (income + forecast) — hidden on mobile, shown in KPI strip instead */
 @media (max-width: 768px) {
-  .db-section-networth    { order: 1; }
-  .db-section-keycards    { order: 2; }
-  .db-section-equity      { order: 3; }
-  .db-section-cashflow    { order: 4; }
-  .db-section-bestmove    { order: 5; }
-  .db-section-year        { order: 6; }
-  .db-section-other       { order: 7; }
+  .db-hero-badges { display: none; }
+}
+
+@media (max-width: 768px) {
+  .db-section-hero-kpis    { order: 1;  display: block; }
+  .db-section-networth     { order: 2; }
+  .db-section-alerts       { order: 3; }
+  .db-section-bestmove     { order: 4; }
+  .db-section-cashflow     { order: 5; }
+  .db-section-keycards     { order: 6; }
+  .db-section-equity       { order: 7; }
+  .db-section-year         { order: 8; }
+  .db-section-bestmove-card { order: 9; }
+  .db-section-deposit-card  { order: 9; }
+  .db-section-ledger       { order: 10; }
+  .db-section-fire         { order: 11; }
+  .db-section-ai           { order: 12; }
+  .db-section-other        { order: 13; }
 
   /* Dashboard page becomes a flex column so order works */
   .db-mobile-stack {
