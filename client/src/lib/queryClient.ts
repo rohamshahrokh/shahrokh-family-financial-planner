@@ -24,6 +24,11 @@ import { sbBills, sbBudgets, sbTelegramSettings, sbAlertLogs, sbFamilyMsgLog, sb
 import { sbFireSettings, sbFireScenarioConfig, sbFireYearAssumptions } from "./supabaseClient";
 import { sbTaxProfile } from "./supabaseClient";
 import { sbMCFireSettings, sbMCFireResults, sbMCFirePresets } from "./supabaseClient";
+import {
+  getDemoDataset,
+  DEMO_FIRE_SETTINGS, DEMO_APP_SETTINGS, DEMO_TAX_PROFILE,
+  DEMO_ALERT_LOGS, DEMO_FAMILY_MSG, DEMO_PLANNED_INVESTMENTS, DEMO_SCENARIOS,
+} from "./demoData";
 
 // ─── Detect deployment mode ───────────────────────────────────────────────────
 
@@ -36,6 +41,287 @@ function isStaticDeployment(): boolean {
 }
 
 const USE_LOCAL_STORE = isStaticDeployment();
+
+// ─── Demo Mode helper ─────────────────────────────────────────────────────────
+// Check the Zustand persisted store without importing the hook (safe outside React)
+function isDemoMode(): boolean {
+  try {
+    const raw = localStorage.getItem("shahrokh-app-state");
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    return parsed?.state?.isDemo === true;
+  } catch { return false; }
+}
+
+// In-memory mutable demo store (so edits during demo session feel live but never persist)
+let _demoStore: ReturnType<typeof getDemoDataset> | null = null;
+function getDemoStore() {
+  if (!_demoStore) _demoStore = getDemoDataset();
+  return _demoStore;
+}
+export function resetDemoStore() {
+  _demoStore = getDemoDataset();
+}
+
+// ─── Demo request handler ─────────────────────────────────────────────────────
+// Intercepts ALL API calls in demo mode. Reads return demo constants.
+// Writes mutate the in-memory _demoStore only — Supabase is never touched.
+async function handleDemoRequest(method: string, path: string, body?: unknown): Promise<unknown> {
+  const m   = method.toUpperCase();
+  const ds  = getDemoStore();
+
+  // ── Snapshot
+  if (path === "/api/snapshot") {
+    if (m === "GET") return ds.snapshot;
+    if (m === "PUT") { Object.assign(ds.snapshot, body as any); return ds.snapshot; }
+  }
+
+  // ── Expenses
+  if (path === "/api/expenses") {
+    if (m === "GET")  return ds.expenses;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString() }; ds.expenses.push(item); return item; }
+  }
+  if (path === "/api/expenses/bulk") {
+    if (m === "POST") { const { expenses } = body as any; const created = expenses.map((e: any, i: number) => ({ ...e, id: Date.now()+i, created_at: new Date().toISOString() })); ds.expenses.push(...created); return { created: created.length, expenses: created }; }
+  }
+  const expMatch = path.match(/^\/api\/expenses\/(\d+)$/);
+  if (expMatch) {
+    const id = parseInt(expMatch[1]);
+    if (m === "PUT")    { const i = ds.expenses.findIndex((e: any) => e.id === id); if (i >= 0) ds.expenses[i] = { ...ds.expenses[i], ...(body as any) }; return ds.expenses[i]; }
+    if (m === "DELETE") { ds.expenses = ds.expenses.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Properties
+  if (path === "/api/properties") {
+    if (m === "GET")  return ds.properties;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString() }; ds.properties.push(item); return item; }
+  }
+  const propMatch2 = path.match(/^\/api\/properties\/(\d+)$/);
+  if (propMatch2) {
+    const id = parseInt(propMatch2[1]);
+    if (m === "PUT")    { const i = ds.properties.findIndex((e: any) => e.id === id); if (i >= 0) ds.properties[i] = { ...ds.properties[i], ...(body as any) }; return ds.properties[i]; }
+    if (m === "DELETE") { ds.properties = ds.properties.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Stocks
+  if (path === "/api/stocks") {
+    if (m === "GET")  return ds.stocks;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString() }; ds.stocks.push(item); return item; }
+  }
+  const stockMatch2 = path.match(/^\/api\/stocks\/(\d+)$/);
+  if (stockMatch2) {
+    const id = parseInt(stockMatch2[1]);
+    if (m === "PUT")    { const i = ds.stocks.findIndex((e: any) => e.id === id); if (i >= 0) ds.stocks[i] = { ...ds.stocks[i], ...(body as any) }; return ds.stocks[i]; }
+    if (m === "DELETE") { ds.stocks = ds.stocks.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Crypto
+  if (path === "/api/crypto") {
+    if (m === "GET")  return ds.cryptos;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString() }; ds.cryptos.push(item); return item; }
+  }
+  const cryptoMatch2 = path.match(/^\/api\/crypto\/(\d+)$/);
+  if (cryptoMatch2) {
+    const id = parseInt(cryptoMatch2[1]);
+    if (m === "PUT")    { const i = ds.cryptos.findIndex((e: any) => e.id === id); if (i >= 0) ds.cryptos[i] = { ...ds.cryptos[i], ...(body as any) }; return ds.cryptos[i]; }
+    if (m === "DELETE") { ds.cryptos = ds.cryptos.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Timeline
+  if (path === "/api/timeline") {
+    if (m === "GET")  return ds.timeline;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString() }; ds.timeline.push(item); return item; }
+  }
+  const tlMatch2 = path.match(/^\/api\/timeline\/(\d+)$/);
+  if (tlMatch2) {
+    const id = parseInt(tlMatch2[1]);
+    if (m === "PUT")    { const i = ds.timeline.findIndex((e: any) => e.id === id); if (i >= 0) ds.timeline[i] = { ...ds.timeline[i], ...(body as any) }; return ds.timeline[i]; }
+    if (m === "DELETE") { ds.timeline = ds.timeline.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Stock transactions
+  if (path === "/api/stock-transactions") {
+    if (m === "GET")  return ds.stockTransactions;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; ds.stockTransactions.push(item); return item; }
+  }
+  const stxMatch2 = path.match(/^\/api\/stock-transactions\/(\d+)$/);
+  if (stxMatch2) {
+    const id = parseInt(stxMatch2[1]);
+    if (m === "PUT")    { const i = ds.stockTransactions.findIndex((e: any) => e.id === id); if (i >= 0) ds.stockTransactions[i] = { ...ds.stockTransactions[i], ...(body as any) }; return ds.stockTransactions[i]; }
+    if (m === "DELETE") { ds.stockTransactions = ds.stockTransactions.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Crypto transactions
+  if (path === "/api/crypto-transactions") {
+    if (m === "GET")  return ds.cryptoTransactions;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; ds.cryptoTransactions.push(item); return item; }
+  }
+  const ctxMatch2 = path.match(/^\/api\/crypto-transactions\/(\d+)$/);
+  if (ctxMatch2) {
+    const id = parseInt(ctxMatch2[1]);
+    if (m === "PUT")    { const i = ds.cryptoTransactions.findIndex((e: any) => e.id === id); if (i >= 0) ds.cryptoTransactions[i] = { ...ds.cryptoTransactions[i], ...(body as any) }; return ds.cryptoTransactions[i]; }
+    if (m === "DELETE") { ds.cryptoTransactions = ds.cryptoTransactions.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Stock DCA
+  if (path === "/api/stock-dca") {
+    if (m === "GET")  return ds.stockDCA;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; ds.stockDCA.push(item); return item; }
+  }
+  const sdcaMatch2 = path.match(/^\/api\/stock-dca\/(\d+)$/);
+  if (sdcaMatch2) {
+    const id = parseInt(sdcaMatch2[1]);
+    if (m === "PUT")    { const i = ds.stockDCA.findIndex((e: any) => e.id === id); if (i >= 0) ds.stockDCA[i] = { ...ds.stockDCA[i], ...(body as any) }; return ds.stockDCA[i]; }
+    if (m === "DELETE") { ds.stockDCA = ds.stockDCA.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Crypto DCA
+  if (path === "/api/crypto-dca") {
+    if (m === "GET")  return ds.cryptoDCA;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; ds.cryptoDCA.push(item); return item; }
+  }
+  const cdcaMatch2 = path.match(/^\/api\/crypto-dca\/(\d+)$/);
+  if (cdcaMatch2) {
+    const id = parseInt(cdcaMatch2[1]);
+    if (m === "PUT")    { const i = ds.cryptoDCA.findIndex((e: any) => e.id === id); if (i >= 0) ds.cryptoDCA[i] = { ...ds.cryptoDCA[i], ...(body as any) }; return ds.cryptoDCA[i]; }
+    if (m === "DELETE") { ds.cryptoDCA = ds.cryptoDCA.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Income
+  if (path === "/api/income") {
+    if (m === "GET")  return ds.income;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; ds.income.push(item); return item; }
+  }
+  if (path === "/api/income/bulk") {
+    if (m === "POST") { const { records } = body as any; const created = records.map((r: any, i: number) => ({ ...r, id: Date.now()+i, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })); ds.income.push(...created); return { created: created.length, records: created }; }
+  }
+  const incMatch2 = path.match(/^\/api\/income\/(\d+)$/);
+  if (incMatch2) {
+    const id = parseInt(incMatch2[1]);
+    if (m === "PUT")    { const i = ds.income.findIndex((e: any) => e.id === id); if (i >= 0) ds.income[i] = { ...ds.income[i], ...(body as any) }; return ds.income[i]; }
+    if (m === "DELETE") { ds.income = ds.income.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Bills
+  if (path === "/api/bills") {
+    if (m === "GET")  return ds.bills;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now() }; ds.bills.push(item); return item; }
+  }
+  const billMatch2 = path.match(/^\/api\/bills\/(\d+)$/);
+  if (billMatch2) {
+    const id = parseInt(billMatch2[1]);
+    if (m === "PUT")    { const i = ds.bills.findIndex((e: any) => e.id === id); if (i >= 0) ds.bills[i] = { ...ds.bills[i], ...(body as any) }; return ds.bills[i]; }
+    if (m === "DELETE") { ds.bills = ds.bills.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Budgets
+  if (path === "/api/budgets") {
+    if (m === "GET")  return ds.budgets;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now() }; ds.budgets.push(item); return item; }
+  }
+  if (path === "/api/budgets/bulk") {
+    if (m === "POST") { const { budgets } = body as any; const created = budgets.map((b: any, i: number) => ({ ...b, id: Date.now()+i })); ds.budgets.push(...created); return { created: created.length, budgets: created }; }
+  }
+  const budgetMonthMatch2 = path.match(/^\/api\/budgets\/(\d+)\/(\d+)$/);
+  if (budgetMonthMatch2) {
+    const year = parseInt(budgetMonthMatch2[1]), month = parseInt(budgetMonthMatch2[2]);
+    if (m === "GET") return ds.budgets.filter((b: any) => b.year === year && b.month === month);
+  }
+  const budgetMatch2 = path.match(/^\/api\/budgets\/id\/(\d+)$/);
+  if (budgetMatch2) {
+    const id = parseInt(budgetMatch2[1]);
+    if (m === "PUT")    { const i = ds.budgets.findIndex((e: any) => e.id === id); if (i >= 0) ds.budgets[i] = { ...ds.budgets[i], ...(body as any) }; return ds.budgets[i]; }
+    if (m === "DELETE") { ds.budgets = ds.budgets.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Planned investments
+  if (path === "/api/planned-investments" || path.startsWith("/api/planned-investments?")) {
+    if (m === "GET") {
+      const moduleParam = path.includes("?module=") ? path.split("?module=")[1].split("&")[0] : undefined;
+      return moduleParam ? ds.plannedInvestments.filter((p: any) => p.module === moduleParam) : ds.plannedInvestments;
+    }
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString() }; ds.plannedInvestments.push(item); return item; }
+  }
+  const piMatch2 = path.match(/^\/api\/planned-investments\/(\d+)$/);
+  if (piMatch2) {
+    const id = parseInt(piMatch2[1]);
+    if (m === "PUT")    { const i = ds.plannedInvestments.findIndex((e: any) => e.id === id); if (i >= 0) ds.plannedInvestments[i] = { ...ds.plannedInvestments[i], ...(body as any) }; return ds.plannedInvestments[i]; }
+    if (m === "DELETE") { ds.plannedInvestments = ds.plannedInvestments.filter((e: any) => e.id !== id); return { success: true }; }
+  }
+
+  // ── Scenarios
+  if (path === "/api/scenarios") {
+    if (m === "GET")  return ds.scenarios;
+    if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString() }; ds.scenarios.push(item); return item; }
+  }
+
+  // ── Settings
+  const settingsMatch2 = path.match(/^\/api\/settings\/(.+)$/);
+  if (settingsMatch2) {
+    const key = settingsMatch2[1];
+    if (m === "GET") return { key, value: ds.appSettings[key] ?? null };
+    if (m === "PUT") { ds.appSettings[key] = (body as any).value; return { success: true }; }
+  }
+  if (path === "/api/app-settings") {
+    if (m === "GET")   return { ...DEMO_APP_SETTINGS };
+    if (m === "PATCH") { Object.assign(ds.appSettings, body as any); return ds.appSettings; }
+  }
+
+  // ── Tax profile
+  if (path === "/api/tax-profile") {
+    if (m === "GET" || m === "POST" || m === "PUT") {
+      if (m !== "GET") Object.assign(ds.taxProfile ?? DEMO_TAX_PROFILE, body as any);
+      return ds.taxProfile ?? DEMO_TAX_PROFILE;
+    }
+  }
+
+  // ── FIRE Settings
+  if (path === "/api/fire-settings") {
+    if (m === "GET") return DEMO_FIRE_SETTINGS;
+    if (m === "PUT") return DEMO_FIRE_SETTINGS;
+  }
+  if (path === "/api/fire-scenario-config") {
+    if (m === "GET") return [];
+    if (m === "PUT") return { success: true };
+  }
+  if (path === "/api/fire-year-assumptions") {
+    if (m === "GET") return [];
+    if (m === "PUT") return { success: true };
+  }
+  if (path === "/api/mc-fire-settings") {
+    if (m === "GET") return {};
+    if (m === "PUT") return {};
+  }
+  if (path === "/api/mc-fire-results") {
+    if (m === "GET") return null;
+    if (m === "PUT") return {};
+  }
+  if (path === "/api/mc-fire-presets") {
+    if (m === "GET") return [];
+  }
+
+  // ── Telegram / Alert Logs / Family Msg — stub
+  if (path === "/api/telegram-settings") {
+    if (m === "GET") return {};
+    if (m === "PUT") return { success: true };
+  }
+  if (path === "/api/alert-logs")    { if (m === "GET") return DEMO_ALERT_LOGS; }
+  if (path === "/api/family-msg-log") { if (m === "GET") return DEMO_FAMILY_MSG; }
+
+  // ── Users stub
+  if (path === "/api/users") {
+    if (m === "GET")  return [{ id: 99, display_name: "Alex Johnson", role: "demo", email: "" }];
+    if (m === "POST") return { success: true };
+  }
+
+  // ── Market data — still live (no real financial data exposed)
+  if (path === "/api/market-data" || path === "/api/market-news-cache") {
+    return null; // market data is public prices — safe to show live
+  }
+
+  // ── Any unhandled path — return empty / success silently
+  return null;
+}
 
 // ─── Local API handler ────────────────────────────────────────────────────────
 // Maps every API endpoint to a localStore call.
@@ -443,6 +729,15 @@ export async function apiRequest(
   path: string,
   body?: unknown
 ): Promise<Response> {
+  // ── Demo mode: serve from in-memory demo constants — NEVER touch Supabase
+  if (isDemoMode()) {
+    const result = await handleDemoRequest(method, path, body);
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   // On Vercel static: serve from localStore (Supabase-first)
   // Errors from handleLocalRequest are re-thrown so TanStack Query onError fires correctly.
   if (USE_LOCAL_STORE) {

@@ -165,7 +165,7 @@ function WealthOSLogo() {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location, navigate] = useLocation();
-  const { theme, toggleTheme, setTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role } =
+  const { theme, toggleTheme, setTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role, isDemo } =
     useAppStore();
 
   // Auto-theme: re-evaluate every minute when mode is "auto"
@@ -559,6 +559,35 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </header>
+
+        {/* DEMO MODE banner — always visible when isDemo === true */}
+        {isDemo && (
+          <div
+            className="flex items-center gap-3 px-4 py-2 text-xs font-semibold tracking-wide z-50"
+            style={{
+              background: "linear-gradient(90deg, rgba(139,92,246,0.22), rgba(139,92,246,0.10))",
+              borderBottom: "1px solid rgba(139,92,246,0.35)",
+              color: "hsl(262,80%,78%)",
+            }}
+          >
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest"
+              style={{ background: "rgba(139,92,246,0.25)", border: "1px solid rgba(139,92,246,0.45)" }}
+            >
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                <circle cx="4" cy="4" r="4" fill="hsl(262,80%,72%)" />
+              </svg>
+              DEMO MODE
+            </span>
+            <span className="opacity-80">Viewing Alex &amp; Sara Johnson — dummy data only. Nothing is real.</span>
+            <button
+              onClick={() => { logout(); }}
+              className="ml-auto text-[11px] px-3 py-1 rounded-md font-medium transition-all"
+              style={{ background: "rgba(139,92,246,0.20)", border: "1px solid rgba(139,92,246,0.40)", color: "hsl(262,80%,80%)", cursor: "pointer" }}
+            >
+              Exit Demo
+            </button>
+          </div>
+        )}
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6">

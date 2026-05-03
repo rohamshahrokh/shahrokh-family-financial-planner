@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, resetDemoStore } from "@/lib/queryClient";
 import SaveButton from "@/components/SaveButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -914,7 +914,7 @@ function CFOSettingsSection() {
 
 export default function SettingsPage() {
   const { toast } = useToast();
-  const { theme, toggleTheme, setTheme, role } = useAppStore();
+  const { theme, toggleTheme, setTheme, role, isDemo, logout } = useAppStore();
   const isAdmin = role === "admin";
   const qc = useQueryClient();
 
@@ -1424,6 +1424,50 @@ export default function SettingsPage() {
           ))}
         </div>
       </SectionCard>
+
+      {/* ── Demo Mode Reset ──────────────────────────────────────────── */}
+      {isDemo && (
+        <div
+          className="rounded-xl p-5 space-y-3"
+          style={{ border: "1px solid rgba(139,92,246,0.35)", background: "rgba(139,92,246,0.06)" }}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span
+              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest"
+              style={{ background: "rgba(139,92,246,0.25)", border: "1px solid rgba(139,92,246,0.45)", color: "hsl(262,80%,78%)" }}
+            >
+              DEMO MODE
+            </span>
+            <h2 className="text-sm font-bold" style={{ color: "hsl(262,80%,78%)" }}>Guest Demo Controls</h2>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            You are viewing <strong className="text-foreground">Alex &amp; Sara Johnson</strong> — a fictional family used for product demonstrations.
+            All data is fake. Nothing is saved to any real database.
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              size="sm"
+              className="gap-2"
+              style={{ background: "rgba(139,92,246,0.25)", border: "1px solid rgba(139,92,246,0.45)", color: "hsl(262,80%,80%)" }}
+              onClick={() => {
+                resetDemoStore();
+                qc.invalidateQueries();
+                toast({ title: "Demo data reset", description: "All demo data restored to defaults." });
+              }}
+            >
+              Reset Demo Data
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              onClick={() => logout()}
+            >
+              Exit Demo
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* ── About ────────────────────────────────────────────────────────── */}
       <div className="rounded-xl border border-border bg-card p-5">

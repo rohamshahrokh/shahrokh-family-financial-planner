@@ -6,8 +6,8 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-type CurrentUser = "Roham" | "Fara";
-export type UserRole = "admin" | "family_user";
+type CurrentUser = "Roham" | "Fara" | "Demo";
+export type UserRole = "admin" | "family_user" | "demo";
 export type ThemeMode = "dark" | "light" | "auto";
 
 /** Apply the resolved theme class to <html>. Auto resolves by local time. */
@@ -26,13 +26,15 @@ export function resolveAutoTheme(): "dark" | "light" {
 
 interface AppState {
   isAuthenticated: boolean;
+  isDemo: boolean;               // true = guest/demo mode — no real data
   theme: ThemeMode;
   lastSaved: string | null;
   chartView: "monthly" | "annual";
-  privacyMode: boolean;       // true = numbers hidden (default for new users)
-  currentUser: CurrentUser;   // which family member is logged in
-  role: UserRole;             // admin = full access, family_user = restricted
+  privacyMode: boolean;          // true = numbers hidden (default for new users)
+  currentUser: CurrentUser;      // which family member is logged in
+  role: UserRole;                // admin = full access, family_user = restricted, demo = read-only fake
   login: () => void;
+  loginAsDemo: () => void;
   logout: () => void;
   toggleTheme: () => void;
   setTheme: (mode: ThemeMode) => void;
@@ -50,16 +52,31 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       isAuthenticated: false,
+      isDemo: false,
       theme: "dark",
       lastSaved: null,
       chartView: "annual",
-      privacyMode: true,       // hidden by default
-      currentUser: "Roham",    // default user
-      role: "admin",           // default role
+      privacyMode: true,         // hidden by default
+      currentUser: "Roham",      // default user
+      role: "admin",             // default role
 
-      login: () => set({ isAuthenticated: true }),
+      login: () => set({ isAuthenticated: true, isDemo: false }),
 
-      logout: () => set({ isAuthenticated: false, role: "admin", currentUser: "Roham" }),
+      loginAsDemo: () => set({
+        isAuthenticated: true,
+        isDemo: true,
+        currentUser: "Demo",
+        role: "demo",
+        privacyMode: false,      // demo mode always shows values
+      }),
+
+      logout: () => set({
+        isAuthenticated: false,
+        isDemo: false,
+        role: "admin",
+        currentUser: "Roham",
+        privacyMode: true,
+      }),
 
       togglePrivacy: () => set((state) => ({ privacyMode: !state.privacyMode })),
 
@@ -92,6 +109,7 @@ export const useAppStore = create<AppState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         isAuthenticated: state.isAuthenticated,
+        isDemo: state.isDemo,
         theme: state.theme,
         chartView: state.chartView,
         privacyMode: state.privacyMode,

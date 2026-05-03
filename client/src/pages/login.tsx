@@ -7,12 +7,15 @@ import { useLocation } from "wouter";
 import familyImg from "@assets/family.jpeg";
 import { sbUsers } from "@/lib/supabaseClient";
 import type { UserRole } from "@/lib/store";
+import { resetDemoStore } from "@/lib/queryClient";
+import { FlaskConical, Lock } from "lucide-react";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login, setCurrentUser, setRole } = useAppStore();
+  const [demoLoading, setDemoLoading] = useState(false);
+  const { login, loginAsDemo, setCurrentUser, setRole } = useAppStore();
   const { toast } = useToast();
   const [, navigate] = useLocation();
 
@@ -51,6 +54,21 @@ export default function LoginPage() {
     }
 
     setLoading(false);
+  };
+
+  const handleGuestDemo = async () => {
+    setDemoLoading(true);
+    // Reset in-memory demo store to fresh defaults
+    resetDemoStore();
+    // Small artificial delay so it feels intentional
+    await new Promise(r => setTimeout(r, 600));
+    loginAsDemo();
+    toast({
+      title: "Welcome to Demo Mode",
+      description: "Viewing Alex & Sara Johnson — dummy data only. Nothing is real.",
+    });
+    navigate("/dashboard");
+    setDemoLoading(false);
   };
 
   return (
@@ -228,12 +246,67 @@ export default function LoginPage() {
                   Authenticating...
                 </span>
               ) : (
-                "Access Dashboard"
+                <span className="flex items-center gap-2 justify-center">
+                  <Lock className="w-4 h-4" />
+                  Access Dashboard
+                </span>
               )}
             </Button>
           </form>
 
-          <div className="mt-8 pt-6 border-t border-white/5">
+          {/* Guest Demo separator */}
+          <div className="flex items-center gap-3 my-5">
+            <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.08)" }} />
+            <span className="text-xs text-white/25 font-medium tracking-wider uppercase">or</span>
+            <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.08)" }} />
+          </div>
+
+          {/* Guest Demo button */}
+          <button
+            data-testid="button-demo-mode"
+            type="button"
+            onClick={handleGuestDemo}
+            disabled={demoLoading}
+            className="w-full h-12 rounded-lg text-sm font-semibold tracking-wide flex items-center justify-center gap-2 transition-all duration-200"
+            style={{
+              background: demoLoading
+                ? "rgba(139,92,246,0.15)"
+                : "rgba(139,92,246,0.12)",
+              border: "1px solid rgba(139,92,246,0.35)",
+              color: "hsl(262,80%,78%)",
+              cursor: demoLoading ? "not-allowed" : "pointer",
+            }}
+            onMouseEnter={e => { if (!demoLoading) (e.currentTarget as HTMLButtonElement).style.background = "rgba(139,92,246,0.22)"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = demoLoading ? "rgba(139,92,246,0.15)" : "rgba(139,92,246,0.12)"; }}
+          >
+            {demoLoading ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Loading demo...
+              </span>
+            ) : (
+              <>
+                <FlaskConical className="w-4 h-4" />
+                Try Demo — Alex &amp; Sara (Dummy Data)
+              </>
+            )}
+          </button>
+
+          <div
+            className="mt-3 rounded-lg px-4 py-2.5 flex items-start gap-2"
+            style={{ background: "rgba(139,92,246,0.07)", border: "1px solid rgba(139,92,246,0.15)" }}
+          >
+            <FlaskConical className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: "hsl(262,80%,78%)" }} />
+            <p className="text-[11px] leading-relaxed" style={{ color: "hsl(262,80%,75%)" }}>
+              Demo uses completely fake data for a fictional family (Alex &amp; Sara Johnson).
+              No real financial information is ever loaded or stored.
+            </p>
+          </div>
+
+          <div className="mt-6 pt-5 border-t border-white/5">
             <p className="text-white/20 text-xs text-center">
               256-bit encrypted · Private &amp; Secure · Family Office Platform
             </p>

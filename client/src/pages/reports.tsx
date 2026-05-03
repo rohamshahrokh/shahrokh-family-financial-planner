@@ -135,7 +135,7 @@ function ReportTable({ headers, rows, className = '' }: {
 export default function ReportsPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const { privacyMode } = useAppStore();
+  const { privacyMode, isDemo } = useAppStore();
   const mv = (v: string) => privacyMode ? '••••••' : v;
 
   // ── All data from central ledger ──────────────────────────────────────────
@@ -414,6 +414,19 @@ export default function ReportsPage() {
     const light = [245, 247, 250] as [number, number, number];
     const date  = new Date().toLocaleDateString('en-AU', { year: 'numeric', month: 'long', day: 'numeric' });
 
+    // Demo watermark helper — overlays each page with diagonal text
+    const addDemoWatermark = () => {
+      if (!isDemo) return;
+      const savedColor = doc.getTextColor();
+      doc.setTextColor(139, 92, 246);
+      doc.setFontSize(36);
+      doc.setFont('helvetica', 'bold');
+      doc.text('DEMO DATA \u2014 NOT REAL FINANCIAL ADVICE', 105, 148, { align: 'center', angle: 45 });
+      doc.setTextColor(60, 60, 60);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+    };
+
     const sectionHeader = (title: string, y = 25) => {
       doc.addPage();
       doc.setFillColor(...dark);
@@ -619,7 +632,7 @@ export default function ReportsPage() {
     }
 
     doc.save(`Shahrokh_Family_Wealth_Report_${new Date().toISOString().split('T')[0]}.pdf`);
-    toast({ title: 'PDF Exported', description: 'Premium 5-section wealth report generated.' });
+    toast({ title: 'PDF Exported', description: 'Premium 5-section wealth report generated.' + (isDemo ? ' (Demo watermarked)' : '') });
   };
 
   const handlePrint = () => window.print();
@@ -637,6 +650,25 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-4 pb-10">
+
+      {/* DEMO MODE banner */}
+      {isDemo && (
+        <div
+          className="rounded-xl flex items-center gap-3 px-4 py-3"
+          style={{ background: "rgba(139,92,246,0.10)", border: "1px solid rgba(139,92,246,0.35)" }}
+        >
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest flex-shrink-0"
+            style={{ background: "rgba(139,92,246,0.25)", border: "1px solid rgba(139,92,246,0.45)", color: "hsl(262,80%,78%)" }}
+          >
+            DEMO MODE
+          </span>
+          <p className="text-xs" style={{ color: "hsl(262,70%,75%)" }}>
+            These reports show <strong>fictional data</strong> for Alex &amp; Sara Johnson.
+            All PDF and Excel exports are watermarked: <em>DEMO DATA — NOT REAL FINANCIAL ADVICE</em>.
+          </p>
+        </div>
+      )}
 
       {/* ── Page header ──────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between flex-wrap gap-3">
