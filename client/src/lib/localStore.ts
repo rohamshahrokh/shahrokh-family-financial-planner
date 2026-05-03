@@ -210,11 +210,11 @@ export interface CryptoTransaction {
 
 const DEFAULT_SNAPSHOT: Snapshot = {
   id: "shahrokh-family-main",
-  ppor: 1510000, cash: 220000, super_balance: 85000,
-  stocks: 0, crypto: 0, cars: 65000,
-  iran_property: 150000, other_assets: 0,
-  mortgage: 1200000, other_debts: 19000,
-  monthly_income: 22000, monthly_expenses: 14540,
+  ppor: 0, cash: 0, super_balance: 0,
+  stocks: 0, crypto: 0, cars: 0,
+  iran_property: 0, other_assets: 0,
+  mortgage: 0, other_debts: 0,
+  monthly_income: 0, monthly_expenses: 0,
   updated_at: new Date().toISOString(),
 };
 
@@ -320,6 +320,16 @@ function normaliseSnapshot(raw: any): Snapshot {
   // not defaulted to 0, so form shows blank rather than a misleading zero)
   for (const f of SUPER_NUM_FIELDS) {
     if (raw?.[f] !== undefined && raw?.[f] !== null) base[f] = rn(raw[f]);
+  }
+
+  // ── Data integrity guard: prevent offset_balance from being double-counted as other_cash ──
+  // If other_cash equals offset_balance (contaminated by old migrations) zero it out.
+  // Users who intentionally set other_cash to a different value are unaffected.
+  const rawOther  = rn(raw?.other_cash);
+  const rawOffset = rn(raw?.offset_balance);
+  if (rawOther > 0 && rawOffset > 0 && rawOther === rawOffset) {
+    console.warn('[localStore] other_cash === offset_balance — likely duplicate, zeroing other_cash');
+    base['other_cash'] = 0;
   }
 
   // Apply super string fields

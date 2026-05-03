@@ -791,7 +791,9 @@ export default function DashboardPage() {
   // ─── Core financials ──────────────────────────────────────────────────────
   // Total liquid cash = all cash buckets from the ledger (no forecast, no fallback)
   // Formula: Everyday Cash + Savings Cash + Emergency Cash + Other Cash + Offset Balance
-  const totalLiquidCash = snap.cash + snap.savings_cash + snap.emergency_cash + snap.other_cash + snap.offset_balance;
+  // Dedup guard: if other_cash === offset_balance it was contaminated by old data — zero it
+  const _safeOtherCash = (snap.other_cash > 0 && snap.other_cash === snap.offset_balance) ? 0 : snap.other_cash;
+  const totalLiquidCash = snap.cash + snap.savings_cash + snap.emergency_cash + _safeOtherCash + snap.offset_balance;
 
   const totalAssets   = snap.ppor + totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property;
   const totalLiab     = snap.mortgage + snap.other_debts;
@@ -1831,10 +1833,10 @@ export default function DashboardPage() {
                   <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.emergency_cash, true), privacyMode)}</span>
                 </div>
               )}
-              {snap.other_cash > 0 && (
+              {_safeOtherCash > 0 && (
                 <div className="flex justify-between text-[11px]">
                   <span className="text-muted-foreground">Other Cash</span>
-                  <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.other_cash, true), privacyMode)}</span>
+                  <span className="tabular-nums text-foreground">{maskValue(formatCurrency(_safeOtherCash, true), privacyMode)}</span>
                 </div>
               )}
               <div className="flex justify-between text-[11px]">

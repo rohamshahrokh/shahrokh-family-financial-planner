@@ -209,7 +209,7 @@ export default function MyFinancialPlan() {
       return isNaN(parsed) ? fallback : Math.round(parsed);
     };
     setDraft({
-      cash:                       ri(snapshot.cash,                       220000),
+      cash:                       ri(snapshot.cash,                       0),
       offset_balance:             ri(snapshot.offset_balance,             0),
       super_balance:              ri(snapshot.super_balance,              85000),
       roham_super_balance:        ri(snapshot.roham_super_balance,        0),
@@ -276,8 +276,12 @@ export default function MyFinancialPlan() {
   const totalIncome = d
     ? safeNum(d.roham_monthly_income) + safeNum(d.fara_monthly_income) + safeNum(d.rental_income_total) + safeNum(d.other_income)
     : 0;
+  // Total liquid cash from ledger: all 4 cash buckets + offset (same formula as dashboard)
+  const totalLiquidCash = d
+    ? safeNum(d.cash) + safeNum(d.savings_cash ?? 0) + safeNum(d.emergency_cash ?? 0) + safeNum(d.other_cash ?? 0) + safeNum(d.offset_balance)
+    : 0;
   const totalLiquidAssets = d
-    ? safeNum(d.cash) + safeNum(d.offset_balance) + safeNum(d.stocks) + safeNum(d.crypto)
+    ? totalLiquidCash + safeNum(d.stocks) + safeNum(d.crypto)
     : 0;
   const totalExpenses = d
     ? safeNum(d.monthly_expenses) + safeNum(d.childcare_monthly) + safeNum(d.insurance_monthly) + safeNum(d.utilities_monthly) + safeNum(d.subscriptions_monthly)
@@ -286,7 +290,7 @@ export default function MyFinancialPlan() {
     ? safeNum(d.mortgage) + safeNum(d.other_debts)
     : 0;
   const totalAssets = d
-    ? safeNum(d.ppor) + safeNum(d.cash) + safeNum(d.offset_balance) + safeNum(d.super_balance) + safeNum(d.stocks) + safeNum(d.crypto) + safeNum(d.cars) + safeNum(d.iran_property)
+    ? safeNum(d.ppor) + totalLiquidCash + safeNum(d.super_balance) + safeNum(d.stocks) + safeNum(d.crypto) + safeNum(d.cars) + safeNum(d.iran_property)
     : 0;
   const netWorth = totalAssets - totalLiabilities;
   const monthlySurplus = totalIncome > 0

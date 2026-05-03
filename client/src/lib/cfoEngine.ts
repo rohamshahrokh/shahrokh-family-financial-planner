@@ -432,28 +432,22 @@ export async function generateCFOReport(
   const liveCrypto  = cryptoFromRows  > 0 ? cryptoFromRows  : safeNum(snap.crypto);
   const portfolioVal = liveStocks + liveCrypto;
 
-  // ── Cash breakdown (display only — breakdown fields are informational) ──────
-  // dashboard.tsx uses snap.cash (single field) + snap.offset_balance as the
-  // cash component of NW. savings_cash / emergency_cash / other_cash are
-  // displayed in the bulletin breakdown but do NOT change the NW total.
-  const cashEveryday  = safeNum(snap.cash);          // the "Cash" field in dashboard
-  const cashSavings   = safeNum(snap.savings_cash);  // display only
-  const cashEmergency = safeNum(snap.emergency_cash);// display only
-  const cashOther     = safeNum(snap.other_cash);    // display only
+  // ── Canonical cash formula (SINGLE SOURCE OF TRUTH — must match dashboard.tsx totalLiquidCash) ──
+  // Total Liquid Cash = Everyday + Savings + Emergency + Other + Offset
+  // "Other Cash" must NEVER equal offset_balance (dedup guard also in localStore)
+  const cashEveryday  = safeNum(snap.cash);
+  const cashSavings   = safeNum(snap.savings_cash);
+  const cashEmergency = safeNum(snap.emergency_cash);
+  const cashOther     = safeNum(snap.other_cash);
   const offsetBal     = safeNum(snap.offset_balance);
-  // liquidCash for display: if breakdown fields are populated use them, else just cash
-  const breakdownSum  = cashSavings + cashEmergency + cashOther;
-  const liquidCash    = breakdownSum > 0
-    ? cashEveryday + breakdownSum  // user has filled in breakdown
-    : cashEveryday;                // only everyday field filled — single cash value
+  // Dedup guard: if other_cash was accidentally set to offset_balance, zero it
+  const safeOther     = (cashOther > 0 && cashOther === offsetBal) ? 0 : cashOther;
+  const liquidCash    = cashEveryday + cashSavings + cashEmergency + safeOther + offsetBal;
 
-  // Core balance sheet — IDENTICAL to dashboard.tsx lines 357-359
-  // totalAssets = ppor + cash + offset_balance + super + stocks + crypto + cars + iran_property
-  // NOTE: dashboard adds snap.cash + snap.offset_balance separately (both included)
+  // Core balance sheet — IDENTICAL to dashboard.tsx
   const totalAssets =
     safeNum(snap.ppor) +
-    cashEveryday +          // snap.cash — matches dashboard exactly
-    offsetBal +             // snap.offset_balance — matches dashboard exactly
+    liquidCash +            // all cash buckets + offset (single source of truth)
     superCombined +
     liveStocks +
     liveCrypto +
@@ -671,7 +665,8 @@ export async function generateCFOReport(
   // SECTION 6: PROPERTY WATCH (Brisbane/SEQ market)
   // ═══════════════════════════════════════════════════════════════════════════
   // Simple heuristic-based scoring based on financial readiness
-  const hasSavedDeposit = liquidCash + offsetBal;
+  // liquidCash already includes offsetBal — use directly (no double-counting)
+  const hasSavedDeposit = liquidCash;
   const targetDeposit   = safeNum(snap.ppor) * 0.20; // 20% of PPOR as proxy
   const depositReadiness = Math.min(100, (hasSavedDeposit / Math.max(targetDeposit, 1)) * 100);
   // FIX: Borrowing power formula (income × 72 − mortgage) is too crude to display.
