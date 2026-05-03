@@ -126,14 +126,21 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
     { label: "Net Cashflow",        value: d.netCF     ?? 0,         color: (d.netCF ?? 0) >= 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)", bold: true },
     { label: "Closing Cash",        value: d.balance   ?? 0,         color: "hsl(210,80%,65%)",  bold: true },
   ].filter(r => Math.abs(r.value) > 0);
-  const equityRows = [
-    d.pporUsableEquity > 0  ? { label: "PPOR Usable Equity",  value: d.pporUsableEquity,  color: "hsl(188,60%,48%)" } : null,
-    d.ipUsableEquity > 0    ? { label: "IP Usable Equity",    value: d.ipUsableEquity,    color: "hsl(145,55%,42%)" } : null,
-    d.totalDepositPower > 0 ? { label: "Total Deposit Power", value: d.totalDepositPower, color: "hsl(43,90%,58%)",  bold: true } : null,
-  ].filter(Boolean) as { label: string; value: number; color: string; bold?: boolean }[];
+  // Build full deposit power waterfall for the tooltip
+  const hasEquityData = (d.pporUsableEquity > 0 || d.ipUsableEquity > 0 || d.projectedCash > 0);
+  const projCash    = d.projectedCash    ?? 0;
+  const pporEq      = d.pporUsableEquity ?? 0;
+  const ipEq        = d.ipUsableEquity   ?? 0;
+  const eBuf        = d.emergencyBufferAmt ?? 0;
+  const totalEq     = pporEq + ipEq;
+  const rawTotal    = projCash + totalEq;
+  const finalDP     = d.totalDepositPower ?? 0;
+  // Detect closing-cash-negative case: chart balance (actual cashflow) is negative
+  const closingCash = d.balance ?? 0;
+  const cashIsNegative = closingCash < 0;
   const milestones: { icon: string; text: string }[] = d._milestones ?? [];
   return (
-    <div className="db-tooltip" style={{ minWidth: 260, background: "hsl(222,22%,9%)", border: "1px solid hsl(222,15%,22%)", borderRadius: 10, padding: "10px 14px" }}>
+    <div className="db-tooltip" style={{ minWidth: 300, maxWidth: 340, background: "hsl(222,22%,9%)", border: "1px solid hsl(222,15%,22%)", borderRadius: 10, padding: "10px 14px" }}>
       <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(215,20%,80%)", marginBottom: 8, letterSpacing: "0.03em" }}>{label}</p>
       {mainRows.map((r, i) => (
         <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 20, marginBottom: 3, color: r.color, fontWeight: r.bold ? 700 : 400, fontSize: r.bold ? 12 : 11 }}>
@@ -141,15 +148,46 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
           <span style={{ fontFamily: "monospace" }}>{r.value >= 0 ? "+" : ""}{formatCurrency(r.value, true)}</span>
         </div>
       ))}
-      {equityRows.length > 0 && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid hsl(222,15%,22%)" }}>
-          <div style={{ fontSize: 10, color: "hsl(188,60%,52%)", marginBottom: 4, letterSpacing: "0.05em", textTransform: "uppercase" }}>Projected Equity ({label})</div>
-          {equityRows.map((r, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 20, marginBottom: 3, color: r.color, fontWeight: r.bold ? 700 : 400, fontSize: r.bold ? 12 : 11 }}>
-              <span style={{ opacity: r.bold ? 1 : 0.85 }}>{r.label}</span>
+      {hasEquityData && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid hsl(222,15%,22%)" }}>
+          {/* Section header */}
+          <div style={{ fontSize: 10, color: "hsl(188,60%,52%)", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700 }}>
+            Deposit Power Build-up ({label})
+          </div>
+          {/* Waterfall rows */}
+          {[
+            projCash > 0 ? { label: "Projected Cash Balance",    value: projCash, color: "hsl(210,80%,65%)", sign: "+" }  : null,
+            pporEq   > 0 ? { label: "PPOR Usable Equity (80%)",  value: pporEq,   color: "hsl(188,60%,52%)", sign: "+" }  : null,
+            ipEq     > 0 ? { label: "IP Usable Equity (80%)",    value: ipEq,     color: "hsl(145,55%,42%)", sign: "+" }  : null,
+          ].filter(Boolean).map((r: any, i: number) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: r.color, fontSize: 11 }}>
+              <span style={{ opacity: 0.90 }}>{r.sign} {r.label}</span>
               <span style={{ fontFamily: "monospace" }}>{formatCurrency(r.value, true)}</span>
             </div>
           ))}
+          {/* Divider + raw total */}
+          <div style={{ borderTop: "1px dashed hsl(222,15%,28%)", margin: "5px 0 4px" }} />
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: "hsl(215,15%,65%)", fontSize: 11 }}>
+            <span>= Gross total</span>
+            <span style={{ fontFamily: "monospace" }}>{formatCurrency(rawTotal, true)}</span>
+          </div>
+          {eBuf > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: "hsl(0,65%,58%)", fontSize: 11 }}>
+              <span>− Emergency Buffer</span>
+              <span style={{ fontFamily: "monospace" }}>−{formatCurrency(eBuf, true)}</span>
+            </div>
+          )}
+          {/* Final deposit power — highlighted */}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginTop: 5, padding: "5px 8px", borderRadius: 6, background: "hsl(43,90%,10%)", border: "1px solid hsl(43,90%,30%)" }}>
+            <span style={{ color: "hsl(43,90%,62%)", fontWeight: 700, fontSize: 12 }}>= Total Deposit Power</span>
+            <span style={{ fontFamily: "monospace", color: "hsl(43,90%,62%)", fontWeight: 700, fontSize: 12 }}>{formatCurrency(finalDP, true)}</span>
+          </div>
+          {/* Negative-cash explanation */}
+          {cashIsNegative && finalDP > 0 && (
+            <div style={{ marginTop: 6, padding: "5px 8px", borderRadius: 6, background: "hsl(43,80%,8%)", border: "1px solid hsl(43,80%,28%)", fontSize: 10, color: "hsl(43,80%,60%)", lineHeight: 1.5 }}>
+              ⚠ Closing cash is negative — Deposit Power is positive because it counts <strong>refinanceable equity</strong>, not just cash. You would need to draw down that equity via a loan top-up to fund the deposit.
+            </div>
+          )}
         </div>
       )}
       {milestones.length > 0 && (
@@ -766,12 +804,20 @@ export default function DashboardPage() {
 
   const masterCFData = useMemo(() => {
     // Build equity lookup by year from equityTimeline (EquityTimelinePoint uses snake_case)
-    const equityByYear = new Map<number, { pporUsableEquity: number; ipUsableEquity: number; totalDepositPower: number }>();
+    const equityByYear = new Map<number, {
+      pporUsableEquity: number;
+      ipUsableEquity: number;
+      totalDepositPower: number;
+      projectedCash: number;       // projected cash in that year (cash + accumulated surplus)
+      emergencyBufferAmt: number;  // emergency buffer deducted
+    }>();
     (equityTimeline ?? []).forEach((pt: any) => {
       equityByYear.set(pt.year, {
-        pporUsableEquity:  pt.ppor_usable_equity  ?? 0,
-        ipUsableEquity:    pt.ip_usable_equity    ?? 0,
-        totalDepositPower: pt.deposit_power       ?? 0,
+        pporUsableEquity:   pt.ppor_usable_equity  ?? 0,
+        ipUsableEquity:     pt.ip_usable_equity    ?? 0,
+        totalDepositPower:  pt.deposit_power       ?? 0,
+        projectedCash:      pt.cash                ?? 0,
+        emergencyBufferAmt: emergencyBuffer,
       });
     });
     // Build stock/crypto purchase lookup by year from planned orders
@@ -817,12 +863,14 @@ export default function DashboardPage() {
           propPurchases:    isJan ? (propPurchByYear.get(m.year) ?? 0) : 0,
           stockPurchases:   isJan ? (stockPurchByYear.get(m.year) ?? 0) : 0,
           cryptoPurchases:  isJan ? (cryptoPurchByYear.get(m.year) ?? 0) : 0,
-          pporUsableEquity: eq.pporUsableEquity,
-          ipUsableEquity:   eq.ipUsableEquity,
-          totalDepositPower:eq.totalDepositPower,
-          usableEquity:     eq.pporUsableEquity + eq.ipUsableEquity,
-          _milestones:      ms,
-          _purchaseBreakdown: mpurchEvent?.purchaseBreakdown ?? null,
+          pporUsableEquity:    eq.pporUsableEquity,
+          ipUsableEquity:      eq.ipUsableEquity,
+          totalDepositPower:   eq.totalDepositPower,
+          projectedCash:       eq.projectedCash,
+          emergencyBufferAmt:  eq.emergencyBufferAmt,
+          usableEquity:        eq.pporUsableEquity + eq.ipUsableEquity,
+          _milestones:         ms,
+          _purchaseBreakdown:  mpurchEvent?.purchaseBreakdown ?? null,
         };
       });
     }
@@ -855,12 +903,14 @@ export default function DashboardPage() {
         propPurchases:    propPurchByYear.get(yr) ?? 0,
         stockPurchases:   stockPurchByYear.get(yr) ?? 0,
         cryptoPurchases:  cryptoPurchByYear.get(yr) ?? 0,
-        pporUsableEquity: eq.pporUsableEquity,
-        ipUsableEquity:   eq.ipUsableEquity,
-        totalDepositPower:eq.totalDepositPower,
-        usableEquity:     eq.pporUsableEquity + eq.ipUsableEquity,
-        _milestones:      dedupMs,
-        _purchaseBreakdown: ppurchEvent?.purchaseBreakdown ?? null,
+        pporUsableEquity:    eq.pporUsableEquity,
+        ipUsableEquity:      eq.ipUsableEquity,
+        totalDepositPower:   eq.totalDepositPower,
+        projectedCash:       eq.projectedCash,
+        emergencyBufferAmt:  eq.emergencyBufferAmt,
+        usableEquity:        eq.pporUsableEquity + eq.ipUsableEquity,
+        _milestones:         dedupMs,
+        _purchaseBreakdown:  ppurchEvent?.purchaseBreakdown ?? null,
       };
     });
   }, [cashFlowView, cashFlowSeries, cashFlowAnnual, milestonesPerYear, equityTimeline, ordersRaw, cryptoOrdersRaw, properties, cashEngineResult]);
@@ -1592,44 +1642,118 @@ export default function DashboardPage() {
             {/* TAB: CASH */}
             {wdcTab === "CASH" && (
               <>
-                {/* 8-card Deposit Power & Usable Equity section */}
+                {/* Deposit Power — Full Waterfall Breakdown */}
                 <div className="mb-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Unlock className="w-3.5 h-3.5" style={{ color: "hsl(188,60%,52%)" }} />
                     <span className="text-xs font-bold uppercase tracking-widest" style={{ color: "hsl(188,60%,52%)" }}>Deposit Power &amp; Usable Equity</span>
+                    <span className="text-xs ml-auto" style={{ color: "hsl(215,12%,45%)" }}>Today's snapshot</span>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {/* Row 1: Cash/Offset + Equity + Emergency Buffer + Deposit Power */}
-                    <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">Cash + Offset</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</div>
-                    </div>
-                    <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">Total Usable Equity <span style={{ color: "hsl(215,12%,45%)", fontWeight: 400 }}>(Today)</span></div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(188,60%,52%)" }}>{maskValue(formatCurrency(depositPowerResult?.totalUsableEquity ?? 0, true), privacyMode)}</div>
-                      <div className="text-xs mt-0.5" style={{ color: "hsl(215,12%,45%)" }}>Use chart for projections</div>
-                    </div>
-                    <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">Emergency Buffer</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(0,72%,58%)" }}>−{maskValue(formatCurrency(emergencyBuffer, true), privacyMode)}</div>
-                    </div>
-                    <div className="rounded-xl border px-3 py-2" style={{ background: "hsl(43,90%,10%)", borderColor: "hsl(43,90%,35%)" }}>
-                      <div className="text-xs text-muted-foreground mb-0.5">Total Deposit Power</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(43,90%,62%)" }}>{maskValue(formatCurrency(depositPowerResult?.totalDepositPower ?? 0, true), privacyMode)}</div>
-                    </div>
-                    {/* Row 2: PPOR Equity + IP Equity + Readiness% + Ready Date */}
-                    <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">PPOR Usable Eq.</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(188,60%,52%)" }}>{maskValue(formatCurrency(depositPowerResult?.pporEquity?.usableEquity ?? 0, true), privacyMode)}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">{depositPowerResult?.pporEquity ? `LVR ${(depositPowerResult.pporEquity.currentLVR * 100).toFixed(0)}%` : "No PPOR"}</div>
-                    </div>
-                    <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">IP Usable Eq. Total</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(145,55%,42%)" }}>
-                        {maskValue(formatCurrency((depositPowerResult?.ipEquityList ?? []).reduce((s: number, p: any) => s + p.usableEquity, 0), true), privacyMode)}
+
+                  {/* Waterfall formula card */}
+                  <div className="rounded-xl border border-border overflow-hidden mb-2" style={{ background: "hsl(220,18%,10%)" }}>
+                    {/* +  Cash + Offset */}
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold w-3" style={{ color: "hsl(210,80%,65%)" }}>+</span>
+                        <span className="text-xs text-muted-foreground">Cash + Offset</span>
                       </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">{depositPowerResult?.ipEquityList?.length ?? 0} IP{(depositPowerResult?.ipEquityList?.length ?? 0) !== 1 ? "s" : ""}</div>
+                      <span className="text-xs font-bold tabular-nums" style={{ color: "hsl(210,80%,65%)" }}>
+                        {maskValue(formatCurrency(depositPowerResult?.cashAndOffset ?? (snap.cash + snap.offset_balance), true), privacyMode)}
+                      </span>
                     </div>
+
+                    {/* +  PPOR Usable Equity */}
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold w-3" style={{ color: "hsl(188,60%,52%)" }}>+</span>
+                        <span className="text-xs text-muted-foreground">
+                          PPOR Usable Equity (80%)
+                          {depositPowerResult?.pporEquity && (
+                            <span className="ml-1" style={{ color: "hsl(215,12%,45%)" }}>
+                              LVR {(depositPowerResult.pporEquity.currentLVR * 100).toFixed(0)}%
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <span className="text-xs font-bold tabular-nums" style={{ color: "hsl(188,60%,52%)" }}>
+                        {maskValue(formatCurrency(depositPowerResult?.pporEquity?.usableEquity ?? 0, true), privacyMode)}
+                      </span>
+                    </div>
+
+                    {/* +  IP Usable Equity */}
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold w-3" style={{ color: "hsl(145,55%,45%)" }}>+</span>
+                        <span className="text-xs text-muted-foreground">
+                          IP Usable Equity (80%)
+                          <span className="ml-1" style={{ color: "hsl(215,12%,45%)" }}>
+                            {depositPowerResult?.ipEquityList?.length ?? 0} IP{(depositPowerResult?.ipEquityList?.length ?? 0) !== 1 ? "s" : ""}
+                          </span>
+                        </span>
+                      </div>
+                      <span className="text-xs font-bold tabular-nums" style={{ color: "hsl(145,55%,45%)" }}>
+                        {maskValue(formatCurrency((depositPowerResult?.ipEquityList ?? []).reduce((s: number, p: any) => s + p.usableEquity, 0), true), privacyMode)}
+                      </span>
+                    </div>
+
+                    {/* =  Gross Total (subtotal line) */}
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-border/50" style={{ background: "hsl(220,18%,13%)" }}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold w-3" style={{ color: "hsl(215,12%,55%)" }}>=</span>
+                        <span className="text-xs" style={{ color: "hsl(215,12%,55%)" }}>Gross Total</span>
+                      </div>
+                      <span className="text-xs tabular-nums" style={{ color: "hsl(215,12%,65%)" }}>
+                        {maskValue(formatCurrency(depositPowerResult?.totalDepositPowerRaw ?? 0, true), privacyMode)}
+                      </span>
+                    </div>
+
+                    {/* −  Emergency Buffer */}
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold w-3" style={{ color: "hsl(0,72%,58%)" }}>−</span>
+                        <span className="text-xs text-muted-foreground">Emergency Buffer</span>
+                      </div>
+                      <span className="text-xs font-bold tabular-nums" style={{ color: "hsl(0,72%,58%)" }}>
+                        {maskValue(formatCurrency(emergencyBuffer, true), privacyMode)}
+                      </span>
+                    </div>
+
+                    {/* =  Total Deposit Power (highlight) */}
+                    <div className="flex items-center justify-between px-4 py-2.5" style={{ background: "hsl(43,90%,10%)", borderTop: "1px solid hsl(43,90%,28%)" }}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold w-3" style={{ color: "hsl(43,90%,62%)" }}>=</span>
+                        <span className="text-xs font-bold" style={{ color: "hsl(43,90%,62%)" }}>Total Deposit Power</span>
+                      </div>
+                      <span className="text-sm font-bold tabular-nums" style={{ color: "hsl(43,90%,62%)" }}>
+                        {maskValue(formatCurrency(depositPowerResult?.totalDepositPower ?? 0, true), privacyMode)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Readiness metrics */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                    {/* PPOR LVR */}
+                    <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
+                      <div className="text-xs text-muted-foreground mb-0.5">PPOR LVR</div>
+                      <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(188,60%,52%)" }}>
+                        {depositPowerResult?.pporEquity
+                          ? `${(depositPowerResult.pporEquity.currentLVR * 100).toFixed(0)}%`
+                          : "—"}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {depositPowerResult?.pporEquity ? "Current LVR" : "No PPOR"}
+                      </div>
+                    </div>
+                    {/* IP count */}
+                    <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
+                      <div className="text-xs text-muted-foreground mb-0.5">IPs Held</div>
+                      <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(145,55%,45%)" }}>
+                        {depositPowerResult?.ipEquityList?.length ?? 0}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">Investment propert{(depositPowerResult?.ipEquityList?.length ?? 0) === 1 ? "y" : "ies"}</div>
+                    </div>
+                    {/* Readiness % */}
                     <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
                       <div className="text-xs text-muted-foreground mb-0.5">IP Readiness</div>
                       <div className="text-sm font-bold tabular-nums" style={{ color: (depositPowerResult?.readinessPct ?? 0) >= 100 ? "hsl(142,60%,52%)" : "hsl(43,90%,58%)" }}>
@@ -1639,22 +1763,27 @@ export default function DashboardPage() {
                         <div className="h-full rounded-full" style={{ width: `${Math.min(100, depositPowerResult?.readinessPct ?? 0)}%`, background: (depositPowerResult?.readinessPct ?? 0) >= 100 ? "hsl(142,55%,42%)" : "hsl(43,85%,52%)" }} />
                       </div>
                     </div>
+                    {/* Est. Ready Date */}
                     <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
                       <div className="text-xs text-muted-foreground mb-0.5">Est. Ready Date</div>
                       <div className="text-sm font-bold tabular-nums" style={{ color: depositPowerResult?.isEquityRichCashPoor ? "hsl(43,90%,62%)" : depositPowerResult?.isReady ? "hsl(142,60%,52%)" : "hsl(215,15%,65%)" }}>
                         {depositPowerResult?.isEquityRichCashPoor
-                          ? "⚠ Equity Rich / Cash Poor"
+                          ? "⚠ Equity Rich"
                           : depositPowerResult?.isReady
                             ? "Ready Now"
                             : depositPowerResult?.estimatedReadyDate
                               ? new Date(depositPowerResult.estimatedReadyDate).toLocaleDateString("en-AU", { month: "short", year: "numeric" })
                               : "—"}
                       </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {depositPowerResult?.isEquityRichCashPoor ? "/ Cash Poor" : depositPowerResult?.isReady ? "Deposit ready" : "Projected"}
+                      </div>
                     </div>
                   </div>
-                  {/* Equity-rich / Cash-poor warning banner — Issue 2 fix */}
+
+                  {/* Equity-rich / Cash-poor warning banner */}
                   {depositPowerResult?.isEquityRichCashPoor && (
-                    <div className="mt-3 rounded-xl px-4 py-2.5 flex items-start gap-2.5"
+                    <div className="mb-2 rounded-xl px-4 py-2.5 flex items-start gap-2.5"
                       style={{ background: "hsl(43,90%,10%)", border: "1px solid hsl(43,90%,35%)" }}>
                       <span style={{ fontSize: 16, lineHeight: 1.4 }}>⚠</span>
                       <div>
@@ -1666,9 +1795,10 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   )}
-                  {/* Funding sources breakdown */}
+
+                  {/* Funding sources chips */}
                   {(depositPowerResult?.fundingSources ?? []).length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2">
                       {depositPowerResult!.fundingSources.map((fs: any, i: number) => (
                         <div key={i} className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg" style={{ background: `${fs.color}18`, border: `1px solid ${fs.color}40`, color: fs.color }}>
                           {fs.type === "cash" ? <DollarSign className="w-3 h-3" /> : fs.type === "equity" ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
