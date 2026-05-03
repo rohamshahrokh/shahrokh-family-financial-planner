@@ -75,7 +75,7 @@ export const SOURCE_CODE_MAP: Record<string, string> = {
 // All display codes for the Source Code filter dropdown
 const ALL_SOURCE_CODES = ['D', 'M', 'T', 'E', 'C', 'B', 'R', 'G', 'S', 'L', 'PI', 'I', 'U', 'BB', 'CC', 'TR'];
 
-const FAMILY_MEMBERS = ['Roham Shahrokh', 'Fara Ghiyasi', 'Yara Shahrokh', 'Jana Shahrokh', 'Family'];
+const FAMILY_MEMBERS = ['Roham', 'Fara', 'Kids', 'Family'];
 const PAYMENT_METHODS = ['Bank Transfer', 'Credit Card', 'Debit Card', 'Cash', 'Offset Account', 'BPAY'];
 
 // ─── Income constants ─────────────────────────────────────────────────────────
@@ -459,9 +459,9 @@ function parseExcelDate(raw: any): { iso: string; wasSerial: boolean } {
 function normalizeMember(raw: string): string {
   if (!raw) return 'Family';
   const s = raw.trim().toLowerCase();
-  if (s.includes('roham')) return 'Roham Shahrokh';
-  if (s.includes('fara')) return 'Fara Ghiyasi';
-  if (s.includes('yara') || s.includes('jana') || s.includes('kids') || s.includes('babies') || s.includes('baby')) return 'Yara Shahrokh';
+  if (s.includes('roham')) return 'Roham';
+  if (s.includes('fara')) return 'Fara';
+  if (s.includes('yara') || s.includes('jana') || s.includes('kids') || s.includes('babies') || s.includes('baby')) return 'Kids';
   if (s.includes('family') || s.includes('household')) return 'Family';
   return 'Family';
 }

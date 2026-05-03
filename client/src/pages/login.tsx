@@ -95,7 +95,7 @@ export default function LoginPage() {
                 Family Office
               </span>
             </div>
-            <p className="text-white/90 text-sm">Roham · Fara · Yara · Jana</p>
+            <p className="text-white/90 text-sm">Roham · Fara · Kids</p>
             <p className="text-white/60 text-xs mt-1">Brisbane, Queensland · Australia</p>
           </div>
         </div>

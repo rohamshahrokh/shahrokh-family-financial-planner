@@ -460,7 +460,7 @@ export default function ReportsPage() {
     doc.setTextColor(200, 200, 200);
     doc.text('Family Wealth Planning · Central Ledger Analytics', 105, 124, { align: 'center' });
     doc.setFontSize(9);
-    doc.text('Roham Shahrokh · Fara Ghiyasi · Yara · Jana', 105, 140, { align: 'center' });
+    doc.text('Roham · Fara · Kids', 105, 140, { align: 'center' });
     doc.text('Brisbane, Queensland, Australia', 105, 149, { align: 'center' });
     doc.setTextColor(...gold);
     doc.setFontSize(10);

@@ -64,9 +64,9 @@ function parseExcelDate(raw: any): string {
 function normalizeMember(raw: string): string {
   if (!raw) return 'Family';
   const s = raw.trim().toLowerCase();
-  if (s.includes('roham')) return 'Roham Shahrokh';
-  if (s.includes('fara')) return 'Fara Ghiyasi';
-  if (s.includes('yara') || s.includes('jana') || s.includes('kids') || s.includes('babies') || s.includes('baby')) return 'Yara Shahrokh';
+  if (s.includes('roham')) return 'Roham';
+  if (s.includes('fara')) return 'Fara';
+  if (s.includes('yara') || s.includes('jana') || s.includes('kids') || s.includes('babies') || s.includes('baby')) return 'Kids';
   if (s.includes('family') || s.includes('household')) return 'Family';
   return 'Family';
 }

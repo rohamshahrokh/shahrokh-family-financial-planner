@@ -275,7 +275,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         }}
       >
         <p className="text-xs font-semibold text-gold">Roham &amp; Fara</p>
-        <p className="text-[10px] text-muted-foreground">Yara · Jana · Brisbane</p>
+        <p className="text-[10px] text-muted-foreground">Kids · Brisbane</p>
       </div>
 
       {/* ACCORDION NAV — ref attached here for scroll preservation */}

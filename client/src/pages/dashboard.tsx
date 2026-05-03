@@ -865,7 +865,7 @@ export default function DashboardPage() {
               <div className="text-xs font-bold uppercase tracking-widest text-amber-400 mb-0.5">Welcome Back</div>
               <div className="text-2xl font-extrabold tracking-tight text-foreground leading-tight">Fara &amp; Roham</div>
               <div className="text-sm font-semibold text-muted-foreground mt-0.5">Family Net Worth Command Center</div>
-              <div className="text-xs text-muted-foreground/70 mt-0.5">Building Wealth for Yara &amp; Jana</div>
+              <div className="text-xs text-muted-foreground/70 mt-0.5">Building Wealth for the Kids</div>
             </div>
           </div>
 

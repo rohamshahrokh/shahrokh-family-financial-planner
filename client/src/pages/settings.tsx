@@ -1409,10 +1409,9 @@ export default function SettingsPage() {
       <SectionCard title="Family Members" icon={User} isAdmin={isAdmin}>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { name: 'Roham Shahrokh', role: 'Primary', initials: 'RS' },
-            { name: 'Fara Ghiyasi', role: 'Co-Holder', initials: 'FG' },
-            { name: 'Yara Shahrokh', role: 'Beneficiary', initials: 'YS' },
-            { name: 'Jana Shahrokh', role: 'Beneficiary', initials: 'JS' },
+            { name: 'Roham', role: 'Primary', initials: 'R' },
+            { name: 'Fara', role: 'Co-Holder', initials: 'F' },
+            { name: 'Kids', role: 'Beneficiaries', initials: 'K' },
           ].map(m => (
             <div key={m.name} className="rounded-lg bg-secondary/40 p-3 text-center">
               <div className="w-10 h-10 rounded-full mx-auto flex items-center justify-center text-sm font-bold mb-2"

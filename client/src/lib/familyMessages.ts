@@ -16,12 +16,12 @@ interface MessageTemplate {
 }
 
 // ─── Message Library ──────────────────────────────────────────────────────────
-// Placeholders: {name} = recipient name(s), {child1} = Yara, {child2} = Jana
+// Placeholders: {name} = recipient name(s), {kids} = the kids
 
 const LIBRARY: MessageTemplate[] = [
   // ── English ──────────────────────────────────────────────────────────────
   { en: "{name}, every disciplined step today builds freedom for your family tomorrow.", tags: ['discipline'] },
-  { en: "{name}, your effort today protects Yara and Jana's future.", tags: ['children'] },
+  { en: "{name}, your effort today protects the kids' future.", tags: ['children'] },
   { en: "{name}, wealth is built in the quiet moments of consistency, not in single big decisions.", tags: ['consistency'] },
   { en: "{name}, the best financial gift to your children is a calm, secure home. You are building that.", tags: ['children', 'security'] },
   { en: "{name}, small savings compounded over years become the freedom you are working toward.", tags: ['savings'] },
@@ -33,7 +33,7 @@ const LIBRARY: MessageTemplate[] = [
   { en: "{name}, today's sacrifice is tomorrow's freedom. Every dollar saved is a vote for your future self.", tags: ['discipline'] },
   { en: "{name}, the mortgage will end. The children will grow. The wealth will remain if you keep building it.", tags: ['long-term'] },
   { en: "{name}, consistency beats intensity. Show up for your finances every single week.", tags: ['consistency'] },
-  { en: "{name}, think about Yara and Jana. That is enough reason to stay the course.", tags: ['children'] },
+  { en: "{name}, think about the kids. That is enough reason to stay the course.", tags: ['children'] },
   { en: "{name}, your home is not just a property — it is the place where your children's memories are made. Protect it.", tags: ['home'] },
   { en: "{name}, financial strength gives you choices. Choices give your family freedom.", tags: ['freedom'] },
   { en: "{name}, the wealthiest families in history shared one trait: patience. Stay patient.", tags: ['patience'] },
@@ -44,7 +44,7 @@ const LIBRARY: MessageTemplate[] = [
   { en: "{name}, financial stress hurts families. You are removing that stress brick by brick.", tags: ['security'] },
   { en: "{name}, one good financial decision per week builds a completely different life in five years.", tags: ['consistency'] },
   { en: "{name}, generosity flows from abundance. Build the abundance first.", tags: ['mindset'] },
-  { en: "{name}, your legacy is not your net worth number — it is the values you model for Yara and Jana.", tags: ['legacy'] },
+  { en: "{name}, your legacy is not your net worth number — it is the values you model for the kids.", tags: ['legacy'] },
   { en: "{name}, a calm parent who is not stressed about money is the greatest gift to a child.", tags: ['children', 'peace'] },
   { en: "{name}, the market will correct. The property will appreciate. Stay invested and stay patient.", tags: ['investing'] },
   { en: "{name}, review the numbers not with anxiety, but with clarity. Knowledge is power.", tags: ['mindset'] },
@@ -87,12 +87,12 @@ const LIBRARY: MessageTemplate[] = [
   { mixed: "{name} جان، wealth is not a destination — it is a way of living with intention.", tags: ['mindset'] },
   { mixed: "{name}، ثروت ساخته می‌شه in the small decisions, not the big ones.", tags: ['consistency'] },
   { mixed: "{name}، protect your peace. آرامشت رو حفظ کن. That is the foundation of everything.", tags: ['peace'] },
-  { mixed: "{name}، Yara and Jana are watching. یارا و جانا یاد می‌گیرن از تو.", tags: ['children', 'legacy'] },
+  { mixed: "{name}، the kids are watching. بچه‌ها یاد می‌گیرن از تو.", tags: ['children', 'legacy'] },
   { mixed: "{name}، the future is built today. آینده امروز ساخته می‌شه.", tags: ['vision'] },
 
   // ── Both / Couple ─────────────────────────────────────────────────────────
   { en: "{name}, you are not just building wealth — you are building peace and security for your family.", tags: ['family', 'security'] },
-  { en: "{name}, your unity today becomes security for Yara and Jana tomorrow.", tags: ['family', 'children'] },
+  { en: "{name}, your unity today becomes security for the kids tomorrow.", tags: ['family', 'children'] },
   { en: "{name}, today is another page in the story of the future you are creating together.", tags: ['family', 'vision'] },
   { en: "{name}, two people aligned on finances are unstoppable. You are that team.", tags: ['family', 'partnership'] },
   { en: "{name}, the love in your home and the discipline in your finances are not separate things — they protect each other.", tags: ['family', 'discipline'] },
@@ -107,7 +107,7 @@ const LIBRARY: MessageTemplate[] = [
   { fa: "{name}، دو نفری که روی مالی هم‌نظرن، شکست‌ناپذیرن. شما اون تیم هستید.", tags: ['family', 'partnership'] },
   { mixed: "{name}، the love you have for each other is the reason این همه تلاش می‌کنید. Never forget that.", tags: ['family', 'love'] },
   { mixed: "{name}، together you are building something rare — هم آرامش، هم امنیت، هم آزادی.", tags: ['family', 'freedom'] },
-  { mixed: "{name}، Yara and Jana are the reason. یارا و جانا دلیل همه چیزن. Keep going.", tags: ['children', 'encouragement'] },
+  { mixed: "{name}، the kids are the reason. بچه‌ها دلیل همه چیزن. Keep going.", tags: ['children', 'encouragement'] },
   { mixed: "{name}، your family story is being written every day. Every good financial choice is a good sentence in it.", tags: ['family', 'legacy'] },
   { mixed: "{name} جانم، یه روز بچه‌هاتون will look back and see how much you sacrificed for them. ارزشش رو داره.", tags: ['children', 'legacy'] },
   { mixed: "{name}، in this family, love and responsibility walk together. عشق و مسئولیت دست به دست هم.", tags: ['family', 'discipline'] },
