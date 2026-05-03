@@ -589,13 +589,13 @@ export default function DashboardPage() {
       offset_balance:  snap.offset_balance,
       ppor_value:      snap.ppor,
       ppor_loan:       snap.mortgage,
-      ppor_growth_rate:    (fa.assumptions.ppor_growth ?? 6) / 100,
+      ppor_growth_rate:    (fa.flat.property_growth ?? 6) / 100,
       ppor_mortgage_rate:  (snap.mortgage_rate ?? 6.5) / 100,
       ppor_term_years:     snap.mortgage_term_years ?? 30,
       ipProperties: ipPropertiesForEquity.map((p: any) => ({
         current_value: safeNum(p.current_value ?? p.purchase_price),
         loan_amount:   safeNum(p.loan_amount),
-        growth_rate:   (fa.assumptions.prop_growth ?? 6) / 100,
+        growth_rate:   (fa.flat.property_growth ?? 6) / 100,
         mortgage_rate: (snap.mortgage_rate ?? 6.5) / 100,
       })),
       monthly_surplus:  Math.max(0, surplus),
@@ -603,7 +603,7 @@ export default function DashboardPage() {
       emergencyBuffer,
       years: 10,
     });
-  }, [snapshot, snap, ipPropertiesForEquity, fa.assumptions, surplus, maxRefinanceLVR, emergencyBuffer]);
+  }, [snapshot, snap, ipPropertiesForEquity, fa.flat.property_growth, surplus, maxRefinanceLVR, emergencyBuffer]);
 
   // Planned investment grouped totals (fix $0 bug)
   const plannedStockTotal = useMemo(() => {
