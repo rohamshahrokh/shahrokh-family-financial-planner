@@ -110,10 +110,9 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-// ─── Executive Cashflow Tooltip ──────────────────────────────────────────────
-const CashflowTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]?.payload ?? {};
+// ─── Shared cashflow tooltip data builder ─────────────────────────────────────
+// Used by both CashflowTooltip (desktop) and MobileChartSheet (mobile)
+const buildCFTooltipRows = (d: any) => {
   const mainRows = [
     { label: "Opening Cash",        value: d.openingBalance ?? 0,    color: "hsl(215,15%,55%)" },
     { label: "Income",              value: d.income    ?? 0,         color: "hsl(142,60%,52%)" },
@@ -125,24 +124,30 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
     { label: "Tax Refund",          value: d.ngRefund  ?? 0,         color: "hsl(43,90%,58%)" },
     { label: "Net Cashflow",        value: d.netCF     ?? 0,         color: (d.netCF ?? 0) >= 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)", bold: true },
     { label: "Closing Cash",        value: d.balance   ?? 0,         color: "hsl(210,80%,65%)",  bold: true },
-  ].filter(r => Math.abs(r.value) > 0);
-  // Build full deposit power waterfall for the tooltip
+  ].filter((r: any) => Math.abs(r.value) > 0);
   const hasEquityData = (d.pporUsableEquity > 0 || d.ipUsableEquity > 0 || d.projectedCash > 0);
-  const projCash    = d.projectedCash    ?? 0;
-  const pporEq      = d.pporUsableEquity ?? 0;
-  const ipEq        = d.ipUsableEquity   ?? 0;
-  const eBuf        = d.emergencyBufferAmt ?? 0;
-  const totalEq     = pporEq + ipEq;
-  const rawTotal    = projCash + totalEq;
-  const finalDP     = d.totalDepositPower ?? 0;
-  // Detect closing-cash-negative case: chart balance (actual cashflow) is negative
-  const closingCash = d.balance ?? 0;
-  const cashIsNegative = closingCash < 0;
+  const projCash  = d.projectedCash    ?? 0;
+  const pporEq    = d.pporUsableEquity ?? 0;
+  const ipEq      = d.ipUsableEquity   ?? 0;
+  const eBuf      = d.emergencyBufferAmt ?? 0;
+  const rawTotal  = projCash + pporEq + ipEq;
+  const finalDP   = d.totalDepositPower ?? 0;
+  const cashIsNegative = (d.balance ?? 0) < 0;
   const milestones: { icon: string; text: string }[] = d._milestones ?? [];
+  return { mainRows, hasEquityData, projCash, pporEq, ipEq, eBuf, rawTotal, finalDP, cashIsNegative, milestones };
+};
+
+// ─── Executive Cashflow Tooltip (DESKTOP ONLY) ────────────────────────────────
+const CashflowTooltip = ({ active, payload, label }: any) => {
+  // On mobile, suppress desktop tooltip — MobileChartSheet handles it instead
+  if (typeof window !== "undefined" && window.innerWidth < 768) return null;
+  if (!active || !payload?.length) return null;
+  const d = payload[0]?.payload ?? {};
+  const { mainRows, hasEquityData, projCash, pporEq, ipEq, eBuf, rawTotal, finalDP, cashIsNegative, milestones } = buildCFTooltipRows(d);
   return (
     <div className="db-tooltip" style={{ minWidth: 300, maxWidth: 340, background: "hsl(222,22%,9%)", border: "1px solid hsl(222,15%,22%)", borderRadius: 10, padding: "10px 14px" }}>
       <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(215,20%,80%)", marginBottom: 8, letterSpacing: "0.03em" }}>{label}</p>
-      {mainRows.map((r, i) => (
+      {mainRows.map((r: any, i: number) => (
         <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 20, marginBottom: 3, color: r.color, fontWeight: r.bold ? 700 : 400, fontSize: r.bold ? 12 : 11 }}>
           <span style={{ opacity: r.bold ? 1 : 0.85 }}>{r.label}</span>
           <span style={{ fontFamily: "monospace" }}>{r.value >= 0 ? "+" : ""}{formatCurrency(r.value, true)}</span>
@@ -150,22 +155,19 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
       ))}
       {hasEquityData && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid hsl(222,15%,22%)" }}>
-          {/* Section header */}
           <div style={{ fontSize: 10, color: "hsl(188,60%,52%)", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700 }}>
             Deposit Power Build-up ({label})
           </div>
-          {/* Waterfall rows */}
           {[
-            projCash > 0 ? { label: "Projected Cash Balance",    value: projCash, color: "hsl(210,80%,65%)", sign: "+" }  : null,
-            pporEq   > 0 ? { label: "PPOR Usable Equity (80%)",  value: pporEq,   color: "hsl(188,60%,52%)", sign: "+" }  : null,
-            ipEq     > 0 ? { label: "IP Usable Equity (80%)",    value: ipEq,     color: "hsl(145,55%,42%)", sign: "+" }  : null,
+            projCash > 0 ? { label: "Projected Cash Balance",   value: projCash, color: "hsl(210,80%,65%)", sign: "+" } : null,
+            pporEq   > 0 ? { label: "PPOR Usable Equity (80%)", value: pporEq,   color: "hsl(188,60%,52%)", sign: "+" } : null,
+            ipEq     > 0 ? { label: "IP Usable Equity (80%)",   value: ipEq,     color: "hsl(145,55%,42%)", sign: "+" } : null,
           ].filter(Boolean).map((r: any, i: number) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: r.color, fontSize: 11 }}>
               <span style={{ opacity: 0.90 }}>{r.sign} {r.label}</span>
               <span style={{ fontFamily: "monospace" }}>{formatCurrency(r.value, true)}</span>
             </div>
           ))}
-          {/* Divider + raw total */}
           <div style={{ borderTop: "1px dashed hsl(222,15%,28%)", margin: "5px 0 4px" }} />
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: "hsl(215,15%,65%)", fontSize: 11 }}>
             <span>= Gross total</span>
@@ -173,26 +175,24 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
           </div>
           {eBuf > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: "hsl(0,65%,58%)", fontSize: 11 }}>
-              <span>− Emergency Buffer</span>
-              <span style={{ fontFamily: "monospace" }}>−{formatCurrency(eBuf, true)}</span>
+              <span>&#8722; Emergency Buffer</span>
+              <span style={{ fontFamily: "monospace" }}>&#8722;{formatCurrency(eBuf, true)}</span>
             </div>
           )}
-          {/* Final deposit power — highlighted */}
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginTop: 5, padding: "5px 8px", borderRadius: 6, background: "hsl(43,90%,10%)", border: "1px solid hsl(43,90%,30%)" }}>
             <span style={{ color: "hsl(43,90%,62%)", fontWeight: 700, fontSize: 12 }}>= Total Deposit Power</span>
             <span style={{ fontFamily: "monospace", color: "hsl(43,90%,62%)", fontWeight: 700, fontSize: 12 }}>{formatCurrency(finalDP, true)}</span>
           </div>
-          {/* Negative-cash explanation */}
           {cashIsNegative && finalDP > 0 && (
             <div style={{ marginTop: 6, padding: "5px 8px", borderRadius: 6, background: "hsl(43,80%,8%)", border: "1px solid hsl(43,80%,28%)", fontSize: 10, color: "hsl(43,80%,60%)", lineHeight: 1.5 }}>
-              ⚠ Closing cash is negative — Deposit Power is positive because it counts <strong>refinanceable equity</strong>, not just cash. You would need to draw down that equity via a loan top-up to fund the deposit.
+              &#9888; Closing cash is negative &#8212; Deposit Power is positive because it counts <strong>refinanceable equity</strong>, not just cash.
             </div>
           )}
         </div>
       )}
       {milestones.length > 0 && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid hsl(222,15%,22%)" }}>
-          {milestones.map((m, i) => (
+          {milestones.map((m: any, i: number) => (
             <div key={i} style={{ fontSize: 11, color: "hsl(43,90%,62%)", marginTop: 3 }}>{m.icon} {m.text}</div>
           ))}
         </div>
@@ -200,6 +200,206 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
     </div>
   );
 };
+
+// ─── Mobile Bottom Sheet ─────────────────────────────────────────────────────
+// Renders a native-app-feel fixed bottom-sheet when user taps a chart point on mobile.
+// Completely outside the chart container — never overflows, always in viewport.
+const MobileChartSheet = ({
+  data, onClose,
+}: { data: { label: string; payload: any } | null; onClose: () => void }) => {
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const touchStartY = useRef<number>(0);
+  const [dragY, setDragY] = useState(0);
+  const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    if (!data) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") triggerClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [data]);
+
+  useEffect(() => {
+    if (data) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [data]);
+
+  const triggerClose = () => {
+    setLeaving(true);
+    setTimeout(() => { setLeaving(false); setDragY(0); onClose(); }, 270);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY;
+  };
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const delta = e.touches[0].clientY - touchStartY.current;
+    if (delta > 0) setDragY(delta);
+  };
+  const handleTouchEnd = () => {
+    if (dragY > 72) { triggerClose(); } else { setDragY(0); }
+  };
+
+  if (!data) return null;
+  const d = data.payload ?? {};
+  const label = data.label;
+  const { mainRows, hasEquityData, projCash, pporEq, ipEq, eBuf, rawTotal, finalDP, cashIsNegative, milestones } = buildCFTooltipRows(d);
+
+  const translateY = leaving ? "100%" : dragY > 0 ? `${dragY}px` : "0";
+  const transition = dragY > 0 ? "none" : "transform 0.27s cubic-bezier(0.32,0.72,0,1)";
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={triggerClose}
+        style={{
+          position: "fixed", inset: 0, zIndex: 9998,
+          background: "rgba(0,0,0,0.55)",
+          opacity: leaving ? 0 : 1,
+          transition: "opacity 0.27s ease",
+        }}
+      />
+      {/* Sheet */}
+      <div
+        ref={sheetRef}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{
+          position: "fixed",
+          left: 0, right: 0, bottom: 0,
+          zIndex: 9999,
+          transform: `translateY(${translateY})`,
+          transition,
+          background: "hsl(220,22%,10%)",
+          borderTop: "1px solid hsl(222,15%,22%)",
+          borderRadius: "20px 20px 0 0",
+          maxHeight: "72vh",
+          display: "flex",
+          flexDirection: "column",
+          paddingBottom: "max(16px, env(safe-area-inset-bottom))",
+          boxShadow: "0 -8px 48px rgba(0,0,0,0.6)",
+        }}
+      >
+        {/* Drag handle */}
+        <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 6px", flexShrink: 0 }}>
+          <div style={{ width: 40, height: 4, borderRadius: 2, background: "hsl(222,15%,30%)" }} />
+        </div>
+
+        {/* Header */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "2px 20px 12px", borderBottom: "1px solid hsl(222,15%,17%)",
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 18, fontWeight: 800, color: "hsl(215,20%,92%)", letterSpacing: "-0.02em" }}>{label}</span>
+          <button
+            onClick={triggerClose}
+            style={{
+              width: 30, height: 30, borderRadius: 15,
+              background: "hsl(222,15%,18%)", border: "none",
+              color: "hsl(215,12%,55%)", fontSize: 18, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1,
+            }}
+          >&#xd7;</button>
+        </div>
+
+        {/* Scrollable content */}
+        <div style={{ overflowY: "auto", flex: 1, padding: "14px 20px 4px", WebkitOverflowScrolling: "touch" as any }}>
+
+          {/* Cashflow section */}
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "hsl(215,12%,42%)", marginBottom: 8 }}>
+              Cashflow
+            </div>
+            {mainRows.map((r: any, i: number) => (
+              <div key={i} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "7px 0",
+                borderBottom: i < mainRows.length - 1 ? "1px solid hsl(222,15%,15%)" : "none",
+                color: r.color,
+              }}>
+                <span style={{ fontSize: 14, fontWeight: r.bold ? 700 : 400, opacity: r.bold ? 1 : 0.88 }}>{r.label}</span>
+                <span style={{ fontSize: r.bold ? 15 : 14, fontFamily: "monospace", fontWeight: r.bold ? 700 : 500 }}>
+                  {r.value >= 0 ? "+" : ""}{formatCurrency(r.value, true)}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Deposit Power waterfall */}
+          {hasEquityData && (
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid hsl(222,15%,19%)" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "hsl(188,60%,52%)", marginBottom: 8 }}>
+                Deposit Power
+              </div>
+              {[
+                projCash > 0 ? { label: "Projected Cash",            value: projCash, color: "hsl(210,80%,65%)", sign: "+" } : null,
+                pporEq   > 0 ? { label: "PPOR Usable Equity (80%)",  value: pporEq,   color: "hsl(188,60%,52%)", sign: "+" } : null,
+                ipEq     > 0 ? { label: "IP Equity (80%)",            value: ipEq,     color: "hsl(145,55%,42%)", sign: "+" } : null,
+              ].filter(Boolean).map((r: any, i: number) => (
+                <div key={i} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "6px 0", color: r.color, borderBottom: "1px solid hsl(222,15%,15%)",
+                }}>
+                  <span style={{ fontSize: 14, opacity: 0.9 }}>{r.sign} {r.label}</span>
+                  <span style={{ fontSize: 14, fontFamily: "monospace" }}>{formatCurrency(r.value, true)}</span>
+                </div>
+              ))}
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "hsl(215,15%,50%)", borderBottom: "1px solid hsl(222,15%,15%)" }}>
+                <span style={{ fontSize: 13 }}>= Gross total</span>
+                <span style={{ fontSize: 13, fontFamily: "monospace" }}>{formatCurrency(rawTotal, true)}</span>
+              </div>
+              {eBuf > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "hsl(0,65%,58%)", borderBottom: "1px solid hsl(222,15%,15%)" }}>
+                  <span style={{ fontSize: 13 }}>&#8722; Emergency Buffer</span>
+                  <span style={{ fontSize: 13, fontFamily: "monospace" }}>&#8722;{formatCurrency(eBuf, true)}</span>
+                </div>
+              )}
+              <div style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                marginTop: 10, padding: "10px 14px", borderRadius: 12,
+                background: "hsl(43,90%,8%)", border: "1px solid hsl(43,90%,26%)",
+              }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "hsl(43,90%,60%)" }}>= Total Deposit Power</span>
+                <span style={{ fontSize: 16, fontFamily: "monospace", fontWeight: 800, color: "hsl(43,90%,65%)" }}>{formatCurrency(finalDP, true)}</span>
+              </div>
+              {cashIsNegative && finalDP > 0 && (
+                <div style={{
+                  marginTop: 8, padding: "9px 12px", borderRadius: 10,
+                  background: "hsl(43,80%,7%)", border: "1px solid hsl(43,80%,22%)",
+                  fontSize: 12, color: "hsl(43,80%,58%)", lineHeight: 1.65,
+                }}>
+                  &#9888; Cash is negative &#8212; Deposit Power is still positive because it includes <strong>refinanceable equity</strong>. Drawing it down requires a loan top-up.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Milestones */}
+          {milestones.length > 0 && (
+            <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid hsl(222,15%,19%)" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "hsl(43,90%,55%)", marginBottom: 8 }}>
+                Events this period
+              </div>
+              {milestones.map((m: any, i: number) => (
+                <div key={i} style={{ fontSize: 14, color: "hsl(43,90%,62%)", marginBottom: 6, lineHeight: 1.4 }}>{m.icon} {m.text}</div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ height: 12 }} />
+        </div>
+      </div>
+    </>
+  );
+};
+
 
 const DonutTooltip = ({ active, payload }: any) => {
   if (!active || !payload?.length) return null;
@@ -366,6 +566,8 @@ export default function DashboardPage() {
   const [expandedYear, setExpandedYear] = useState<number | null>(null);
   const [wdcChartType, setWdcChartType] = useState<"combo" | "line" | "candlestick">("combo");
   const [cfViewMode, setCfViewMode] = useState<"cash" | "equity" | "deposit">("cash");
+  // Mobile chart bottom-sheet tooltip state
+  const [mobileTooltipData, setMobileTooltipData] = useState<{ label: string; payload: any } | null>(null);
   const [maxRefinanceLVR, setMaxRefinanceLVR] = useState<number>(0.80);
   const [emergencyBuffer, setEmergencyBuffer] = useState<number>(30000);
   const [showLedgerAudit, setShowLedgerAudit] = useState(false);
@@ -1913,7 +2115,15 @@ export default function DashboardPage() {
                 <div className="w-full" style={{ height: 360 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     {wdcChartType === "line" ? (
-                      <LineChart data={masterCFData} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
+                      <LineChart
+                        data={masterCFData}
+                        margin={{ top: 16, right: 8, left: 0, bottom: 0 }}
+                        onClick={(chartData: any) => {
+                          if (window.innerWidth < 768 && chartData?.activePayload?.length) {
+                            setMobileTooltipData({ label: chartData.activeLabel ?? "", payload: chartData.activePayload[0]?.payload ?? {} });
+                          }
+                        }}
+                      >
                         <defs>
                           <linearGradient id="wdcBalGradLine" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%"   stopColor="hsl(210,80%,62%)" stopOpacity={0.20} />
@@ -1947,6 +2157,11 @@ export default function DashboardPage() {
                       // Candlestick — use ComposedChart with a custom Bar showing OHLC-style balance movement
                       // open = prev year balance, close = this year balance, bar height = |close-open|
                       <ComposedChart
+                        onClick={(chartData: any) => {
+                          if (window.innerWidth < 768 && chartData?.activePayload?.length) {
+                            setMobileTooltipData({ label: chartData.activeLabel ?? "", payload: chartData.activePayload[0]?.payload ?? {} });
+                          }
+                        }}
                         data={masterCFData.map((d: any, i: number) => ({
                           ...d,
                           open:   i === 0 ? d.balance : (masterCFData[i-1] as any).balance,
@@ -1984,7 +2199,15 @@ export default function DashboardPage() {
                       </ComposedChart>
                     ) : (
                       // DEFAULT: Combo — Balance area + Net CF bars
-                      <ComposedChart data={masterCFData} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
+                      <ComposedChart
+                        data={masterCFData}
+                        margin={{ top: 16, right: 8, left: 0, bottom: 0 }}
+                        onClick={(chartData: any) => {
+                          if (window.innerWidth < 768 && chartData?.activePayload?.length) {
+                            setMobileTooltipData({ label: chartData.activeLabel ?? "", payload: chartData.activePayload[0]?.payload ?? {} });
+                          }
+                        }}
+                      >
                         <defs>
                           <linearGradient id="wdcBalGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%"   stopColor="hsl(210,80%,62%)" stopOpacity={0.20} />
@@ -2709,6 +2932,9 @@ export default function DashboardPage() {
           })}
         />
       </div>
+
+      {/* Mobile bottom-sheet tooltip — renders on tap for screens < 768px */}
+      <MobileChartSheet data={mobileTooltipData} onClose={() => setMobileTooltipData(null)} />
 
     </div>
   );
