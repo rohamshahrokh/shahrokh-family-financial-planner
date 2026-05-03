@@ -2204,7 +2204,8 @@ export default function DashboardPage() {
                 {/* CF KPI row */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
                   {[
-                    { label: "Cash Today",                                                                                                   val: formatCurrency(cfFirst.balance ?? 0, true), color: "hsl(210,80%,65%)" },
+                    // Cash Today MUST read from ledger (totalLiquidCash), never from forecast/chart data
+                    { label: "Cash Today",                                                                                                   val: formatCurrency(totalLiquidCash, true), color: "hsl(210,80%,65%)" },
                     { label: cashFlowView === "monthly" ? `${cashFlowSeries[cashFlowSeries.length-1]?.label ?? "Future"} Cash` : `${new Date().getFullYear()+9} Cash`, val: formatCurrency(cfLast.balance ?? 0, true), color: "hsl(142,60%,52%)" },
                     { label: cashFlowView === "monthly" ? "Monthly Net CF" : "Annual Net CF",                                                val: formatCurrency(cfFirst.netCF ?? 0, true), color: (cfFirst.netCF??0)>=0?"hsl(142,60%,52%)":"hsl(0,72%,58%)" },
                     { label: "Tax Refund/yr",                                                                                                val: `+${formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}`, color: "hsl(43,90%,58%)" },
