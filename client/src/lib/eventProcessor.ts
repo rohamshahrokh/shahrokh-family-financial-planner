@@ -52,6 +52,16 @@ export interface CashEvent {
   endKey?: string;
   /** For liquidity marker visual */
   icon?: '🏠' | '₿' | '📈' | '💰' | '💳' | '⚠' | '📉' | '🔁';
+  /** Property purchase breakdown (populated only for type === 'property_purchase') */
+  purchaseBreakdown?: {
+    deposit: number;          // cash deposit component
+    stampDuty: number;        // stamp duty paid at settlement
+    legalFees: number;        // conveyancing / legal
+    otherCosts: number;       // inspection, buyer agent, renovation, loan setup
+    loanFunded: number;       // purchase_price - deposit (funded by new loan — not a cash outflow)
+    totalCashImpact: number;  // actual cash out = deposit + all buying costs
+    purchasePrice: number;    // total purchase price
+  };
 }
 
 // ─── Input shapes ─────────────────────────────────────────────────────────────
@@ -353,23 +363,34 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
         monthDate.getMonth() === settleDate.getMonth()
       );
       if (isSettlementMonth) {
-        const purchaseCost =
-          safeNum(prop.deposit)
-          + safeNum(prop.stamp_duty)
-          + safeNum(prop.legal_fees)
-          + safeNum(prop.buyer_agent_fee)
-          + safeNum(prop.renovation_costs)
-          + safeNum(prop.building_inspection)
-          + safeNum(prop.loan_setup_fees);
+        const deposit      = safeNum(prop.deposit);
+        const stampDuty    = safeNum(prop.stamp_duty);
+        const legalFees    = safeNum(prop.legal_fees);
+        const otherCosts   = safeNum(prop.buyer_agent_fee)
+                           + safeNum(prop.renovation_costs)
+                           + safeNum(prop.building_inspection)
+                           + safeNum(prop.loan_setup_fees);
+        const purchasePrice = safeNum(prop.purchase_price ?? prop.current_value);
+        const loanFunded    = safeNum(prop.loan_amount) || Math.max(0, purchasePrice - deposit);
+        const totalCashImpact = deposit + stampDuty + legalFees + otherCosts;
 
-        if (purchaseCost > 0) {
+        if (totalCashImpact > 0) {
           events.push({
             monthKey: key, year, month,
             type: 'property_purchase',
-            amount: -purchaseCost,
-            label: `${propName} — purchase costs`,
+            amount: -totalCashImpact,
+            label: `${propName} — settlement`,
             assetName: propName,
             icon: '🏠',
+            purchaseBreakdown: {
+              deposit,
+              stampDuty,
+              legalFees,
+              otherCosts,
+              loanFunded,
+              totalCashImpact,
+              purchasePrice,
+            },
           });
         }
       }

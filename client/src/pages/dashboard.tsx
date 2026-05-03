@@ -143,7 +143,7 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
       ))}
       {equityRows.length > 0 && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid hsl(222,15%,22%)" }}>
-          <div style={{ fontSize: 10, color: "hsl(215,12%,40%)", marginBottom: 4, letterSpacing: "0.05em", textTransform: "uppercase" }}>Equity</div>
+          <div style={{ fontSize: 10, color: "hsl(188,60%,52%)", marginBottom: 4, letterSpacing: "0.05em", textTransform: "uppercase" }}>Projected Equity ({label})</div>
           {equityRows.map((r, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 20, marginBottom: 3, color: r.color, fontWeight: r.bold ? 700 : 400, fontSize: r.bold ? 12 : 11 }}>
               <span style={{ opacity: r.bold ? 1 : 0.85 }}>{r.label}</span>
@@ -799,6 +799,10 @@ export default function DashboardPage() {
         const ms = isJan ? (milestonesPerYear.get(m.year) ?? []) : [];
         const prevBal = idx > 0 ? (cashFlowSeries[idx - 1]?.cumulativeBalance ?? 0) : (m.cumulativeBalance ?? 0);
         const eq = equityByYear.get(m.year) ?? { pporUsableEquity: 0, ipUsableEquity: 0, totalDepositPower: 0 };
+        // Property purchase breakdown for tooltip — Issue 3 fix
+        const mpurchEvent = (cashEngineResult?.events ?? []).find(
+          (ev: any) => ev.type === 'property_purchase' && ev.monthKey === `${m.year}-${String(m.month).padStart(2,'0')}`
+        );
         return {
           label:            m.label,
           openingBalance:   prevBal,
@@ -818,6 +822,7 @@ export default function DashboardPage() {
           totalDepositPower:eq.totalDepositPower,
           usableEquity:     eq.pporUsableEquity + eq.ipUsableEquity,
           _milestones:      ms,
+          _purchaseBreakdown: mpurchEvent?.purchaseBreakdown ?? null,
         };
       });
     }
@@ -832,6 +837,10 @@ export default function DashboardPage() {
       });
       const prevBal = idx > 0 ? (cashFlowAnnual[idx - 1]?.endingBalance ?? 0) : (a.endingBalance ?? 0);
       const eq = equityByYear.get(yr) ?? { pporUsableEquity: 0, ipUsableEquity: 0, totalDepositPower: 0 };
+      // Property purchase breakdown for tooltip — Issue 3 fix
+      const ppurchEvent = (cashEngineResult?.events ?? []).find(
+        (ev: any) => ev.type === 'property_purchase' && ev.year === yr
+      );
       return {
         label:            String(yr),
         openingBalance:   prevBal,
@@ -851,9 +860,10 @@ export default function DashboardPage() {
         totalDepositPower:eq.totalDepositPower,
         usableEquity:     eq.pporUsableEquity + eq.ipUsableEquity,
         _milestones:      dedupMs,
+        _purchaseBreakdown: ppurchEvent?.purchaseBreakdown ?? null,
       };
     });
-  }, [cashFlowView, cashFlowSeries, cashFlowAnnual, milestonesPerYear, equityTimeline, ordersRaw, cryptoOrdersRaw, properties]);
+  }, [cashFlowView, cashFlowSeries, cashFlowAnnual, milestonesPerYear, equityTimeline, ordersRaw, cryptoOrdersRaw, properties, cashEngineResult]);
 
   // ─── Property purchase event reference lines ──────────────────────────────
   const propertyEventLines = useMemo(() => {
@@ -1595,8 +1605,9 @@ export default function DashboardPage() {
                       <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</div>
                     </div>
                     <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">Total Usable Equity</div>
+                      <div className="text-xs text-muted-foreground mb-0.5">Total Usable Equity <span style={{ color: "hsl(215,12%,45%)", fontWeight: 400 }}>(Today)</span></div>
                       <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(188,60%,52%)" }}>{maskValue(formatCurrency(depositPowerResult?.totalUsableEquity ?? 0, true), privacyMode)}</div>
+                      <div className="text-xs mt-0.5" style={{ color: "hsl(215,12%,45%)" }}>Use chart for projections</div>
                     </div>
                     <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
                       <div className="text-xs text-muted-foreground mb-0.5">Emergency Buffer</div>
@@ -1630,11 +1641,31 @@ export default function DashboardPage() {
                     </div>
                     <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
                       <div className="text-xs text-muted-foreground mb-0.5">Est. Ready Date</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: depositPowerResult?.isReady ? "hsl(142,60%,52%)" : "hsl(215,15%,65%)" }}>
-                        {depositPowerResult?.isReady ? "Ready Now" : depositPowerResult?.estimatedReadyDate ? new Date(depositPowerResult.estimatedReadyDate).toLocaleDateString("en-AU", { month: "short", year: "numeric" }) : "—"}
+                      <div className="text-sm font-bold tabular-nums" style={{ color: depositPowerResult?.isEquityRichCashPoor ? "hsl(43,90%,62%)" : depositPowerResult?.isReady ? "hsl(142,60%,52%)" : "hsl(215,15%,65%)" }}>
+                        {depositPowerResult?.isEquityRichCashPoor
+                          ? "⚠ Equity Rich / Cash Poor"
+                          : depositPowerResult?.isReady
+                            ? "Ready Now"
+                            : depositPowerResult?.estimatedReadyDate
+                              ? new Date(depositPowerResult.estimatedReadyDate).toLocaleDateString("en-AU", { month: "short", year: "numeric" })
+                              : "—"}
                       </div>
                     </div>
                   </div>
+                  {/* Equity-rich / Cash-poor warning banner — Issue 2 fix */}
+                  {depositPowerResult?.isEquityRichCashPoor && (
+                    <div className="mt-3 rounded-xl px-4 py-2.5 flex items-start gap-2.5"
+                      style={{ background: "hsl(43,90%,10%)", border: "1px solid hsl(43,90%,35%)" }}>
+                      <span style={{ fontSize: 16, lineHeight: 1.4 }}>⚠</span>
+                      <div>
+                        <div className="text-xs font-bold" style={{ color: "hsl(43,90%,62%)" }}>Equity Rich / Cash Poor</div>
+                        <div className="text-xs mt-0.5" style={{ color: "hsl(43,70%,52%)" }}>
+                          Your equity covers the deposit requirement, but your closing cash would fall below the emergency buffer after settlement.
+                          Consider refinancing to release equity as cash before purchasing, or building more liquid savings first.
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {/* Funding sources breakdown */}
                   {(depositPowerResult?.fundingSources ?? []).length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-2">

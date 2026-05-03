@@ -3,13 +3,19 @@
  *
  * Central usable equity engine for FamilyWealthLab.
  *
+ * ONE TRUTH SOURCE — every module reads from these functions:
+ *   calculateUsableEquity(value, loan, maxLVR)  ← canonical single formula
+ *   calcPropertyEquity(params)                  ← per-property breakdown
+ *   calcDepositPower(params)                    ← full snapshot (today)
+ *   projectEquityTimeline(params)               ← 10-year projection
+ *
  * Rules:
- *   - Usable Equity per property = (Value × maxRefinanceLVR) − Loan Balance
- *   - If usable equity < 0, clamp to 0
+ *   - Usable Equity per property = max(0, Value × maxRefinanceLVR − Loan Balance)
  *   - Default maxRefinanceLVR = 80%
  *   - Total Deposit Power = Cash + Offset + Total Usable Equity − Emergency Buffer
  *   - Interest = expense. Principal repayment = equity transfer (NOT expense).
  *   - Property purchase can use: cash + offset + usable equity as deposit source
+ *   - Equity-rich/cash-poor: closingCash < emergencyBuffer but equity covers requirement
  */
 
 import { safeNum } from './finance';
@@ -53,6 +59,7 @@ export interface DepositPowerResult {
   readySurplusOrShortfall: number;    // totalDepositPower - nextPropertyRequiredCash
   safeBufferAfterPurchase: number;    // cashAndOffset - nextPropertyDeposit - emergencyBuffer
   isReady: boolean;
+  isEquityRichCashPoor: boolean;       // equity covers requirement but closing cash < emergencyBuffer
   estimatedReadyDate: string | null;  // ISO date string when savings + equity will cover shortfall
   monthlySurplus: number;             // used for estimatedReadyDate calc
 
@@ -80,6 +87,21 @@ export interface EquityTimelinePoint {
   deposit_power: number;
 }
 
+// ─── Canonical single formula — use this EVERYWHERE ─────────────────────────
+
+/**
+ * calculateUsableEquity — the ONE canonical formula used by all modules.
+ * Returns max(0, value × maxLVR − loanBalance).
+ * Default maxLVR = 0.80 (80%).
+ */
+export function calculateUsableEquity(
+  value: number,
+  loanBalance: number,
+  maxLVR: number = 0.80,
+): number {
+  return Math.max(0, value * maxLVR - loanBalance);
+}
+
 // ─── Per-property usable equity ───────────────────────────────────────────────
 
 export function calcPropertyEquity(params: {
@@ -93,7 +115,8 @@ export function calcPropertyEquity(params: {
   const { id, label, type, currentValue, loanBalance } = params;
   const maxRefinanceLVR = params.maxRefinanceLVR ?? 0.80;
   const refinanceableValue = currentValue * maxRefinanceLVR;
-  const usableEquity = Math.max(0, refinanceableValue - loanBalance);
+  // Use canonical formula
+  const usableEquity = calculateUsableEquity(currentValue, loanBalance, maxRefinanceLVR);
   const currentLVR = currentValue > 0 ? loanBalance / currentValue : 0;
   const equityPct = currentValue > 0 ? usableEquity / currentValue : 0;
   return {
@@ -197,8 +220,12 @@ export function calcDepositPower(params: {
     ? Math.min(200, (totalDepositPower / nextPropertyRequiredCash) * 100)
     : 100;
   const readySurplusOrShortfall  = totalDepositPower - nextPropertyRequiredCash;
-  const isReady                  = readySurplusOrShortfall >= 0;
+  // isReady: deposit power covers requirement, AND safeBufferAfterPurchase >= 0
   const safeBufferAfterPurchase  = cashAndOffset - nextPropertyDeposit - emergencyBuffer;
+  const isReady                  = readySurplusOrShortfall >= 0 && safeBufferAfterPurchase >= 0;
+  // Equity-rich / cash-poor: total deposit power covers requirement (via equity) but
+  // actual closing cash after purchase would be negative (< emergencyBuffer)
+  const isEquityRichCashPoor     = readySurplusOrShortfall >= 0 && safeBufferAfterPurchase < 0;
 
   // Estimated ready date (months from now)
   let estimatedReadyDate: string | null = null;
@@ -263,6 +290,7 @@ export function calcDepositPower(params: {
     readySurplusOrShortfall,
     safeBufferAfterPurchase,
     isReady,
+    isEquityRichCashPoor,
     estimatedReadyDate,
     monthlySurplus,
     fundingSources,
@@ -351,10 +379,11 @@ export function projectEquityTimeline(params: {
     // Accumulate surplus to cash
     cash += monthly_surplus * 12;
 
-    const ppor_eq  = Math.max(0, ppor_val * maxRefinanceLVR - ppor_loan);
+    // Use canonical formula for all equity calculations in timeline
+    const ppor_eq  = calculateUsableEquity(ppor_val, ppor_loan, maxRefinanceLVR);
     const ip_vals  = grownIPs.reduce((s, ip) => s + ip.val, 0);
     const ip_loans = grownIPs.reduce((s, ip) => s + ip.loan, 0);
-    const ip_eq    = grownIPs.reduce((s, ip) => s + Math.max(0, ip.val * maxRefinanceLVR - ip.loan), 0);
+    const ip_eq    = grownIPs.reduce((s, ip) => s + calculateUsableEquity(ip.val, ip.loan, maxRefinanceLVR), 0);
     const total_eq = ppor_eq + ip_eq;
     const dep_power = Math.max(0, cash + total_eq - emergencyBuffer);
 
