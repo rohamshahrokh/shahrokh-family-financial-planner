@@ -342,7 +342,7 @@ function PropertyForm({ data, onChange, onEnterSave }: PropertyFormProps) {
       {/* Section 1: Purchase Details */}
       <Section title="Purchase Details" icon={<MapPin className="w-3.5 h-3.5 text-primary" />} defaultOpen>
         <div className="col-span-2 sm:col-span-3 lg:col-span-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-muted-foreground mb-1">Property Name</label>
               <Input value={data.name} onChange={e => str("name", e.target.value)} className="h-8 text-sm" />

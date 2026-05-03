@@ -1248,7 +1248,7 @@ function EmergencyScore({ snap }: { snap: Record<string, number> }) {
       {/* Inputs */}
       <div className="bg-card border border-border rounded-2xl p-5">
         <SectionTitle>Household Details</SectionTitle>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <InputRow label="Family size" value={familySize} onChange={setFamilySize} />
           <InputRow label="Income streams" value={incomeStreams} onChange={setIncomeStreams} />
         </div>
@@ -1295,7 +1295,7 @@ function EmergencyScore({ snap }: { snap: Record<string, number> }) {
           </div>
 
           {/* Expense breakdown */}
-          <div className="grid grid-cols-2 gap-3 pt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
             <KpiCard label="Monthly Expenses" value={formatCurrency(calc.monthlyExpenses)} />
             <KpiCard label="Monthly Debt Payments" value={formatCurrency(calc.monthlyDebtPayments)} />
           </div>
@@ -2742,7 +2742,7 @@ export default function WealthStrategyPage() {
                       <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded">{action.category}</span>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-border/50">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 pt-3 border-t border-border/50">
                     <div>
                       <p className="text-xs text-muted-foreground">Estimated Impact</p>
                       <p className="text-xs font-semibold text-primary mt-0.5">{action.impact}</p>

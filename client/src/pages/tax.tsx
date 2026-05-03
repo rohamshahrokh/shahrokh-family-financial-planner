@@ -604,7 +604,7 @@ export default function Tax() {
 
           {/* KPI summary */}
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <StatCard label="Net Monthly" value={mv(rohamResult.netMonthly)} sub="take-home pay" />
               <StatCard label="Net Annual" value={mv(rohamResult.netAnnual)} sub="after all deductions" />
               <StatCard label="Effective Rate" value={`${(rohamResult.effectiveTaxRate * 100).toFixed(1)}%`} sub="total deductions / gross" />
@@ -683,7 +683,7 @@ export default function Tax() {
           </div>
 
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <StatCard label="Net Monthly" value={mv(faraResult.netMonthly)} sub="take-home pay" />
               <StatCard label="Net Annual" value={mv(faraResult.netAnnual)} sub="after all deductions" />
               <StatCard label="Effective Rate" value={`${(faraResult.effectiveTaxRate * 100).toFixed(1)}%`} sub="total / gross" />

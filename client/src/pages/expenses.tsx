@@ -228,7 +228,7 @@ function ExpenseForm({ data, onChange }: ExpenseFormProps) {
   };
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
       <div>
         <label className="text-xs text-muted-foreground">Date</label>
         <Input
@@ -241,11 +241,21 @@ function ExpenseForm({ data, onChange }: ExpenseFormProps) {
       <div>
         <label className="text-xs text-muted-foreground">Amount (AUD)</label>
         <Input
-          type="number"
-          value={data.amount}
-          onChange={e => onChange({ ...data, amount: e.target.value })}
+          inputMode="decimal"
+          type="text"
+          pattern="[0-9]*\.?[0-9]*"
+          value={data.amount === 0 || data.amount === "0" ? "" : String(data.amount)}
+          placeholder="0.00"
+          onFocus={e => { e.target.select(); setTimeout(() => { try { e.target.setSelectionRange(0, e.target.value.length); } catch {} }, 0); }}
+          onChange={e => {
+            let s = e.target.value.replace(/^0+([0-9])/, "$1");
+            if (s === "" || /^[0-9]*\.?[0-9]*$/.test(s)) onChange({ ...data, amount: s });
+          }}
+          onBlur={e => {
+            const n = parseFloat(String(data.amount));
+            if (isNaN(n)) onChange({ ...data, amount: 0 });
+          }}
           className="h-8 text-sm num-display"
-          step="0.01"
         />
       </div>
       <div>
@@ -331,7 +341,7 @@ interface IncomeFormProps {
 }
 function IncomeForm({ data, onChange }: IncomeFormProps) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
       <div>
         <label className="text-xs text-muted-foreground">Date</label>
         <Input
@@ -344,11 +354,21 @@ function IncomeForm({ data, onChange }: IncomeFormProps) {
       <div>
         <label className="text-xs text-muted-foreground">Amount (AUD)</label>
         <Input
-          type="number"
-          value={data.amount}
-          onChange={e => onChange({ ...data, amount: e.target.value })}
+          inputMode="decimal"
+          type="text"
+          pattern="[0-9]*\.?[0-9]*"
+          value={data.amount === 0 || data.amount === "0" ? "" : String(data.amount)}
+          placeholder="0.00"
+          onFocus={e => { e.target.select(); setTimeout(() => { try { e.target.setSelectionRange(0, e.target.value.length); } catch {} }, 0); }}
+          onChange={e => {
+            let s = e.target.value.replace(/^0+([0-9])/, "$1");
+            if (s === "" || /^[0-9]*\.?[0-9]*$/.test(s)) onChange({ ...data, amount: s });
+          }}
+          onBlur={e => {
+            const n = parseFloat(String(data.amount));
+            if (isNaN(n)) onChange({ ...data, amount: 0 });
+          }}
           className="h-8 text-sm num-display"
-          step="0.01"
         />
       </div>
       <div>
@@ -1787,7 +1807,7 @@ export default function ExpensesPage() {
               <Button size="sm" variant="ghost" onClick={resetFilters} className="text-xs h-8 text-muted-foreground">Reset</Button>
             </div>
             {showAdvancedFilters && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-border">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-border">
                 <div>
                   <label className="text-xs text-muted-foreground">Source Code</label>
                   <Select value={filterSourceCode} onValueChange={v => { setFilterSourceCode(v); setPage(1); }}>

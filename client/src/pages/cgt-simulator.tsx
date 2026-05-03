@@ -24,6 +24,7 @@ import {
   Home, Banknote, Wallet,
 } from "lucide-react";
 import { Button }   from "@/components/ui/button";
+import { SmartNumInput } from "@/components/ui/smart-num-input";
 import { Input }    from "@/components/ui/input";
 import { Label }    from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
@@ -563,16 +564,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 function Num({ value, onChange, prefix = "$", step = 1000, min = 0 }: {
   value: number; onChange: (v: number) => void; prefix?: string; step?: number; min?: number;
 }) {
-  return (
-    <div className="relative">
-      {prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">{prefix}</span>}
-      <Input
-        type="number" min={min} step={step} value={value}
-        onChange={e => onChange(parseFloat(e.target.value) || 0)}
-        className={`bg-background/50 border-border text-sm h-9 ${prefix ? "pl-7" : ""}`}
-      />
-    </div>
-  );
+  return <SmartNumInput value={value} onChange={onChange} prefix={prefix} step={step} min={min} />;
 }
 
 function StructTab({ active, id, label, icon, onClick }: {
@@ -646,7 +638,7 @@ function LoanPanel({ s, upd }: { s: Scenario; upd: <K extends keyof Scenario>(k:
         </div>
       </Field>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Loan Amount">
           <Num value={loan.loanAmount} onChange={v => updLoan("loanAmount", v)} step={10000} />
         </Field>
@@ -690,7 +682,7 @@ function HoldingCostPanel({ s, upd }: { s: Scenario; upd: <K extends keyof Scena
       {/* Rental Income */}
       <div>
         <SectionHeader icon={<Home className="w-3.5 h-3.5" />} label="Rental Income" />
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Weekly Rent">
             <Num value={r.weeklyRent} onChange={v => updR("weeklyRent", v)} step={50} />
           </Field>
@@ -706,7 +698,7 @@ function HoldingCostPanel({ s, upd }: { s: Scenario; upd: <K extends keyof Scena
       {/* Annual holding costs */}
       <div>
         <SectionHeader icon={<Wallet className="w-3.5 h-3.5" />} label="Annual Holding Costs" />
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Council Rates" hint="Annual">
             <Num value={hc.councilRates} onChange={v => updHC("councilRates", v)} step={100} />
           </Field>
@@ -830,7 +822,7 @@ function InputPanel({ s, upd }: { s: Scenario; upd: <K extends keyof Scenario>(k
       {/* Personal */}
       {s.structure === "personal" && (
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Owner 1 Name">
               <Input value={s.owner1Name} onChange={e => upd("owner1Name", e.target.value)}
                 className="bg-background/50 border-border text-sm h-9" />
@@ -849,7 +841,7 @@ function InputPanel({ s, upd }: { s: Scenario; upd: <K extends keyof Scenario>(k
             </div>
           </div>
           {s.owner1Pct < 100 && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Owner 2 Name">
                 <Input value={s.owner2Name} onChange={e => upd("owner2Name", e.target.value)}
                   className="bg-background/50 border-border text-sm h-9" />
@@ -885,7 +877,7 @@ function InputPanel({ s, upd }: { s: Scenario; upd: <K extends keyof Scenario>(k
             Distribute the discounted capital gain among beneficiaries. Trust passes the 50% CGT discount through to individuals.
           </p>
           {s.beneficiaries.map((b, i) => (
-            <div key={i} className="grid grid-cols-3 gap-2 items-end">
+            <div key={i} className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
               <Field label={i === 0 ? "Beneficiary Name" : ""}>
                 <Input value={b.name} onChange={e => {
                   const bens = [...s.beneficiaries]; bens[i] = { ...b, name: e.target.value }; upd("beneficiaries", bens);
@@ -1000,7 +992,7 @@ function HoldingSummaryCard({ res, mv }: { res: StructureResult; mv: (v: string)
             <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground mb-2">
               Loan — {res.holding.loan.monthlyInterest !== undefined ? "Interest Only" : "Principal & Interest"}
             </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
               {[
                 { label: "Monthly Repayment", value: mv($(loan.monthlyRepayment)) },
                 { label: "Total Repayments", value: mv($(loan.totalRepayments)),   color: "hsl(0,65%,55%)" },

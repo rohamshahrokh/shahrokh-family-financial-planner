@@ -3507,3 +3507,45 @@ td.db-act-rank { padding: 9px 0; }
   background-color: hsl(220 14% 86%) !important;
 }
 
+
+/* ── Mobile form polish ──────────────────────────────────────────────────── */
+
+/* Remove number input spinner arrows — cleaner on mobile and avoids layout shifts */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Ensure modals never overflow on small screens */
+@media (max-width: 640px) {
+  /* Modal container: tighter padding on mobile */
+  .max-w-2xl.rounded-2xl,
+  .max-w-lg.rounded-2xl,
+  .max-w-xl.rounded-2xl {
+    padding: 1rem !important;
+    margin: 0.5rem;
+    max-height: 92vh;
+    overflow-y: auto;
+  }
+
+  /* Modal action buttons wrap cleanly */
+  .flex.gap-2.mt-5 {
+    flex-wrap: wrap;
+  }
+
+  /* Select triggers never overflow */
+  [data-radix-select-trigger] {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+/* Prevent horizontal scroll on input rows */
+.grid.grid-cols-1 > *,
+.grid.grid-cols-2 > * {
+  min-width: 0;
+}

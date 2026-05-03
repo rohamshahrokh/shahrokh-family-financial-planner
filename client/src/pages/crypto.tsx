@@ -2022,7 +2022,7 @@ export default function CryptoPage() {
                   <h3 className="font-bold text-sm">{editingDCAId ? 'Edit DCA Schedule' : 'New DCA Schedule'}</h3>
                   <button onClick={() => { setShowDCAForm(false); setDcaDraft(null); setEditingDCAId(null); }} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Coin Symbol</label>
                     <select value={dcaDraft.symbol} onChange={e => setDcaDraft((p: any) => ({ ...p, symbol: e.target.value, asset_name: e.target.value === '' ? p.asset_name : '' }))}
