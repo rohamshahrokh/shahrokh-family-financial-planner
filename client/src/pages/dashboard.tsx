@@ -935,7 +935,6 @@ export default function DashboardPage() {
   const dpTotal           = depositPowerResult?.totalDepositPower ?? 0;
   const dpReadiness       = depositPowerResult?.readinessPct ?? 0;
 
-  // inlineBestMove declared after lowestFutureCash / negativeCashMonths below
 
   // ─── Risk score ───────────────────────────────────────────────────────────
   const riskScore = Math.min(100, Math.max(0, Math.round(
@@ -1091,6 +1090,59 @@ export default function DashboardPage() {
   }, [projection, snapshot, equityTimeline]);
 
   // ─── Loading guard (MUST come after ALL hooks) ───────────────────────────
+
+  // ─── Pre-guard computed values — used by inlineBestMove_hook useMemo ──────────────
+  // These MUST live before the early return so the useMemo hook is never conditionally skipped.
+  const _allFutureCash      = projection.map((p: any) => p.cash);
+  const _lowestFutureCash   = _allFutureCash.length > 0 ? Math.min(..._allFutureCash) : 0;
+  const _negativeCashMonths = (cashEngineResult?.ledger ?? [])
+    .filter((m: any) => m.closingCash < 0)
+    .slice(0, 5)
+    .map((m: any) => m.label || m.monthKey);
+
+  // ─── Best Move V2 useMemo — MUST be before loading guard (Rules of Hooks) ──────────
+  const inlineBestMove_hook = useMemo(() => {
+    if (!snapshot) return null;
+    const _ledger: BestMoveLedger = {
+      cash:                 snap.cash,
+      offsetBalance:        snap.offset_balance,
+      mortgage:             snap.mortgage,
+      otherDebts:           snap.other_debts,
+      monthlyIncome:        snap.monthly_income,
+      monthlyExpenses:      snap.monthly_expenses,
+      ppor:                 snap.ppor,
+      plannedStockTotal:    plannedStockTotal + plannedStockTxTotal,
+      plannedCryptoTotal:   plannedCryptoTotal + plannedCryptoTxTotal,
+      billsRaw:             billsRaw as any[],
+      properties:           properties as any[],
+      emergencyBuffer,
+      maxRefinanceLVR,
+      mortgageRate:         (snap.mortgage_rate ?? 6.5) / 100,
+      etfExpectedReturn:    (fa.flat.stocks_return ?? 9.5) / 100,
+      cryptoExpectedReturn: (fa.flat.crypto_return ?? 20) / 100,
+      lowestFutureCash:     _lowestFutureCash,
+      negativeCashMonths:   _negativeCashMonths,
+      rohamGrossAnnual:     snap.monthly_income * 12,
+      superContribAnnual:   safeNum((snapshot as any).roham_salary_sacrifice) * 12
+                              + snap.monthly_income * 12 * 0.115,
+      stocksValue:          stocksTotal,
+      cryptoValue:          cryptoTotal,
+      depositPowerResult:   depositPowerResult ? {
+        totalDepositPower:  depositPowerResult.totalDepositPower,
+        readinessPct:       depositPowerResult.readinessPct,
+        isReady:            depositPowerResult.isReady,
+        totalUsableEquity:  depositPowerResult.totalUsableEquity,
+        deployableCash:     Math.max(0, depositPowerResult.totalDepositPower - (depositPowerResult.totalUsableEquity ?? 0)),
+        fundingSources:     depositPowerResult.fundingSources ?? [],
+      } : null,
+    };
+    return getBestMoveRecommendation(_ledger);
+  }, [
+    snapshot, snap, plannedStockTotal, plannedStockTxTotal, plannedCryptoTotal, plannedCryptoTxTotal,
+    billsRaw, properties, emergencyBuffer, maxRefinanceLVR, _lowestFutureCash, _negativeCashMonths,
+    stocksTotal, cryptoTotal, depositPowerResult, fa.flat.stocks_return, fa.flat.crypto_return,
+  ]);
+
   if (snapLoading || !snapshot) {
     return (
       <div className="db-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
@@ -1124,52 +1176,10 @@ export default function DashboardPage() {
     .map((m: any) => m.label || m.monthKey);
   const hasLiquidityStress = negativeCashMonths.length > 0;
 
-  // ─── Best Move V2 — placed HERE so lowestFutureCash + negativeCashMonths are in scope ─────
-  const inlineBestMove = useMemo(() => {
-    if (!snapshot) return null;
-    const bestMoveLedger: BestMoveLedger = {
-      cash:                 snap.cash,
-      offsetBalance:        snap.offset_balance,
-      mortgage:             snap.mortgage,
-      otherDebts:           snap.other_debts,
-      monthlyIncome:        snap.monthly_income,
-      monthlyExpenses:      snap.monthly_expenses,
-      ppor:                 snap.ppor,
-      plannedStockTotal:    plannedStockTotal + plannedStockTxTotal,
-      plannedCryptoTotal:   plannedCryptoTotal + plannedCryptoTxTotal,
-      billsRaw:             billsRaw as any[],
-      properties:           properties as any[],
-      emergencyBuffer,
-      maxRefinanceLVR,
-      mortgageRate:         (snap.mortgage_rate ?? 6.5) / 100,
-      etfExpectedReturn:    (fa.flat.stocks_return ?? 9.5) / 100,
-      cryptoExpectedReturn: (fa.flat.crypto_return ?? 20) / 100,
-      lowestFutureCash,
-      negativeCashMonths,
-      rohamGrossAnnual:     snap.monthly_income * 12,
-      superContribAnnual:   safeNum((snapshot as any).roham_salary_sacrifice) * 12
-                              + snap.monthly_income * 12 * 0.115,
-      stocksValue:          stocksTotal,
-      cryptoValue:          cryptoTotal,
-      depositPowerResult:   depositPowerResult ? {
-        totalDepositPower:  depositPowerResult.totalDepositPower,
-        readinessPct:       depositPowerResult.readinessPct,
-        isReady:            depositPowerResult.isReady,
-        totalUsableEquity:  depositPowerResult.totalUsableEquity,
-        deployableCash:     Math.max(0, depositPowerResult.totalDepositPower - (depositPowerResult.totalUsableEquity ?? 0)),
-        fundingSources:     depositPowerResult.fundingSources ?? [],
-      } : null,
-    };
-    return getBestMoveRecommendation(bestMoveLedger);
-  }, [
-    snapshot, snap, plannedStockTotal, plannedStockTxTotal, plannedCryptoTotal, plannedCryptoTxTotal,
-    billsRaw, properties, emergencyBuffer, maxRefinanceLVR, lowestFutureCash, negativeCashMonths,
-    stocksTotal, cryptoTotal, depositPowerResult, fa.flat.stocks_return, fa.flat.crypto_return,
-  ]);
-  // Derived labels for inline mini-card
-  const bestMoveTitle   = inlineBestMove?.best.action       ?? "Analysing…";
-  const bestMoveImpact  = inlineBestMove?.best.benefit_label ?? "";
-  const bestMoveHref    = inlineBestMove?.best.cta_route     ?? "/dashboard";
+  // Derived labels for inline mini-card (sourced from inlineBestMove_hook above loading guard)
+  const bestMoveTitle   = inlineBestMove_hook?.best.action       ?? "Analysing…";
+  const bestMoveImpact  = inlineBestMove_hook?.best.benefit_label ?? "";
+  const bestMoveHref    = inlineBestMove_hook?.best.cta_route     ?? "/dashboard";
 
   const upcomingBillsCount = (billsRaw ?? []).filter((b: any) => {
     if (!b.next_due_date) return false;
@@ -2037,10 +2047,10 @@ export default function DashboardPage() {
               <div className="text-xs text-muted-foreground">{bestMoveImpact}</div>
               <div className="mt-2.5 flex items-center justify-between">
                 <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${
-                  inlineBestMove?.best.risk === "High" ? "bg-red-500/15 text-red-400" :
-                  inlineBestMove?.best.risk === "Low"  ? "bg-emerald-500/15 text-emerald-400" :
+                  inlineBestMove_hook?.best.risk === "High" ? "bg-red-500/15 text-red-400" :
+                  inlineBestMove_hook?.best.risk === "Low"  ? "bg-emerald-500/15 text-emerald-400" :
                   "bg-amber-500/15 text-amber-400"
-                }`}>{inlineBestMove?.best.risk ?? ""} Risk</span>
+                }`}>{inlineBestMove_hook?.best.risk ?? ""} Risk</span>
                 <Link href={bestMoveHref}><span className="text-xs text-primary hover:underline">Take Action →</span></Link>
               </div>
             </div>
@@ -2326,8 +2336,8 @@ export default function DashboardPage() {
               {/* ────────────────────────────────────────────────────────────
                   RECOMMENDATION INPUTS VALIDATION
                   ─────────────────────────────────────────────────────────── */}
-              {inlineBestMove?.ledgerInputs && (() => {
-                const li = inlineBestMove.ledgerInputs;
+              {inlineBestMove_hook?.ledgerInputs && (() => {
+                const li = inlineBestMove_hook.ledgerInputs;
                 const recRows = [
                   { label: "Cash (everyday)",           value: li.cashOutsideOffset,          color: "hsl(210,80%,65%)",  note: "" },
                   { label: "Offset balance",            value: li.offsetBalance,              color: "hsl(210,80%,65%)",  note: "" },
