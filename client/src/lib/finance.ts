@@ -1115,9 +1115,10 @@ export function buildCashFlowSeries(params: {
   // Australian FY ends 30 June; tax return / refund lands in August (month 8)
   const NG_REFUND_MONTH = 8; // August
 
-  const snap_income   = safeNum(s.monthly_income) || 22000;
-  const snap_expenses = safeNum(s.monthly_expenses) || 14540;
-  const snap_mortgage = safeNum(s.mortgage) || 1200000;
+  // Use real ledger values only — no hardcoded fallbacks that could mask missing data
+  const snap_income   = safeNum(s.monthly_income);
+  const snap_expenses = safeNum(s.monthly_expenses);
+  const snap_mortgage = safeNum(s.mortgage);
 
   // Pre-compute PPOR monthly mortgage repayment (fixed amount)
   const pporMonthlyRepayment = calcMonthlyRepayment(snap_mortgage, 6.5, 30);

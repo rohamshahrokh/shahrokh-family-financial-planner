@@ -1123,7 +1123,9 @@ export default function DashboardPage() {
       return cashFlowSeries.map((m: any, idx: number) => {
         const isJan = m.month === 1;
         const ms = isJan ? (milestonesPerYear.get(m.year) ?? []) : [];
-        const prevBal = idx > 0 ? (cashFlowSeries[idx - 1]?.cumulativeBalance ?? 0) : (m.cumulativeBalance ?? 0);
+        // For the first month: Opening Cash = real ledger totalLiquidCash.
+        // For subsequent months: Opening Cash = prior month's cumulative balance.
+        const prevBal = idx > 0 ? (cashFlowSeries[idx - 1]?.cumulativeBalance ?? 0) : totalLiquidCash;
         const eq = equityByYear.get(m.year) ?? { pporUsableEquity: 0, ipUsableEquity: 0, emergencyBufferAmt: emergencyBuffer };
         // Property purchase breakdown for tooltip — Issue 3 fix
         const mpurchEvent = (cashEngineResult?.events ?? []).find(
@@ -1170,7 +1172,10 @@ export default function DashboardPage() {
         if (m.type === "tax") { if (seen.has("tax")) return false; seen.add("tax"); }
         return true;
       });
-      const prevBal = idx > 0 ? (cashFlowAnnual[idx - 1]?.endingBalance ?? 0) : (a.endingBalance ?? 0);
+      // For the first year (2026/today): Opening Cash = real ledger totalLiquidCash.
+      // For subsequent years: Opening Cash = prior year's ending balance.
+      // NEVER use a.endingBalance as the opening for the first year — that's the year-END figure.
+      const prevBal = idx > 0 ? (cashFlowAnnual[idx - 1]?.endingBalance ?? 0) : totalLiquidCash;
       const eq = equityByYear.get(yr) ?? { pporUsableEquity: 0, ipUsableEquity: 0, emergencyBufferAmt: emergencyBuffer };
       // Property purchase breakdown for tooltip — Issue 3 fix
       const ppurchEvent = (cashEngineResult?.events ?? []).find(
