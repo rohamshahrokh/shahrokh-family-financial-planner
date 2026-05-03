@@ -1481,7 +1481,7 @@ export default function DashboardPage() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-background text-foreground pb-16 db-mobile-stack">
+    <div className="min-h-screen bg-background text-foreground pb-16">
 
       {/* ══════════════════════════════════════════════════════════════════
           ABOVE-FOLD KPI STRIP (mobile: order 1 — first thing on screen)
@@ -1772,9 +1772,9 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ALERTS / WARNINGS (mobile: order 3 — floats above cashflow chart)
+          ALERTS / WARNINGS — bills, liquidity stress, quick stats
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-2 db-section-alerts">
+      <div className="px-4 pb-2 db-section-keycards">
         {hasLiquidityStress && (
           <div className="mb-2 rounded-xl border border-red-500/40 bg-red-500/8 px-4 py-3 flex items-start gap-2.5">
             <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
