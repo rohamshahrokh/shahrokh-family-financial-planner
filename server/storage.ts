@@ -178,6 +178,10 @@ const _missingCols: Array<[string, string]> = [
   ["property_savings_monthly",    "REAL DEFAULT 0"],
   ["roham_super_balance",         "REAL DEFAULT 0"],
   ["fara_super_balance",          "REAL DEFAULT 0"],
+  // Cash breakdown sub-fields (split of snap.cash into named buckets)
+  ["savings_cash",               "REAL DEFAULT 0"],
+  ["emergency_cash",             "REAL DEFAULT 0"],
+  ["other_cash",                 "REAL DEFAULT 0"],
 ];
 for (const [col, def] of _missingCols) {
   try {

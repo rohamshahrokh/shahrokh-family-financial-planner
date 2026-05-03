@@ -744,8 +744,8 @@ export default function DashboardPage() {
   const plannedCryptoOrders = useMemo(() => (cryptoOrdersRaw ?? []).filter((o: any) => o.status !== "cancelled"), [cryptoOrdersRaw]);
 
   const SNAP_ZERO = {
-    ppor: 0, cash: 0, offset_balance: 0, super_balance: 0,
-    super_roham: 0, super_fara: 0, cars: 0, iran_property: 0,
+    ppor: 0, cash: 0, offset_balance: 0, savings_cash: 0, emergency_cash: 0, other_cash: 0,
+    super_balance: 0, super_roham: 0, super_fara: 0, cars: 0, iran_property: 0,
     mortgage: 0, other_debts: 0, monthly_income: 0, monthly_expenses: 0,
     mortgage_rate: 6.5, mortgage_term_years: 30,
   };
@@ -755,8 +755,13 @@ export default function DashboardPage() {
     const s = snapshot;
     return {
       ppor:             safeNum(s.ppor),
+      // Everyday cash (transaction/chequing account)
       cash:             safeNum(s.cash),
+      // Cash split buckets — stored separately in the ledger
       offset_balance:   safeNum(s.offset_balance),
+      savings_cash:     safeNum(s.savings_cash),
+      emergency_cash:   safeNum(s.emergency_cash),
+      other_cash:       safeNum(s.other_cash),
       super_balance:    safeNum(s.super_balance),
       super_roham:      safeNum(s.super_roham ?? s.super_balance),
       super_fara:       safeNum(s.super_fara),
@@ -784,7 +789,11 @@ export default function DashboardPage() {
   const _totalSuperNow = snap.super_roham + snap.super_fara;
 
   // ─── Core financials ──────────────────────────────────────────────────────
-  const totalAssets   = snap.ppor + snap.cash + snap.offset_balance + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property;
+  // Total liquid cash = all cash buckets from the ledger (no forecast, no fallback)
+  // Formula: Everyday Cash + Savings Cash + Emergency Cash + Other Cash + Offset Balance
+  const totalLiquidCash = snap.cash + snap.savings_cash + snap.emergency_cash + snap.other_cash + snap.offset_balance;
+
+  const totalAssets   = snap.ppor + totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property;
   const totalLiab     = snap.mortgage + snap.other_debts;
   const netWorth      = totalAssets - totalLiab;
   const propertyEquity = snap.ppor - snap.mortgage;
@@ -993,7 +1002,7 @@ export default function DashboardPage() {
         monthly_expenses: snap.monthly_expenses,
         mortgage:         snap.mortgage,
         other_debts:      snap.other_debts,
-        cash:             snap.cash + snap.offset_balance,
+        cash:             totalLiquidCash,
       },
       expenses, properties,
       stockTransactions:  plannedStockTx,
@@ -1220,11 +1229,11 @@ export default function DashboardPage() {
   // ─── Wealth cards ─────────────────────────────────────────────────────────
   const wealthCards = useMemo(() => {
     if (!snapshot) return [];
-    const currentInvestable = snap.cash + snap.offset_balance + _totalSuperNow + stocksTotal + cryptoTotal;
+    const currentInvestable = totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal;
     const requiredFIRE = (10000 * 12) / 0.04;
     const fireProgress = Math.min(100, Math.round((currentInvestable / requiredFIRE) * 100));
     const totalMonthly = snap.monthly_expenses + monthlyMortgageRepay;
-    const monthsCovered = (snap.cash + snap.offset_balance) / totalMonthly;
+    const monthsCovered = (totalLiquidCash) / totalMonthly;
     const emergencyScore = Math.min(100, Math.round((monthsCovered / 6) * 100));
     const totalDebt = snap.mortgage + snap.other_debts;
     const debtToIncome = totalDebt / (snap.monthly_income * 12);
@@ -1234,9 +1243,9 @@ export default function DashboardPage() {
       : (() => {
           const targetIP = 750000;
           const depositNeeded = targetIP * 0.2 + targetIP * 0.035;
-          return Math.min(100, Math.round(((snap.cash + snap.offset_balance) * 0.7 / depositNeeded) * 100));
+          return Math.min(100, Math.round(((totalLiquidCash) * 0.7 / depositNeeded) * 100));
         })();
-    const currentInvestable2 = snap.cash + snap.offset_balance + _totalSuperNow + stocksTotal + cryptoTotal;
+    const currentInvestable2 = totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal;
     const targetFIRE = (8000 * 12) / 0.04;
     const monthlySaving = Math.max(surplus, 100);
     const r = 0.07 / 12;
@@ -1272,8 +1281,8 @@ export default function DashboardPage() {
   const totalUsableEquity    = depositPowerResult?.totalUsableEquity ?? 0;
   const dpReady              = depositPowerResult?.isReady ?? false;
   // savingsIdleForOffset — used in smartActions table below
-  const savingsIdleForOffset = (snap.cash + snap.offset_balance) > snap.monthly_expenses * 6
-    ? (snap.cash + snap.offset_balance) - snap.monthly_expenses * 6
+  const savingsIdleForOffset = (totalLiquidCash) > snap.monthly_expenses * 6
+    ? (totalLiquidCash) - snap.monthly_expenses * 6
     : 0;
   const dpTotal           = depositPowerResult?.totalDepositPower ?? 0;
   const dpReadiness       = depositPowerResult?.readinessPct ?? 0;
@@ -1332,7 +1341,7 @@ export default function DashboardPage() {
     if (!snapshot) return [];
     const items = [
       { name: "PPOR",    value: snap.ppor,            fill: "hsl(188,60%,48%)" },
-      { name: "Cash",    value: snap.cash + snap.offset_balance, fill: "hsl(210,75%,52%)" },
+      { name: "Cash",    value: totalLiquidCash, fill: "hsl(210,75%,52%)" },
       { name: "Super",   value: _totalSuperNow,       fill: "hsl(43,85%,55%)" },
       { name: "Stocks",  value: stocksTotal,          fill: "hsl(145,55%,42%)" },
       { name: "Crypto",  value: cryptoTotal,          fill: "hsl(260,60%,58%)" },
@@ -1367,7 +1376,7 @@ export default function DashboardPage() {
 
   // ─── FIRE calc ────────────────────────────────────────────────────────────
   const fireTargetAmt = (8000 * 12) / 0.04;
-  const fireCurrentAmt = snap.cash + snap.offset_balance + _totalSuperNow + stocksTotal + cryptoTotal;
+  const fireCurrentAmt = totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal;
   const fireProgressPct = Math.min(100, (fireCurrentAmt / fireTargetAmt) * 100);
   const fireGap = Math.max(0, fireTargetAmt - fireCurrentAmt);
   const fireMonthlyNeeded = fireGap > 0 ? Math.round(fireGap * 0.07 / 12 / ((Math.pow(1.07 / 12 + 1, Math.max(1, (parseInt(fireCard?.value?.replace("~", "") ?? "55")) * 12 - 36 * 12)) - 1) / (0.07 / 12))) : 0;
@@ -1538,7 +1547,7 @@ export default function DashboardPage() {
     return Date.now() - ts < 24 * 60 * 60 * 1000;
   }).length;
 
-  const cashAfterBills = (snap.cash + snap.offset_balance) - (billsRaw ?? [])
+  const cashAfterBills = (totalLiquidCash) - (billsRaw ?? [])
     .filter((b: any) => {
       if (!b.next_due_date) return false;
       const due = new Date(b.next_due_date);
@@ -1580,8 +1589,8 @@ export default function DashboardPage() {
           {/* Cash Today */}
           <div className="rounded-xl border border-border bg-card px-3 py-2.5">
             <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">Cash Today</div>
-            <div className="text-base font-extrabold tabular-nums leading-tight" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Everyday + Offset</div>
+            <div className="text-base font-extrabold tabular-nums leading-tight" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(totalLiquidCash, true), privacyMode)}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">All liquid cash + offset</div>
           </div>
           {/* Monthly Surplus */}
           <div className="rounded-xl border border-border bg-card px-3 py-2.5">
@@ -1802,8 +1811,41 @@ export default function DashboardPage() {
         {/* cash projection cards */}
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Current Cash</div>
-            <div className="text-lg font-bold text-foreground tabular-nums">{maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)}</div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Cash Today</div>
+            <div className="text-lg font-bold tabular-nums mb-2" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(totalLiquidCash, true), privacyMode)}</div>
+            {/* Audit breakdown — reads directly from ledger, no forecast */}
+            <div className="space-y-0.5 border-t border-border/40 pt-2">
+              <div className="flex justify-between text-[11px]">
+                <span className="text-muted-foreground">Everyday Cash</span>
+                <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.cash, true), privacyMode)}</span>
+              </div>
+              {snap.savings_cash > 0 && (
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-muted-foreground">Savings</span>
+                  <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.savings_cash, true), privacyMode)}</span>
+                </div>
+              )}
+              {snap.emergency_cash > 0 && (
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-muted-foreground">Emergency Cash</span>
+                  <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.emergency_cash, true), privacyMode)}</span>
+                </div>
+              )}
+              {snap.other_cash > 0 && (
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-muted-foreground">Other Cash</span>
+                  <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.other_cash, true), privacyMode)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-[11px]">
+                <span className="text-muted-foreground">Offset Balance</span>
+                <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.offset_balance, true), privacyMode)}</span>
+              </div>
+              <div className="flex justify-between text-[11px] font-semibold border-t border-border/40 pt-0.5 mt-0.5">
+                <span style={{ color: "hsl(210,80%,65%)" }}>Total Liquid</span>
+                <span className="tabular-nums" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(totalLiquidCash, true), privacyMode)}</span>
+              </div>
+            </div>
           </div>
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Next Major Event</div>
@@ -1839,13 +1881,13 @@ export default function DashboardPage() {
             </div>
           ))}
           {/* Emergency Buffer — moved here so it pairs with Hidden Money on mobile */}
-          <div className={`rounded-xl border p-4 bg-card ${(snap.cash + snap.offset_balance) < snap.monthly_expenses * 3 ? "border-red-500/30" : "border-border"}`}>
+          <div className={`rounded-xl border p-4 bg-card ${(totalLiquidCash) < snap.monthly_expenses * 3 ? "border-red-500/30" : "border-border"}`}>
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Emergency Buffer</span>
-              <Shield className={`w-3.5 h-3.5 ${(snap.cash + snap.offset_balance) < snap.monthly_expenses * 3 ? "text-red-400" : "text-muted-foreground"}`} />
+              <Shield className={`w-3.5 h-3.5 ${(totalLiquidCash) < snap.monthly_expenses * 3 ? "text-red-400" : "text-muted-foreground"}`} />
             </div>
-            <div className={`text-lg font-bold ${(snap.cash + snap.offset_balance) >= snap.monthly_expenses * 3 ? "text-emerald-400" : "text-red-400"}`}>
-              {(snap.cash + snap.offset_balance) >= snap.monthly_expenses * 3 ? "Healthy" : "Low"}
+            <div className={`text-lg font-bold ${(totalLiquidCash) >= snap.monthly_expenses * 3 ? "text-emerald-400" : "text-red-400"}`}>
+              {(totalLiquidCash) >= snap.monthly_expenses * 3 ? "Healthy" : "Low"}
             </div>
             <div className="text-xs text-muted-foreground mt-0.5">${Math.round(snap.monthly_expenses * 3 / 1000)}k reserve target</div>
           </div>
@@ -2008,7 +2050,7 @@ export default function DashboardPage() {
                         <span className="text-xs text-muted-foreground">Cash + Offset</span>
                       </div>
                       <span className="text-xs font-bold tabular-nums" style={{ color: "hsl(210,80%,65%)" }}>
-                        {maskValue(formatCurrency(depositPowerResult?.cashAndOffset ?? (snap.cash + snap.offset_balance), true), privacyMode)}
+                        {maskValue(formatCurrency(depositPowerResult?.cashAndOffset ?? (totalLiquidCash), true), privacyMode)}
                       </span>
                     </div>
 
@@ -2369,7 +2411,7 @@ export default function DashboardPage() {
                   <div className="absolute left-[18px] top-0 bottom-0 w-px bg-border" />
                   <div className="space-y-0">
                     {[
-                      { year: new Date().getFullYear(), icon: "📍", label: "Deposit Build", sub: `${maskValue(formatCurrency(snap.cash + snap.offset_balance, true), privacyMode)} liquid today`, color: "hsl(210,80%,65%)", active: true },
+                      { year: new Date().getFullYear(), icon: "📍", label: "Deposit Build", sub: `${maskValue(formatCurrency(totalLiquidCash, true), privacyMode)} liquid today`, color: "hsl(210,80%,65%)", active: true },
                       ...((properties as any[]).filter((p: any) => p.type !== "ppor" && p.settlement_date).map((p: any) => ({
                         year: new Date(p.settlement_date).getFullYear(),
                         icon: "🏠",
@@ -2495,7 +2537,7 @@ export default function DashboardPage() {
 
             {/* TAB: RISK */}
             {wdcTab === "RISK" && (() => {
-              const liquidCash = snap.cash + snap.offset_balance;
+              const liquidCash = totalLiquidCash;
               const totalMonthlyOut = snap.monthly_expenses + monthlyMortgageRepay;
               const monthsCov = totalMonthlyOut > 0 ? liquidCash / totalMonthlyOut : 0;
               const debtRatio = snap.monthly_income > 0 ? totalLiab / (snap.monthly_income * 12) : 0;
@@ -2758,7 +2800,7 @@ export default function DashboardPage() {
           </button>
         </div>
         {showLedgerAudit && (() => {
-          const totalCash     = snap.cash + snap.offset_balance;
+          const totalCash     = totalLiquidCash;
           const totalEquity   = depositPowerResult?.totalUsableEquity ?? 0;
           const propEq        = propertyEquity;
           const auditRows = [

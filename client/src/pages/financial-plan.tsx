@@ -201,7 +201,13 @@ export default function MyFinancialPlan() {
     snapshotLoaded.current = true;
     // Round all numeric values on load — eliminates display of floats like 32652.2566...
     // that may be stored from old saves before this fix was applied.
-    const ri = (val: any, fallback: number): number => Math.round(parseFloat(String(val ?? fallback)) || fallback);
+    // ri: parse value, use fallback ONLY if val is null/undefined (not if val is 0)
+    // IMPORTANT: parseFloat("0") || fallback would incorrectly use fallback for zero values.
+    // We use val ?? fallback so that explicit zeros from the ledger are preserved.
+    const ri = (val: any, fallback: number): number => {
+      const parsed = parseFloat(String(val ?? fallback));
+      return isNaN(parsed) ? fallback : Math.round(parsed);
+    };
     setDraft({
       cash:                       ri(snapshot.cash,                       220000),
       offset_balance:             ri(snapshot.offset_balance,             0),

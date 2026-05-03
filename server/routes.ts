@@ -60,8 +60,8 @@ const SQLITE_SNAPSHOT_COLS = new Set([
   "fire_target_age", "fire_target_monthly_income", "property_savings_monthly",
   // Super per-person
   "roham_super_balance", "fara_super_balance",
-  // Cash split
-  "offset_balance",
+  // Cash split — all four cash buckets + offset
+  "offset_balance", "savings_cash", "emergency_cash", "other_cash",
   // Timestamp
   "updated_at",
 ]);

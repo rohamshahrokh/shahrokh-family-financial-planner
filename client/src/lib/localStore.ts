@@ -279,8 +279,8 @@ const SUPER_NUM_FIELDS = [
   'fara_salary_sacrifice', 'fara_super_personal_contrib', 'fara_super_annual_topup',
   'fara_super_growth_rate', 'fara_super_fee_pct', 'fara_super_insurance_pa',
   'fara_retirement_age',
-  // Cash
-  'offset_balance',
+  // Cash split fields
+  'offset_balance', 'savings_cash', 'emergency_cash', 'other_cash',
   // Income sub-fields (now columns in sf_snapshot after migration)
   'roham_monthly_income', 'fara_monthly_income', 'rental_income_total', 'other_income',
   // Expense sub-fields
