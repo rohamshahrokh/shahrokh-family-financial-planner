@@ -123,18 +123,25 @@ const buildCFTooltipRows = (d: any) => {
     { label: "Crypto Purchases",    value: -(d.cryptoPurchases ?? 0),color: "hsl(262,60%,65%)" },
     { label: "Tax Refund",          value: d.ngRefund  ?? 0,         color: "hsl(43,90%,58%)" },
     { label: "Net Cashflow",        value: d.netCF     ?? 0,         color: (d.netCF ?? 0) >= 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)", bold: true },
-    { label: "Closing Cash",        value: d.balance   ?? 0,         color: "hsl(210,80%,65%)",  bold: true },
+    { label: "Closing Cash",        value: d.balance   ?? 0,         color: (d.balance ?? 0) >= 0 ? "hsl(210,80%,65%)" : "hsl(0,65%,58%)",  bold: true },
   ].filter((r: any) => Math.abs(r.value) > 0);
-  const hasEquityData = (d.pporUsableEquity > 0 || d.ipUsableEquity > 0 || d.projectedCash > 0);
-  const projCash  = d.projectedCash    ?? 0;
-  const pporEq    = d.pporUsableEquity ?? 0;
-  const ipEq      = d.ipUsableEquity   ?? 0;
-  const eBuf      = d.emergencyBufferAmt ?? 0;
-  const rawTotal  = projCash + pporEq + ipEq;
-  const finalDP   = d.totalDepositPower ?? 0;
-  const cashIsNegative = (d.balance ?? 0) < 0;
+
+  // closingCashForDP = same Closing Cash figure from cashEngine (includes all purchases/events).
+  // This is the ONLY cash figure used in deposit power — no separate "projected cash" accumulation.
+  const closingCash = d.closingCashForDP ?? d.balance ?? 0;
+  const pporEq      = d.pporUsableEquity ?? 0;
+  const ipEq        = d.ipUsableEquity   ?? 0;
+  const eBuf        = d.emergencyBufferAmt ?? 0;
+  // Show deposit power section whenever we have equity data (cash can be negative — that's valid)
+  const hasEquityData = (pporEq > 0 || ipEq > 0);
+  // rawTotal can be negative when closing cash is very negative — shows the real picture
+  const rawTotal    = closingCash + pporEq + ipEq;
+  const finalDP     = d.totalDepositPower ?? 0;
+  const cashIsNegative = closingCash < 0;
   const milestones: { icon: string; text: string }[] = d._milestones ?? [];
-  return { mainRows, hasEquityData, projCash, pporEq, ipEq, eBuf, rawTotal, finalDP, cashIsNegative, milestones };
+  // Expose closingCash as projCash for legacy display references
+  const projCash = closingCash;
+  return { mainRows, hasEquityData, projCash, closingCash, pporEq, ipEq, eBuf, rawTotal, finalDP, cashIsNegative, milestones };
 };
 
 // ─── Executive Cashflow Tooltip (DESKTOP ONLY) ────────────────────────────────
@@ -158,19 +165,23 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
           <div style={{ fontSize: 10, color: "hsl(188,60%,52%)", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700 }}>
             Deposit Power Build-up ({label})
           </div>
+          {/* Closing cash — always shown, can be negative (this IS the reconciled cashEngine figure) */}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: closingCash >= 0 ? "hsl(210,80%,65%)" : "hsl(0,65%,58%)", fontSize: 11 }}>
+            <span style={{ opacity: 0.90 }}>+ Closing Cash (after all events)</span>
+            <span style={{ fontFamily: "monospace" }}>{closingCash >= 0 ? "" : ""}{formatCurrency(closingCash, true)}</span>
+          </div>
           {[
-            projCash > 0 ? { label: "Projected Cash Balance",   value: projCash, color: "hsl(210,80%,65%)", sign: "+" } : null,
-            pporEq   > 0 ? { label: "PPOR Usable Equity (80%)", value: pporEq,   color: "hsl(188,60%,52%)", sign: "+" } : null,
-            ipEq     > 0 ? { label: "IP Usable Equity (80%)",   value: ipEq,     color: "hsl(145,55%,42%)", sign: "+" } : null,
+            pporEq > 0 ? { label: "PPOR Usable Equity (80%)", value: pporEq, color: "hsl(188,60%,52%)" } : null,
+            ipEq   > 0 ? { label: "IP Usable Equity (80%)",   value: ipEq,   color: "hsl(145,55%,42%)" } : null,
           ].filter(Boolean).map((r: any, i: number) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: r.color, fontSize: 11 }}>
-              <span style={{ opacity: 0.90 }}>{r.sign} {r.label}</span>
+              <span style={{ opacity: 0.90 }}>+ {r.label}</span>
               <span style={{ fontFamily: "monospace" }}>{formatCurrency(r.value, true)}</span>
             </div>
           ))}
           <div style={{ borderTop: "1px dashed hsl(222,15%,28%)", margin: "5px 0 4px" }} />
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: "hsl(215,15%,65%)", fontSize: 11 }}>
-            <span>= Gross total</span>
+            <span>= Gross total (cash + equity)</span>
             <span style={{ fontFamily: "monospace" }}>{formatCurrency(rawTotal, true)}</span>
           </div>
           {eBuf > 0 && (
@@ -185,7 +196,7 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
           </div>
           {cashIsNegative && finalDP > 0 && (
             <div style={{ marginTop: 6, padding: "5px 8px", borderRadius: 6, background: "hsl(43,80%,8%)", border: "1px solid hsl(43,80%,28%)", fontSize: 10, color: "hsl(43,80%,60%)", lineHeight: 1.5 }}>
-              &#9888; Closing cash is negative &#8212; Deposit Power is positive because it counts <strong>refinanceable equity</strong>, not just cash.
+              &#9888; Cash is negative after events this year. Deposit Power is still positive because refinanceable equity covers the shortfall &#8212; drawing it down requires a loan top-up or refinance.
             </div>
           )}
         </div>
@@ -336,23 +347,34 @@ const MobileChartSheet = ({
           {hasEquityData && (
             <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid hsl(222,15%,19%)" }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "hsl(188,60%,52%)", marginBottom: 8 }}>
-                Deposit Power
+                Deposit Power Build-up
               </div>
+
+              {/* Closing cash — the reconciled cashEngine figure (same as chart Closing Cash above) */}
+              <div style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "6px 0", borderBottom: "1px solid hsl(222,15%,15%)",
+                color: closingCash >= 0 ? "hsl(210,80%,65%)" : "hsl(0,65%,58%)",
+              }}>
+                <span style={{ fontSize: 14, opacity: 0.9 }}>+ Closing Cash (after events)</span>
+                <span style={{ fontSize: 14, fontFamily: "monospace" }}>{formatCurrency(closingCash, true)}</span>
+              </div>
+
               {[
-                projCash > 0 ? { label: "Projected Cash",            value: projCash, color: "hsl(210,80%,65%)", sign: "+" } : null,
-                pporEq   > 0 ? { label: "PPOR Usable Equity (80%)",  value: pporEq,   color: "hsl(188,60%,52%)", sign: "+" } : null,
-                ipEq     > 0 ? { label: "IP Equity (80%)",            value: ipEq,     color: "hsl(145,55%,42%)", sign: "+" } : null,
+                pporEq > 0 ? { label: "PPOR Usable Equity (80%)", value: pporEq, color: "hsl(188,60%,52%)" } : null,
+                ipEq   > 0 ? { label: "IP Equity (80%)",            value: ipEq,   color: "hsl(145,55%,42%)" } : null,
               ].filter(Boolean).map((r: any, i: number) => (
                 <div key={i} style={{
                   display: "flex", justifyContent: "space-between", alignItems: "center",
                   padding: "6px 0", color: r.color, borderBottom: "1px solid hsl(222,15%,15%)",
                 }}>
-                  <span style={{ fontSize: 14, opacity: 0.9 }}>{r.sign} {r.label}</span>
+                  <span style={{ fontSize: 14, opacity: 0.9 }}>+ {r.label}</span>
                   <span style={{ fontSize: 14, fontFamily: "monospace" }}>{formatCurrency(r.value, true)}</span>
                 </div>
               ))}
+
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "hsl(215,15%,50%)", borderBottom: "1px solid hsl(222,15%,15%)" }}>
-                <span style={{ fontSize: 13 }}>= Gross total</span>
+                <span style={{ fontSize: 13 }}>= Gross total (cash + equity)</span>
                 <span style={{ fontSize: 13, fontFamily: "monospace" }}>{formatCurrency(rawTotal, true)}</span>
               </div>
               {eBuf > 0 && (
@@ -375,7 +397,7 @@ const MobileChartSheet = ({
                   background: "hsl(43,80%,7%)", border: "1px solid hsl(43,80%,22%)",
                   fontSize: 12, color: "hsl(43,80%,58%)", lineHeight: 1.65,
                 }}>
-                  &#9888; Cash is negative &#8212; Deposit Power is still positive because it includes <strong>refinanceable equity</strong>. Drawing it down requires a loan top-up.
+                  &#9888; Cash is negative after this year&#39;s events (property/stock purchases). Deposit Power is still positive because refinanceable equity covers the gap &#8212; drawing it down requires a loan top-up or refinance.
                 </div>
               )}
             </div>
@@ -1009,16 +1031,12 @@ export default function DashboardPage() {
     const equityByYear = new Map<number, {
       pporUsableEquity: number;
       ipUsableEquity: number;
-      totalDepositPower: number;
-      projectedCash: number;       // projected cash in that year (cash + accumulated surplus)
-      emergencyBufferAmt: number;  // emergency buffer deducted
+      emergencyBufferAmt: number;
     }>();
     (equityTimeline ?? []).forEach((pt: any) => {
       equityByYear.set(pt.year, {
         pporUsableEquity:   pt.ppor_usable_equity  ?? 0,
         ipUsableEquity:     pt.ip_usable_equity    ?? 0,
-        totalDepositPower:  pt.deposit_power       ?? 0,
-        projectedCash:      pt.cash                ?? 0,
         emergencyBufferAmt: emergencyBuffer,
       });
     });
@@ -1046,11 +1064,17 @@ export default function DashboardPage() {
         const isJan = m.month === 1;
         const ms = isJan ? (milestonesPerYear.get(m.year) ?? []) : [];
         const prevBal = idx > 0 ? (cashFlowSeries[idx - 1]?.cumulativeBalance ?? 0) : (m.cumulativeBalance ?? 0);
-        const eq = equityByYear.get(m.year) ?? { pporUsableEquity: 0, ipUsableEquity: 0, totalDepositPower: 0 };
+        const eq = equityByYear.get(m.year) ?? { pporUsableEquity: 0, ipUsableEquity: 0, emergencyBufferAmt: emergencyBuffer };
         // Property purchase breakdown for tooltip — Issue 3 fix
         const mpurchEvent = (cashEngineResult?.events ?? []).find(
           (ev: any) => ev.type === 'property_purchase' && ev.monthKey === `${m.year}-${String(m.month).padStart(2,'0')}`
         );
+        const mBalance = m.cumulativeBalance ?? 0;
+        const mPporEq = eq.pporUsableEquity ?? 0;
+        const mIpEq   = eq.ipUsableEquity   ?? 0;
+        const mEBuf   = eq.emergencyBufferAmt ?? emergencyBuffer;
+        // Deposit power uses the REAL closing cash from cashEngine (not equity-timeline accumulation)
+        const mDpTotal = Math.max(0, mBalance + mPporEq + mIpEq - mEBuf);
         return {
           label:            m.label,
           openingBalance:   prevBal,
@@ -1060,17 +1084,18 @@ export default function DashboardPage() {
           rental:           m.rentalIncome ?? 0,
           ngRefund:         m.ngTaxBenefit ?? 0,
           netCF:            m.netCashFlow ?? 0,
-          balance:          m.cumulativeBalance ?? 0,
+          balance:          mBalance,
           investments:      0,
           propPurchases:    isJan ? (propPurchByYear.get(m.year) ?? 0) : 0,
           stockPurchases:   isJan ? (stockPurchByYear.get(m.year) ?? 0) : 0,
           cryptoPurchases:  isJan ? (cryptoPurchByYear.get(m.year) ?? 0) : 0,
-          pporUsableEquity:    eq.pporUsableEquity,
-          ipUsableEquity:      eq.ipUsableEquity,
-          totalDepositPower:   eq.totalDepositPower,
-          projectedCash:       eq.projectedCash,
-          emergencyBufferAmt:  eq.emergencyBufferAmt,
-          usableEquity:        eq.pporUsableEquity + eq.ipUsableEquity,
+          pporUsableEquity:    mPporEq,
+          ipUsableEquity:      mIpEq,
+          totalDepositPower:   mDpTotal,
+          // closingCashForDP: the actual post-event closing cash used in deposit power calc
+          closingCashForDP:    mBalance,
+          emergencyBufferAmt:  mEBuf,
+          usableEquity:        mPporEq + mIpEq,
           _milestones:         ms,
           _purchaseBreakdown:  mpurchEvent?.purchaseBreakdown ?? null,
         };
@@ -1086,11 +1111,17 @@ export default function DashboardPage() {
         return true;
       });
       const prevBal = idx > 0 ? (cashFlowAnnual[idx - 1]?.endingBalance ?? 0) : (a.endingBalance ?? 0);
-      const eq = equityByYear.get(yr) ?? { pporUsableEquity: 0, ipUsableEquity: 0, totalDepositPower: 0 };
+      const eq = equityByYear.get(yr) ?? { pporUsableEquity: 0, ipUsableEquity: 0, emergencyBufferAmt: emergencyBuffer };
       // Property purchase breakdown for tooltip — Issue 3 fix
       const ppurchEvent = (cashEngineResult?.events ?? []).find(
         (ev: any) => ev.type === 'property_purchase' && ev.year === yr
       );
+      const aBalance = a.endingBalance ?? 0;
+      const aPporEq  = eq.pporUsableEquity ?? 0;
+      const aIpEq    = eq.ipUsableEquity   ?? 0;
+      const aEBuf    = eq.emergencyBufferAmt ?? emergencyBuffer;
+      // Deposit power uses the REAL cashEngine closing balance (after all purchases, expenses, etc.)
+      const aDpTotal = Math.max(0, aBalance + aPporEq + aIpEq - aEBuf);
       return {
         label:            String(yr),
         openingBalance:   prevBal,
@@ -1100,17 +1131,18 @@ export default function DashboardPage() {
         rental:           a.rentalIncome ?? 0,
         ngRefund:         a.ngTaxBenefit ?? 0,
         netCF:            a.netCashFlow ?? 0,
-        balance:          a.endingBalance ?? 0,
+        balance:          aBalance,
         investments:      0,
         propPurchases:    propPurchByYear.get(yr) ?? 0,
         stockPurchases:   stockPurchByYear.get(yr) ?? 0,
         cryptoPurchases:  cryptoPurchByYear.get(yr) ?? 0,
-        pporUsableEquity:    eq.pporUsableEquity,
-        ipUsableEquity:      eq.ipUsableEquity,
-        totalDepositPower:   eq.totalDepositPower,
-        projectedCash:       eq.projectedCash,
-        emergencyBufferAmt:  eq.emergencyBufferAmt,
-        usableEquity:        eq.pporUsableEquity + eq.ipUsableEquity,
+        pporUsableEquity:    aPporEq,
+        ipUsableEquity:      aIpEq,
+        totalDepositPower:   aDpTotal,
+        // closingCashForDP: the actual post-event closing cash used in deposit power calc
+        closingCashForDP:    aBalance,
+        emergencyBufferAmt:  aEBuf,
+        usableEquity:        aPporEq + aIpEq,
         _milestones:         dedupMs,
         _purchaseBreakdown:  ppurchEvent?.purchaseBreakdown ?? null,
       };
