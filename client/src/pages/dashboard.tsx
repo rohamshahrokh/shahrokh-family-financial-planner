@@ -1229,17 +1229,17 @@ export default function DashboardPage() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-background text-foreground pb-16">
+    <div className="min-h-screen bg-background text-foreground pb-16 db-mobile-stack">
 
       {/* ══════════════════════════════════════════════════════════════════
           WEALTH FLOW BANNER
           ═════════════════════════════════════════════════════════════════ */}
-      <WealthFlowBanner />
+      <div className="db-section-networth"><WealthFlowBanner /></div>
 
       {/* ══════════════════════════════════════════════════════════════════
           HERO SECTION
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-6 pb-4">
+      <div className="px-4 pt-4 pb-4 db-section-networth">
         <div className="flex flex-col lg:flex-row gap-4 items-stretch">
 
           {/* Left — Family welcome card */}
@@ -1328,7 +1328,7 @@ export default function DashboardPage() {
       {/* ══════════════════════════════════════════════════════════════════
           KPI CARDS
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-2">
+      <div className="px-4 pb-2 db-section-keycards">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KpiCard
             label="MONTHLY SURPLUS"
@@ -1381,7 +1381,7 @@ export default function DashboardPage() {
       {/* ══════════════════════════════════════════════════════════════════
           ACCESSIBLE / LOCKED / TOTAL NET WORTH + CASH PROJECTIONS
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-4 pb-2">
+      <div className="px-4 pt-4 pb-2 db-section-keycards">
         {/* 3 wealth split cards */}
         <div className="grid grid-cols-3 gap-3 mb-3">
           <div className="rounded-xl border border-border bg-card p-4">
@@ -1475,7 +1475,7 @@ export default function DashboardPage() {
       {/* ══════════════════════════════════════════════════════════════════
           WEALTH HEALTH CARDS (6 cards — paired evenly on mobile & desktop)
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 db-section-keycards">
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {wealthCards.map((card) => (
             <div
@@ -1509,7 +1509,7 @@ export default function DashboardPage() {
       {/* ══════════════════════════════════════════════════════════════════
           WEALTH DECISION CENTER
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 db-section-cashflow">
         {/* Section header */}
         <div className="mb-4">
           <div className="text-lg font-bold text-foreground tracking-tight">Wealth Decision Center</div>
@@ -2064,7 +2064,7 @@ export default function DashboardPage() {
           </div>
 
           {/* RIGHT: Decision Cards */}
-          <div className="flex-[3] min-w-0 flex flex-col gap-3">
+          <div className="flex-[3] min-w-0 flex flex-col gap-3 db-section-bestmove">
 
             {/* 1. BEST MOVE NOW */}
             <div className="rounded-2xl border border-border bg-card p-4">
@@ -2181,7 +2181,7 @@ export default function DashboardPage() {
       {/* ══════════════════════════════════════════════════════════════════
           YEAR-BY-YEAR TABLE
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 db-section-year">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-bold text-foreground">Year-by-Year Projection</h2>
           <Link href="/timeline"><span className="text-xs text-primary hover:underline">Full Timeline →</span></Link>

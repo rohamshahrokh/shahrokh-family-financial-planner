@@ -3551,12 +3551,61 @@ input[type="number"] {
 }
 
 /* ── iPhone PWA / iOS Safari: safe-area insets for notch + home indicator ── */
-/* Applied to the root shell so content is never hidden behind system UI      */
+/* ONE safe-area source only: the sticky header owns padding-top.             */
+/* #root only handles left/right/bottom — never top (that causes double gap). */
 #root {
-  padding-top: env(safe-area-inset-top);
+  /* NO padding-top — header handles env(safe-area-inset-top) */
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
+}
+
+/* PWA bottom-nav safe area on the main scroll container */
+.pwa-main-scroll {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+
+/* ── Mobile header: strictly 56px content + safe-area-top — no double gap ── */
+.mobile-header {
+  /* Height: fixed 56px for content + OS status bar */
+  height: calc(56px + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
+  /* Ensure content (buttons/text) is vertically centred within the 56px part */
+  display: flex;
+  align-items: center;
+}
+
+/* ── DEMO banner: compact one-liner on mobile ────────────────────────────── */
+@media (max-width: 768px) {
+  .demo-banner-text {
+    display: none;
+  }
+  .demo-banner-compact {
+    display: flex !important;
+  }
+}
+@media (min-width: 769px) {
+  .demo-banner-compact {
+    display: none;
+  }
+}
+
+/* ── Mobile dashboard section ordering via CSS order ────────────────────── */
+@media (max-width: 768px) {
+  .db-section-networth    { order: 1; }
+  .db-section-keycards    { order: 2; }
+  .db-section-equity      { order: 3; }
+  .db-section-cashflow    { order: 4; }
+  .db-section-bestmove    { order: 5; }
+  .db-section-year        { order: 6; }
+  .db-section-other       { order: 7; }
+
+  /* Dashboard page becomes a flex column so order works */
+  .db-mobile-stack {
+    display: flex;
+    flex-direction: column;
+  }
 }
 
 /* ── iPhone PWA (≤480px): force single-column inside ALL form grids ───────── */
@@ -3624,5 +3673,59 @@ body {
 @media (max-width: 768px) {
   input, textarea, select {
     font-size: 16px !important;
+  }
+}
+
+/* ── Mobile polish: fintech-quality tweaks for ≤480px ─────────────────────── */
+@media (max-width: 480px) {
+  /* 3-col wealth split → 1-col on very small screens */
+  .grid.grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* KPI cards: always 2-col on mobile (never collapse to 1) */
+  .grid.grid-cols-2 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Hero section: reduce pt to 12px so content starts tighter after header */
+  .db-section-networth .px-4 {
+    padding-top: 12px !important;
+  }
+
+  /* Year-by-year table: scrollable, no overflow bleed */
+  .db-section-year .rounded-2xl {
+    overflow-x: auto !important;
+  }
+
+  /* Tab bar: wrap and shrink to fit on narrow screens */
+  .flex.gap-1.mb-4.flex-wrap button {
+    padding: 4px 8px !important;
+    font-size: 10px !important;
+  }
+
+  /* Wealth Decision Center left card: remove excess padding on mobile */
+  .flex-\[7\].min-w-0.rounded-2xl {
+    padding: 12px !important;
+  }
+
+  /* Make chart height smaller on mobile — 280px is plenty */
+  .w-full[style*="height: 360"] {
+    height: 280px !important;
+  }
+}
+
+/* ── Header breadcrumb: hide on very small screens to save space ───────────── */
+@media (max-width: 480px) {
+  .header-breadcrumb-text {
+    display: none !important;
+  }
+  /* Live clock: hide on mobile (saves ~80px) */
+  .live-clock-display {
+    display: none !important;
+  }
+  /* ChartViewToggle: hide on mobile */
+  .chart-view-toggle-header {
+    display: none !important;
   }
 }

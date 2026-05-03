@@ -469,15 +469,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       {/* ── MAIN CONTENT ─────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Top bar */}
+        {/* Top bar — ONE safe-area source: header owns padding-top */}
         <header
-          className="flex items-center px-4 gap-3 shrink-0"
+          className="mobile-header flex items-center px-3 lg:px-4 gap-2 lg:gap-3 shrink-0"
           style={{
             borderBottom: "1px solid hsl(var(--border))",
-            background: "hsl(var(--card) / 0.8)",
-            backdropFilter: "blur(12px)",
-            paddingTop: "max(env(safe-area-inset-top), 0px)",
-            minHeight: "calc(3rem + env(safe-area-inset-top))",
+            background: "hsl(var(--card) / 0.90)",
+            backdropFilter: "blur(16px)",
+            WebkitBackdropFilter: "blur(16px)",
             position: "sticky",
             top: 0,
             zIndex: 30,
@@ -498,8 +497,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <TopBarBreadcrumb location={location} isAdmin={isAdmin} />
 
           <div className="ml-auto flex items-center gap-2">
-            <LiveClock />
-            <ChartViewToggle />
+            <span className="live-clock-display"><LiveClock /></span>
+            <span className="chart-view-toggle-header"><ChartViewToggle /></span>
 
             {/* Privacy toggle */}
             <Button
@@ -560,37 +559,52 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        {/* DEMO MODE banner — always visible when isDemo === true */}
+        {/* DEMO MODE banner — compact one-line on mobile, fuller on desktop */}
         {isDemo && (
           <div
-            className="flex items-center gap-3 px-4 py-2 text-xs font-semibold tracking-wide z-50"
+            className="flex items-center gap-2 px-3 lg:px-4 shrink-0"
             style={{
               background: "linear-gradient(90deg, rgba(139,92,246,0.22), rgba(139,92,246,0.10))",
               borderBottom: "1px solid rgba(139,92,246,0.35)",
               color: "hsl(262,80%,78%)",
+              minHeight: 36,
+              maxHeight: 44,
+              paddingTop: 6,
+              paddingBottom: 6,
             }}
           >
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest"
-              style={{ background: "rgba(139,92,246,0.25)", border: "1px solid rgba(139,92,246,0.45)" }}
+            {/* Dot badge — always visible */}
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest shrink-0"
+              style={{ background: "rgba(139,92,246,0.30)", border: "1px solid rgba(139,92,246,0.50)" }}
             >
-              <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+              <svg width="6" height="6" viewBox="0 0 8 8" fill="none">
                 <circle cx="4" cy="4" r="4" fill="hsl(262,80%,72%)" />
               </svg>
-              DEMO MODE
+              DEMO
             </span>
-            <span className="opacity-80">Viewing Alex &amp; Sara Johnson — dummy data only. Nothing is real.</span>
+
+            {/* Full text — desktop only */}
+            <span className="demo-banner-text opacity-80 text-xs font-medium">
+              Alex &amp; Sara Johnson — dummy data · nothing is real
+            </span>
+
+            {/* Compact text — mobile only */}
+            <span className="demo-banner-compact hidden text-[11px] font-medium opacity-80">
+              Dummy data · Exit
+            </span>
+
             <button
               onClick={() => { logout(); }}
-              className="ml-auto text-[11px] px-3 py-1 rounded-md font-medium transition-all"
+              className="ml-auto text-[10px] lg:text-[11px] px-2 lg:px-3 py-0.5 lg:py-1 rounded font-semibold transition-all shrink-0"
               style={{ background: "rgba(139,92,246,0.20)", border: "1px solid rgba(139,92,246,0.40)", color: "hsl(262,80%,80%)", cursor: "pointer" }}
             >
-              Exit Demo
+              Exit
             </button>
           </div>
         )}
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6">
+        <main className="pwa-main-scroll flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6">
           {children}
         </main>
       </div>
