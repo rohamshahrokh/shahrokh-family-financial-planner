@@ -150,7 +150,7 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
   if (typeof window !== "undefined" && window.innerWidth < 768) return null;
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload ?? {};
-  const { mainRows, hasEquityData, projCash, pporEq, ipEq, eBuf, rawTotal, finalDP, cashIsNegative, milestones } = buildCFTooltipRows(d);
+  const { mainRows, hasEquityData, projCash, closingCash, pporEq, ipEq, eBuf, rawTotal, finalDP, cashIsNegative, milestones } = buildCFTooltipRows(d);
   return (
     <div className="db-tooltip" style={{ minWidth: 300, maxWidth: 340, background: "hsl(222,22%,9%)", border: "1px solid hsl(222,15%,22%)", borderRadius: 10, padding: "10px 14px" }}>
       <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(215,20%,80%)", marginBottom: 8, letterSpacing: "0.03em" }}>{label}</p>
@@ -257,8 +257,18 @@ const MobileChartSheet = ({
 
   if (!data) return null;
   const d = data.payload ?? {};
-  const label = data.label;
-  const { mainRows, hasEquityData, projCash, pporEq, ipEq, eBuf, rawTotal, finalDP, cashIsNegative, milestones } = buildCFTooltipRows(d);
+  const label = data.label ?? "—";
+
+  // Guard: if payload is completely empty (no balance, no income, no equity) flag as broken
+  const payloadOk = (
+    d.balance !== undefined ||
+    d.income  !== undefined ||
+    d.pporUsableEquity !== undefined ||
+    d.closingCashForDP !== undefined
+  );
+
+  const { mainRows, hasEquityData, projCash, closingCash, pporEq, ipEq, eBuf, rawTotal, finalDP, cashIsNegative, milestones } =
+    payloadOk ? buildCFTooltipRows(d) : { mainRows: [], hasEquityData: false, projCash: 0, closingCash: 0, pporEq: 0, ipEq: 0, eBuf: 0, rawTotal: 0, finalDP: 0, cashIsNegative: false, milestones: [] };
 
   const translateY = leaving ? "100%" : dragY > 0 ? `${dragY}px` : "0";
   const transition = dragY > 0 ? "none" : "transform 0.27s cubic-bezier(0.32,0.72,0,1)";
@@ -323,25 +333,38 @@ const MobileChartSheet = ({
         {/* Scrollable content */}
         <div style={{ overflowY: "auto", flex: 1, padding: "14px 20px 4px", WebkitOverflowScrolling: "touch" as any }}>
 
-          {/* Cashflow section */}
-          <div style={{ marginBottom: 6 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "hsl(215,12%,42%)", marginBottom: 8 }}>
-              Cashflow
-            </div>
-            {mainRows.map((r: any, i: number) => (
-              <div key={i} style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                padding: "7px 0",
-                borderBottom: i < mainRows.length - 1 ? "1px solid hsl(222,15%,15%)" : "none",
-                color: r.color,
-              }}>
-                <span style={{ fontSize: 14, fontWeight: r.bold ? 700 : 400, opacity: r.bold ? 1 : 0.88 }}>{r.label}</span>
-                <span style={{ fontSize: r.bold ? 15 : 14, fontFamily: "monospace", fontWeight: r.bold ? 700 : 500 }}>
-                  {r.value >= 0 ? "+" : ""}{formatCurrency(r.value, true)}
-                </span>
+          {/* Empty state — payload failed to load */}
+          {!payloadOk && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 0", gap: 10 }}>
+              <div style={{ fontSize: 28 }}>⚠️</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "hsl(43,90%,62%)" }}>No data for {label}</div>
+              <div style={{ fontSize: 12, color: "hsl(215,12%,50%)", textAlign: "center", lineHeight: 1.5 }}>
+                Chart data for this year hasn't loaded yet.<br/>Try scrolling back and tapping again.
               </div>
-            ))}
-          </div>
+            </div>
+          )}
+
+          {/* Cashflow section */}
+          {payloadOk && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "hsl(215,12%,42%)", marginBottom: 8 }}>
+                Cashflow
+              </div>
+              {mainRows.map((r: any, i: number) => (
+                <div key={i} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "7px 0",
+                  borderBottom: i < mainRows.length - 1 ? "1px solid hsl(222,15%,15%)" : "none",
+                  color: r.color,
+                }}>
+                  <span style={{ fontSize: 14, fontWeight: r.bold ? 700 : 400, opacity: r.bold ? 1 : 0.88 }}>{r.label}</span>
+                  <span style={{ fontSize: r.bold ? 15 : 14, fontFamily: "monospace", fontWeight: r.bold ? 700 : 500 }}>
+                    {r.value >= 0 ? "+" : ""}{formatCurrency(r.value, true)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Deposit Power waterfall */}
           {hasEquityData && (
@@ -590,6 +613,19 @@ export default function DashboardPage() {
   const [cfViewMode, setCfViewMode] = useState<"cash" | "equity" | "deposit">("cash");
   // Mobile chart bottom-sheet tooltip state
   const [mobileTooltipData, setMobileTooltipData] = useState<{ label: string; payload: any } | null>(null);
+
+  // Shared tap handler for ALL chart variants on mobile.
+  // chartData = Recharts SyntheticEvent from onClick prop.
+  // On candlestick the data is an inline-mapped array — payload still has all ...d fields spread in.
+  const handleChartTap = (chartData: any) => {
+    if (typeof window === "undefined" || window.innerWidth >= 768) return;
+    if (!chartData?.activePayload?.length) return;
+    const raw = chartData.activePayload[0]?.payload ?? {};
+    // Guard: at minimum we need a label. Fall back to activeLabel.
+    const label = raw.label ?? chartData.activeLabel ?? "";
+    if (!label && !raw.balance && !raw.income) return; // truly empty — ignore
+    setMobileTooltipData({ label, payload: raw });
+  };
   const [maxRefinanceLVR, setMaxRefinanceLVR] = useState<number>(0.80);
   const [emergencyBuffer, setEmergencyBuffer] = useState<number>(30000);
   const [showLedgerAudit, setShowLedgerAudit] = useState(false);
@@ -2144,17 +2180,13 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Chart — Fix 1: increased height to 360px, Fix 7: responsive */}
-                <div className="w-full" style={{ height: 360 }}>
+                <div className="w-full" style={{ height: 360, touchAction: "none", userSelect: "none" }}>
                   <ResponsiveContainer width="100%" height="100%">
                     {wdcChartType === "line" ? (
                       <LineChart
                         data={masterCFData}
                         margin={{ top: 16, right: 8, left: 0, bottom: 0 }}
-                        onClick={(chartData: any) => {
-                          if (window.innerWidth < 768 && chartData?.activePayload?.length) {
-                            setMobileTooltipData({ label: chartData.activeLabel ?? "", payload: chartData.activePayload[0]?.payload ?? {} });
-                          }
-                        }}
+                        onClick={handleChartTap}
                       >
                         <defs>
                           <linearGradient id="wdcBalGradLine" x1="0" y1="0" x2="0" y2="1">
@@ -2189,11 +2221,7 @@ export default function DashboardPage() {
                       // Candlestick — use ComposedChart with a custom Bar showing OHLC-style balance movement
                       // open = prev year balance, close = this year balance, bar height = |close-open|
                       <ComposedChart
-                        onClick={(chartData: any) => {
-                          if (window.innerWidth < 768 && chartData?.activePayload?.length) {
-                            setMobileTooltipData({ label: chartData.activeLabel ?? "", payload: chartData.activePayload[0]?.payload ?? {} });
-                          }
-                        }}
+                        onClick={handleChartTap}
                         data={masterCFData.map((d: any, i: number) => ({
                           ...d,
                           open:   i === 0 ? d.balance : (masterCFData[i-1] as any).balance,
@@ -2234,11 +2262,7 @@ export default function DashboardPage() {
                       <ComposedChart
                         data={masterCFData}
                         margin={{ top: 16, right: 8, left: 0, bottom: 0 }}
-                        onClick={(chartData: any) => {
-                          if (window.innerWidth < 768 && chartData?.activePayload?.length) {
-                            setMobileTooltipData({ label: chartData.activeLabel ?? "", payload: chartData.activePayload[0]?.payload ?? {} });
-                          }
-                        }}
+                        onClick={handleChartTap}
                       >
                         <defs>
                           <linearGradient id="wdcBalGrad" x1="0" y1="0" x2="0" y2="1">
