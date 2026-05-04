@@ -361,6 +361,10 @@ function flagExpense(e: any, all: any[]): 'normal' | 'unusual' | 'high' {
 export async function generateCFOReport(
   tone: 'Conservative' | 'Balanced' | 'Aggressive' = 'Balanced'
 ): Promise<CFOBulletin> {
+  // ── Outer try/catch: one undefined variable must NOT crash the whole bulletin
+  // If something goes wrong a structured partial report is returned with the
+  // error message embedded so the UI can display it and not show a blank page.
+  try {
 
   // ── Fetch all data in parallel ────────────────────────────────────────────
   const [
@@ -497,6 +501,13 @@ export async function generateCFOReport(
     ? incomeTrackerMonthly
     : safeNum(snap.monthly_income) || 22000;
   const monthlyExpenses = safeNum(snap.monthly_expenses) || 8000;
+
+  // Cash buffer in months: how many months of expenses the liquid cash covers.
+  // Placed HERE (after monthlyExpenses is defined) — was used at score/summary
+  // sections but was never defined, causing "monthsCash is not defined" crash.
+  const monthsCash = monthlyExpenses > 0
+    ? liquidCash / monthlyExpenses
+    : (liquidCash > 0 ? 99 : 0); // guard against division by zero
 
   // Bills monthly equivalent (for FIRE calc and cashflow display — NOT subtracted from surplus)
   // IMPORTANT: dashboard surplus = income - expenses ONLY (line 363).
@@ -1071,6 +1082,54 @@ export async function generateCFOReport(
     fire_year:         fireYear,
     fire_progress:     firePct,
   };
+
+  // ── End outer try/catch ───────────────────────────────────────────────────
+  } catch (err: any) {
+    // Return a partial bulletin with the error surfaced so the UI can show it.
+    // This prevents a single missing variable (e.g. monthsCash) from crashing
+    // the Run Now button and showing a blank page.
+    const errorMsg = err?.message ?? String(err) ?? 'Unknown error';
+    console.error('[generateCFOReport] Fatal error — returning stub report:', errorMsg);
+    const now = new Date();
+    const weekDate = now.toISOString().split('T')[0];
+    const zeroScores: CFOScore = { wealth: 0, cashflow: 0, risk: 0, discipline: 0, opportunity: 0, overall: 0 };
+    return {
+      week_date: weekDate, generated_at: now.toISOString(),
+      scores: zeroScores,
+      snapshot: { net_worth: 0, net_worth_delta: 0, cash_everyday: 0, cash_savings: 0,
+        cash_emergency: 0, cash_other: 0, offset_balance: 0, liquid_cash: 0,
+        offset_interest_saving: 0, monthly_income: 0, monthly_expenses: 0, monthly_surplus: 0,
+        debt_ratio: 0, fire_progress_pct: 0, years_to_fire: 0, fire_year: now.getFullYear() + 20,
+        fire_on_track: false, total_assets: 0, total_debt: 0, portfolio_value: 0, super_combined: 0,
+      },
+      top_expenses: [], spending_insight: `Generation error: ${errorMsg}`,
+      cashflow: { opening: 0, income: 0, expenses: 0, surplus: 0, net: 0, status: 'red' as const,
+        income_breakdown: [], expense_breakdown: [] },
+      smart_action: `Report generation failed: ${errorMsg}`, smart_action_value: 'Please try again.',
+      property_watch: { ppor_value: 0, ppor_equity: 0, ip_value: 0, ip_equity: 0,
+        total_equity: 0, usable_equity: 0, refinance_available: false,
+        refinance_amount: 0, ip_rental_yield: 0, ip_cashflow: 0, watch_note: errorMsg },
+      investment: { stocks_value: 0, crypto_value: 0, super_value: 0, total_value: 0,
+        dca_active_count: 0, lump_sum_count: 0, allocation: [], performance_note: '' },
+      risk_alerts: [{ level: 'warning', title: 'Generation Error', message: errorMsg }],
+      risk_radar: { overall_score: 0, overall_level: 'unknown' as any, overall_label: 'Error',
+        fragility_index: 0, categories: [], top_risks: [], top_mitigations: [] },
+      fire: { on_track: false, progress_pct: 0, years_to_fire: 20, fire_year: now.getFullYear() + 20,
+        required_capital: 0, current_investable: 0, semi_fire_year: now.getFullYear() + 10,
+        monthly_savings_needed: 0 },
+      fire_path: [], tax_alpha: { strategies: [], total_saving: 0 },
+      property_buy_signal: null,
+      best_move: { action: 'Generation failed', reason: errorMsg, annual_benefit: 0,
+        benefit_label: 'Not available', risk: 'Low' as const, cta: 'Try Again',
+        cta_route: '/bulletin', alternatives: [], summary: errorMsg },
+      cfo_insight: `Bulletin generation failed: ${errorMsg}`,
+      summary: `Error: ${errorMsg}`, alerts: [], opportunities: [],
+      best_move_text: `Error: ${errorMsg}`, wealth_score: 0, cashflow_score: 0,
+      risk_score: 0, discipline_score: 0, networth: 0, networth_delta: 0,
+      monthly_surplus: 0, debt_total: 0, portfolio_value: 0,
+      fire_year: now.getFullYear() + 20, fire_progress: 0,
+    };
+  }
 }
 
 // ─── Telegram formatter (compact + emojis) ───────────────────────────────────

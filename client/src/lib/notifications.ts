@@ -482,94 +482,193 @@ export async function checkUpcomingBills(bills: Array<{
 }
 
 // ─── Saturday Morning Bulletin dispatch ──────────────────────────────────────
-// Called from App.tsx every 30 minutes. Checks:
-//   1. Feature enabled
-//   2. 6-day cooldown not active (Supabase dedup)
-//   3. It is Saturday 8:00 AM Brisbane time (within 45-minute window)
-// Then: generates bulletin, sends Telegram + Email, saves to sf_cfo_reports.
+// Called from App.tsx every 30 minutes (scheduled) or from the Run Now button (manual).
+// Checks: enabled, 6-day cooldown, schedule time — then generates, sends, logs.
+//
+// Dedicated toggle: settings.bulletin_send_telegram — Send Saturday bulletin via Telegram.
+// All steps logged to sf_bulletin_log for Settings last-sent/error display.
 
-export async function dispatchWeeklyCFO(): Promise<void> {
-  // Lazy-import cfoEngine to avoid bundling it on every page load
+// ── Bulletin log helpers ─────────────────────────────────────────────────────
+
+const BULLETIN_LOG_URL = `${SUPABASE_URL}/rest/v1/sf_bulletin_log`;
+
+export interface BulletinLogEntry {
+  id?:              number;
+  triggered_at:     string;
+  trigger_type:     'scheduled' | 'manual';
+  status:           'running' | 'generated' | 'sent' | 'failed' | 'skipped';
+  telegram_sent?:   boolean;
+  telegram_chat_ids?: string;
+  telegram_error?:  string;
+  telegram_response?: string;
+  error_message?:   string;
+  week_date?:       string;
+  scores_overall?:  number;
+}
+
+async function writeBulletinLog(entry: Partial<BulletinLogEntry> & { triggered_at: string }): Promise<number | null> {
+  try {
+    const res = await fetch(BULLETIN_LOG_URL, {
+      method:  'POST',
+      headers: { ...SB_HEADERS, Prefer: 'return=representation' },
+      body:    JSON.stringify({ ...entry, created_at: new Date().toISOString() }),
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    return rows[0]?.id ?? null;
+  } catch { return null; }
+}
+
+async function updateBulletinLog(id: number, patch: Partial<BulletinLogEntry>): Promise<void> {
+  try {
+    await fetch(`${BULLETIN_LOG_URL}?id=eq.${id}`, {
+      method:  'PATCH',
+      headers: SB_HEADERS,
+      body:    JSON.stringify(patch),
+    });
+  } catch { /* silent */ }
+}
+
+/** Last bulletin log entry — used by Settings to show last-sent status & errors. */
+export async function getLastBulletinLog(): Promise<BulletinLogEntry | null> {
+  try {
+    const res = await fetch(`${BULLETIN_LOG_URL}?order=triggered_at.desc&limit=1`, { headers: SB_HEADERS });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    return rows[0] ?? null;
+  } catch { return null; }
+}
+
+/** Last N bulletin log entries — used by the error log panel in Settings. */
+export async function getBulletinLog(limit = 10): Promise<BulletinLogEntry[]> {
+  try {
+    const res = await fetch(`${BULLETIN_LOG_URL}?order=triggered_at.desc&limit=${limit}`, { headers: SB_HEADERS });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch { return []; }
+}
+
+export async function dispatchWeeklyCFO(triggerType: 'scheduled' | 'manual' = 'scheduled'): Promise<{ ok: boolean; error?: string }> {
+  const logId = await writeBulletinLog({
+    triggered_at: new Date().toISOString(),
+    trigger_type: triggerType,
+    status: 'running',
+  });
+
   const {
     getCFOSettings, generateCFOReport, saveCFOReport,
     formatCFOTelegram, formatCFOEmail, cfoAlreadyRanThisWeek, isCFOScheduleTime,
   } = await import('./cfoEngine');
 
-  const settings = await getCFOSettings();
-  if (!settings.enabled)                return;
-  if (await cfoAlreadyRanThisWeek())    return;
-  if (!isCFOScheduleTime(settings.delivery_day, settings.delivery_time)) return;
+  try {
+    const settings = await getCFOSettings();
 
-  // Generate Saturday Morning Bulletin
-  const report = await generateCFOReport(settings.tone ?? 'Balanced');
-
-  // ── Telegram delivery ──────────────────────────────────────────────────────
-  let telegramSent = false;
-  if (settings.telegram_enabled) {
-    const tgSettings = await getTelegramSettings();
-    if (tgSettings?.enabled && tgSettings.bot_token) {
-      const msg      = formatCFOTelegram(report);
-      const chatIds  = [
-        tgSettings.roham_chat_id,
-        tgSettings.fara_chat_id,
-      ].filter(Boolean) as string[];
-
-      for (const chatId of chatIds) {
-        try {
-          const res = await fetch(
-            `https://api.telegram.org/bot${tgSettings.bot_token}/sendMessage`,
-            {
-              method:  'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id:                  chatId,
-                text:                     msg,
-                parse_mode:               'HTML',
-                disable_web_page_preview: true,
-              }),
-            }
-          );
-          if (res.ok) telegramSent = true;
-        } catch { /* silent — never block save */ }
+    // ── Guard checks (scheduled only — manual always runs) ────────────────────
+    if (triggerType === 'scheduled') {
+      if (!settings.enabled) {
+        if (logId) await updateBulletinLog(logId, { status: 'skipped', error_message: 'Bulletin disabled in settings' });
+        return { ok: true };
+      }
+      if (await cfoAlreadyRanThisWeek()) {
+        if (logId) await updateBulletinLog(logId, { status: 'skipped', error_message: 'Already ran this week (dedup)' });
+        return { ok: true };
+      }
+      if (!isCFOScheduleTime(settings.delivery_day, settings.delivery_time)) {
+        if (logId) await updateBulletinLog(logId, { status: 'skipped', error_message: `Not schedule time (${settings.delivery_day} ${settings.delivery_time} AEST)` });
+        return { ok: true };
+      }
+    } else {
+      if (!settings.enabled) {
+        if (logId) await updateBulletinLog(logId, { status: 'skipped', error_message: 'Bulletin disabled — enable it in Saturday Bulletin settings' });
+        return { ok: false, error: 'Bulletin is disabled in settings' };
       }
     }
-  }
 
-  // ── Email delivery ────────────────────────────────────────────────────────
-  // Uses EmailJS free tier (no server required). Requires EmailJS to be
-  // configured in settings with service_id, template_id, and public_key.
-  // Template must have variables: {{to_email}}, {{subject}}, {{html_content}}
-  // Falls back gracefully if EmailJS is not configured.
-  if (settings.email_enabled && settings.email_address) {
-    try {
-      const { subject, html } = formatCFOEmail(report);
-      // Attempt EmailJS delivery — requires window.emailjs loaded via CDN
-      // or configured on the backend. Since this is a static Vite app we
-      // use the public EmailJS REST API directly.
-      const SB_URL  = 'https://uoraduyyxhtzixcsaidg.supabase.co';
-      const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVvcmFkdXl5eGh0eml4Y3NhaWRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTgsImV4cCI6MjA5MjY5NzAxOH0.qNrqDlG4j0lfGKDsmGyywP8DZeMurB02UWv4bdevW7c';
-      // Store the pending email in Supabase for backend pickup
-      // (or use a Supabase edge function / external SMTP trigger).
-      // For now: log the email to sf_cfo_reports.email_payload so it can
-      // be picked up by a future server-side trigger.
-      await fetch(`${SB_URL}/rest/v1/sf_cfo_reports?id=eq.${encodeURIComponent(report.week_date)}`, {
-        method:  'PATCH',
-        headers: {
-          apikey:        SB_ANON,
-          Authorization: `Bearer ${SB_ANON}`,
-          'Content-Type': 'application/json',
-          Prefer:         'return=minimal',
-        },
-        body: JSON.stringify({
-          email_sent:    false,
-          email_payload: { to: settings.email_address, subject, html },
-        }),
-      });
-    } catch { /* silent — email is best-effort */ }
-  }
+    // ── Generate bulletin ──────────────────────────────────────────────────────
+    const report = await generateCFOReport(settings.tone ?? 'Balanced');
+    if (logId) await updateBulletinLog(logId, { status: 'generated', week_date: report.week_date, scores_overall: report.scores?.overall });
 
-  // ── Save bulletin to Supabase (also updates last_run_at — dedup guard) ──────
-  await saveCFOReport(report, telegramSent);
+    // ── Telegram delivery ──────────────────────────────────────────────────────
+    // Dedicated toggle: bulletin_send_telegram (separate from generic Telegram alert toggles)
+    let telegramSent  = false;
+    let telegramError = '';
+    const telegramEnabled = (settings.bulletin_send_telegram !== false) && (settings.telegram_enabled !== false);
+
+    if (telegramEnabled) {
+      const tgSettings = await getTelegramSettings();
+      if (!tgSettings?.enabled || !tgSettings.bot_token) {
+        telegramError = 'Telegram bot not configured (missing token or bot disabled)';
+      } else {
+        const msg     = formatCFOTelegram(report);
+        const chatIds = [tgSettings.roham_chat_id, tgSettings.fara_chat_id].filter(Boolean) as string[];
+        if (chatIds.length === 0) {
+          telegramError = 'No chat IDs configured in Telegram settings';
+        } else {
+          const results: Array<{ chatId: string; ok: boolean; code?: number; body?: string }> = [];
+          for (const chatId of chatIds) {
+            try {
+              const res  = await fetch(`https://api.telegram.org/bot${tgSettings.bot_token}/sendMessage`, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'HTML', disable_web_page_preview: true }),
+              });
+              const body = await res.text().catch(() => '');
+              results.push({ chatId, ok: res.ok, code: res.status, body: body.slice(0, 200) });
+              if (res.ok) telegramSent = true;
+              else telegramError += `[${chatId}] HTTP ${res.status}: ${body.slice(0, 100)}; `;
+            } catch (e: any) {
+              results.push({ chatId, ok: false, body: e?.message ?? 'Network error' });
+              telegramError += `[${chatId}] ${e?.message ?? 'Network error'}; `;
+            }
+          }
+          const responseLog = results.map(r => `${r.chatId}:${r.ok ? 'OK' : r.code} ${r.body ?? ''}`).join(' | ');
+          if (logId) await updateBulletinLog(logId, {
+            telegram_response: responseLog,
+            telegram_chat_ids: chatIds.join(', '),
+          });
+          await logAlert({
+            alert_type: 'saturday_bulletin', channel: 'telegram',
+            title: 'Saturday Morning Bulletin',
+            message: `Bulletin ${report.week_date} — ${telegramSent ? 'delivered' : 'failed to deliver'}`,
+            status: telegramSent ? 'sent' : 'failed',
+          });
+        }
+      }
+    } else {
+      telegramError = `Telegram delivery disabled (bulletin_send_telegram=${settings.bulletin_send_telegram ?? 'default-true'}, telegram_enabled=${settings.telegram_enabled ?? 'default-true'})`;
+    }
+
+    // ── Email delivery ─────────────────────────────────────────────────────────
+    if (settings.email_enabled && settings.email_address) {
+      try {
+        const { subject, html } = formatCFOEmail(report);
+        await fetch(`${SUPABASE_URL}/rest/v1/sf_cfo_reports?id=eq.${encodeURIComponent(report.week_date)}`, {
+          method: 'PATCH',
+          headers: { ...SB_HEADERS, Prefer: 'return=minimal' },
+          body: JSON.stringify({ email_sent: false, email_payload: { to: settings.email_address, subject, html } }),
+        });
+      } catch { /* email best-effort */ }
+    }
+
+    // ── Save bulletin (also writes last_run_at dedup guard) ────────────────────
+    await saveCFOReport(report, telegramSent);
+
+    // ── Final log ──────────────────────────────────────────────────────────────
+    const finalStatus = telegramSent ? 'sent' : 'generated';
+    if (logId) await updateBulletinLog(logId, {
+      status:         finalStatus,
+      telegram_sent:  telegramSent,
+      telegram_error: telegramError || undefined,
+    });
+
+    return { ok: true };
+
+  } catch (err: any) {
+    const errorMsg = err?.message ?? String(err);
+    console.error('[dispatchWeeklyCFO] Error:', errorMsg);
+    if (logId) await updateBulletinLog(logId, { status: 'failed', error_message: errorMsg });
+    return { ok: false, error: errorMsg };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

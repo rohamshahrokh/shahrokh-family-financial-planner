@@ -12,7 +12,7 @@ import {
   Send, Bell, BellOff, CheckCircle2, XCircle, MessageSquare, Heart, Clock,
   Zap, TrendingDown, AlertTriangle, CreditCard, DollarSign, BarChart2, Lock,
   UserPlus, KeyRound, UserCheck, UserX, ChevronDown, ChevronUp, Eye, EyeOff,
-  Briefcase, TrendingUp, Info, BrainCircuit,
+  Briefcase, TrendingUp, Info, BrainCircuit, FileText,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { sendTestMessage, sendBrowserPush, invalidateSettingsCache } from "@/lib/notifications";
@@ -808,6 +808,12 @@ function CFOSettingsSection() {
   const [draft, setDraft] = useState<any>(null);
   const settings = draft ?? cfoSettings ?? {};
 
+  // Bulletin log (last sent status + error log)
+  const [bulletinLog, setBulletinLog] = useState<any[]>([]);
+  const [logLoading, setLogLoading] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+  const [testBulletinStatus, setTestBulletinStatus] = useState<'idle' | 'running' | 'ok' | 'fail'>('idle');
+
   const handleChange = (key: string, val: any) => {
     setDraft((prev: any) => ({ ...(prev ?? cfoSettings ?? {}), [key]: val }));
   };
@@ -825,7 +831,59 @@ function CFOSettingsSection() {
     }
   };
 
+  const loadLog = async () => {
+    setLogLoading(true);
+    try {
+      const { getBulletinLog } = await import('../lib/notifications');
+      const entries = await getBulletinLog(15);
+      setBulletinLog(entries);
+    } catch { setBulletinLog([]); }
+    setLogLoading(false);
+  };
+
+  const handleShowLog = () => {
+    if (!showLog) loadLog();
+    setShowLog(v => !v);
+  };
+
+  const handleTestBulletin = async () => {
+    setTestBulletinStatus('running');
+    try {
+      const { dispatchWeeklyCFO } = await import('../lib/notifications');
+      const result = await dispatchWeeklyCFO('manual');
+      setTestBulletinStatus(result.ok ? 'ok' : 'fail');
+      toast({
+        title: result.ok ? 'Bulletin Generated' : 'Bulletin Failed',
+        description: result.ok
+          ? 'Bulletin generated successfully. If Telegram is ON, it was sent.'
+          : result.error ?? 'Check error log below.',
+        variant: result.ok ? 'default' : 'destructive',
+      });
+      loadLog();
+    } catch (e: any) {
+      setTestBulletinStatus('fail');
+      toast({ title: 'Error', description: e?.message ?? 'Unknown error', variant: 'destructive' });
+    }
+    setTimeout(() => setTestBulletinStatus('idle'), 4000);
+  };
+
   if (isLoading) return null;
+
+  // Last-sent info from cfoSettings
+  const lastRunAt = settings.last_run_at ? new Date(settings.last_run_at) : null;
+  const lastRunStr = lastRunAt
+    ? lastRunAt.toLocaleDateString('en-AU', {
+        weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Brisbane',
+      }) + ' AEST'
+    : 'Never';
+
+  const statusColor = (s: string) =>
+    s === 'sent' ? 'text-emerald-400' :
+    s === 'generated' ? 'text-blue-400' :
+    s === 'skipped' ? 'text-muted-foreground' :
+    s === 'failed' ? 'text-red-400' :
+    s === 'running' ? 'text-amber-400' : 'text-muted-foreground';
 
   return (
     <SectionCard
@@ -833,6 +891,7 @@ function CFOSettingsSection() {
       subtitle="Automated weekly financial briefing — every Saturday 8:00 AM AEST"
       icon={<BrainCircuit className="w-4 h-4 text-violet-400" />}
     >
+      {/* Core toggles */}
       <ToggleRow
         label="Enable Saturday Morning Bulletin"
         desc="Automatically generate and send your weekly financial briefing"
@@ -840,10 +899,10 @@ function CFOSettingsSection() {
         onChange={v => handleChange('enabled', v)}
       />
       <ToggleRow
-        label="Telegram Delivery"
-        desc="Send compact bulletin via Telegram to configured chat ID(s)"
-        checked={settings.telegram_enabled ?? true}
-        onChange={v => handleChange('telegram_enabled', v)}
+        label="Send Saturday Bulletin via Telegram"
+        desc="Automatically send the bulletin to your Telegram on the scheduled day/time"
+        checked={settings.bulletin_send_telegram !== false}
+        onChange={v => handleChange('bulletin_send_telegram', v)}
       />
       <ToggleRow
         label="Email Delivery"
@@ -863,9 +922,11 @@ function CFOSettingsSection() {
           />
         </div>
       )}
+
+      {/* Schedule grid */}
       <div className="grid grid-cols-2 gap-4 mt-2">
         <div>
-          <label className="text-xs text-muted-foreground">Delivery Day</label>
+          <label className="text-xs text-muted-foreground">Bulletin Day</label>
           <select
             value={settings.delivery_day ?? 'Saturday'}
             onChange={e => handleChange('delivery_day', e.target.value)}
@@ -877,7 +938,7 @@ function CFOSettingsSection() {
           </select>
         </div>
         <div>
-          <label className="text-xs text-muted-foreground">Delivery Time (Brisbane AEST)</label>
+          <label className="text-xs text-muted-foreground">Bulletin Time (Brisbane AEST)</label>
           <input
             type="time"
             value={settings.delivery_time ?? '08:00'}
@@ -897,17 +958,96 @@ function CFOSettingsSection() {
             <option value="Aggressive">Aggressive (5% SWR)</option>
           </select>
         </div>
-
       </div>
-      {settings.last_run_at && (
-        <p className="text-xs text-muted-foreground mt-2">
-          Last bulletin sent: {new Date(settings.last_run_at).toLocaleDateString('en-AU', {
-            day: 'numeric', month: 'short', year: 'numeric',
-            hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Brisbane',
-          })} AEST
-        </p>
+
+      {/* Last sent status */}
+      <div className="mt-3 p-3 rounded-lg bg-secondary/30 border border-border/50 space-y-1">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-foreground">Last Bulletin Sent</span>
+          <span className="text-xs text-muted-foreground">{lastRunStr}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">Scheduled</span>
+          <span className="text-xs text-foreground">
+            {settings.delivery_day ?? 'Saturday'} · {settings.delivery_time ?? '08:00'} AEST
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">Auto Telegram</span>
+          <span className={`text-xs font-semibold ${settings.bulletin_send_telegram !== false ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+            {settings.bulletin_send_telegram !== false ? 'ON' : 'OFF'}
+          </span>
+        </div>
+      </div>
+
+      {/* Action buttons */}
+      <div className="flex flex-wrap items-center gap-2 mt-2">
+        <Button
+          size="sm" variant="outline"
+          className="gap-1.5 h-8 text-xs"
+          onClick={handleTestBulletin}
+          disabled={testBulletinStatus === 'running'}
+        >
+          {testBulletinStatus === 'running' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> :
+           testBulletinStatus === 'ok'      ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> :
+           testBulletinStatus === 'fail'    ? <XCircle className="w-3.5 h-3.5 text-red-400" /> :
+           <BrainCircuit className="w-3.5 h-3.5" />}
+          {testBulletinStatus === 'running' ? 'Generating…' : 'Send Test Bulletin'}
+        </Button>
+        <Button
+          size="sm" variant="ghost"
+          className="gap-1.5 h-8 text-xs text-muted-foreground"
+          onClick={handleShowLog}
+        >
+          <FileText className="w-3.5 h-3.5" />
+          {showLog ? 'Hide' : 'Show'} Log
+        </Button>
+        <SaveButton label="Save Bulletin Settings" onSave={handleSave} />
+      </div>
+
+      {/* Error / activity log */}
+      {showLog && (
+        <div className="mt-3 rounded-lg border border-border bg-background p-3">
+          <div className="text-xs font-semibold text-foreground mb-2">Bulletin Activity Log</div>
+          {logLoading ? (
+            <p className="text-xs text-muted-foreground">Loading…</p>
+          ) : bulletinLog.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No entries yet. Click &quot;Send Test Bulletin&quot; to generate the first one.</p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {bulletinLog.map((entry: any, i: number) => (
+                <div key={i} className="border-b border-border/40 pb-2 last:border-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-xs font-bold uppercase ${statusColor(entry.status)}`}>{entry.status}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(entry.triggered_at).toLocaleString('en-AU', {
+                        timeZone: 'Australia/Brisbane', day: 'numeric', month: 'short',
+                        hour: '2-digit', minute: '2-digit',
+                      })} AEST
+                    </span>
+                    <span className="text-xs text-muted-foreground capitalize">{entry.trigger_type}</span>
+                  </div>
+                  {entry.week_date && (
+                    <p className="text-xs text-muted-foreground mt-0.5">Week: {entry.week_date} · Score: {entry.scores_overall ?? '—'}</p>
+                  )}
+                  {entry.telegram_sent !== undefined && (
+                    <p className="text-xs mt-0.5">
+                      Telegram: <span className={entry.telegram_sent ? 'text-emerald-400' : 'text-amber-400'}>{entry.telegram_sent ? 'Sent' : 'Not sent'}</span>
+                      {entry.telegram_error && <span className="text-red-400 ml-1">— {entry.telegram_error}</span>}
+                    </p>
+                  )}
+                  {entry.error_message && (
+                    <p className="text-xs text-red-400 mt-0.5 break-all">{entry.error_message}</p>
+                  )}
+                  {entry.telegram_response && (
+                    <p className="text-xs text-muted-foreground mt-0.5 break-all font-mono">{entry.telegram_response}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
-      <SaveButton label="Save Bulletin Settings" onSave={handleSave} />
     </SectionCard>
   );
 }

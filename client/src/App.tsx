@@ -251,7 +251,7 @@ export default function App() {
     const runCFO = () => {
       if (document.hidden) return;
       import('./lib/notifications').then(({ dispatchWeeklyCFO }) => {
-        dispatchWeeklyCFO().catch(() => {/* silent */});
+        dispatchWeeklyCFO('scheduled').catch(() => {/* silent */});
       }).catch(() => {/* silent */});
     };
     runCFO();
