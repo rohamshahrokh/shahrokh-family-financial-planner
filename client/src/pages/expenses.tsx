@@ -45,6 +45,7 @@ const CATEGORIES = [
   'Home Maintenance',
   'Investment Costs',
   'Debt Repayment',
+  'Refund',
   'Other',
 ];
 
@@ -66,6 +67,7 @@ export const SOURCE_CODE_MAP: Record<string, string> = {
   BB: 'Kids Expenses',
   CC: 'Childcare',
   TR: 'Travel',
+  RE: 'Refund',       // Refund — reduces net expenses, displayed as +amount in green
   // backward compat — old codes
   F:  'Other',
   RN: 'Other',
@@ -73,7 +75,11 @@ export const SOURCE_CODE_MAP: Record<string, string> = {
 };
 
 // All display codes for the Source Code filter dropdown
-const ALL_SOURCE_CODES = ['D', 'M', 'T', 'E', 'C', 'B', 'R', 'G', 'S', 'L', 'PI', 'I', 'U', 'BB', 'CC', 'TR'];
+const ALL_SOURCE_CODES = ['D', 'M', 'T', 'E', 'C', 'B', 'R', 'G', 'S', 'L', 'PI', 'I', 'U', 'BB', 'CC', 'TR', 'RE'];
+
+/** Returns true if an expense record is a refund */
+const isRefund = (e: any) =>
+  e.category === 'Refund' || (e.source_code ?? '').toUpperCase() === 'RE';
 
 const FAMILY_MEMBERS = ['Roham', 'Fara', 'Kids', 'Family'];
 const PAYMENT_METHODS = ['Bank Transfer', 'Credit Card', 'Debit Card', 'Cash', 'Offset Account', 'BPAY'];
@@ -842,12 +848,13 @@ export default function ExpensesPage() {
 
   // ── Expense analytics ─────────────────────────────────────────────────────────
   const analytics = useMemo(() => {
-    const totalSpend = filtered.reduce((s: number, e: any) => s + e.amount, 0);
+    // Refunds are stored as positive but reduce net expenses
+    const totalSpend = filtered.reduce((s: number, e: any) => isRefund(e) ? s - e.amount : s + e.amount, 0);
     const now = new Date();
     const monthlySpend = expenses.filter((e: any) => {
       const d = new Date(e.date);
       return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }).reduce((s: number, e: any) => s + e.amount, 0);
+    }).reduce((s: number, e: any) => isRefund(e) ? s - e.amount : s + e.amount, 0);
 
     const byCategory: Record<string, number> = {};
     filtered.forEach((e: any) => { byCategory[e.category] = (byCategory[e.category] || 0) + e.amount; });
@@ -1043,8 +1050,10 @@ export default function ExpensesPage() {
 
   // ── Filtered expense totals (react instantly to filters) ─────────────────
   const filteredExpensesTotals = useMemo(() => {
-    const totalAmount = filtered.reduce((s: number, e: any) => s + (e.amount || 0), 0);
-    return { totalAmount, count: filtered.length };
+    // Refunds reduce net expenses
+    const totalAmount = filtered.reduce((s: number, e: any) => isRefund(e) ? s - (e.amount || 0) : s + (e.amount || 0), 0);
+    const refundTotal = filtered.filter(isRefund).reduce((s: number, e: any) => s + (e.amount || 0), 0);
+    return { totalAmount, refundTotal, count: filtered.length };
   }, [filtered]);
 
   // ── Cash Flow data ────────────────────────────────────────────────────────────
@@ -1795,7 +1804,11 @@ export default function ExpensesPage() {
                     <SelectTrigger className="h-8 text-sm mt-0.5"><SelectValue placeholder="Code" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Codes</SelectItem>
-                      {ALL_SOURCE_CODES.map(c => <SelectItem key={c} value={c}>{c} — {SOURCE_CODE_MAP[c]}</SelectItem>)}
+                      {ALL_SOURCE_CODES.map(c => (
+                        <SelectItem key={c} value={c}>
+                          {c} — {SOURCE_CODE_MAP[c]}{c === 'RE' ? ' (+)' : ''}
+                        </SelectItem>
+                      ))}
                       <SelectItem value="__unknown__">Unknown / Other</SelectItem>
                     </SelectContent>
                   </Select>
@@ -1950,17 +1963,26 @@ export default function ExpensesPage() {
                       );
                     }
                     const isSelected = selected.has(e.id);
+                    const expIsRefund = isRefund(e);
                     return (
-                      <tr key={e.id} className={`border-b border-border/50 hover:bg-secondary/20 transition-colors cursor-pointer ${isSelected ? 'bg-primary/5' : ''}`} onClick={() => toggleSelect(e.id)}>
+                      <tr key={e.id} className={`border-b border-border/50 hover:bg-secondary/20 transition-colors cursor-pointer ${isSelected ? 'bg-primary/5' : ''} ${expIsRefund ? 'bg-emerald-500/5' : ''}`} onClick={() => toggleSelect(e.id)}>
                         <td className="px-3 py-2" onClick={ev => ev.stopPropagation()}>
                           <button onClick={() => toggleSelect(e.id)} className="flex items-center justify-center text-muted-foreground hover:text-foreground">
                             {isSelected ? <CheckSquare className="w-3.5 h-3.5 text-primary" /> : <Square className="w-3.5 h-3.5" />}
                           </button>
                         </td>
                         <td className="px-3 py-2 text-xs">{e.date}</td>
-                        <td className="px-3 py-2 text-xs font-bold num-display text-primary">{formatCurrency(e.amount)}</td>
-                        <td className="px-3 py-2 text-xs"><span className="px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">{e.category}</span></td>
-                        <td className="px-3 py-2 text-xs">{e.source_code ? <span className="px-1.5 py-0.5 rounded bg-secondary/60 font-mono text-muted-foreground">{e.source_code}</span> : <span className="text-muted-foreground/40">—</span>}</td>
+                        {/* Refund: +$amount in green; normal expense: $amount in primary */}
+                        <td className={`px-3 py-2 text-xs font-bold num-display ${expIsRefund ? 'text-emerald-500' : 'text-primary'}`}>
+                          {expIsRefund ? `+${formatCurrency(e.amount)}` : formatCurrency(e.amount)}
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          {expIsRefund
+                            ? <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'hsl(142,60%,15%)', color: 'hsl(142,60%,55%)' }}>Refund</span>
+                            : <span className="px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">{e.category}</span>
+                          }
+                        </td>
+                        <td className="px-3 py-2 text-xs">{e.source_code ? <span className={`px-1.5 py-0.5 rounded font-mono ${expIsRefund ? 'bg-emerald-500/15 text-emerald-400' : 'bg-secondary/60 text-muted-foreground'}`}>{e.source_code}</span> : <span className="text-muted-foreground/40">—</span>}</td>
                         <td className="px-3 py-2 text-xs text-muted-foreground">{e.subcategory}</td>
                         <td className="px-3 py-2 text-xs max-w-[150px] truncate">{e.description}</td>
                         <td className="px-3 py-2 text-xs text-muted-foreground">{e.payment_method}</td>
@@ -1989,6 +2011,9 @@ export default function ExpensesPage() {
                       </td>
                       <td className="px-3 py-2.5 text-xs font-bold num-display text-primary whitespace-nowrap">
                         {formatCurrency(filteredExpensesTotals.totalAmount, true)}
+                        {filteredExpensesTotals.refundTotal > 0 && (
+                          <span className="ml-1 text-emerald-500 font-normal">(incl. +{formatCurrency(filteredExpensesTotals.refundTotal, true)} refunds)</span>
+                        )}
                       </td>
                       <td colSpan={8} className="px-3 py-2.5 text-xs text-muted-foreground italic">
                         Filtered total · {filtered.length < (expenses as any[]).length ? `${(expenses as any[]).length - filtered.length} records hidden by filters` : 'All records shown'}

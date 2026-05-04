@@ -368,6 +368,78 @@
 
   /* ── CHART CONTAINER ── */
   .chart-container { @apply w-full; }
+
+  /* ── THEME-AWARE CHART TOOLTIP / MOBILE SHEET ──────────────────────────────
+     These replace hardcoded hsl(222,22%,9%) / rgba(0,0,0,x) inline styles
+     so both tooltip and mobile sheet adapt to light/dark automatically.
+  */
+  .db-cf-tooltip {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 10px;
+    padding: 10px 14px;
+    min-width: 300px;
+    max-width: 340px;
+  }
+  .db-cf-sheet {
+    background: hsl(var(--card));
+    border-top: 1px solid hsl(var(--border));
+  }
+  .db-cf-sheet-header {
+    border-bottom: 1px solid hsl(var(--border));
+  }
+  .db-cf-sheet-drag {
+    background: hsl(var(--muted));
+  }
+  .db-cf-sheet-close {
+    background: hsl(var(--muted));
+    border: none;
+    color: hsl(var(--muted-foreground));
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 15px;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .db-cf-row {
+    border-bottom: 1px solid hsl(var(--border) / 0.5);
+  }
+  .db-cf-divider {
+    border-top: 1px solid hsl(var(--border));
+  }
+  .db-cf-divider-dashed {
+    border-top: 1px dashed hsl(var(--border));
+  }
+  .db-cf-section-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: hsl(var(--muted-foreground));
+    margin-bottom: 8px;
+  }
+  .db-cf-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    background: hsl(var(--background) / 0.7);
+    transition: opacity 0.27s ease;
+  }
+  .db-cf-dp-total {
+    background: hsl(var(--gold-surface));
+    border: 1px solid hsl(var(--gold-light) / 0.3);
+    border-radius: 6px;
+    padding: 5px 8px;
+  }
+  .db-cf-dp-warning {
+    background: hsl(var(--gold-surface));
+    border: 1px solid hsl(var(--gold-light) / 0.25);
+    border-radius: 6px;
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────

@@ -8,20 +8,13 @@ import { persist, createJSONStorage } from "zustand/middleware";
 
 type CurrentUser = "Roham" | "Fara" | "Demo";
 export type UserRole = "admin" | "family_user" | "demo";
-export type ThemeMode = "dark" | "light" | "auto";
+export type ThemeMode = "dark" | "light";
 
-/** Apply the resolved theme class to <html>. Auto resolves by local time. */
+/** Apply the resolved theme class to <html>. */
 export function applyTheme(mode: ThemeMode) {
-  const resolved = mode === "auto" ? resolveAutoTheme() : mode;
   const html = document.documentElement;
-  html.classList.toggle("light", resolved === "light");
-  html.dataset.theme = mode; // store raw mode for UI display
-}
-
-/** Auto theme: light 7 AM – 6 PM, dark otherwise (local time) */
-export function resolveAutoTheme(): "dark" | "light" {
-  const h = new Date().getHours();
-  return h >= 7 && h < 18 ? "light" : "dark";
+  html.classList.toggle("light", mode === "light");
+  html.dataset.theme = mode;
 }
 
 interface AppState {
@@ -82,10 +75,8 @@ export const useAppStore = create<AppState>()(
 
       toggleTheme: () =>
         set((state) => {
-          // Cycle: dark → light → auto → dark
-          const next: ThemeMode =
-            state.theme === "dark"  ? "light" :
-            state.theme === "light" ? "auto"  : "dark";
+          // Toggle: dark → light → dark (no auto)
+          const next: ThemeMode = state.theme === "dark" ? "light" : "dark";
           applyTheme(next);
           return { theme: next };
         }),

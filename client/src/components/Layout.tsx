@@ -9,7 +9,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useAppStore } from "@/lib/store";
-import { applyTheme, resolveAutoTheme } from "@/lib/store";
+import { applyTheme } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
   // Step 1 — Snapshot
@@ -168,11 +168,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { theme, toggleTheme, setTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role, isDemo } =
     useAppStore();
 
-  // Auto-theme: re-evaluate every minute when mode is "auto"
+  // Apply theme whenever it changes (dark/light only, no auto)
   useEffect(() => {
-    if (theme !== "auto") return;
-    const id = setInterval(() => applyTheme("auto"), 60_000);
-    return () => clearInterval(id);
+    applyTheme(theme);
   }, [theme]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = role === "admin";

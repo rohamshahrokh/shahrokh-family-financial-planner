@@ -152,8 +152,8 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
   const d = payload[0]?.payload ?? {};
   const { mainRows, hasEquityData, projCash, closingCash, pporEq, ipEq, eBuf, rawTotal, finalDP, cashIsNegative, milestones } = buildCFTooltipRows(d);
   return (
-    <div className="db-tooltip" style={{ minWidth: 300, maxWidth: 340, background: "hsl(222,22%,9%)", border: "1px solid hsl(222,15%,22%)", borderRadius: 10, padding: "10px 14px" }}>
-      <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(215,20%,80%)", marginBottom: 8, letterSpacing: "0.03em" }}>{label}</p>
+    <div className="db-cf-tooltip">
+      <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(var(--foreground))", marginBottom: 8, letterSpacing: "0.03em" }}>{label}</p>
       {mainRows.map((r: any, i: number) => (
         <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 20, marginBottom: 3, color: r.color, fontWeight: r.bold ? 700 : 400, fontSize: r.bold ? 12 : 11 }}>
           <span style={{ opacity: r.bold ? 1 : 0.85 }}>{r.label}</span>
@@ -161,7 +161,7 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
         </div>
       ))}
       {hasEquityData && (
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid hsl(222,15%,22%)" }}>
+        <div className="db-cf-divider" style={{ marginTop: 10, paddingTop: 10 }}>
           <div style={{ fontSize: 10, color: "hsl(188,60%,52%)", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700 }}>
             Deposit Power Build-up ({label})
           </div>
@@ -179,7 +179,7 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
               <span style={{ fontFamily: "monospace" }}>{formatCurrency(r.value, true)}</span>
             </div>
           ))}
-          <div style={{ borderTop: "1px dashed hsl(222,15%,28%)", margin: "5px 0 4px" }} />
+          <div className="db-cf-divider-dashed" style={{ margin: "5px 0 4px" }} />
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: "hsl(215,15%,65%)", fontSize: 11 }}>
             <span>= Gross total (cash + equity)</span>
             <span style={{ fontFamily: "monospace" }}>{formatCurrency(rawTotal, true)}</span>
@@ -190,19 +190,19 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
               <span style={{ fontFamily: "monospace" }}>&#8722;{formatCurrency(eBuf, true)}</span>
             </div>
           )}
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginTop: 5, padding: "5px 8px", borderRadius: 6, background: "hsl(43,90%,10%)", border: "1px solid hsl(43,90%,30%)" }}>
+          <div className="db-cf-dp-total" style={{ display: "flex", justifyContent: "space-between", gap: 16, marginTop: 5 }}>
             <span style={{ color: "hsl(43,90%,62%)", fontWeight: 700, fontSize: 12 }}>= Total Deposit Power</span>
             <span style={{ fontFamily: "monospace", color: "hsl(43,90%,62%)", fontWeight: 700, fontSize: 12 }}>{formatCurrency(finalDP, true)}</span>
           </div>
           {cashIsNegative && finalDP > 0 && (
-            <div style={{ marginTop: 6, padding: "5px 8px", borderRadius: 6, background: "hsl(43,80%,8%)", border: "1px solid hsl(43,80%,28%)", fontSize: 10, color: "hsl(43,80%,60%)", lineHeight: 1.5 }}>
+            <div className="db-cf-dp-warning" style={{ marginTop: 6, padding: "5px 8px", fontSize: 10, color: "hsl(var(--gold-light))", lineHeight: 1.5 }}>
               &#9888; Cash is negative after events this year. Deposit Power is still positive because refinanceable equity covers the shortfall &#8212; drawing it down requires a loan top-up or refinance.
             </div>
           )}
         </div>
       )}
       {milestones.length > 0 && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid hsl(222,15%,22%)" }}>
+        <div className="db-cf-divider" style={{ marginTop: 8, paddingTop: 8 }}>
           {milestones.map((m: any, i: number) => (
             <div key={i} style={{ fontSize: 11, color: "hsl(43,90%,62%)", marginTop: 3 }}>{m.icon} {m.text}</div>
           ))}
@@ -278,12 +278,8 @@ const MobileChartSheet = ({
       {/* Backdrop */}
       <div
         onClick={triggerClose}
-        style={{
-          position: "fixed", inset: 0, zIndex: 9998,
-          background: "rgba(0,0,0,0.55)",
-          opacity: leaving ? 0 : 1,
-          transition: "opacity 0.27s ease",
-        }}
+        className="db-cf-backdrop"
+        style={{ opacity: leaving ? 0 : 1 }}
       />
       {/* Sheet */}
       <div
@@ -291,43 +287,34 @@ const MobileChartSheet = ({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
+        className="db-cf-sheet"
         style={{
           position: "fixed",
           left: 0, right: 0, bottom: 0,
           zIndex: 9999,
           transform: `translateY(${translateY})`,
           transition,
-          background: "hsl(220,22%,10%)",
-          borderTop: "1px solid hsl(222,15%,22%)",
           borderRadius: "20px 20px 0 0",
           maxHeight: "72vh",
           display: "flex",
           flexDirection: "column",
           paddingBottom: "max(16px, env(safe-area-inset-bottom))",
-          boxShadow: "0 -8px 48px rgba(0,0,0,0.6)",
+          boxShadow: "0 -8px 32px rgba(0,0,0,0.25)",
         }}
       >
         {/* Drag handle */}
         <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 6px", flexShrink: 0 }}>
-          <div style={{ width: 40, height: 4, borderRadius: 2, background: "hsl(222,15%,30%)" }} />
+          <div className="db-cf-sheet-drag" style={{ width: 40, height: 4, borderRadius: 2 }} />
         </div>
 
         {/* Header */}
-        <div style={{
+        <div className="db-cf-sheet-header" style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "2px 20px 12px", borderBottom: "1px solid hsl(222,15%,17%)",
+          padding: "2px 20px 12px",
           flexShrink: 0,
         }}>
-          <span style={{ fontSize: 18, fontWeight: 800, color: "hsl(215,20%,92%)", letterSpacing: "-0.02em" }}>{label}</span>
-          <button
-            onClick={triggerClose}
-            style={{
-              width: 30, height: 30, borderRadius: 15,
-              background: "hsl(222,15%,18%)", border: "none",
-              color: "hsl(215,12%,55%)", fontSize: 18, cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1,
-            }}
-          >&#xd7;</button>
+          <span style={{ fontSize: 18, fontWeight: 800, color: "hsl(var(--foreground))", letterSpacing: "-0.02em" }}>{label}</span>
+          <button onClick={triggerClose} className="db-cf-sheet-close">&#xd7;</button>
         </div>
 
         {/* Scrollable content */}
@@ -347,15 +334,11 @@ const MobileChartSheet = ({
           {/* Cashflow section */}
           {payloadOk && (
             <div style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "hsl(215,12%,42%)", marginBottom: 8 }}>
-                Cashflow
-              </div>
+              <div className="db-cf-section-label">Cashflow</div>
               {mainRows.map((r: any, i: number) => (
-                <div key={i} style={{
+                <div key={i} className={i < mainRows.length - 1 ? "db-cf-row" : ""} style={{
                   display: "flex", justifyContent: "space-between", alignItems: "center",
-                  padding: "7px 0",
-                  borderBottom: i < mainRows.length - 1 ? "1px solid hsl(222,15%,15%)" : "none",
-                  color: r.color,
+                  padding: "7px 0", color: r.color,
                 }}>
                   <span style={{ fontSize: 14, fontWeight: r.bold ? 700 : 400, opacity: r.bold ? 1 : 0.88 }}>{r.label}</span>
                   <span style={{ fontSize: r.bold ? 15 : 14, fontFamily: "monospace", fontWeight: r.bold ? 700 : 500 }}>
@@ -368,15 +351,15 @@ const MobileChartSheet = ({
 
           {/* Deposit Power waterfall */}
           {hasEquityData && (
-            <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid hsl(222,15%,19%)" }}>
+            <div className="db-cf-divider" style={{ marginTop: 16, paddingTop: 14 }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "hsl(188,60%,52%)", marginBottom: 8 }}>
                 Deposit Power Build-up
               </div>
 
-              {/* Closing cash — the reconciled cashEngine figure (same as chart Closing Cash above) */}
-              <div style={{
+              {/* Closing cash */}
+              <div className="db-cf-row" style={{
                 display: "flex", justifyContent: "space-between", alignItems: "center",
-                padding: "6px 0", borderBottom: "1px solid hsl(222,15%,15%)",
+                padding: "6px 0",
                 color: closingCash >= 0 ? "hsl(210,80%,65%)" : "hsl(0,65%,58%)",
               }}>
                 <span style={{ fontSize: 14, opacity: 0.9 }}>+ Closing Cash (after events)</span>
@@ -387,38 +370,36 @@ const MobileChartSheet = ({
                 pporEq > 0 ? { label: "PPOR Usable Equity (80%)", value: pporEq, color: "hsl(188,60%,52%)" } : null,
                 ipEq   > 0 ? { label: "IP Equity (80%)",            value: ipEq,   color: "hsl(145,55%,42%)" } : null,
               ].filter(Boolean).map((r: any, i: number) => (
-                <div key={i} style={{
+                <div key={i} className="db-cf-row" style={{
                   display: "flex", justifyContent: "space-between", alignItems: "center",
-                  padding: "6px 0", color: r.color, borderBottom: "1px solid hsl(222,15%,15%)",
+                  padding: "6px 0", color: r.color,
                 }}>
                   <span style={{ fontSize: 14, opacity: 0.9 }}>+ {r.label}</span>
                   <span style={{ fontSize: 14, fontFamily: "monospace" }}>{formatCurrency(r.value, true)}</span>
                 </div>
               ))}
 
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "hsl(215,15%,50%)", borderBottom: "1px solid hsl(222,15%,15%)" }}>
+              <div className="db-cf-row" style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "hsl(var(--muted-foreground))" }}>
                 <span style={{ fontSize: 13 }}>= Gross total (cash + equity)</span>
                 <span style={{ fontSize: 13, fontFamily: "monospace" }}>{formatCurrency(rawTotal, true)}</span>
               </div>
               {eBuf > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "hsl(0,65%,58%)", borderBottom: "1px solid hsl(222,15%,15%)" }}>
+                <div className="db-cf-row" style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "hsl(0,65%,58%)" }}>
                   <span style={{ fontSize: 13 }}>&#8722; Emergency Buffer</span>
                   <span style={{ fontSize: 13, fontFamily: "monospace" }}>&#8722;{formatCurrency(eBuf, true)}</span>
                 </div>
               )}
-              <div style={{
+              <div className="db-cf-dp-total" style={{
                 display: "flex", justifyContent: "space-between", alignItems: "center",
                 marginTop: 10, padding: "10px 14px", borderRadius: 12,
-                background: "hsl(43,90%,8%)", border: "1px solid hsl(43,90%,26%)",
               }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "hsl(43,90%,60%)" }}>= Total Deposit Power</span>
-                <span style={{ fontSize: 16, fontFamily: "monospace", fontWeight: 800, color: "hsl(43,90%,65%)" }}>{formatCurrency(finalDP, true)}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--gold-light))" }}>= Total Deposit Power</span>
+                <span style={{ fontSize: 16, fontFamily: "monospace", fontWeight: 800, color: "hsl(var(--gold-light))" }}>{formatCurrency(finalDP, true)}</span>
               </div>
               {cashIsNegative && finalDP > 0 && (
-                <div style={{
+                <div className="db-cf-dp-warning" style={{
                   marginTop: 8, padding: "9px 12px", borderRadius: 10,
-                  background: "hsl(43,80%,7%)", border: "1px solid hsl(43,80%,22%)",
-                  fontSize: 12, color: "hsl(43,80%,58%)", lineHeight: 1.65,
+                  fontSize: 12, color: "hsl(var(--gold-light))", lineHeight: 1.65,
                 }}>
                   &#9888; Cash is negative after this year&#39;s events (property/stock purchases). Deposit Power is still positive because refinanceable equity covers the gap &#8212; drawing it down requires a loan top-up or refinance.
                 </div>
@@ -428,7 +409,7 @@ const MobileChartSheet = ({
 
           {/* Milestones */}
           {milestones.length > 0 && (
-            <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid hsl(222,15%,19%)" }}>
+            <div className="db-cf-divider" style={{ marginTop: 16, paddingTop: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "hsl(43,90%,55%)", marginBottom: 8 }}>
                 Events this period
               </div>
