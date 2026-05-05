@@ -19,7 +19,7 @@
  *     ❌ NO state mutation inside compute logic
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -36,7 +36,8 @@ import {
   Zap, ChevronDown, ChevronUp, Info, Loader2, AlertCircle,
   Table as TableIcon, Clock, LogOut, ArrowRightLeft, PieChart,
   Banknote, ShieldCheck, TrendingDown, BadgeDollarSign, Settings2,
-  ArrowRight, Percent, Wallet,
+  ArrowRight, Percent, Wallet, Activity, Lightbulb, Calendar,
+  ChevronsUpDown, Star, Navigation, Gauge, ListChecks, BookOpen,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
@@ -51,12 +52,15 @@ import {
   loadScenarioAssumptions, saveAssumptions,
   runScenarioForecast, runGoalSolver, runWiMonteCarlo,
   runExitEvent, buildHoldVsExitComparison, calcReinvestmentIncome,
+  runExitTimingOptimiser, runImpactEngine, runActionRecommendationEngine,
+  buildScenarioComparison, enforceReturnConstraints,
   DEFAULT_SOLVER_CONSTRAINTS, DEFAULT_EXIT_STRATEGY,
   type WiScenario, type WiProperty, type WiStockPlan, type WiCryptoPlan,
   type WiAssumption, type WiScenarioResult, type GoalSolverOption,
   type MonteCarloWiResult, type GoalSolverConstraints,
   type ExitStrategy, type ExitEventResult, type HoldVsExitComparison,
-  type CgtBreakdown,
+  type CgtBreakdown, type ExitTimingResult, type ImpactResult,
+  type ActionPlan, type ScenarioComparisonRow, type AssumptionWarning,
 } from '@/lib/whatIfEngine';
 import { PROFILE_DEFAULTS } from '@/lib/forecastStore';
 
@@ -2023,6 +2027,671 @@ function ExitStrategyTab({ result, scenario, properties, onExitResult }: {
 }
 
 
+// ─── Decision Dashboard Summary Bar ──────────────────────────────────────────
+
+function DecisionDashboard({ result, actionPlan, exitTiming, onTabSwitch }: {
+  result: WiScenarioResult | null;
+  actionPlan: ActionPlan | null;
+  exitTiming: ExitTimingResult | null;
+  onTabSwitch: (tab: string) => void;
+}) {
+  if (!result) return null;
+
+  const gap = result.gapPerMonth;
+  const gapPct = result.projectedPassiveIncome > 0
+    ? gap / Math.max(result.projectedPassiveIncome, 1) * 100
+    : 0;
+  const onTrack = result.feasibilityScore >= 7;
+  const exitImproves = exitTiming && exitTiming.rows.find(r => r.isOptimalTradeoff)
+    ? (exitTiming.rows.find(r => r.isOptimalTradeoff)!.monthlyIncome - exitTiming.holdMonthlyIncome) > 200
+    : false;
+
+  return (
+    <div className={`rounded-xl border-2 p-4 mb-4 ${onTrack ? 'border-green-500/30 bg-green-500/5' : 'border-orange-500/30 bg-orange-500/5'}`}>
+      <div className="flex items-start justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <Navigation className="w-4 h-4 text-primary" />
+            <span className="font-semibold text-sm">Decision Dashboard</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full border ${onTrack ? 'bg-green-500/10 text-green-600 border-green-500/20' : 'bg-orange-500/10 text-orange-600 border-orange-500/20'}`}>
+              {onTrack ? 'On Track' : 'Action Required'}
+            </span>
+          </div>
+          <div className="text-xs text-muted-foreground mt-0.5">
+            {actionPlan?.headline ?? 'Run forecast to see your plan'}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Gauge className="w-4 h-4 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Feasibility</span>
+          <span className={`text-sm font-bold ${result.feasibilityScore >= 7 ? 'text-green-500' : result.feasibilityScore >= 5 ? 'text-yellow-500' : 'text-red-500'}`}>
+            {result.feasibilityScore}/10
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        <button onClick={() => onTabSwitch('overview')} className="rounded-lg bg-background/60 border border-border p-2.5 text-left hover:border-primary/40 transition-colors">
+          <div className="text-xs text-muted-foreground mb-0.5">Monthly Passive</div>
+          <div className="text-base font-bold tabular-nums text-primary">{fmt(result.projectedPassiveIncome)}</div>
+        </button>
+        <button onClick={() => onTabSwitch('overview')} className={`rounded-lg bg-background/60 border p-2.5 text-left hover:border-primary/40 transition-colors ${gap > 0 ? 'border-red-500/30' : 'border-green-500/30'}`}>
+          <div className="text-xs text-muted-foreground mb-0.5">Gap to Goal</div>
+          <div className={`text-base font-bold tabular-nums ${gap > 0 ? 'text-red-400' : 'text-green-500'}`}>
+            {gap > 0 ? `-${fmt(gap)}` : `+${fmt(Math.abs(gap))}`}
+          </div>
+        </button>
+        <button onClick={() => onTabSwitch('exit')} className={`rounded-lg bg-background/60 border p-2.5 text-left hover:border-primary/40 transition-colors ${exitImproves ? 'border-primary/40' : 'border-border'}`}>
+          <div className="text-xs text-muted-foreground mb-0.5">Exit Outcome</div>
+          <div className="text-base font-bold tabular-nums">
+            {exitTiming ? fmt(exitTiming.maxMonthlyIncome) : '—'}
+          </div>
+          {exitImproves && <div className="text-xs text-primary">+{fmt((exitTiming!.rows.find(r => r.isOptimalTradeoff)?.monthlyIncome ?? 0) - exitTiming!.holdMonthlyIncome)}/mo gain</div>}
+        </button>
+        <button onClick={() => onTabSwitch('actions')} className="rounded-lg bg-background/60 border border-border p-2.5 text-left hover:border-primary/40 transition-colors">
+          <div className="text-xs text-muted-foreground mb-0.5">Actions</div>
+          <div className="text-base font-bold tabular-nums">
+            {actionPlan ? actionPlan.actions.filter(a => a.priority === 'critical' || a.priority === 'high').length : '—'}
+          </div>
+          <div className="text-xs text-muted-foreground">High priority</div>
+        </button>
+      </div>
+
+      {/* Best path strip */}
+      {actionPlan && actionPlan.actions.length > 0 && (
+        <div className="rounded-lg bg-background/60 border border-primary/20 p-2.5">
+          <div className="text-xs font-medium text-primary mb-1.5 flex items-center gap-1.5">
+            <Lightbulb className="w-3.5 h-3.5" /> Best Path
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {actionPlan.actions.filter(a => a.priority === 'critical' || a.priority === 'high').slice(0, 3).map((a, i) => (
+              <div key={i} className="flex items-center gap-1.5 text-xs">
+                <div className={`w-1.5 h-1.5 rounded-full ${a.priority === 'critical' ? 'bg-red-500' : 'bg-orange-400'}`} />
+                <span className="font-medium">{a.title}</span>
+                <span className="text-muted-foreground">{a.impact}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Impact Panel ─────────────────────────────────────────────────────────────
+
+function ImpactPanel({ before, after }: { before: WiScenarioResult | null; after: WiScenarioResult | null }) {
+  if (!before || !after) {
+    return (
+      <div className="rounded-lg border border-border bg-muted/20 p-4 text-center text-xs text-muted-foreground">
+        Make changes to any scenario input — impact will appear here instantly.
+      </div>
+    );
+  }
+
+  const impact = runImpactEngine({ before, after, changeSummary: 'Scenario inputs modified' });
+
+  return (
+    <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Activity className="w-4 h-4 text-blue-400" />
+        <span className="text-sm font-semibold">Impact Analysis</span>
+        <span className="text-xs text-muted-foreground ml-auto">{impact.summary}</span>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+        {impact.deltas.slice(0, 6).map(d => (
+          <div key={d.label} className="rounded-lg bg-background/60 border border-border p-2.5">
+            <div className="text-xs text-muted-foreground mb-0.5">{d.label}</div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-sm font-bold tabular-nums">
+                {d.unit === '/10' ? d.after.toFixed(1) : d.unit === '$/mo' || d.unit === '$/yr' || d.unit === '$' ? fmt(d.after) : d.after.toFixed(1)}
+              </span>
+              {d.delta !== 0 && (
+                <span className={`text-xs tabular-nums font-medium ${d.direction === 'up' ? (d.unit === '/10' && d.label.includes('Risk') ? 'text-red-400' : 'text-green-500') : (d.unit === '/10' && d.label.includes('Risk') ? 'text-green-500' : 'text-red-400')}`}>
+                  {d.direction === 'up' ? '▲' : '▼'} {d.unit === '$' || d.unit === '$/mo' || d.unit === '$/yr' ? fmt(Math.abs(d.delta)) : Math.abs(d.delta).toFixed(1)}{d.unit === '/10' ? '' : ''}
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* FIRE shift */}
+      {impact.fireYearBefore !== impact.fireYearAfter && (
+        <div className="mt-2 rounded-lg bg-background/60 border border-border p-2.5 text-xs flex items-center gap-2">
+          <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">FIRE year:</span>
+          <span className="font-medium">{impact.fireYearBefore ?? '—'}</span>
+          <ArrowRight className="w-3 h-3 text-muted-foreground" />
+          <span className={`font-bold ${impact.fireYearAfter !== null && impact.fireYearBefore !== null && impact.fireYearAfter < impact.fireYearBefore ? 'text-green-500' : 'text-red-400'}`}>
+            {impact.fireYearAfter ?? '—'}
+          </span>
+          {impact.fireYearAfter !== null && impact.fireYearBefore !== null && (
+            <span className={`${impact.fireYearAfter < impact.fireYearBefore ? 'text-green-500' : 'text-red-400'}`}>
+              ({impact.fireYearAfter < impact.fireYearBefore ? '-' : '+'}{Math.abs(impact.fireYearAfter - impact.fireYearBefore)}yr)
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Exit Timing Optimiser Tab ────────────────────────────────────────────────
+
+function ExitTimingTab({ result, scenario, properties, exitStrategy, onTimingResult }: {
+  result: WiScenarioResult | null;
+  scenario: WiScenario | null;
+  properties: WiProperty[];
+  exitStrategy: ExitStrategy;
+  onTimingResult?: (tr: ExitTimingResult) => void;
+}) {
+  const [timingResult, setTimingResult] = useState<ExitTimingResult | null>(null);
+  const [running, setRunning] = useState(false);
+  const [marginalTax, setMarginalTax] = useState(37);
+  const [startYear, setStartYear] = useState(2028);
+  const [endYear, setEndYear] = useState(2044);
+  const [showAll, setShowAll] = useState(false);
+
+  async function run() {
+    if (!result || running) return;
+    setRunning(true);
+    await new Promise(r => setTimeout(r, 20));
+    try {
+      const tr = runExitTimingOptimiser({
+        startYear, endYear, strategy: exitStrategy, properties,
+        forecastResult: result, marginalTaxRate: marginalTax / 100, currentYear: 2026,
+      });
+      setTimingResult(tr);
+      onTimingResult?.(tr);
+    } finally { setRunning(false); }
+  }
+
+  const displayRows = timingResult ? (showAll ? timingResult.rows : timingResult.rows.filter(
+    r => r.isOptimalIncome || r.isOptimalTradeoff || timingResult.rows.indexOf(r) % 2 === 0
+  )) : [];
+
+  if (!result) {
+    return <div className="text-center py-12 text-muted-foreground text-sm">Run a scenario forecast first.</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 flex items-start gap-3">
+        <Calendar className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
+        <div>
+          <div className="font-semibold text-sm text-amber-500 mb-0.5">Exit Timing Optimiser</div>
+          <div className="text-xs text-muted-foreground">
+            Simulates your exit strategy across every year in the range. Identifies the year that maximises income and the year with the best income-vs-CGT tradeoff.
+          </div>
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="pt-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div>
+              <Label className="text-xs text-muted-foreground">From Year</Label>
+              <Select value={String(startYear)} onValueChange={v => setStartYear(parseInt(v))}>
+                <SelectTrigger className="h-8 text-sm mt-0.5"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 15 }, (_, i) => 2027 + i).map(y =>
+                    <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">To Year</Label>
+              <Select value={String(endYear)} onValueChange={v => setEndYear(parseInt(v))}>
+                <SelectTrigger className="h-8 text-sm mt-0.5"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 15 }, (_, i) => 2030 + i).map(y =>
+                    <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Marginal Tax Rate</Label>
+              <Select value={String(marginalTax)} onValueChange={v => setMarginalTax(parseInt(v))}>
+                <SelectTrigger className="h-8 text-sm mt-0.5"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="19">19%</SelectItem>
+                  <SelectItem value="32">32.5%</SelectItem>
+                  <SelectItem value="37">37%</SelectItem>
+                  <SelectItem value="45">45%</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-end">
+              <Button className="w-full h-8 text-sm" onClick={run} disabled={running} data-testid="btn-run-timing">
+                {running ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Activity className="w-3.5 h-3.5 mr-1.5" />}
+                {running ? 'Running…' : 'Optimise'}
+              </Button>
+            </div>
+          </div>
+
+          {/* Legend */}
+          {timingResult && (
+            <div className="flex flex-wrap gap-4 mb-3 text-xs">
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded bg-green-500/20 border border-green-500/40" />
+                <span>Best income year ({timingResult.optimalIncomeYear})</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded bg-blue-500/20 border border-blue-500/40" />
+                <span>Best tradeoff year ({timingResult.optimalTradeoffYear})</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">Hold income: {fmt(timingResult.holdMonthlyIncome)}/mo</span>
+              </div>
+            </div>
+          )}
+
+          {timingResult && (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[760px]">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40">
+                      {[
+                        'Year', 'Net Equity', 'CGT', 'Selling Costs', 'Net Proceeds',
+                        'Monthly Income', 'Annual Income', 'Eff. Rate%', 'Income vs Tax', 'CGT Recoup'
+                      ].map(h => <th key={h} className="px-2 py-2 text-left text-muted-foreground font-medium whitespace-nowrap">{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayRows.map(r => (
+                      <tr key={r.year}
+                        className={`border-b border-border/40 transition-colors
+                          ${r.isOptimalIncome ? 'bg-green-500/10' : ''}
+                          ${r.isOptimalTradeoff && !r.isOptimalIncome ? 'bg-blue-500/10' : ''}
+                          ${!r.isOptimalIncome && !r.isOptimalTradeoff ? 'hover:bg-muted/20' : ''}
+                        `}
+                        data-testid={`timing-row-${r.year}`}
+                      >
+                        <td className="px-2 py-2 font-bold flex items-center gap-1">
+                          {r.year}
+                          {r.isOptimalIncome && <span className="text-green-500 text-xs">★max</span>}
+                          {r.isOptimalTradeoff && !r.isOptimalIncome && <span className="text-blue-400 text-xs">★best</span>}
+                        </td>
+                        <td className="px-2 py-2 tabular-nums">{fmt(r.grossEquity)}</td>
+                        <td className="px-2 py-2 tabular-nums text-red-400">-{fmt(r.totalCgt)}</td>
+                        <td className="px-2 py-2 tabular-nums text-muted-foreground">-{fmt(r.totalSellingCosts)}</td>
+                        <td className="px-2 py-2 tabular-nums font-medium text-primary">{fmt(r.netProceeds)}</td>
+                        <td className="px-2 py-2 tabular-nums font-bold text-green-500">{fmt(r.monthlyIncome)}/mo</td>
+                        <td className="px-2 py-2 tabular-nums">{fmt(r.annualIncome)}/yr</td>
+                        <td className="px-2 py-2 tabular-nums">{r.effectiveRate.toFixed(1)}%</td>
+                        <td className={`px-2 py-2 tabular-nums ${r.incomeVsCgt >= 0 ? 'text-green-500' : 'text-red-400'}`}>
+                          {r.incomeVsCgt >= 0 ? '+' : ''}{fmt(r.incomeVsCgt)}
+                        </td>
+                        <td className="px-2 py-2 tabular-nums text-muted-foreground">
+                          {r.yearsToRecoupCgt === Infinity ? '∞' : r.yearsToRecoupCgt.toFixed(1) + 'yr'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button
+                className="mt-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                onClick={() => setShowAll(!showAll)}
+              >
+                {showAll ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                {showAll ? 'Show key rows only' : `Show all ${timingResult.rows.length} years`}
+              </button>
+
+              {/* Recommendation */}
+              <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                <div className="text-xs font-semibold text-primary mb-1 flex items-center gap-1.5">
+                  <Star className="w-3.5 h-3.5" /> Timing Recommendation
+                </div>
+                {timingResult.optimalIncomeYear === timingResult.optimalTradeoffYear ? (
+                  <div className="text-xs text-muted-foreground">
+                    <span className="text-foreground font-medium">{timingResult.optimalIncomeYear}</span> is both the highest-income and best tradeoff exit year. Strong signal — this is your target exit year.
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">
+                    <span className="text-green-500 font-medium">{timingResult.optimalIncomeYear}</span> maximises income ({fmt(timingResult.maxMonthlyIncome)}/mo).{' '}
+                    <span className="text-blue-400 font-medium">{timingResult.optimalTradeoffYear}</span> offers the best income-after-tax tradeoff.
+                    {timingResult.optimalTradeoffYear < timingResult.optimalIncomeYear
+                      ? ' Exiting earlier may save on CGT while still delivering strong income.'
+                      : ' A later exit lets assets compound further before conversion.'}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Action Recommendation Engine Tab ────────────────────────────────────────
+
+const ACTION_PRIORITY_COLORS: Record<string, string> = {
+  critical: 'border-red-500/40 bg-red-500/5 text-red-500',
+  high:     'border-orange-500/40 bg-orange-500/5 text-orange-500',
+  medium:   'border-yellow-500/40 bg-yellow-500/5 text-yellow-600',
+  low:      'border-blue-500/40 bg-blue-500/5 text-blue-400',
+};
+const ACTION_CATEGORY_ICONS: Record<string, any> = {
+  property: Home, stocks: TrendingUp, crypto: Bitcoin,
+  cashflow: DollarSign, exit: LogOut, debt: TrendingDown, super: ShieldCheck,
+};
+
+function ActionEngineTab({ scenario, result, exitTiming, snap, properties, stockPlans, cryptoPlans, onPlanReady }: {
+  scenario: WiScenario | null;
+  result: WiScenarioResult | null;
+  exitTiming: ExitTimingResult | null;
+  snap: any;
+  properties: WiProperty[];
+  stockPlans: WiStockPlan[];
+  cryptoPlans: WiCryptoPlan[];
+  onPlanReady?: (p: ActionPlan) => void;
+}) {
+  const [plan, setPlan] = useState<ActionPlan | null>(null);
+  const [running, setRunning] = useState(false);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+  async function generate() {
+    if (!scenario || !result || running) return;
+    setRunning(true);
+    await new Promise(r => setTimeout(r, 30));
+    try {
+      const p = runActionRecommendationEngine({ scenario, result, exitTiming: exitTiming ?? undefined, snap, properties, stockPlans, cryptoPlans });
+      setPlan(p);
+      onPlanReady?.(p);
+    } finally { setRunning(false); }
+  }
+
+  if (!result) {
+    return <div className="text-center py-12 text-muted-foreground text-sm">Run a scenario forecast first.</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-4 flex items-start gap-3">
+        <ListChecks className="w-5 h-5 text-violet-500 mt-0.5 shrink-0" />
+        <div>
+          <div className="font-semibold text-sm text-violet-500 mb-0.5">Action Recommendation Engine</div>
+          <div className="text-xs text-muted-foreground">
+            Analyses your scenario and produces a concrete, prioritised action plan. Respects cashflow constraints, borrowing capacity, and exit timing data.
+          </div>
+        </div>
+      </div>
+
+      <Button className="w-full" onClick={generate} disabled={running} data-testid="btn-generate-plan">
+        {running ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Lightbulb className="w-4 h-4 mr-2" />}
+        {running ? 'Generating plan…' : 'Generate Action Plan'}
+      </Button>
+
+      {plan && (
+        <>
+          {/* Headline */}
+          <div className={`rounded-xl border-2 p-4 ${plan.scenarioOutcome.feasibleByTargetYear ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+            <div className={`font-bold text-base mb-0.5 ${plan.scenarioOutcome.feasibleByTargetYear ? 'text-green-500' : 'text-red-400'}`}>
+              {plan.headline}
+            </div>
+            <div className="text-sm text-muted-foreground">{plan.subheadline}</div>
+            <div className="grid grid-cols-3 gap-3 mt-3">
+              <div className="text-center">
+                <div className="text-lg font-bold tabular-nums">{fmt(plan.scenarioOutcome.currentMonthlyPassive)}</div>
+                <div className="text-xs text-muted-foreground">Current Projection</div>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-bold tabular-nums text-primary">{fmt(plan.scenarioOutcome.targetMonthlyPassive)}</div>
+                <div className="text-xs text-muted-foreground">Target</div>
+              </div>
+              <div className={`text-center`}>
+                <div className={`text-lg font-bold tabular-nums ${plan.scenarioOutcome.gap > 0 ? 'text-red-400' : 'text-green-500'}`}>
+                  {plan.scenarioOutcome.gap > 0 ? `-${fmt(plan.scenarioOutcome.gap)}` : `+${fmt(Math.abs(plan.scenarioOutcome.gap))}`}
+                </div>
+                <div className="text-xs text-muted-foreground">Gap</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Actions list */}
+          <div className="space-y-3">
+            {plan.actions.map((action, i) => {
+              const IconComp = ACTION_CATEGORY_ICONS[action.category] ?? Target;
+              const expanded = expandedIdx === i;
+              return (
+                <div key={i}
+                  className={`rounded-xl border p-4 ${ACTION_PRIORITY_COLORS[action.priority]}`}
+                  data-testid={`action-item-${i}`}
+                >
+                  <div className="flex items-start justify-between gap-2 cursor-pointer"
+                    onClick={() => setExpandedIdx(expanded ? null : i)}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`rounded-lg p-1.5 border ${ACTION_PRIORITY_COLORS[action.priority]}`}>
+                        <IconComp className="w-3.5 h-3.5" />
+                      </div>
+                      <div>
+                        <div className="font-semibold text-sm">{action.title}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">{action.timeframe}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs font-bold text-green-500">{action.impact}</span>
+                      {!action.feasible && <span className="text-xs text-red-400 border border-red-400/30 rounded px-1.5 py-0.5">Constrained</span>}
+                      <span className={`text-xs border rounded px-1.5 py-0.5 ${ACTION_PRIORITY_COLORS[action.priority]}`}>{action.priority}</span>
+                      {expanded ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                    </div>
+                  </div>
+                  {expanded && (
+                    <div className="mt-3 pt-3 border-t border-current/10">
+                      <p className="text-xs text-muted-foreground mb-2">{action.detail}</p>
+                      {action.blockers && action.blockers.length > 0 && (
+                        <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-2 mt-2">
+                          <div className="text-xs font-medium text-red-400 mb-1">Blockers</div>
+                          {action.blockers.map((b, bi) => (
+                            <div key={bi} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                              <AlertTriangle className="w-3 h-3 text-red-400 mt-0.5 shrink-0" />
+                              {b}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Exit recommendation */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2"><LogOut className="w-4 h-4 text-primary" /> Exit Strategy Recommendation</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className={`rounded-lg border p-3 ${plan.exitRecommendation.recommended ? 'border-primary/30 bg-primary/5' : 'border-border bg-muted/20'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  {plan.exitRecommendation.recommended
+                    ? <Check className="w-4 h-4 text-green-500" />
+                    : <Info className="w-4 h-4 text-muted-foreground" />}
+                  <span className={`text-sm font-medium ${plan.exitRecommendation.recommended ? 'text-green-500' : 'text-muted-foreground'}`}>
+                    {plan.exitRecommendation.recommended ? 'Exit Strategy Recommended' : 'Exit Strategy Optional'}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">{plan.exitRecommendation.summary}</p>
+                {plan.exitRecommendation.recommended && (
+                  <div className="grid grid-cols-3 gap-2 mt-3 text-center text-xs">
+                    <div className="rounded bg-background/60 border border-border p-2">
+                      <div className="font-bold">{plan.exitRecommendation.optimalYear}</div>
+                      <div className="text-muted-foreground">Optimal Year</div>
+                    </div>
+                    <div className="rounded bg-background/60 border border-border p-2">
+                      <div className="font-bold text-green-500">+{fmt(plan.exitRecommendation.incomeGain)}/mo</div>
+                      <div className="text-muted-foreground">Income Gain</div>
+                    </div>
+                    <div className="rounded bg-background/60 border border-border p-2">
+                      <div className="font-bold">{plan.exitRecommendation.yearsToRecoup.toFixed(1)}yr</div>
+                      <div className="text-muted-foreground">Recoup CGT</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Scenario Comparison Tab (upgraded) ──────────────────────────────────────
+
+function ScenarioComparisonTab({ allResults, activeId, baseId }: {
+  allResults: { name: string; result: WiScenarioResult }[];
+  activeId: number | null;
+  baseId: number | null;
+}) {
+  if (allResults.length === 0) {
+    return <div className="text-center py-12 text-muted-foreground text-sm">Create multiple scenarios to compare them side by side.</div>;
+  }
+
+  const rows = buildScenarioComparison({
+    results: allResults.map(r => ({
+      name: r.name,
+      scenarioId: r.result.scenarioId,
+      result: r.result,
+    })),
+    activeId: activeId ?? -1,
+    baseId,
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-border bg-muted/20 p-3 text-xs text-muted-foreground flex items-center gap-2">
+        <BookOpen className="w-4 h-4 shrink-0" />
+        Comparing {rows.length} scenario{rows.length !== 1 ? 's' : ''}. Green = above base, red = below base. Base scenario is the reference.
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs min-w-[700px]">
+          <thead>
+            <tr className="border-b border-border bg-muted/40">
+              {['Scenario', 'Monthly Income', 'Net Worth', 'Capital Gap', 'FIRE Year', 'Feasibility', 'Risk', 'vs Base Income'].map(h => (
+                <th key={h} className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.scenarioId}
+                className={`border-b border-border/40 transition-colors ${r.isActive ? 'bg-primary/5' : 'hover:bg-muted/20'}`}
+                data-testid={`compare-row-${r.scenarioId}`}
+              >
+                <td className="px-3 py-2.5">
+                  <div className="font-medium">{r.scenarioName}</div>
+                  <div className="flex gap-1 mt-0.5">
+                    {r.isBase && <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded px-1">Base</span>}
+                    {r.isActive && <span className="text-xs bg-primary/10 text-primary border border-primary/20 rounded px-1">Active</span>}
+                  </div>
+                </td>
+                <td className="px-3 py-2.5 tabular-nums font-bold text-primary">{fmt(r.passiveIncomeMonthly)}/mo</td>
+                <td className="px-3 py-2.5 tabular-nums">{fmt(r.netWorthAtTarget)}</td>
+                <td className={`px-3 py-2.5 tabular-nums ${r.capitalGap > 0 ? 'text-red-400' : 'text-green-500'}`}>
+                  {r.capitalGap > 0 ? `-${fmt(r.capitalGap)}` : `Surplus ${fmt(Math.abs(r.capitalGap))}`}
+                </td>
+                <td className="px-3 py-2.5 tabular-nums">{r.fireYear ?? '—'}</td>
+                <td className="px-3 py-2.5">
+                  <span className={`${r.feasibilityScore >= 7 ? 'text-green-500' : r.feasibilityScore >= 5 ? 'text-yellow-500' : 'text-red-500'} font-medium`}>
+                    {r.feasibilityLabel} ({r.feasibilityScore}/10)
+                  </span>
+                </td>
+                <td className="px-3 py-2.5">
+                  <span className={`${r.riskScore <= 3 ? 'text-green-500' : r.riskScore <= 6 ? 'text-yellow-500' : 'text-red-500'} font-medium`}>
+                    {r.riskLabel} ({r.riskScore}/10)
+                  </span>
+                </td>
+                <td className="px-3 py-2.5">
+                  {r.vsBase ? (
+                    <span className={`font-medium tabular-nums ${r.vsBase.passiveIncomeDelta >= 0 ? 'text-green-500' : 'text-red-400'}`}>
+                      {r.vsBase.passiveIncomeDelta >= 0 ? '+' : ''}{fmt(r.vsBase.passiveIncomeDelta)}/mo
+                      {r.vsBase.fireYearDelta !== null && r.vsBase.fireYearDelta !== 0 && (
+                        <span className="ml-1 text-muted-foreground">({r.vsBase.fireYearDelta > 0 ? '+' : ''}{r.vsBase.fireYearDelta}yr FIRE)</span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic">Reference</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Bar chart comparison */}
+      {rows.length > 1 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2"><BarChart2 className="w-4 h-4 text-primary" /> Monthly Passive Income Comparison</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={rows.map(r => ({ name: r.scenarioName.substring(0, 15), income: r.passiveIncomeMonthly, feasibility: r.feasibilityScore }))}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                <YAxis tickFormatter={v => `$${Math.round(v / 1000)}K`} tick={{ fontSize: 10 }} />
+                <Tooltip formatter={(v: number) => [`${fmt(v)}/mo`, 'Income']} contentStyle={{ fontSize: 11 }} />
+                <Bar dataKey="income" fill="hsl(var(--primary))" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── Assumption Warnings Banner ───────────────────────────────────────────────
+
+function AssumptionWarningsBanner({ assumptions, stockPlans }: {
+  assumptions: WiAssumption[];
+  stockPlans: WiStockPlan[];
+}) {
+  const warnings = (() => {
+    if (!assumptions.length) return [];
+    const firstAss = assumptions[0];
+    const avgStockYield = stockPlans.length > 0
+      ? stockPlans.reduce((s, p) => s + p.dividend_yield, 0) / stockPlans.length
+      : 3;
+    return enforceReturnConstraints({
+      stockReturn: firstAss.stocks_return,
+      stockDividendYield: avgStockYield,
+      cryptoReturn: firstAss.crypto_return,
+      propertyGrowth: firstAss.property_growth,
+      rentalYield: 4, // approximate
+      reinvestYield: undefined,
+    });
+  })();
+
+  if (!warnings.length) return null;
+
+  return (
+    <div className="space-y-1.5 mb-3">
+      {warnings.map((w, i) => (
+        <div key={i}
+          className={`flex items-start gap-2 rounded-lg border p-2.5 text-xs
+            ${w.severity === 'error' ? 'border-red-500/40 bg-red-500/5 text-red-400'
+            : w.severity === 'warning' ? 'border-yellow-500/40 bg-yellow-500/5 text-yellow-600'
+            : 'border-blue-500/40 bg-blue-500/5 text-blue-400'}`}
+          data-testid={`assumption-warning-${w.field}`}
+        >
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span>{w.message}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 // ─── Assumptions Panel ────────────────────────────────────────────────────────
 
 function AssumptionsPanel({ scenarioId, profile, onChanged }:
@@ -2119,6 +2788,8 @@ export default function WhatIfScenariosPage() {
   const [allResults,    setAllResults]    = useState<{ name: string; result: WiScenarioResult }[]>([]);
   const [baseResult,    setBaseResult]    = useState<WiScenarioResult | null>(null);
   const [exitResultForSolver, setExitResultForSolver] = useState<ExitEventResult | null>(null);
+  const [exitTimingResult,    setExitTimingResult]    = useState<ExitTimingResult | null>(null);
+  const [actionPlan,          setActionPlan]          = useState<ActionPlan | null>(null);
 
   // ── COMPUTE CONTROL ──────────────────────────────────────────────────────────
   const isComputingRef  = useRef(false);   // compute lock — prevents re-entry
@@ -2136,6 +2807,29 @@ export default function WhatIfScenariosPage() {
   const { toast } = useToast();
 
   const activeScenario = scenarioList.find(s => s.id === activeId) ?? null;
+
+  // Exit strategy is stored per-scenario in snap_overrides.exit_strategy
+  const activeExitStrategy: ExitStrategy = useMemo(() => {
+    const stored = activeScenario?.snap_overrides?.exit_strategy;
+    if (stored && typeof stored === 'object') {
+      return { ...DEFAULT_EXIT_STRATEGY, ...stored };
+    }
+    return { ...DEFAULT_EXIT_STRATEGY, exitYear: activeScenario?.target_year ?? 2035 };
+  }, [activeScenario?.id, activeScenario?.snap_overrides?.exit_strategy, activeScenario?.target_year]);
+
+  async function saveExitStrategy(es: ExitStrategy) {
+    if (!activeScenario) return;
+    const updated: WiScenario = {
+      ...activeScenario,
+      snap_overrides: { ...activeScenario.snap_overrides, exit_strategy: es },
+    };
+    await saveScenario(updated);
+    setScenarioList(prev => prev.map(s => s.id === updated.id ? updated : s));
+  }
+
+  const baseScenarioId = useMemo(() =>
+    scenarioList.find(s => s.is_base_plan)?.id ?? null
+  , [scenarioList]);
 
   // ────────────────────────────────────────────────────────────────────────────
   // PURE COMPUTE FUNCTION
@@ -2624,6 +3318,25 @@ export default function WhatIfScenariosPage() {
             </CardContent>
           </Card>
 
+          {/* Decision Dashboard — promoted summary bar */}
+          <DecisionDashboard
+            result={activeResult}
+            actionPlan={actionPlan}
+            exitTiming={exitTimingResult}
+            onTabSwitch={setTab}
+          />
+
+          {/* Assumption Warnings */}
+          <AssumptionWarningsBanner
+            assumptions={scenarioData.assumptions}
+            stockPlans={scenarioData.stockPlans}
+          />
+
+          {/* Impact Panel — base vs active comparison */}
+          {baseResult && activeResult && activeScenario && !activeScenario.is_base_plan && (
+            <ImpactPanel before={baseResult} after={activeResult} />
+          )}
+
           {/* Main tabs */}
           <Tabs value={tab} onValueChange={setTab}>
             <div className="overflow-x-auto">
@@ -2635,6 +3348,8 @@ export default function WhatIfScenariosPage() {
                   { value: 'crypto',       label: 'Crypto',       icon: Bitcoin },
                   { value: 'cashflow',     label: 'Cashflow',     icon: DollarSign },
                   { value: 'exit',         label: 'Exit Strategy',icon: LogOut },
+                  { value: 'timing',       label: 'Exit Timing',  icon: Calendar },
+                  { value: 'actions',      label: 'Action Plan',  icon: ListChecks },
                   { value: 'solver',       label: 'Goal Solver',  icon: Zap },
                   { value: 'montecarlo',   label: 'Monte Carlo',  icon: FlaskConical },
                   { value: 'compare',      label: 'Compare',      icon: TableIcon },
@@ -2671,7 +3386,34 @@ export default function WhatIfScenariosPage() {
                 result={activeResult}
                 scenario={activeScenario}
                 properties={scenarioData.properties}
-                onExitResult={setExitResultForSolver}
+                onExitResult={(er) => {
+                  setExitResultForSolver(er);
+                  // Persist exit strategy config back to scenario
+                  if (er) {
+                    // already persisted by ExitStrategyTab via saveExitStrategy below
+                  }
+                }}
+              />
+            </TabsContent>
+            <TabsContent value="timing">
+              <ExitTimingTab
+                result={activeResult}
+                scenario={activeScenario}
+                properties={scenarioData.properties}
+                exitStrategy={activeExitStrategy}
+                onTimingResult={setExitTimingResult}
+              />
+            </TabsContent>
+            <TabsContent value="actions">
+              <ActionEngineTab
+                scenario={activeScenario}
+                result={activeResult}
+                exitTiming={exitTimingResult}
+                snap={snap}
+                properties={scenarioData.properties}
+                stockPlans={scenarioData.stockPlans}
+                cryptoPlans={scenarioData.cryptoPlans}
+                onPlanReady={setActionPlan}
               />
             </TabsContent>
             <TabsContent value="solver">
@@ -2694,10 +3436,10 @@ export default function WhatIfScenariosPage() {
               />
             </TabsContent>
             <TabsContent value="compare">
-              <CompareTab
+              <ScenarioComparisonTab
                 allResults={allResults}
-                targetPassive={activeScenario.target_passive_income}
-                targetYear={activeScenario.target_year}
+                activeId={activeId}
+                baseId={baseScenarioId}
               />
             </TabsContent>
             <TabsContent value="assumptions">

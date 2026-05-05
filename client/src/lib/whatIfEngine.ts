@@ -1656,3 +1656,617 @@ export const DEFAULT_EXIT_STRATEGY: ExitStrategy = {
     hybridGrowthReinvestPct: 30,
   },
 };
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DECISION ENGINE v2 — Exit Timing Optimiser, Impact Engine,
+//                      Action Recommendation Engine, Assumption Guards
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Assumption Guards ────────────────────────────────────────────────────────
+
+export interface AssumptionWarning {
+  field: string;
+  value: number;
+  message: string;
+  severity: 'error' | 'warning' | 'info';
+}
+
+/**
+ * Enforces that total_return = growth + yield (no free-lunch assumptions).
+ * Also warns on unrealistic values. Returns list of warnings.
+ */
+export function enforceReturnConstraints(params: {
+  stockReturn: number;          // % total return
+  stockDividendYield: number;   // % yield component
+  cryptoReturn: number;
+  propertyGrowth: number;       // % capital growth
+  rentalYield: number;          // % gross rental yield
+  reinvestYield?: number;       // % for reinvestment portfolio
+}): AssumptionWarning[] {
+  const warnings: AssumptionWarning[] = [];
+  const { stockReturn, stockDividendYield, cryptoReturn, propertyGrowth, rentalYield, reinvestYield } = params;
+
+  // Stock: total return must be at least the yield (can't withdraw more than you earn without principal erosion)
+  if (stockDividendYield > stockReturn) {
+    warnings.push({
+      field: 'stocks',
+      value: stockDividendYield,
+      message: `Dividend yield (${stockDividendYield}%) exceeds total return (${stockReturn}%). This erodes capital — lower yield or raise return.`,
+      severity: 'error',
+    });
+  }
+  const impliedGrowth = stockReturn - stockDividendYield;
+  if (impliedGrowth < 0) {
+    warnings.push({
+      field: 'stocks_growth',
+      value: impliedGrowth,
+      message: `Implied capital growth is ${impliedGrowth.toFixed(1)}% — your portfolio will shrink over time.`,
+      severity: 'error',
+    });
+  }
+
+  // High-yield warning
+  if (stockReturn > 20) {
+    warnings.push({
+      field: 'stocks',
+      value: stockReturn,
+      message: `Stock total return of ${stockReturn}% is very aggressive. Long-run ASX average ≈ 10%. Consider 8–12%.`,
+      severity: 'warning',
+    });
+  }
+
+  // Crypto warnings
+  if (cryptoReturn > 50) {
+    warnings.push({
+      field: 'crypto',
+      value: cryptoReturn,
+      message: `Crypto return of ${cryptoReturn}% is extremely speculative. Median cycle return ≈ 20–30%. Use for optimistic scenario only.`,
+      severity: 'warning',
+    });
+  }
+
+  // Property warnings
+  if (propertyGrowth > 12) {
+    warnings.push({
+      field: 'property',
+      value: propertyGrowth,
+      message: `Property growth of ${propertyGrowth}% far exceeds long-run Australian average of 6–7%. Consider stress-testing at 5%.`,
+      severity: 'warning',
+    });
+  }
+
+  // Gross yield warning
+  if (rentalYield > 10) {
+    warnings.push({
+      field: 'rental_yield',
+      value: rentalYield,
+      message: `Gross rental yield of ${rentalYield}% is unusually high. Net yield is typically 2–4% after costs.`,
+      severity: 'warning',
+    });
+  }
+
+  // Reinvestment portfolio
+  if (reinvestYield !== undefined && reinvestYield > stockReturn + 2) {
+    warnings.push({
+      field: 'reinvest_yield',
+      value: reinvestYield,
+      message: `Exit income rate of ${reinvestYield.toFixed(1)}% exceeds assumed stock return. Ensure allocation includes growth assets.`,
+      severity: 'warning',
+    });
+  }
+
+  return warnings;
+}
+
+// ─── Exit Timing Optimiser ────────────────────────────────────────────────────
+
+export interface ExitTimingRow {
+  year: number;
+  assetValueAtExit: number;
+  loanBalanceAtExit: number;
+  grossEquity: number;
+  totalCgt: number;
+  totalSellingCosts: number;
+  netProceeds: number;
+  monthlyIncome: number;
+  annualIncome: number;
+  effectiveRate: number;
+  incomeVsCgt: number;         // net income in 1st year after tax drag
+  yearsToRecoupCgt: number;    // CGT / annual income gain over hold
+  isOptimalIncome: boolean;
+  isOptimalTradeoff: boolean;
+}
+
+export interface ExitTimingResult {
+  rows: ExitTimingRow[];
+  optimalIncomeYear: number;
+  optimalTradeoffYear: number;
+  maxMonthlyIncome: number;
+  holdMonthlyIncome: number;   // from base forecast at each year
+}
+
+/**
+ * Runs exit simulation across a range of years and identifies optimal exit timing.
+ * Uses the existing runExitEvent function for each year.
+ */
+export function runExitTimingOptimiser(params: {
+  startYear: number;
+  endYear: number;
+  strategy: ExitStrategy;
+  properties: WiProperty[];
+  forecastResult: WiScenarioResult;
+  marginalTaxRate?: number;
+  currentYear?: number;
+}): ExitTimingResult {
+  const { startYear, endYear, strategy, properties, forecastResult, marginalTaxRate = 0.37, currentYear = 2026 } = params;
+
+  const rows: ExitTimingRow[] = [];
+  let optimalIncomeYear = startYear;
+  let optimalTradeoffYear = startYear;
+  let maxMonthlyIncome = 0;
+  let bestTradeoffScore = -Infinity;
+
+  for (let yr = startYear; yr <= endYear; yr++) {
+    const yearResult = forecastResult.years.find(y => y.year === yr) ?? forecastResult.years[forecastResult.years.length - 1];
+    if (!yearResult) continue;
+
+    // Build property values at this exit year
+    const ips = properties.filter(p => !p.is_ppor);
+    const totalPurchase = ips.reduce((s, p) => s + p.purchase_price, 0);
+    const propValuesAtExit = ips.map(p => {
+      const yearsOwned = yr - (p.purchase_year ?? currentYear);
+      const propValue = p.purchase_price * Math.pow(1.07, Math.max(0, yearsOwned));
+      let lbal = p.loan_amount;
+      if (p.loan_type === 'PI' && yearsOwned > 0) {
+        const mr = (p.interest_rate / 100) / 12;
+        const n = p.loan_term_years * 12;
+        const pm = Math.min(yearsOwned * 12, n);
+        if (mr > 0) {
+          const pmt = lbal * (mr * Math.pow(1 + mr, n)) / (Math.pow(1 + mr, n) - 1);
+          for (let m = 0; m < pm; m++) {
+            lbal = Math.max(0, lbal - (pmt - lbal * mr));
+          }
+        }
+      }
+      return {
+        id: p.id ?? 0,
+        label: p.property_name,
+        value: propValue,
+        loanBalance: lbal,
+        purchasePrice: p.purchase_price,
+        purchaseYear: p.purchase_year ?? currentYear,
+      };
+    });
+
+    const modifiedStrategy: ExitStrategy = { ...strategy, exitYear: yr };
+    const er = runExitEvent({
+      strategy: modifiedStrategy,
+      properties,
+      stockValueAtExit: yearResult.stockValue * (strategy.assets.stocksPct / 100),
+      cryptoValueAtExit: yearResult.cryptoValue * (strategy.assets.cryptoPct / 100),
+      propertyValuesAtExit: propValuesAtExit,
+      marginalTaxRate,
+      currentYear,
+    });
+
+    const holdMonthly = yearResult.monthlyPassiveIncome;
+    const incomeGain  = er.monthlyPassiveIncome - holdMonthly;
+    const yearsToRecoup = er.totalTaxOwed > 0 && incomeGain > 0
+      ? er.totalTaxOwed / (incomeGain * 12)
+      : er.totalTaxOwed > 0 ? Infinity : 0;
+
+    const tradeoffScore = incomeGain * 12 - er.totalTaxOwed / 5; // 5-year horizon normalisation
+
+    rows.push({
+      year: yr,
+      assetValueAtExit: er.propertyGrossValue + er.stockValueAtExit + er.cryptoValueAtExit,
+      loanBalanceAtExit: er.propertyLoansAtExit,
+      grossEquity: er.propertyGrossValue - er.propertyLoansAtExit + er.stockValueAtExit + er.cryptoValueAtExit,
+      totalCgt: er.totalTaxOwed,
+      totalSellingCosts: er.totalSellingCosts,
+      netProceeds: er.totalNetProceeds,
+      monthlyIncome: er.monthlyPassiveIncome,
+      annualIncome: er.annualPassiveIncome,
+      effectiveRate: er.effectiveSWR,
+      incomeVsCgt: incomeGain * 12 - er.totalTaxOwed,
+      yearsToRecoupCgt: yearsToRecoup,
+      isOptimalIncome: false,
+      isOptimalTradeoff: false,
+    });
+
+    if (er.monthlyPassiveIncome > maxMonthlyIncome) {
+      maxMonthlyIncome = er.monthlyPassiveIncome;
+      optimalIncomeYear = yr;
+    }
+    if (tradeoffScore > bestTradeoffScore) {
+      bestTradeoffScore = tradeoffScore;
+      optimalTradeoffYear = yr;
+    }
+  }
+
+  // Mark optimal rows
+  rows.forEach(r => {
+    r.isOptimalIncome    = r.year === optimalIncomeYear;
+    r.isOptimalTradeoff  = r.year === optimalTradeoffYear;
+  });
+
+  return {
+    rows,
+    optimalIncomeYear,
+    optimalTradeoffYear,
+    maxMonthlyIncome,
+    holdMonthlyIncome: forecastResult.projectedPassiveIncome,
+  };
+}
+
+// ─── Impact Engine ────────────────────────────────────────────────────────────
+
+export interface ImpactDelta {
+  label: string;
+  before: number;
+  after: number;
+  delta: number;
+  deltaPct: number;
+  direction: 'up' | 'down' | 'neutral';
+  unit: string;
+}
+
+export interface ImpactResult {
+  deltas: ImpactDelta[];
+  passiveIncomeBefore: number;
+  passiveIncomeAfter: number;
+  fireYearBefore: number | null;
+  fireYearAfter: number | null;
+  feasibilityBefore: number;
+  feasibilityAfter: number;
+  riskBefore: number;
+  riskAfter: number;
+  netWorthBefore: number;
+  netWorthAfter: number;
+  capitalGapBefore: number;
+  capitalGapAfter: number;
+  summary: string;
+}
+
+/**
+ * Runs impact analysis between two forecast results (before/after a change).
+ * Returns deltas on all key metrics.
+ */
+export function runImpactEngine(params: {
+  before: WiScenarioResult;
+  after: WiScenarioResult;
+  changeSummary: string;
+}): ImpactResult {
+  const { before, after, changeSummary } = params;
+
+  function delta(label: string, bef: number, aft: number, unit: string): ImpactDelta {
+    const d = aft - bef;
+    const pct = bef !== 0 ? (d / Math.abs(bef)) * 100 : 0;
+    return {
+      label, before: bef, after: aft, delta: d,
+      deltaPct: pct,
+      direction: d > 0.5 ? 'up' : d < -0.5 ? 'down' : 'neutral',
+      unit,
+    };
+  }
+
+  const deltas: ImpactDelta[] = [
+    delta('Monthly Passive Income', before.projectedPassiveIncome, after.projectedPassiveIncome, '$/mo'),
+    delta('Annual Passive Income', before.projectedPassiveIncome * 12, after.projectedPassiveIncome * 12, '$/yr'),
+    delta('Net Worth at Target', before.netWorthTargetYear, after.netWorthTargetYear, '$'),
+    delta('Capital Gap', before.capitalGap, after.capitalGap, '$'),
+    delta('Feasibility Score', before.feasibilityScore, after.feasibilityScore, '/10'),
+    delta('Risk Score', before.riskScore, after.riskScore, '/10'),
+    delta('Required Capital', before.requiredCapital, after.requiredCapital, '$'),
+    delta('Projected Capital', before.currentProjectedCapital, after.currentProjectedCapital, '$'),
+    delta('Property Value', before.propertyValueTargetYear, after.propertyValueTargetYear, '$'),
+    delta('Stock Value', before.stockValueTargetYear, after.stockValueTargetYear, '$'),
+    delta('Crypto Value', before.cryptoValueTargetYear, after.cryptoValueTargetYear, '$'),
+  ];
+
+  const fireShift = after.fireYear !== null && before.fireYear !== null
+    ? after.fireYear - before.fireYear : 0;
+
+  const passiveDelta = after.projectedPassiveIncome - before.projectedPassiveIncome;
+  let summary = '';
+  if (passiveDelta > 0) {
+    summary = `This change adds ${fmt2(passiveDelta)}/month in passive income`;
+    if (fireShift < 0) summary += ` and moves FIRE ${Math.abs(fireShift)} year${Math.abs(fireShift) > 1 ? 's' : ''} earlier`;
+    summary += `.`;
+  } else if (passiveDelta < 0) {
+    summary = `This change reduces passive income by ${fmt2(Math.abs(passiveDelta))}/month`;
+    if (fireShift > 0) summary += ` and delays FIRE by ${fireShift} year${fireShift > 1 ? 's' : ''}`;
+    summary += `.`;
+  } else {
+    summary = `Negligible impact on passive income. ${changeSummary}`;
+  }
+
+  return {
+    deltas,
+    passiveIncomeBefore: before.projectedPassiveIncome,
+    passiveIncomeAfter: after.projectedPassiveIncome,
+    fireYearBefore: before.fireYear,
+    fireYearAfter: after.fireYear,
+    feasibilityBefore: before.feasibilityScore,
+    feasibilityAfter: after.feasibilityScore,
+    riskBefore: before.riskScore,
+    riskAfter: after.riskScore,
+    netWorthBefore: before.netWorthTargetYear,
+    netWorthAfter: after.netWorthTargetYear,
+    capitalGapBefore: before.capitalGap,
+    capitalGapAfter: after.capitalGap,
+    summary,
+  };
+}
+
+// ─── Action Recommendation Engine ────────────────────────────────────────────
+
+export type ActionPriority = 'critical' | 'high' | 'medium' | 'low';
+export type ActionCategory = 'property' | 'stocks' | 'crypto' | 'cashflow' | 'exit' | 'debt' | 'super';
+
+export interface RecommendedAction {
+  priority: ActionPriority;
+  category: ActionCategory;
+  title: string;
+  detail: string;
+  impact: string;       // e.g. "+$1,200/month"
+  timeframe: string;    // e.g. "By 2028"
+  feasible: boolean;
+  blockers?: string[];  // reasons why it may not be feasible
+}
+
+export interface ActionPlan {
+  headline: string;
+  subheadline: string;
+  actions: RecommendedAction[];
+  exitRecommendation: {
+    recommended: boolean;
+    optimalYear: number | null;
+    incomeGain: number;
+    cgtCost: number;
+    yearsToRecoup: number;
+    summary: string;
+  };
+  scenarioOutcome: {
+    currentMonthlyPassive: number;
+    targetMonthlyPassive: number;
+    gap: number;
+    feasibleByTargetYear: boolean;
+    bestCaseYear: number | null;
+  };
+}
+
+/**
+ * Analyses the scenario result + exit timing data and produces a concrete,
+ * prioritised action plan with feasibility checks.
+ */
+export function runActionRecommendationEngine(params: {
+  scenario: WiScenario;
+  result: WiScenarioResult;
+  exitTiming?: ExitTimingResult;
+  snap: any;
+  properties: WiProperty[];
+  stockPlans: WiStockPlan[];
+  cryptoPlans: WiCryptoPlan[];
+}): ActionPlan {
+  const { scenario, result, exitTiming, snap, properties, stockPlans, cryptoPlans } = params;
+  const target = scenario.target_passive_income;
+  const current = result.projectedPassiveIncome;
+  const gap = target - current;
+  const gapPct = target > 0 ? gap / target : 0;
+
+  const actions: RecommendedAction[] = [];
+
+  // ── 1. Gap analysis → determine what's needed ──────────────────────────────
+  const incomeFromProps = result.years.find(y => y.year === scenario.target_year)?.netRent ?? 0;
+  const incomeFromStocks = result.years.find(y => y.year === scenario.target_year)?.stockPassive ?? 0;
+  const incomeFromCrypto = result.years.find(y => y.year === scenario.target_year)?.cryptoPassive ?? 0;
+  const propCount = properties.filter(p => !p.is_ppor).length;
+
+  // ── 2. Property actions ────────────────────────────────────────────────────
+  if (gap > 500 && propCount < 4) {
+    const rentContrib = incomeFromProps > 0 ? incomeFromProps / (propCount || 1) : 800;
+    const ipsNeeded = Math.ceil(gap / rentContrib);
+    const feasible = safeNum(snap?.monthly_income) - safeNum(snap?.monthly_expenses) > 2000;
+    actions.push({
+      priority: gap > target * 0.4 ? 'critical' : 'high',
+      category: 'property',
+      title: `Add ${Math.min(ipsNeeded, 3)} investment ${Math.min(ipsNeeded, 3) === 1 ? 'property' : 'properties'}`,
+      detail: `Current properties contribute ${fmt2(incomeFromProps * 12)}/yr net rent. Adding ${Math.min(ipsNeeded, 3)} IP${Math.min(ipsNeeded, 3) > 1 ? 's' : ''} at median AU price closes ${Math.min(100, Math.round((rentContrib * Math.min(ipsNeeded, 3)) / gap * 100))}% of gap.`,
+      impact: `+${fmt2(rentContrib * Math.min(ipsNeeded, 3))}/month net rent`,
+      timeframe: `Start ${new Date().getFullYear() + 1}–${new Date().getFullYear() + 3}`,
+      feasible,
+      blockers: !feasible ? ['Monthly surplus below $2,000 — serviceability may be tight'] : undefined,
+    });
+  }
+
+  // ── 3. Stock DCA actions ───────────────────────────────────────────────────
+  const totalStockDCA = stockPlans.reduce((s, p) => s + dcaMonthly(p.dca_amount, p.dca_frequency), 0);
+  if (gap > 300 && incomeFromStocks < target * 0.3) {
+    const idealDCA = Math.min(5000, Math.max(totalStockDCA * 1.5, 2000));
+    const incomeGain = (idealDCA - totalStockDCA) * 12 * Math.pow(1.1, scenario.target_year - new Date().getFullYear()) * 0.04 / 12;
+    const canAfford = safeNum(snap?.monthly_income) - safeNum(snap?.monthly_expenses) - safeNum(snap?.monthly_debt) > idealDCA;
+    actions.push({
+      priority: 'high',
+      category: 'stocks',
+      title: `Increase stock DCA to ${fmt2(idealDCA)}/month`,
+      detail: `Current DCA: ${fmt2(totalStockDCA)}/month. Increasing to ${fmt2(idealDCA)} adds significant compounding mass over ${scenario.target_year - new Date().getFullYear()} years.`,
+      impact: `+${fmt2(incomeGain)}/month at target year`,
+      timeframe: 'Immediately',
+      feasible: canAfford,
+      blockers: !canAfford ? [`Monthly surplus after expenses and debt = ${fmt2(safeNum(snap?.monthly_income) - safeNum(snap?.monthly_expenses) - safeNum(snap?.monthly_debt))} — insufficient for DCA increase`] : undefined,
+    });
+  }
+
+  // ── 4. Crypto DCA ─────────────────────────────────────────────────────────
+  const totalCryptoDCA = cryptoPlans.reduce((s, p) => s + dcaMonthly(p.dca_amount, p.dca_frequency), 0);
+  if (gap > 500 && incomeFromCrypto < target * 0.15) {
+    actions.push({
+      priority: 'medium',
+      category: 'crypto',
+      title: `Maintain crypto DCA at ${fmt2(Math.max(totalCryptoDCA, 500))}/month`,
+      detail: `Crypto contributes ${fmt2(incomeFromCrypto * 12)}/yr at target year. Consistent DCA through market cycles compounds significantly.`,
+      impact: `+${fmt2(incomeFromCrypto * 0.3)}/month (optimistic scenario)`,
+      timeframe: 'Ongoing',
+      feasible: true,
+    });
+  }
+
+  // ── 5. Debt actions ────────────────────────────────────────────────────────
+  const totalDebt = safeNum(snap?.total_debt) - safeNum(snap?.mortgage_balance);
+  if (totalDebt > 30000) {
+    actions.push({
+      priority: 'medium',
+      category: 'debt',
+      title: `Clear non-mortgage debt of ${fmt2(totalDebt)}`,
+      detail: `High-interest consumer debt reduces cashflow available for investment. Eliminating it frees up ~${fmt2(totalDebt * 0.065 / 12)}/month.`,
+      impact: `+${fmt2(totalDebt * 0.065 / 12)}/month cashflow`,
+      timeframe: 'Within 24 months',
+      feasible: true,
+    });
+  }
+
+  // ── 6. Exit strategy ──────────────────────────────────────────────────────
+  let exitRec = {
+    recommended: false,
+    optimalYear: null as number | null,
+    incomeGain: 0,
+    cgtCost: 0,
+    yearsToRecoup: 0,
+    summary: 'Run exit timing analysis to see if exit strategy improves your outcome.',
+  };
+
+  if (exitTiming && exitTiming.rows.length > 0) {
+    const optimal = exitTiming.rows.find(r => r.isOptimalTradeoff);
+    if (optimal) {
+      const gain = optimal.monthlyIncome - exitTiming.holdMonthlyIncome;
+      exitRec = {
+        recommended: gain > 500 && optimal.yearsToRecoupCgt < 5,
+        optimalYear: optimal.year,
+        incomeGain: gain,
+        cgtCost: optimal.totalCgt,
+        yearsToRecoup: optimal.yearsToRecoupCgt,
+        summary: gain > 500
+          ? `Exit in ${optimal.year}: gain ${fmt2(gain)}/month, CGT ${fmt2(optimal.totalCgt)}, recouped in ${optimal.yearsToRecoupCgt.toFixed(1)} years.`
+          : `Exit strategy improves income by only ${fmt2(gain)}/month at current settings — holding may be better.`,
+      };
+
+      if (exitRec.recommended) {
+        actions.push({
+          priority: 'high',
+          category: 'exit',
+          title: `Plan exit in ${optimal.year}`,
+          detail: exitRec.summary,
+          impact: `+${fmt2(gain)}/month after exit`,
+          timeframe: `Exit year: ${optimal.year}`,
+          feasible: true,
+        });
+      }
+    }
+  }
+
+  // ── 7. Super ──────────────────────────────────────────────────────────────
+  const superBal = safeNum(snap?.super_balance);
+  if (superBal < 200000 && scenario.include_super) {
+    actions.push({
+      priority: 'low',
+      category: 'super',
+      title: 'Maximise concessional super contributions',
+      detail: `Concessional cap is $30,000/yr. Tax-effective way to grow retirement income. Current super balance: ${fmt2(superBal)}.`,
+      impact: 'Reduces taxable income + grows retirement pool',
+      timeframe: 'This financial year',
+      feasible: true,
+    });
+  }
+
+  // Sort: critical → high → medium → low
+  const priorityOrder: Record<ActionPriority, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+  actions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+  const feasibleByTarget = result.feasibilityScore >= 7;
+  const headline = feasibleByTarget
+    ? `On track to reach ${fmt2(target)}/month by ${scenario.target_year}`
+    : `${fmt2(gap)}/month gap to close — action required`;
+  const subheadline = feasibleByTarget
+    ? `${actions.length} optimisation${actions.length !== 1 ? 's' : ''} will strengthen your position`
+    : `${actions.filter(a => a.priority === 'critical' || a.priority === 'high').length} high-priority action${actions.filter(a => ['critical','high'].includes(a.priority)).length !== 1 ? 's' : ''} required`;
+
+  return {
+    headline,
+    subheadline,
+    actions,
+    exitRecommendation: exitRec,
+    scenarioOutcome: {
+      currentMonthlyPassive: current,
+      targetMonthlyPassive: target,
+      gap,
+      feasibleByTargetYear: feasibleByTarget,
+      bestCaseYear: result.fireYear,
+    },
+  };
+}
+
+// helper used inside engine (local)
+function safeNum(v: any): number { const n = parseFloat(String(v)); return isNaN(n) ? 0 : n; }
+
+// ─── Scenario Comparison ──────────────────────────────────────────────────────
+
+export interface ScenarioComparisonRow {
+  scenarioId: number;
+  scenarioName: string;
+  isBase: boolean;
+  isActive: boolean;
+  passiveIncomeMonthly: number;
+  netWorthAtTarget: number;
+  capitalGap: number;
+  fireYear: number | null;
+  feasibilityScore: number;
+  riskScore: number;
+  feasibilityLabel: string;
+  riskLabel: string;
+  vsBase: {
+    passiveIncomeDelta: number;
+    netWorthDelta: number;
+    fireYearDelta: number | null;
+  } | null;
+}
+
+export function buildScenarioComparison(params: {
+  results: { name: string; scenarioId: number; result: WiScenarioResult }[];
+  activeId: number;
+  baseId: number | null;
+}): ScenarioComparisonRow[] {
+  const { results, activeId, baseId } = params;
+  const baseResult = results.find(r => r.scenarioId === baseId)?.result ?? null;
+
+  return results.map(({ name, scenarioId, result }) => {
+    const isBase = scenarioId === baseId;
+    const isActive = scenarioId === activeId;
+    const vsBase = baseResult && !isBase ? {
+      passiveIncomeDelta: result.projectedPassiveIncome - baseResult.projectedPassiveIncome,
+      netWorthDelta: result.netWorthTargetYear - baseResult.netWorthTargetYear,
+      fireYearDelta: result.fireYear !== null && baseResult.fireYear !== null
+        ? result.fireYear - baseResult.fireYear : null,
+    } : null;
+
+    const fl = result.feasibilityScore >= 9 ? 'Excellent' : result.feasibilityScore >= 7 ? 'Good'
+      : result.feasibilityScore >= 5 ? 'Moderate' : 'Challenging';
+    const rl = result.riskScore <= 3 ? 'Low' : result.riskScore <= 5 ? 'Medium'
+      : result.riskScore <= 7 ? 'Med-High' : 'High';
+
+    return {
+      scenarioId, scenarioName: name,
+      isBase, isActive,
+      passiveIncomeMonthly: result.projectedPassiveIncome,
+      netWorthAtTarget: result.netWorthTargetYear,
+      capitalGap: result.capitalGap,
+      fireYear: result.fireYear,
+      feasibilityScore: result.feasibilityScore,
+      riskScore: result.riskScore,
+      feasibilityLabel: fl,
+      riskLabel: rl,
+      vsBase,
+    };
+  });
+}
