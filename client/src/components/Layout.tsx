@@ -73,6 +73,7 @@ const NAV_STEPS = [
     badgeClass: "step-3",
     items: [
       { href: "/ai-forecast-engine", label: "Forecast Engine",      icon: Sigma,         adminOnly: true  },
+      { href: "/what-if-scenarios",   label: "What-If Scenarios",     icon: FlaskConical,  adminOnly: false },
       { href: "/scenario-compare",   label: "Scenario Compare Lab",   icon: FlaskConical,  adminOnly: false },
       { href: "/market-news",        label: "Market News",            icon: Newspaper,     adminOnly: false },
       { href: "/reports",            label: "Reports",                icon: FileText,      adminOnly: false },
