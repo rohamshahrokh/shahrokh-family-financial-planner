@@ -34,10 +34,13 @@ import {
   TrendingUp, Target, Plus, Copy, Trash2, RefreshCw, FlaskConical,
   Check, AlertTriangle, BarChart2, Home, Bitcoin, DollarSign,
   Zap, ChevronDown, ChevronUp, Info, Loader2, AlertCircle,
-  Table as TableIcon, Clock,
+  Table as TableIcon, Clock, LogOut, ArrowRightLeft, PieChart,
+  Banknote, ShieldCheck, TrendingDown, BadgeDollarSign, Settings2,
+  ArrowRight, Percent, Wallet,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
+  PieChart as RPieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import {
@@ -47,10 +50,13 @@ import {
   loadScenarioCryptoPlans, saveCryptoPlan,
   loadScenarioAssumptions, saveAssumptions,
   runScenarioForecast, runGoalSolver, runWiMonteCarlo,
-  DEFAULT_SOLVER_CONSTRAINTS,
+  runExitEvent, buildHoldVsExitComparison, calcReinvestmentIncome,
+  DEFAULT_SOLVER_CONSTRAINTS, DEFAULT_EXIT_STRATEGY,
   type WiScenario, type WiProperty, type WiStockPlan, type WiCryptoPlan,
   type WiAssumption, type WiScenarioResult, type GoalSolverOption,
   type MonteCarloWiResult, type GoalSolverConstraints,
+  type ExitStrategy, type ExitEventResult, type HoldVsExitComparison,
+  type CgtBreakdown,
 } from '@/lib/whatIfEngine';
 import { PROFILE_DEFAULTS } from '@/lib/forecastStore';
 
@@ -963,8 +969,8 @@ function CashflowTab({ result, scenario }: { result: WiScenarioResult | null; sc
 
 // ─── Goal Solver Tab ──────────────────────────────────────────────────────────
 
-function GoalSolverTab({ scenario, snap, assumptions, onApplyOption }:
-  { scenario: WiScenario | null; snap: any; assumptions: WiAssumption[]; onApplyOption: (opt: GoalSolverOption) => void }) {
+function GoalSolverTab({ scenario, snap, assumptions, onApplyOption, exitResultForSolver }:
+  { scenario: WiScenario | null; snap: any; assumptions: WiAssumption[]; onApplyOption: (opt: GoalSolverOption) => void; exitResultForSolver?: ExitEventResult | null }) {
   const [options, setOptions]   = useState<GoalSolverOption[]>([]);
   const [running, setRunning]   = useState(false);
   const [constraints, setConstraints] = useState<GoalSolverConstraints>({ ...DEFAULT_SOLVER_CONSTRAINTS });
@@ -974,7 +980,6 @@ function GoalSolverTab({ scenario, snap, assumptions, onApplyOption }:
   async function runSolver() {
     if (!scenario || running) return;
     setRunning(true);
-    // yield to React so spinner renders
     await new Promise(r => setTimeout(r, 30));
     try {
       const opts = runGoalSolver({
@@ -986,7 +991,45 @@ function GoalSolverTab({ scenario, snap, assumptions, onApplyOption }:
         snap,
         constraints,
       });
-      setOptions(opts);
+
+      // Inject Option F — Exit Strategy path (if exit result is available)
+      if (exitResultForSolver && exitResultForSolver.monthlyPassiveIncome > 0) {
+        const exitOpt: GoalSolverOption = {
+          label: 'Option F',
+          name: 'Exit + Convert',
+          description: `Sell assets in ${exitResultForSolver.exitYear} → reinvest ${fmt(exitResultForSolver.totalNetProceeds)} net capital into diversified portfolio`,
+          extraProperties: [],
+          stockDCAMonthly: 0,
+          cryptoDCAMonthly: 0,
+          projectedPassiveIncome: exitResultForSolver.monthlyPassiveIncome,
+          targetAchievedYear: exitResultForSolver.exitYear,
+          gap: scenario.target_passive_income - exitResultForSolver.monthlyPassiveIncome,
+          riskScore: 3,
+          feasibilityScore: exitResultForSolver.monthlyPassiveIncome >= scenario.target_passive_income ? 10 : 7,
+          maxCashShortfall: 0,
+          isRecommended: false,
+          reasoning: [
+            `Accumulate until ${exitResultForSolver.exitYear}, then exit`,
+            `Net capital after CGT: ${fmt(exitResultForSolver.totalNetProceeds)}`,
+            `Reinvest into diversified portfolio (ETF/Bonds/Cash)`,
+            `${exitResultForSolver.incomeMode === 'swr' ? `${exitResultForSolver.effectiveSWR.toFixed(1)}% SWR withdrawal` : exitResultForSolver.incomeMode === 'yield' ? 'Yield-based income (no capital drawdown)' : 'Hybrid: growth + income'}`,
+            `Income: ${fmt(exitResultForSolver.monthlyPassiveIncome)}/mo (${fmt(exitResultForSolver.annualPassiveIncome)}/yr)`,
+            `CGT cost: ${fmt(exitResultForSolver.totalTaxOwed)} — vs. ${fmt((exitResultForSolver.monthlyPassiveIncome) * 12)}/yr income gain`,
+          ],
+        };
+        // Re-evaluate recommended
+        const allOpts = [...opts, exitOpt];
+        const acceptable = allOpts.filter(r => r.riskScore <= 7 && r.feasibilityScore >= 7);
+        const best = acceptable.length > 0
+          ? acceptable.sort((a, b) => b.feasibilityScore - a.feasibilityScore)[0]
+          : allOpts.sort((a, b) => b.feasibilityScore - a.feasibilityScore)[0];
+        allOpts.forEach(o => { o.isRecommended = false; });
+        if (best) best.isRecommended = true;
+        setOptions(allOpts);
+      } else {
+        setOptions(opts);
+      }
+
       setRanAt(new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }));
     } finally {
       setRunning(false);
@@ -1311,6 +1354,675 @@ function CompareTab({ allResults, targetPassive, targetYear }:
   );
 }
 
+// ─── Exit Strategy Tab ────────────────────────────────────────────────────────
+
+const PIE_COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))'];
+
+function ExitStrategyTab({ result, scenario, properties, onExitResult }: {
+  result: WiScenarioResult | null;
+  scenario: WiScenario | null;
+  properties: WiProperty[];
+  onExitResult?: (er: ExitEventResult | null) => void;
+}) {
+  const [strategy, setStrategy] = useState<ExitStrategy>(() => ({
+    ...DEFAULT_EXIT_STRATEGY,
+    exitYear: scenario?.target_year ?? 2035,
+  }));
+  const [exitResult, setExitResult] = useState<ExitEventResult | null>(null);
+  const [comparison, setComparison] = useState<HoldVsExitComparison[]>([]);
+  const [showCgt, setShowCgt] = useState(false);
+  const [marginalTax, setMarginalTax] = useState(37);
+
+  // Update exitYear when scenario changes
+  useEffect(() => {
+    if (scenario) setStrategy(s => ({ ...s, exitYear: scenario.target_year }));
+  }, [scenario?.target_year]);
+
+  // Derive property values at exit year from forecast result
+  const propValuesAtExit = (() => {
+    if (!result || !properties.length) return [];
+    const exitYr = strategy.exitYear;
+    const yr = result.years.find(y => y.year === exitYr) ?? result.years[result.years.length - 1];
+    if (!yr) return [];
+    // distribute ipValues proportionally across non-PPOR properties by purchase price weight
+    const ips = properties.filter(p => !p.is_ppor);
+    const totalPurchase = ips.reduce((s, p) => s + safeN(p.purchase_price), 0);
+    if (totalPurchase === 0) return [];
+    return ips.map(p => {
+      const weight = safeN(p.purchase_price) / totalPurchase;
+      const exitYrYear = strategy.exitYear;
+      const purchaseYr = p.purchase_year ?? 2026;
+      const yearsOwned = exitYrYear - purchaseYr;
+      const ass = { property_growth: 7 }; // approximate
+      const propV = safeN(p.purchase_price) * Math.pow(1 + 0.07, Math.max(0, yearsOwned));
+      // loan balance at exit
+      const rate = safeN(p.interest_rate) / 100 || 0.0625;
+      let lbal = safeN(p.loan_amount);
+      if (p.loan_type === 'PI' && yearsOwned > 0) {
+        const mr = rate / 12;
+        const n = p.loan_term_years * 12;
+        const pm = Math.min(yearsOwned * 12, n);
+        if (mr > 0) {
+          const pmt = lbal * (mr * Math.pow(1 + mr, n)) / (Math.pow(1 + mr, n) - 1);
+          for (let m = 0; m < pm; m++) {
+            const int = lbal * mr;
+            lbal = Math.max(0, lbal - (pmt - int));
+          }
+        }
+      }
+      return {
+        id: p.id ?? 0,
+        label: p.property_name,
+        value: propV,
+        loanBalance: lbal,
+        purchasePrice: safeN(p.purchase_price),
+        purchaseYear: purchaseYr,
+      };
+    });
+  })();
+
+  function runExit() {
+    if (!result) return;
+    const exitYr = strategy.exitYear;
+    const yr = result.years.find(y => y.year === exitYr) ?? result.years[result.years.length - 1];
+    if (!yr) return;
+
+    const er = runExitEvent({
+      strategy,
+      properties,
+      stockValueAtExit: yr.stockValue * (strategy.assets.stocksPct / 100),
+      cryptoValueAtExit: yr.cryptoValue * (strategy.assets.cryptoPct / 100),
+      propertyValuesAtExit: propValuesAtExit,
+      marginalTaxRate: marginalTax / 100,
+      currentYear: 2026,
+    });
+    setExitResult(er);
+    onExitResult?.(er);
+
+    if (result) {
+      const comp = buildHoldVsExitComparison({
+        holdResult: result,
+        exitResult: er,
+        targetYear: scenario?.target_year ?? 2035,
+      });
+      setComparison(comp);
+    }
+  }
+
+  // Update strategy helper
+  const updS = (patch: Partial<ExitStrategy>) => setStrategy(s => ({ ...s, ...patch }));
+  const updA = (patch: Partial<ExitStrategy['assets']>) => setStrategy(s => ({ ...s, assets: { ...s.assets, ...patch } }));
+  const updR = (patch: Partial<ExitStrategy['reinvestment']>) => setStrategy(s => ({ ...s, reinvestment: { ...s.reinvestment, ...patch } }));
+  const updI = (patch: Partial<ExitStrategy['income']>) => setStrategy(s => ({ ...s, income: { ...s.income, ...patch } }));
+
+  // Donut data for reinvestment allocation
+  const donutData = [
+    { name: 'ETF Growth', value: strategy.reinvestment.etfGrowthPct },
+    { name: 'ETF Dividend', value: strategy.reinvestment.etfDividendPct },
+    { name: 'Bonds', value: strategy.reinvestment.bondsPct },
+    { name: 'Cash', value: strategy.reinvestment.cashPct },
+  ].filter(d => d.value > 0);
+
+  // Income preview (live, no exit event needed)
+  const incomePreview = exitResult
+    ? null
+    : (() => {
+        const exitYr = result?.years.find(y => y.year === strategy.exitYear) ?? result?.years[result.years.length - 1];
+        if (!exitYr) return null;
+        const approxNet = (exitYr.ipValues - exitYr.ipLoans) * (strategy.assets.sellAllIPs ? 1 : 0.5)
+          + exitYr.stockValue * (strategy.assets.stocksPct / 100)
+          + exitYr.cryptoValue * (strategy.assets.cryptoPct / 100);
+        if (approxNet <= 0) return null;
+        return calcReinvestmentIncome({ netProceeds: approxNet, allocation: strategy.reinvestment, income: strategy.income });
+      })();
+
+  if (!result) {
+    return <div className="text-center py-12 text-muted-foreground text-sm">Run a scenario forecast first to use Exit Strategy.</div>;
+  }
+
+  return (
+    <div className="space-y-5">
+
+      {/* Header */}
+      <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-4 flex items-start gap-3">
+        <LogOut className="w-5 h-5 text-orange-500 mt-0.5 shrink-0" />
+        <div>
+          <div className="font-semibold text-sm text-orange-500 mb-0.5">Exit Strategy Simulator</div>
+          <div className="text-xs text-muted-foreground">
+            Simulate selling assets at a target year, converting proceeds into a stable income-generating portfolio.
+            Compare "Hold" vs "Exit" to find your optimal wealth-to-income transition.
+          </div>
+        </div>
+      </div>
+
+      {/* ── SECTION 1: Exit Event ─────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2"><Settings2 className="w-4 h-4 text-primary" /> Exit Event Configuration</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div>
+              <Label className="text-xs text-muted-foreground">Exit Year</Label>
+              <Select value={String(strategy.exitYear)} onValueChange={v => updS({ exitYear: parseInt(v) })}>
+                <SelectTrigger className="h-8 text-sm mt-0.5" data-testid="exit-year-select"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 20 }, (_, i) => 2026 + i).map(y => (
+                    <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Selling Costs (%)</Label>
+              <Input type="number" step="0.1" min="0" max="10"
+                value={strategy.sellingCostsPct}
+                onChange={e => updS({ sellingCostsPct: safeN(e.target.value) })}
+                className="h-8 text-sm mt-0.5" data-testid="exit-selling-costs" />
+              <div className="text-xs text-muted-foreground mt-0.5">Agent fees, conveyancing etc.</div>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Your Marginal Tax Rate (%)</Label>
+              <Select value={String(marginalTax)} onValueChange={v => setMarginalTax(parseInt(v))}>
+                <SelectTrigger className="h-8 text-sm mt-0.5" data-testid="exit-tax-rate"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="19">19% — $18,201–$45,000</SelectItem>
+                  <SelectItem value="32">32.5% — $45,001–$120,000</SelectItem>
+                  <SelectItem value="37">37% — $120,001–$180,000</SelectItem>
+                  <SelectItem value="45">45% — $180,001+</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Assets to sell */}
+          <div>
+            <div className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Assets to Liquidate</div>
+            <div className="space-y-3">
+              {/* Properties */}
+              <div className="rounded-lg border border-border p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Home className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-xs font-medium">Investment Properties</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground">Sell all IPs</Label>
+                    <Switch
+                      checked={strategy.assets.sellAllIPs}
+                      onCheckedChange={v => updA({ sellAllIPs: v })}
+                      data-testid="exit-sell-all-ips"
+                    />
+                  </div>
+                </div>
+                {!strategy.assets.sellAllIPs && propValuesAtExit.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {propValuesAtExit.map(pv => (
+                      <div key={pv.id} className="flex items-center gap-2 text-xs">
+                        <input type="checkbox"
+                          className="rounded"
+                          checked={strategy.assets.propertyIds.includes(pv.id)}
+                          onChange={e => {
+                            const ids = e.target.checked
+                              ? [...strategy.assets.propertyIds, pv.id]
+                              : strategy.assets.propertyIds.filter(id => id !== pv.id);
+                            updA({ propertyIds: ids });
+                          }}
+                          data-testid={`exit-prop-${pv.id}`}
+                        />
+                        <span>{pv.label}</span>
+                        <span className="text-muted-foreground">{fmt(pv.value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {strategy.assets.sellAllIPs && propValuesAtExit.length > 0 && (
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Will sell: {propValuesAtExit.map(p => p.label).join(', ')}
+                    {' · '}Gross: {fmt(propValuesAtExit.reduce((s, p) => s + p.value, 0))}
+                    {' · '}Loans: {fmt(propValuesAtExit.reduce((s, p) => s + p.loanBalance, 0))}
+                  </div>
+                )}
+              </div>
+
+              {/* Stocks */}
+              <div className="rounded-lg border border-border p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="text-xs font-medium">Stocks / ETFs — sell {strategy.assets.stocksPct}%</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input type="range" min="0" max="100" step="5"
+                    value={strategy.assets.stocksPct}
+                    onChange={e => updA({ stocksPct: safeN(e.target.value) })}
+                    className="flex-1" data-testid="exit-stocks-pct" />
+                  <span className="text-sm font-bold w-10 text-right">{strategy.assets.stocksPct}%</span>
+                </div>
+                {result && (() => {
+                  const yr = result.years.find(y => y.year === strategy.exitYear) ?? result.years[result.years.length - 1];
+                  return yr ? <div className="text-xs text-muted-foreground mt-1">
+                    Value at exit: {fmt(yr.stockValue)} → selling {fmt(yr.stockValue * strategy.assets.stocksPct / 100)}
+                  </div> : null;
+                })()}
+              </div>
+
+              {/* Crypto */}
+              <div className="rounded-lg border border-border p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Bitcoin className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="text-xs font-medium">Crypto — sell {strategy.assets.cryptoPct}%</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input type="range" min="0" max="100" step="5"
+                    value={strategy.assets.cryptoPct}
+                    onChange={e => updA({ cryptoPct: safeN(e.target.value) })}
+                    className="flex-1" data-testid="exit-crypto-pct" />
+                  <span className="text-sm font-bold w-10 text-right">{strategy.assets.cryptoPct}%</span>
+                </div>
+                {result && (() => {
+                  const yr = result.years.find(y => y.year === strategy.exitYear) ?? result.years[result.years.length - 1];
+                  return yr ? <div className="text-xs text-muted-foreground mt-1">
+                    Value at exit: {fmt(yr.cryptoValue)} → selling {fmt(yr.cryptoValue * strategy.assets.cryptoPct / 100)}
+                  </div> : null;
+                })()}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── SECTION 2: Reinvestment Allocation ───────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2"><PieChart className="w-4 h-4 text-primary" /> Reinvestment Allocation</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid md:grid-cols-2 gap-5">
+            {/* Sliders */}
+            <div className="space-y-3">
+              {([
+                ['ETF Growth (VGS/VAS)', 'etfGrowthPct', 'chart-1'],
+                ['ETF Dividend (VHY)', 'etfDividendPct', 'chart-2'],
+                ['Bonds / Fixed Income', 'bondsPct', 'chart-3'],
+                ['Cash / HISA', 'cashPct', 'chart-4'],
+              ] as [string, keyof ExitStrategy['reinvestment'], string][]).map(([label, field]) => (
+                <div key={field}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className="font-medium">{strategy.reinvestment[field]}%</span>
+                  </div>
+                  <input type="range" min="0" max="100" step="5"
+                    value={strategy.reinvestment[field]}
+                    onChange={e => updR({ [field]: safeN(e.target.value) })}
+                    className="w-full"
+                    data-testid={`reinvest-${field}`}
+                  />
+                </div>
+              ))}
+              <div className="text-xs text-muted-foreground">
+                Total: {strategy.reinvestment.etfGrowthPct + strategy.reinvestment.etfDividendPct + strategy.reinvestment.bondsPct + strategy.reinvestment.cashPct}%
+                {' '}(auto-normalised on calculation)
+              </div>
+            </div>
+            {/* Donut chart */}
+            <div className="flex flex-col items-center justify-center">
+              <ResponsiveContainer width="100%" height={160}>
+                <RPieChart>
+                  <Pie data={donutData} cx="50%" cy="50%" innerRadius={45} outerRadius={70}
+                    dataKey="value" nameKey="name" paddingAngle={2}>
+                    {donutData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip formatter={(v: number) => `${v}%`} contentStyle={{ fontSize: 11 }} />
+                </RPieChart>
+              </ResponsiveContainer>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 justify-center mt-1">
+                {donutData.map((d, i) => (
+                  <div key={d.name} className="flex items-center gap-1 text-xs">
+                    <div className="w-2 h-2 rounded-full" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                    <span className="text-muted-foreground">{d.name}: {d.value}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── SECTION 3: Income Mode ────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2"><Banknote className="w-4 h-4 text-primary" /> Income Mode</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Mode selector */}
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              ['swr', 'Safe Withdrawal', 'Withdraw % of portfolio annually. Historically safe.'],
+              ['yield', 'Yield-Based', 'Live off dividends/coupons only. No capital erosion.'],
+              ['hybrid', 'Hybrid', 'Growth ETF stays invested. Income from yield + SWR on rest.'],
+            ] as [ExitStrategy['income']['mode'], string, string][]).map(([mode, label, desc]) => (
+              <button key={mode}
+                onClick={() => updI({ mode })}
+                data-testid={`income-mode-${mode}`}
+                className={`rounded-lg border p-3 text-left transition-colors ${strategy.income.mode === mode
+                  ? 'border-primary bg-primary/10'
+                  : 'border-border hover:border-primary/40'}`}
+              >
+                <div className="text-xs font-medium mb-1">{label}</div>
+                <div className="text-xs text-muted-foreground leading-tight">{desc}</div>
+              </button>
+            ))}
+          </div>
+
+          {/* Mode-specific controls */}
+          {strategy.income.mode === 'swr' && (
+            <div className="grid grid-cols-3 gap-2">
+              {[3, 3.5, 4].map(rate => (
+                <button key={rate}
+                  onClick={() => updI({ swrPct: rate })}
+                  data-testid={`swr-rate-${rate}`}
+                  className={`rounded-lg border p-3 text-center transition-colors ${strategy.income.swrPct === rate
+                    ? 'border-primary bg-primary/10'
+                    : 'border-border hover:border-primary/40'}`}
+                >
+                  <div className="text-lg font-bold">{rate}%</div>
+                  <div className="text-xs text-muted-foreground">
+                    {rate === 3 ? 'Ultra-safe' : rate === 3.5 ? 'Conservative' : 'Standard (Trinity)'}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {strategy.income.mode === 'yield' && (
+            <div>
+              <Label className="text-xs text-muted-foreground">Target Dividend / Coupon Yield (%)</Label>
+              <div className="flex items-center gap-3 mt-1">
+                <input type="range" min="3" max="8" step="0.5"
+                  value={strategy.income.dividendYieldPct}
+                  onChange={e => updI({ dividendYieldPct: safeN(e.target.value) })}
+                  className="flex-1" data-testid="yield-pct-slider" />
+                <span className="text-sm font-bold w-12 text-right">{strategy.income.dividendYieldPct}%</span>
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                VHY 2025 yield ≈ 5.5%. Higher yield = more income but lower growth potential.
+              </div>
+            </div>
+          )}
+
+          {strategy.income.mode === 'hybrid' && (
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs text-muted-foreground">Growth ETF kept for compounding (%)</Label>
+                <div className="flex items-center gap-3 mt-1">
+                  <input type="range" min="10" max="70" step="5"
+                    value={strategy.income.hybridGrowthReinvestPct}
+                    onChange={e => updI({ hybridGrowthReinvestPct: safeN(e.target.value) })}
+                    className="flex-1" data-testid="hybrid-growth-pct" />
+                  <span className="text-sm font-bold w-12 text-right">{strategy.income.hybridGrowthReinvestPct}%</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs text-muted-foreground">SWR on income pool (%)</Label>
+                  <Input type="number" step="0.5" min="1" max="6"
+                    value={strategy.income.swrPct}
+                    onChange={e => updI({ swrPct: safeN(e.target.value) })}
+                    className="h-8 text-sm mt-0.5" />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Dividend yield on income ETF (%)</Label>
+                  <Input type="number" step="0.5" min="1" max="8"
+                    value={strategy.income.dividendYieldPct}
+                    onChange={e => updI({ dividendYieldPct: safeN(e.target.value) })}
+                    className="h-8 text-sm mt-0.5" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Live income preview */}
+          {incomePreview && (
+            <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+              <div className="text-xs font-medium text-primary mb-1">Estimated Income Preview (before CGT)</div>
+              <div className="text-2xl font-bold text-primary">{fmt(incomePreview.monthlyIncome)}<span className="text-sm font-normal text-muted-foreground">/month</span></div>
+              <div className="text-xs text-muted-foreground">{fmt(incomePreview.annualIncome)}/year · Effective rate: {incomePreview.effectiveRate.toFixed(1)}%</div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Run Button ───────────────────────────────────────────────────── */}
+      <Button className="w-full" size="lg" onClick={runExit} data-testid="btn-run-exit">
+        <LogOut className="w-4 h-4 mr-2" /> Calculate Exit Strategy
+      </Button>
+
+      {/* ── RESULTS ──────────────────────────────────────────────────────── */}
+      {exitResult && (
+        <>
+          {/* Headline KPIs */}
+          <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4">
+            <div className="text-sm font-semibold text-primary mb-3 flex items-center gap-2">
+              <Check className="w-4 h-4" />
+              Exit in {exitResult.exitYear}: Your Wealth-to-Income Conversion
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+              <div>
+                <div className="text-2xl font-bold tabular-nums">{fmt(exitResult.totalNetProceeds)}</div>
+                <div className="text-xs text-muted-foreground">Net Capital After Tax</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-green-500 tabular-nums">{fmt(exitResult.monthlyPassiveIncome)}</div>
+                <div className="text-xs text-muted-foreground">Monthly Passive Income</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold tabular-nums">{fmt(exitResult.annualPassiveIncome)}</div>
+                <div className="text-xs text-muted-foreground">Annual Passive Income</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-orange-500 tabular-nums">{exitResult.effectiveSWR.toFixed(1)}%</div>
+                <div className="text-xs text-muted-foreground">Effective Income Rate</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Proceeds breakdown */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2"><Wallet className="w-4 h-4 text-primary" /> Proceeds Breakdown</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+                <div className="rounded-lg bg-muted/40 p-3">
+                  <div className="text-lg font-bold tabular-nums">
+                    {fmt(exitResult.propertyGrossValue + (exitResult.stockValueAtExit > 0 ? exitResult.stockValueAtExit / (strategy.assets.stocksPct / 100 || 1) * (strategy.assets.stocksPct / 100) : 0) + (exitResult.cryptoValueAtExit > 0 ? exitResult.cryptoValueAtExit / (strategy.assets.cryptoPct / 100 || 1) * (strategy.assets.cryptoPct / 100) : 0))}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Gross Sale Value</div>
+                </div>
+                <div className="rounded-lg bg-red-500/10 p-3">
+                  <div className="text-lg font-bold text-red-400 tabular-nums">-{fmt(exitResult.totalTaxOwed + exitResult.totalSellingCosts + exitResult.propertyLoansAtExit)}</div>
+                  <div className="text-xs text-muted-foreground">CGT + Costs + Loans</div>
+                </div>
+                <div className="rounded-lg bg-green-500/10 p-3">
+                  <div className="text-lg font-bold text-green-500 tabular-nums">{fmt(exitResult.totalNetProceeds)}</div>
+                  <div className="text-xs text-muted-foreground">Net Cash to Deploy</div>
+                </div>
+              </div>
+
+              {/* CGT detail toggle */}
+              <button
+                onClick={() => setShowCgt(!showCgt)}
+                className="text-xs text-muted-foreground flex items-center gap-1 hover:text-foreground transition-colors"
+                data-testid="toggle-cgt-detail"
+              >
+                {showCgt ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                {showCgt ? 'Hide' : 'Show'} per-asset CGT detail
+              </button>
+
+              {showCgt && (
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full text-xs min-w-[580px]">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/40">
+                        {['Asset', 'Sale Price', 'Cost Base', 'Gross Gain', '50% Discount', 'Taxable Gain', 'Tax Owed', 'Net Proceeds'].map(h => (
+                          <th key={h} className="px-2 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {exitResult.cgtBreakdowns.map((c, i) => (
+                        <tr key={i} className="border-b border-border/40 hover:bg-muted/20">
+                          <td className="px-2 py-2 font-medium">{c.assetLabel}</td>
+                          <td className="px-2 py-2 tabular-nums">{fmt(c.saleProceeds)}</td>
+                          <td className="px-2 py-2 tabular-nums text-muted-foreground">{fmt(c.costBase)}</td>
+                          <td className="px-2 py-2 tabular-nums text-orange-500">{fmt(c.grossGain)}</td>
+                          <td className="px-2 py-2 tabular-nums text-green-500">-{fmt(c.cgtDiscount)}</td>
+                          <td className="px-2 py-2 tabular-nums">{fmt(c.taxableGain)}</td>
+                          <td className="px-2 py-2 tabular-nums text-red-400">-{fmt(c.taxOwed)}</td>
+                          <td className="px-2 py-2 tabular-nums font-medium text-primary">{fmt(c.netProceeds)}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-muted/30 font-semibold">
+                        <td className="px-2 py-2">Total</td>
+                        <td className="px-2 py-2 tabular-nums">{fmt(exitResult.cgtBreakdowns.reduce((s, c) => s + c.saleProceeds, 0))}</td>
+                        <td className="px-2 py-2" />
+                        <td className="px-2 py-2 tabular-nums text-orange-500">{fmt(exitResult.cgtBreakdowns.reduce((s, c) => s + c.grossGain, 0))}</td>
+                        <td className="px-2 py-2 tabular-nums text-green-500">-{fmt(exitResult.cgtBreakdowns.reduce((s, c) => s + c.cgtDiscount, 0))}</td>
+                        <td className="px-2 py-2 tabular-nums">{fmt(exitResult.cgtBreakdowns.reduce((s, c) => s + c.taxableGain, 0))}</td>
+                        <td className="px-2 py-2 tabular-nums text-red-400">-{fmt(exitResult.totalTaxOwed)}</td>
+                        <td className="px-2 py-2 tabular-nums text-primary">{fmt(exitResult.totalNetProceeds)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Portfolio deployment */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2"><PieChart className="w-4 h-4 text-primary" /> Portfolio Deployment</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                {[
+                  { label: 'ETF Growth', value: exitResult.etfGrowthValue, color: 'text-blue-400' },
+                  { label: 'ETF Dividend', value: exitResult.etfDividendValue, color: 'text-green-400' },
+                  { label: 'Bonds', value: exitResult.bondsValue, color: 'text-yellow-400' },
+                  { label: 'Cash / HISA', value: exitResult.cashValue, color: 'text-purple-400' },
+                ].map(({ label, value, color }) => value > 0 ? (
+                  <div key={label} className="rounded-lg bg-muted/40 p-3 text-center">
+                    <div className={`text-lg font-bold tabular-nums ${color}`}>{fmt(value)}</div>
+                    <div className="text-xs text-muted-foreground">{label}</div>
+                    <div className="text-xs text-muted-foreground/60">
+                      {exitResult.totalNetProceeds > 0 ? `${(value / exitResult.totalNetProceeds * 100).toFixed(0)}%` : '—'}
+                    </div>
+                  </div>
+                ) : null)}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Hold vs Exit comparison */}
+          {comparison.length === 2 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2"><ArrowRightLeft className="w-4 h-4 text-primary" /> Hold vs Exit — Decision Matrix</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs min-w-[500px]">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/40">
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Metric</th>
+                        {comparison.map(c => (
+                          <th key={c.strategy} className={`px-3 py-2 text-center font-medium ${c.strategy === 'exit' ? 'text-primary' : 'text-muted-foreground'}`}>
+                            {c.strategy === 'hold' ? '🏠 Hold Strategy' : '🚪 Exit Strategy'}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {([
+                        ['Passive Income', (c: HoldVsExitComparison) => `${fmt(c.passiveIncomeMonthly)}/mo`, 'income'],
+                        ['Capital at Work', (c: HoldVsExitComparison) => fmt(c.capitalAtWork), ''],
+                        ['Risk Level', (c: HoldVsExitComparison) => c.riskLabel, 'risk'],
+                        ['Stability', (c: HoldVsExitComparison) => `${c.stabilityLabel} (${c.stabilityScore}/10)`, ''],
+                        ['Income Sources', (c: HoldVsExitComparison) => c.primaryIncomeSources.join(', ') || '—', ''],
+                      ] as [string, (c: HoldVsExitComparison) => string, string][]).map(([label, getter, type]) => (
+                        <tr key={label} className="border-b border-border/40 hover:bg-muted/20">
+                          <td className="px-3 py-2 font-medium text-muted-foreground">{label}</td>
+                          {comparison.map(c => {
+                            const val = getter(c);
+                            let cls = '';
+                            if (type === 'income') {
+                              const incomes = comparison.map(x => x.passiveIncomeMonthly);
+                              cls = c.passiveIncomeMonthly === Math.max(...incomes) ? 'text-green-500 font-semibold' : '';
+                            }
+                            if (type === 'risk') {
+                              cls = c.riskScore <= 3 ? 'text-green-500' : c.riskScore <= 6 ? 'text-yellow-500' : 'text-red-500';
+                            }
+                            return <td key={c.strategy} className={`px-3 py-2 text-center ${cls}`}>{val}</td>;
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pros/Cons side by side */}
+                <div className="grid md:grid-cols-2 gap-4 mt-4">
+                  {comparison.map(c => (
+                    <div key={c.strategy}>
+                      <div className="text-xs font-semibold mb-2 uppercase tracking-wide text-muted-foreground">
+                        {c.strategy === 'hold' ? '🏠 Hold — Pros & Cons' : '🚪 Exit — Pros & Cons'}
+                      </div>
+                      <div className="space-y-1 mb-2">
+                        {c.pros.map((p, i) => <div key={i} className="flex gap-1.5 text-xs"><span className="text-green-500 shrink-0">✓</span>{p}</div>)}
+                      </div>
+                      <div className="space-y-1">
+                        {c.cons.map((p, i) => <div key={i} className="flex gap-1.5 text-xs"><span className="text-red-400 shrink-0">✗</span>{p}</div>)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Recommendation */}
+                {comparison.length === 2 && (() => {
+                  const [hold, exit] = comparison;
+                  const exitBetter = exit.passiveIncomeMonthly > hold.passiveIncomeMonthly;
+                  const winner = exitBetter ? exit : hold;
+                  return (
+                    <div className={`mt-4 rounded-lg p-3 border ${exitBetter ? 'border-primary/40 bg-primary/5' : 'border-green-500/40 bg-green-500/5'}`}>
+                      <div className="flex items-center gap-2 text-xs font-semibold mb-1">
+                        <ShieldCheck className="w-4 h-4 text-primary" />
+                        Recommendation: {exitBetter ? 'Exit generates more income' : 'Hold generates more income'}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {exitBetter
+                          ? `Exiting in ${exit.strategy === 'exit' ? exitResult.exitYear : '—'} and reinvesting generates ${fmt(exit.passiveIncomeMonthly - hold.passiveIncomeMonthly)}/mo more than holding. Consider the ${fmt(exitResult.totalTaxOwed)} CGT cost vs. ${fmt((exit.passiveIncomeMonthly - hold.passiveIncomeMonthly) * 12)}/yr extra income.`
+                          : `Holding generates ${fmt(hold.passiveIncomeMonthly - exit.passiveIncomeMonthly)}/mo more than exiting at these assumptions. Assets continue compounding and no CGT is triggered.`
+                        }
+                      </div>
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Goal Solver integration message */}
+          <div className="rounded-lg border border-primary/20 bg-muted/30 p-3 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Goal Solver integration:</span> Switch to the Goal Solver tab — the solver now includes an exit strategy path ("Option F — Exit + Convert") using the income you've configured here.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+
 // ─── Assumptions Panel ────────────────────────────────────────────────────────
 
 function AssumptionsPanel({ scenarioId, profile, onChanged }:
@@ -1406,6 +2118,7 @@ export default function WhatIfScenariosPage() {
   const [activeResult,  setActiveResult]  = useState<WiScenarioResult | null>(null);
   const [allResults,    setAllResults]    = useState<{ name: string; result: WiScenarioResult }[]>([]);
   const [baseResult,    setBaseResult]    = useState<WiScenarioResult | null>(null);
+  const [exitResultForSolver, setExitResultForSolver] = useState<ExitEventResult | null>(null);
 
   // ── COMPUTE CONTROL ──────────────────────────────────────────────────────────
   const isComputingRef  = useRef(false);   // compute lock — prevents re-entry
@@ -1921,6 +2634,7 @@ export default function WhatIfScenariosPage() {
                   { value: 'stocks',       label: 'Stocks',       icon: TrendingUp },
                   { value: 'crypto',       label: 'Crypto',       icon: Bitcoin },
                   { value: 'cashflow',     label: 'Cashflow',     icon: DollarSign },
+                  { value: 'exit',         label: 'Exit Strategy',icon: LogOut },
                   { value: 'solver',       label: 'Goal Solver',  icon: Zap },
                   { value: 'montecarlo',   label: 'Monte Carlo',  icon: FlaskConical },
                   { value: 'compare',      label: 'Compare',      icon: TableIcon },
@@ -1952,12 +2666,21 @@ export default function WhatIfScenariosPage() {
             <TabsContent value="cashflow">
               <CashflowTab result={activeResult} scenario={activeScenario} />
             </TabsContent>
+            <TabsContent value="exit">
+              <ExitStrategyTab
+                result={activeResult}
+                scenario={activeScenario}
+                properties={scenarioData.properties}
+                onExitResult={setExitResultForSolver}
+              />
+            </TabsContent>
             <TabsContent value="solver">
               <GoalSolverTab
                 scenario={activeScenario}
                 snap={snap}
                 assumptions={scenarioData.assumptions}
                 onApplyOption={handleApplyOption}
+                exitResultForSolver={exitResultForSolver}
               />
             </TabsContent>
             <TabsContent value="montecarlo">

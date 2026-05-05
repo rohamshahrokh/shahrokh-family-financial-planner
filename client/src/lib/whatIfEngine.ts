@@ -1194,3 +1194,465 @@ export async function cloneBasePlan(snap: any, existingProperties: any[], name =
 
   return scenario;
 }
+
+// ─── Exit Strategy Engine ─────────────────────────────────────────────────────
+
+/** Which assets to liquidate at exit year */
+export interface ExitAssetSelection {
+  // Properties: array of WiProperty IDs (or all if empty = sell all IPs)
+  propertyIds: number[];       // empty = sell all non-PPOR properties
+  sellAllIPs: boolean;
+  // Stocks: 0–100%
+  stocksPct: number;           // 0–100
+  // Crypto: 0–100%
+  cryptoPct: number;           // 0–100
+}
+
+/** How proceeds are deployed after tax */
+export interface ReinvestmentAllocation {
+  etfGrowthPct: number;       // % → ETF (growth-focused, e.g. VGS/VAS)
+  etfDividendPct: number;     // % → ETF (high-yield, e.g. VHY)
+  bondsPct: number;           // % → bonds / fixed income
+  cashPct: number;            // % → cash / HISA
+}
+
+export type IncomeMode = 'swr' | 'yield' | 'hybrid';
+
+export interface ExitIncomeConfig {
+  mode: IncomeMode;
+  swrPct: number;             // 3 / 3.5 / 4 (%)
+  dividendYieldPct: number;   // 5–6% for yield mode
+  hybridGrowthReinvestPct: number; // % of portfolio kept for growth in hybrid mode
+}
+
+/** Full exit strategy specification (serialised in WiScenario.snap_overrides.exit_strategy) */
+export interface ExitStrategy {
+  enabled: boolean;
+  exitYear: number;           // e.g. 2035
+  sellingCostsPct: number;    // agent fees etc. (%) — default 2.5%
+  assets: ExitAssetSelection;
+  reinvestment: ReinvestmentAllocation;
+  income: ExitIncomeConfig;
+}
+
+/** Per-asset CGT calculation result */
+export interface CgtBreakdown {
+  assetLabel: string;
+  saleProceeds: number;
+  costBase: number;
+  grossGain: number;
+  cgtDiscount: number;        // 50% if held >12 months
+  taxableGain: number;
+  taxRate: number;            // marginal rate assumed
+  taxOwed: number;
+  sellingCosts: number;
+  netProceeds: number;
+}
+
+/** Full exit event result */
+export interface ExitEventResult {
+  exitYear: number;
+  // Asset values at exit (before sale)
+  propertyGrossValue: number;
+  propertyLoansAtExit: number;
+  stockValueAtExit: number;
+  cryptoValueAtExit: number;
+  // CGT breakdown
+  cgtBreakdowns: CgtBreakdown[];
+  totalSellingCosts: number;
+  totalTaxOwed: number;
+  totalNetProceeds: number;   // after costs + CGT
+  // Post-exit portfolio
+  reinvestedCapital: number;
+  etfGrowthValue: number;
+  etfDividendValue: number;
+  bondsValue: number;
+  cashValue: number;
+  // Income generated
+  annualPassiveIncome: number;
+  monthlyPassiveIncome: number;
+  // Strategy summary
+  effectiveSWR: number;
+  effectiveYield: number;
+  incomeMode: IncomeMode;
+}
+
+/** Hold vs Exit comparison */
+export interface HoldVsExitComparison {
+  strategy: 'hold' | 'exit';
+  passiveIncomeMonthly: number;
+  netWorthAtTarget: number;
+  capitalAtWork: number;
+  riskLabel: string;
+  riskScore: number;
+  stabilityLabel: string;
+  stabilityScore: number;     // 1–10
+  primaryIncomeSources: string[];
+  pros: string[];
+  cons: string[];
+}
+
+// ─── Australian CGT calculation ───────────────────────────────────────────────
+
+/**
+ * Calculates CGT for a single asset using Australian rules:
+ * - 50% discount if held > 12 months
+ * - Marginal tax rate applied to discounted gain
+ * - Selling costs deducted from proceeds
+ */
+export function calcCgt(params: {
+  assetLabel: string;
+  saleProceeds: number;
+  costBase: number;
+  sellingCostsPct: number;   // % of sale proceeds
+  yearsHeld: number;
+  marginalTaxRate: number;   // e.g. 0.37 for $135K–$190K bracket
+}): CgtBreakdown {
+  const { assetLabel, saleProceeds, costBase, sellingCostsPct, yearsHeld, marginalTaxRate } = params;
+  const sellingCosts = saleProceeds * (sellingCostsPct / 100);
+  const netSaleProceeds = saleProceeds - sellingCosts;
+  const grossGain = Math.max(0, netSaleProceeds - costBase);
+  // 50% CGT discount for assets held > 12 months
+  const cgtDiscount = yearsHeld >= 1 ? grossGain * 0.5 : 0;
+  const taxableGain = grossGain - cgtDiscount;
+  const taxOwed = taxableGain * marginalTaxRate;
+  const netProceeds = netSaleProceeds - taxOwed;
+
+  return {
+    assetLabel,
+    saleProceeds,
+    costBase,
+    grossGain,
+    cgtDiscount,
+    taxableGain,
+    taxRate: marginalTaxRate,
+    taxOwed,
+    sellingCosts,
+    netProceeds,
+  };
+}
+
+// ─── Reinvestment income calculation ─────────────────────────────────────────
+
+/**
+ * Calculates annual passive income from a reinvested capital pool
+ * based on chosen income mode and allocation.
+ */
+export function calcReinvestmentIncome(params: {
+  netProceeds: number;
+  allocation: ReinvestmentAllocation;
+  income: ExitIncomeConfig;
+}): {
+  annualIncome: number;
+  monthlyIncome: number;
+  effectiveRate: number;
+  breakdown: { label: string; capital: number; yield: number; income: number }[];
+} {
+  const { netProceeds, allocation, income } = params;
+  const { mode, swrPct, dividendYieldPct, hybridGrowthReinvestPct } = income;
+
+  // Normalise allocation to sum to 100
+  const total = allocation.etfGrowthPct + allocation.etfDividendPct + allocation.bondsPct + allocation.cashPct;
+  const norm = total > 0 ? 100 / total : 1;
+  const a = {
+    etfGrowth:   (allocation.etfGrowthPct * norm / 100) * netProceeds,
+    etfDividend: (allocation.etfDividendPct * norm / 100) * netProceeds,
+    bonds:       (allocation.bondsPct * norm / 100) * netProceeds,
+    cash:        (allocation.cashPct * norm / 100) * netProceeds,
+  };
+
+  let annualIncome = 0;
+  const breakdown: { label: string; capital: number; yield: number; income: number }[] = [];
+
+  if (mode === 'swr') {
+    // Safe withdrawal rate applied to total portfolio
+    const swr = swrPct / 100;
+    annualIncome = netProceeds * swr;
+
+    breakdown.push({ label: 'ETF (Growth)',   capital: a.etfGrowth,   yield: swrPct, income: a.etfGrowth * swr });
+    breakdown.push({ label: 'ETF (Dividend)', capital: a.etfDividend, yield: swrPct, income: a.etfDividend * swr });
+    breakdown.push({ label: 'Bonds',          capital: a.bonds,       yield: swrPct, income: a.bonds * swr });
+    breakdown.push({ label: 'Cash / HISA',    capital: a.cash,        yield: swrPct, income: a.cash * swr });
+  } else if (mode === 'yield') {
+    // Yield-based: dividend/coupon income only (no capital drawdown)
+    const etfGrowthYield = 0.025;   // VGS-style: 2.5% franked
+    const etfDivYield    = dividendYieldPct / 100; // VHY-style: 5–6%
+    const bondsYield     = 0.055;   // ~5.5% investment grade bonds
+    const cashYield      = 0.045;   // ~4.5% HISA
+
+    breakdown.push({ label: 'ETF (Growth)',   capital: a.etfGrowth,   yield: etfGrowthYield * 100, income: a.etfGrowth * etfGrowthYield });
+    breakdown.push({ label: 'ETF (Dividend)', capital: a.etfDividend, yield: etfDivYield * 100,    income: a.etfDividend * etfDivYield });
+    breakdown.push({ label: 'Bonds',          capital: a.bonds,       yield: bondsYield * 100,     income: a.bonds * bondsYield });
+    breakdown.push({ label: 'Cash / HISA',    capital: a.cash,        yield: cashYield * 100,      income: a.cash * cashYield });
+    annualIncome = breakdown.reduce((s, b) => s + b.income, 0);
+  } else {
+    // Hybrid: growth ETF stays invested, income from yield + partial SWR on remainder
+    const growthKept = a.etfGrowth;  // kept for growth, not withdrawn
+    const incomePool = netProceeds - growthKept * (hybridGrowthReinvestPct / 100);
+    const swrIncome  = incomePool * (swrPct / 100);
+    const divIncome  = a.etfDividend * (dividendYieldPct / 100);
+    const bondIncome = a.bonds * 0.055;
+    const cashIncome = a.cash * 0.045;
+    annualIncome = swrIncome + divIncome + bondIncome + cashIncome;
+
+    breakdown.push({ label: 'ETF (Growth) — held',    capital: growthKept,   yield: 0,                    income: 0 });
+    breakdown.push({ label: 'ETF (Dividend)',          capital: a.etfDividend,yield: dividendYieldPct,    income: divIncome });
+    breakdown.push({ label: 'Bonds',                  capital: a.bonds,      yield: 5.5,                 income: bondIncome });
+    breakdown.push({ label: 'Cash / HISA',            capital: a.cash,       yield: 4.5,                 income: cashIncome });
+    breakdown.push({ label: 'SWR drawdown (rest)',    capital: incomePool,   yield: swrPct,              income: swrIncome });
+  }
+
+  const effectiveRate = netProceeds > 0 ? (annualIncome / netProceeds) * 100 : 0;
+
+  return {
+    annualIncome,
+    monthlyIncome: annualIncome / 12,
+    effectiveRate,
+    breakdown: breakdown.filter(b => b.capital > 0),
+  };
+}
+
+// ─── Run Exit Event ───────────────────────────────────────────────────────────
+
+/**
+ * Runs the full exit event simulation:
+ * 1. Takes asset values at the exit year (from runScenarioForecast result)
+ * 2. Sells selected assets, calculates CGT
+ * 3. Reinvests net proceeds
+ * 4. Calculates passive income from new portfolio
+ */
+export function runExitEvent(params: {
+  strategy: ExitStrategy;
+  properties: WiProperty[];
+  // Asset values at exit year (from forecast result's year array)
+  stockValueAtExit: number;
+  cryptoValueAtExit: number;
+  propertyValuesAtExit: { id: number; label: string; value: number; loanBalance: number; purchasePrice: number; purchaseYear: number }[];
+  marginalTaxRate?: number;
+  currentYear?: number;
+}): ExitEventResult {
+  const {
+    strategy,
+    properties,
+    stockValueAtExit,
+    cryptoValueAtExit,
+    propertyValuesAtExit,
+    marginalTaxRate = 0.37,
+    currentYear = 2026,
+  } = params;
+
+  const { exitYear, sellingCostsPct, assets, reinvestment, income } = strategy;
+  const yearsToExit = exitYear - currentYear;
+
+  const cgtBreakdowns: CgtBreakdown[] = [];
+  let totalNetProceeds = 0;
+
+  // ── 1. Properties ──────────────────────────────────────────────────────────
+  let propertyGross = 0;
+  let propertyLoans = 0;
+
+  const propsToSell = assets.sellAllIPs
+    ? propertyValuesAtExit.filter(pv => {
+        const wp = properties.find(p => p.id === pv.id);
+        return !wp?.is_ppor;
+      })
+    : propertyValuesAtExit.filter(pv => assets.propertyIds.includes(pv.id ?? 0));
+
+  for (const pv of propsToSell) {
+    propertyGross += pv.value;
+    propertyLoans += pv.loanBalance;
+    const yearsHeld = exitYear - (pv.purchaseYear ?? currentYear);
+    const cgt = calcCgt({
+      assetLabel: pv.label,
+      saleProceeds: pv.value,
+      costBase: pv.purchasePrice,
+      sellingCostsPct,
+      yearsHeld: Math.max(0, yearsHeld),
+      marginalTaxRate,
+    });
+    // Net proceeds = after costs + CGT + pay off loan
+    cgt.netProceeds = cgt.netProceeds - pv.loanBalance;
+    cgtBreakdowns.push(cgt);
+    totalNetProceeds += Math.max(0, cgt.netProceeds);
+  }
+
+  // ── 2. Stocks ──────────────────────────────────────────────────────────────
+  const stockSaleValue = stockValueAtExit * (assets.stocksPct / 100);
+  if (stockSaleValue > 0) {
+    const stockCostBase = stockSaleValue * 0.45; // approximate: market-weighted avg
+    const stockCgt = calcCgt({
+      assetLabel: `Stocks (${assets.stocksPct}%)`,
+      saleProceeds: stockSaleValue,
+      costBase: stockCostBase,
+      sellingCostsPct: 0.1, // brokerage ~0.1%
+      yearsHeld: yearsToExit,
+      marginalTaxRate,
+    });
+    cgtBreakdowns.push(stockCgt);
+    totalNetProceeds += stockCgt.netProceeds;
+  }
+
+  // ── 3. Crypto ──────────────────────────────────────────────────────────────
+  const cryptoSaleValue = cryptoValueAtExit * (assets.cryptoPct / 100);
+  if (cryptoSaleValue > 0) {
+    const cryptoCostBase = cryptoSaleValue * 0.25; // higher gain assumption for crypto
+    const cryptoCgt = calcCgt({
+      assetLabel: `Crypto (${assets.cryptoPct}%)`,
+      saleProceeds: cryptoSaleValue,
+      costBase: cryptoCostBase,
+      sellingCostsPct: 0.5, // exchange fees
+      yearsHeld: yearsToExit,
+      marginalTaxRate,
+    });
+    cgtBreakdowns.push(cryptoCgt);
+    totalNetProceeds += cryptoCgt.netProceeds;
+  }
+
+  const totalSellingCosts = cgtBreakdowns.reduce((s, c) => s + c.sellingCosts, 0);
+  const totalTaxOwed      = cgtBreakdowns.reduce((s, c) => s + c.taxOwed, 0);
+
+  // ── 4. Reinvestment ────────────────────────────────────────────────────────
+  const norm = reinvestment.etfGrowthPct + reinvestment.etfDividendPct +
+               reinvestment.bondsPct + reinvestment.cashPct;
+  const r = norm > 0 ? { ...reinvestment } : { etfGrowthPct: 50, etfDividendPct: 30, bondsPct: 10, cashPct: 10 };
+
+  const etfGrowthValue  = (r.etfGrowthPct / 100) * totalNetProceeds;
+  const etfDivValue     = (r.etfDividendPct / 100) * totalNetProceeds;
+  const bondsValue      = (r.bondsPct / 100) * totalNetProceeds;
+  const cashValue       = (r.cashPct / 100) * totalNetProceeds;
+
+  // ── 5. Income ──────────────────────────────────────────────────────────────
+  const incomeCalc = calcReinvestmentIncome({
+    netProceeds: totalNetProceeds,
+    allocation: reinvestment,
+    income,
+  });
+
+  return {
+    exitYear,
+    propertyGrossValue: propertyGross,
+    propertyLoansAtExit: propertyLoans,
+    stockValueAtExit: stockSaleValue,
+    cryptoValueAtExit: cryptoSaleValue,
+    cgtBreakdowns,
+    totalSellingCosts,
+    totalTaxOwed,
+    totalNetProceeds,
+    reinvestedCapital: totalNetProceeds,
+    etfGrowthValue,
+    etfDividendValue: etfDivValue,
+    bondsValue,
+    cashValue,
+    annualPassiveIncome: incomeCalc.annualIncome,
+    monthlyPassiveIncome: incomeCalc.monthlyIncome,
+    effectiveSWR: incomeCalc.effectiveRate,
+    effectiveYield: incomeCalc.effectiveRate,
+    incomeMode: income.mode,
+  };
+}
+
+// ─── Hold vs Exit Comparison ──────────────────────────────────────────────────
+
+export function buildHoldVsExitComparison(params: {
+  holdResult: WiScenarioResult;
+  exitResult: ExitEventResult;
+  targetYear: number;
+}): HoldVsExitComparison[] {
+  const { holdResult, exitResult } = params;
+
+  const hold: HoldVsExitComparison = {
+    strategy: 'hold',
+    passiveIncomeMonthly: holdResult.projectedPassiveIncome,
+    netWorthAtTarget: holdResult.netWorthTargetYear,
+    capitalAtWork: holdResult.currentProjectedCapital,
+    riskLabel: holdResult.riskScore <= 3 ? 'Low' : holdResult.riskScore <= 6 ? 'Medium' : 'High',
+    riskScore: holdResult.riskScore,
+    stabilityLabel: holdResult.projectedPassiveIncome > 0 ? 'Growing' : 'Low',
+    stabilityScore: Math.min(10, Math.max(1, 10 - holdResult.riskScore)),
+    primaryIncomeSources: [
+      holdResult.propertyValueTargetYear > 0 ? 'Net rental income' : '',
+      holdResult.stockValueTargetYear > 0 ? 'Stock dividends / SWR' : '',
+      holdResult.cryptoValueTargetYear > 0 ? 'Crypto yield' : '',
+    ].filter(Boolean),
+    pros: [
+      'Capital continues compounding',
+      'Rental income grows with CPI',
+      'No CGT event triggered',
+      'Multiple income streams',
+    ],
+    cons: [
+      'Income tied to tenant payments / market',
+      'Property management overhead',
+      'Illiquid — hard to rebalance',
+      'Income may be irregular',
+    ],
+  };
+
+  const exitMonthly = exitResult.monthlyPassiveIncome;
+  const exitRisk    = exitMonthly > holdResult.projectedPassiveIncome ? 3 : 5;
+
+  const exit: HoldVsExitComparison = {
+    strategy: 'exit',
+    passiveIncomeMonthly: exitMonthly,
+    netWorthAtTarget: exitResult.totalNetProceeds,
+    capitalAtWork: exitResult.reinvestedCapital,
+    riskLabel: exitRisk <= 3 ? 'Low' : 'Medium',
+    riskScore: exitRisk,
+    stabilityLabel: 'Stable',
+    stabilityScore: 9,
+    primaryIncomeSources: [
+      exitResult.etfGrowthValue > 0 ? 'ETF (growth) — SWR/dividend' : '',
+      exitResult.etfDividendValue > 0 ? 'ETF (high-yield) — dividends' : '',
+      exitResult.bondsValue > 0 ? 'Bonds — coupon income' : '',
+      exitResult.cashValue > 0 ? 'Cash / HISA — interest' : '',
+    ].filter(Boolean),
+    pros: [
+      'Predictable, market-linked income',
+      'Diversified liquid portfolio',
+      'No landlord responsibilities',
+      `${exitResult.incomeMode === 'swr' ? 'SWR proven historically safe' : exitResult.incomeMode === 'yield' ? 'Dividend income without capital drawdown' : 'Hybrid: growth + income balanced'}`,
+    ],
+    cons: [
+      `CGT of ${fmt2(exitResult.totalTaxOwed)} triggered on exit`,
+      'Capital deployed — lower growth upside',
+      'Sequence-of-returns risk on SWR',
+      'Inflation erodes fixed income (bonds/cash)',
+    ],
+  };
+
+  return [hold, exit];
+}
+
+// small local fmt used inside engine (no import needed)
+function fmt2(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `$${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000)     return `$${(abs / 1_000).toFixed(0)}K`;
+  return `$${Math.round(abs).toLocaleString()}`;
+}
+
+// ─── Default exit strategy ────────────────────────────────────────────────────
+
+export const DEFAULT_EXIT_STRATEGY: ExitStrategy = {
+  enabled: false,
+  exitYear: 2035,
+  sellingCostsPct: 2.5,
+  assets: {
+    propertyIds: [],
+    sellAllIPs: true,
+    stocksPct: 0,
+    cryptoPct: 50,
+  },
+  reinvestment: {
+    etfGrowthPct: 50,
+    etfDividendPct: 30,
+    bondsPct: 10,
+    cashPct: 10,
+  },
+  income: {
+    mode: 'swr',
+    swrPct: 4,
+    dividendYieldPct: 5.5,
+    hybridGrowthReinvestPct: 30,
+  },
+};
