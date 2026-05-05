@@ -191,7 +191,7 @@ function DebtRow({ debt, onChange, onRemove, canRemove }: DebtRowProps) {
           value={debt.name}
           onChange={(e) => onChange(debt.id, 'name', e.target.value)}
           className="h-8 text-sm"
-          placeholder="e.g. Car Loan"
+          placeholder="e.g. Personal Loan"
         />
       </div>
       <div>

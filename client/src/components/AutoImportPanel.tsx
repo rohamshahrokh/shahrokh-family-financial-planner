@@ -15,7 +15,7 @@ const SOURCE_CODE_MAP: Record<string, string> = {
   M:  'Health / Medical',
   T:  'Transport / Fuel',
   E:  'Entertainment',
-  C:  'Car Loan / Car Expenses',
+  C:  'Car Expenses',
   B:  'Shopping',
   R:  'Housing / Mortgage',
   G:  'Gifts',

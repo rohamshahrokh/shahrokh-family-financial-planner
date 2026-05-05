@@ -8,7 +8,7 @@
  *
  * Sections:
  *  1. Assets (cash, offset, savings target, stocks, crypto, super, PPOR, cars, overseas)
- *  2. Liabilities (mortgage, car loan, personal loan, credit card)
+ *  2. Liabilities (mortgage, personal loan, credit card)
  *  3. Income (Roham salary, Fara salary, rental income, other income)
  *  4. Monthly Expenses (living, childcare, insurance, utilities, subscriptions, debt repayments)
  *  5. Investing (stock DCA, crypto DCA, property savings target, FIRE target)

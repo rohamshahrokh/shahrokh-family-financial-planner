@@ -224,7 +224,7 @@ const SECTIONS: SectionDef[] = [
             ["M", "Health / Medical"],
             ["T", "Transport / Fuel"],
             ["E", "Entertainment"],
-            ["C", "Car / Car Expenses"],
+            ["C", "Car Expenses"],
             ["B", "Shopping / Retail"],
             ["R", "Housing / Mortgage / Rent"],
             ["G", "Gifts"],
@@ -735,7 +735,7 @@ const SECTIONS: SectionDef[] = [
           ]} />
           <H3>Milestones</H3>
           <PTag>
-            Add milestone markers to the timeline (e.g. "Paid off car loan", "Bought property",
+            Add milestone markers to the timeline (e.g. "Paid off debt", "Bought property",
             "Reached $500k net worth"). Milestones appear as vertical markers on the chart.
           </PTag>
           <Callout type="tip">
@@ -1570,7 +1570,7 @@ const SECTIONS: SectionDef[] = [
           ]} />
           <H3>Data Sources</H3>
           <PTag>
-            The engine uses your mortgage, car loan, and other debts from the Dashboard snapshot,
+            The engine uses your mortgage, personal loan, and other debts from the Dashboard snapshot,
             and allows you to add additional debts manually.
           </PTag>
           <H3>Calculation Method</H3>
