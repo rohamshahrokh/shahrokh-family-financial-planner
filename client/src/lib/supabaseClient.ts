@@ -776,3 +776,40 @@ export const sbTaxProfile = {
     return rows[0];
   },
 };
+
+// ─── Household Permissions ────────────────────────────────────────────────────
+
+const HOUSEHOLD_PERM_ID = "shahrokh-family-main";
+
+export interface HouseholdPermissionSettings {
+  id: string;
+  partner_view_bulletin: boolean;
+  partner_run_bulletin: boolean;
+  partner_view_ai_insights: boolean;
+  partner_receive_telegram: boolean;
+  partner_edit_financial_plan: boolean;
+  partner_edit_expenses: boolean;
+  partner_edit_bills: boolean;
+  telegram_roham_enabled: boolean;
+  telegram_fara_enabled: boolean;
+  updated_at?: string;
+}
+
+export const sbHouseholdPermissions = {
+  async get(): Promise<HouseholdPermissionSettings | null> {
+    try {
+      const rows = await sbGet("sf_household_permissions", `id=eq.${HOUSEHOLD_PERM_ID}`);
+      return rows[0] ?? null;
+    } catch { return null; }
+  },
+
+  async upsert(data: Partial<Omit<HouseholdPermissionSettings, 'id'>>): Promise<HouseholdPermissionSettings | null> {
+    try {
+      return await sbUpsert("sf_household_permissions", {
+        id: HOUSEHOLD_PERM_ID,
+        ...data,
+        updated_at: new Date().toISOString(),
+      });
+    } catch { return null; }
+  },
+};

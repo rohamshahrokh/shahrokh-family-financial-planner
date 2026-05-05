@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, resetDemoStore } from "@/lib/queryClient";
 import SaveButton from "@/components/SaveButton";
@@ -12,8 +12,9 @@ import {
   Send, Bell, BellOff, CheckCircle2, XCircle, MessageSquare, Heart, Clock,
   Zap, TrendingDown, AlertTriangle, CreditCard, DollarSign, BarChart2, Lock,
   UserPlus, KeyRound, UserCheck, UserX, ChevronDown, ChevronUp, Eye, EyeOff,
-  Briefcase, TrendingUp, Info, BrainCircuit, FileText,
+  Briefcase, TrendingUp, Info, BrainCircuit, FileText, Users, Sparkles,
 } from "lucide-react";
+import { sbHouseholdPermissions, type HouseholdPermissionSettings } from "@/lib/supabaseClient";
 import * as XLSX from "xlsx";
 import { sendTestMessage, sendBrowserPush, invalidateSettingsCache } from "@/lib/notifications";
 
@@ -796,6 +797,167 @@ function CashAllocationSection({
   );
 }
 
+// ─── Family Access & Permissions ─────────────────────────────────────────────
+
+const DEFAULT_HOUSEHOLD_PERMS: HouseholdPermissionSettings = {
+  id: 'household-main',
+  partner_view_bulletin: true,
+  partner_run_bulletin: true,
+  partner_view_ai_insights: true,
+  partner_receive_telegram: true,
+  partner_edit_financial_plan: false,
+  partner_edit_expenses: false,
+  partner_edit_bills: false,
+  telegram_roham_enabled: true,
+  telegram_fara_enabled: true,
+};
+
+function FamilyAccessSection({ isAdmin }: { isAdmin: boolean }) {
+  const { toast } = useToast();
+  const [perms, setPerms] = useState<HouseholdPermissionSettings>(DEFAULT_HOUSEHOLD_PERMS);
+  const [saving, setSaving] = useState(false);
+
+  // Load permissions from Supabase once on mount
+  useEffect(() => {
+    sbHouseholdPermissions.get().then(data => {
+      if (data) setPerms(data);
+    });
+  }, []);
+
+  function toggle(key: keyof Omit<HouseholdPermissionSettings, 'id' | 'updated_at'>, value: boolean) {
+    setPerms(prev => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const { id, updated_at, ...rest } = perms;
+      const saved = await sbHouseholdPermissions.upsert(rest);
+      if (saved) {
+        setPerms(saved);
+        toast({ title: 'Saved Successfully', description: 'Family access permissions updated.' });
+      } else {
+        throw new Error('Supabase returned null');
+      }
+    } catch (err: any) {
+      toast({ title: 'Save failed', description: err?.message ?? 'Could not save permissions.', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <SectionCard title="Family Access & Permissions" icon={Users} adminOnly isAdmin={isAdmin}>
+      <div className="rounded-lg bg-amber-950/20 border border-amber-800/30 p-3 text-xs text-amber-200/80 mb-2">
+        <p className="font-semibold text-amber-200 mb-1">Owner-Controlled Access</p>
+        <p>
+          These settings control what <strong className="text-amber-100">Fara (partner)</strong> can see and do in the app.
+          Changes take effect the next time Fara logs in.
+        </p>
+      </div>
+
+      {/* ── Bulletin & AI Insights ── */}
+      <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mt-3 mb-1">Bulletin & AI Insights</p>
+      <ToggleRow
+        label="View Saturday Bulletin"
+        desc="Fara can open and read the Saturday Bulletin page"
+        checked={perms.partner_view_bulletin}
+        onChange={v => toggle('partner_view_bulletin', v)}
+      />
+      <ToggleRow
+        label="Run / Refresh Bulletin"
+        desc="Fara can trigger a new bulletin generation (costs AI credits)"
+        checked={perms.partner_run_bulletin}
+        onChange={v => toggle('partner_run_bulletin', v)}
+      />
+      <ToggleRow
+        label="View AI Insights"
+        desc="Fara can access the AI Insights hub page"
+        checked={perms.partner_view_ai_insights}
+        onChange={v => toggle('partner_view_ai_insights', v)}
+      />
+
+      {/* ── Financial Data ── */}
+      <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mt-4 mb-1">Financial Data</p>
+      <ToggleRow
+        label="Edit Financial Plan"
+        desc="Fara can modify dashboard financial inputs, net worth, and plan assumptions"
+        checked={perms.partner_edit_financial_plan}
+        onChange={v => toggle('partner_edit_financial_plan', v)}
+      />
+      <ToggleRow
+        label="Edit Expenses"
+        desc="Fara can add, edit, and delete expense entries"
+        checked={perms.partner_edit_expenses}
+        onChange={v => toggle('partner_edit_expenses', v)}
+      />
+      <ToggleRow
+        label="Edit Recurring Bills"
+        desc="Fara can add, edit, and delete recurring bills"
+        checked={perms.partner_edit_bills}
+        onChange={v => toggle('partner_edit_bills', v)}
+      />
+
+      {/* ── Telegram Notifications ── */}
+      <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mt-4 mb-1">Telegram Notifications</p>
+      <ToggleRow
+        label="Fara receives Telegram alerts"
+        desc="All household Telegram alerts are also sent to Fara's Telegram chat"
+        checked={perms.partner_receive_telegram}
+        onChange={v => toggle('partner_receive_telegram', v)}
+      />
+      <div className="mt-3 rounded-lg border border-border bg-secondary/10 p-3">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Per-User Telegram Recipients</p>
+        <p className="text-xs text-muted-foreground mb-3">
+          Control which household members receive each Telegram message. Both can be active simultaneously.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className={`rounded-lg border p-3 transition-all ${perms.telegram_roham_enabled ? 'border-primary bg-primary/5' : 'border-border bg-secondary/20'}`}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold">Roham</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Primary recipient</p>
+              </div>
+              <button
+                onClick={() => toggle('telegram_roham_enabled', !perms.telegram_roham_enabled)}
+                className={`w-10 h-5 rounded-full transition-colors relative flex-shrink-0 ${
+                  perms.telegram_roham_enabled ? 'bg-primary' : 'bg-secondary'
+                }`}
+              >
+                <span
+                  className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all"
+                  style={{ left: perms.telegram_roham_enabled ? 22 : 2 }}
+                />
+              </button>
+            </div>
+          </div>
+          <div className={`rounded-lg border p-3 transition-all ${perms.telegram_fara_enabled ? 'border-primary bg-primary/5' : 'border-border bg-secondary/20'}`}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold">Fara</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Partner recipient</p>
+              </div>
+              <button
+                onClick={() => toggle('telegram_fara_enabled', !perms.telegram_fara_enabled)}
+                className={`w-10 h-5 rounded-full transition-colors relative flex-shrink-0 ${
+                  perms.telegram_fara_enabled ? 'bg-primary' : 'bg-secondary'
+                }`}
+              >
+                <span
+                  className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all"
+                  style={{ left: perms.telegram_fara_enabled ? 22 : 2 }}
+                />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <SaveButton label="Save Family Permissions" onSave={handleSave} />
+    </SectionCard>
+  );
+}
+
 function CFOSettingsSection() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -1516,6 +1678,9 @@ export default function SettingsPage() {
 
       {/* ── User Management ───────────────────────────────────────────────── */}
       <UserManagementSection isAdmin={isAdmin} />
+
+      {/* ── Family Access & Permissions ──────────────────────────────────── */}
+      <FamilyAccessSection isAdmin={isAdmin} />
 
       {/* ── Backup & Restore ─────────────────────────────────────────────── */}
       <SectionCard title="Backup & Restore" icon={RefreshCw} adminOnly isAdmin={isAdmin}>

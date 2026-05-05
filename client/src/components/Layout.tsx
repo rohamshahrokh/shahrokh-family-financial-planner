@@ -10,6 +10,7 @@ import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useAppStore } from "@/lib/store";
 import { applyTheme } from "@/lib/store";
+import type { Permission } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
   // Step 1 — Snapshot
@@ -86,8 +87,8 @@ const NAV_STEPS = [
     sublabel: "Take Action",
     badgeClass: "step-4",
     items: [
-      { href: "/ai-weekly-cfo",  label: "Sat. Bulletin",       icon: BrainCircuit,    adminOnly: true  },
-      { href: "/ai-insights",    label: "AI Insights",         icon: Lightbulb,       adminOnly: true  },
+      { href: "/ai-weekly-cfo",  label: "Sat. Bulletin",       icon: BrainCircuit,    adminOnly: false, requiredPermission: 'view_bulletin' as Permission },
+      { href: "/ai-insights",    label: "AI Insights",         icon: Lightbulb,       adminOnly: false, requiredPermission: 'view_ai_insights' as Permission },
     ],
   },
 ];
@@ -106,10 +107,25 @@ function isPathActive(href: string, location: string): boolean {
   return location.startsWith(href);
 }
 
+/** Module-level helper — pass isAdmin + hasPermission explicitly */
+function canSeeItem(
+  item: { adminOnly: boolean; requiredPermission?: Permission },
+  isAdmin: boolean,
+  hasPermission: (perm: Permission) => boolean,
+): boolean {
+  if (item.adminOnly && !isAdmin) return false;
+  if (item.requiredPermission) return hasPermission(item.requiredPermission);
+  return true;
+}
+
 // Which step is currently active based on current route?
-function getActiveStep(location: string, isAdmin: boolean): string {
+function getActiveStep(
+  location: string,
+  isAdmin: boolean,
+  hasPermission: (perm: Permission) => boolean,
+): string {
   for (const step of NAV_STEPS) {
-    const visibleItems = step.items.filter(i => !i.adminOnly || isAdmin);
+    const visibleItems = step.items.filter(i => canSeeItem(i, isAdmin, hasPermission));
     if (visibleItems.some(i => isPathActive(i.href, location))) {
       return step.id;
     }
@@ -166,7 +182,7 @@ function WealthOSLogo() {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location, navigate] = useLocation();
-  const { theme, toggleTheme, setTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role, isDemo } =
+  const { theme, toggleTheme, setTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role, isDemo, householdRole, permissions, hasPermission } =
     useAppStore();
 
   // Apply theme whenever it changes (dark/light only, no auto)
@@ -175,6 +191,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }, [theme]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = role === "admin";
+
+  /** Bound convenience wrapper for use inside Layout component */
+  const seeItem = (item: { adminOnly: boolean; requiredPermission?: Permission }) =>
+    canSeeItem(item, isAdmin, hasPermission);
 
   // Track which accordion sections are open — all open by default for discoverability
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -186,7 +206,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // Auto-open the section that contains the active route
   useEffect(() => {
-    const activeStep = getActiveStep(location, isAdmin);
+    const activeStep = getActiveStep(location, isAdmin, hasPermission);
     setOpenSections(prev => ({ ...prev, [activeStep]: true }));
   }, [location, isAdmin]);
 
@@ -200,7 +220,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   };
 
   const avatarLetter = currentUser === "Fara" ? "F" : "R";
-  const roleLabel = isAdmin ? "Admin" : "Family";
+  const roleLabel = householdRole === 'owner' ? 'Owner'
+    : householdRole === 'partner' ? 'Partner'
+    : householdRole === 'viewer' ? 'Viewer'
+    : isAdmin ? 'Admin'
+    : 'Family';
 
   // Step accent colors for active section headers
   const stepColors: Record<string, string> = {
@@ -278,7 +302,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* ACCORDION NAV — ref attached here for scroll preservation */}
       <nav ref={sidebarScrollRef} className="flex-1 px-3 py-2 overflow-y-auto space-y-1 pb-2">
         {NAV_STEPS.map((stepDef) => {
-          const visibleItems = stepDef.items.filter(i => !i.adminOnly || isAdmin);
+          const visibleItems = stepDef.items.filter(i => seeItem(i));
           if (visibleItems.length === 0) return null;
 
           const isOpen = !!openSections[stepDef.id];
@@ -384,7 +408,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <p className="px-3 mb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50 select-none">
             Support
           </p>
-          {SUPPORT_LINKS.filter(l => !l.adminOnly || isAdmin).map(({ href, label, icon: Icon }) => {
+          {SUPPORT_LINKS.filter(l => seeItem(l)).map(({ href, label, icon: Icon }) => {
             const active = isPathActive(href, location);
             return (
               <Link
@@ -614,11 +638,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 // ─── Top Bar Breadcrumb ───────────────────────────────────────────────────────
 
 function TopBarBreadcrumb({ location, isAdmin }: { location: string; isAdmin: boolean }) {
+  const hasPermission = useAppStore((s: any) => s.hasPermission);
   let stepLabel = "";
   let pageLabel = "";
 
   for (const step of NAV_STEPS) {
-    const visibleItems = step.items.filter(i => !i.adminOnly || isAdmin);
+    const visibleItems = step.items.filter(i => canSeeItem(i, isAdmin, hasPermission));
     const match = visibleItems.find(i => isPathActive(i.href, location));
     if (match) {
       stepLabel = step.label;

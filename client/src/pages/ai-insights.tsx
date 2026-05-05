@@ -7,9 +7,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import AIInsightsCard from "@/components/AIInsightsCard";
+import { useAppStore } from "@/lib/store";
 import {
   Sparkles, LayoutDashboard, Receipt, Home,
-  TrendingUp, Bitcoin, Clock, Info,
+  TrendingUp, Bitcoin, Clock, Info, Lock,
 } from "lucide-react";
 
 // ─── Data summarisers ─────────────────────────────────────────────────────────
@@ -103,6 +104,27 @@ function summariseTimeline(events: any[], snap: any) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AIInsightsPage() {
+  const hasPermission = useAppStore((s: any) => s.hasPermission);
+  const canView = hasPermission('view_ai_insights');
+
+  // Access denied — clean fallback for non-permitted roles
+  if (!canView) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 p-8 text-center">
+        <div className="w-14 h-14 rounded-full bg-secondary/40 flex items-center justify-center">
+          <Lock className="w-7 h-7 text-muted-foreground" />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold mb-1">AI Insights not enabled</h2>
+          <p className="text-sm text-muted-foreground max-w-xs">
+            This section is managed by the household owner.
+            Ask Roham to enable AI Insights access for your account in Settings → Family Access.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const { data: snapshot } = useQuery<any>({
     queryKey: ["/api/snapshot"],
     queryFn: () => apiRequest("GET", "/api/snapshot").then(r => r.json()),

@@ -1120,6 +1120,24 @@ export default function AIWeeklyCFOPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
 
+  // ── Permission guard ───────────────────────────────────────────────────────
+  const { hasPermission, householdRole, currentUser } = useAppStore();
+  const canView = hasPermission('view_bulletin');
+  const canRun  = hasPermission('run_bulletin');
+
+  if (!canView) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] p-6 text-center">
+        <BrainCircuit className="w-12 h-12 text-muted-foreground mb-4 opacity-40" />
+        <h2 className="text-lg font-semibold text-foreground mb-2">Saturday Bulletin</h2>
+        <p className="text-sm text-muted-foreground max-w-xs">
+          You do not have access to this section.<br />
+          Ask the household owner to enable bulletin access in Settings → Family Access.
+        </p>
+      </div>
+    );
+  }
+
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["/api/cfo-reports"],
     queryFn: () => getCFOReports(20),
@@ -1169,18 +1187,22 @@ export default function AIWeeklyCFOPage() {
             Automated weekly family financial briefing — every Saturday at 8:00 AM AEST.
           </p>
         </div>
-        <Button
-          size="sm"
-          className="bg-cyan-500 hover:bg-cyan-400 text-background font-semibold text-xs shrink-0"
-          onClick={handleGenerate}
-          disabled={generating}
-        >
-          {generating ? (
-            <><Loader2 size={13} className="mr-1.5 animate-spin" /> Generating…</>
-          ) : (
-            <><RefreshCw size={13} className="mr-1.5" /> Run Now</>
-          )}
-        </Button>
+        {canRun ? (
+          <Button
+            size="sm"
+            className="bg-cyan-500 hover:bg-cyan-400 text-background font-semibold text-xs shrink-0"
+            onClick={handleGenerate}
+            disabled={generating}
+          >
+            {generating ? (
+              <><Loader2 size={13} className="mr-1.5 animate-spin" /> Generating…</>
+            ) : (
+              <><RefreshCw size={13} className="mr-1.5" /> Run Now</>
+            )}
+          </Button>
+        ) : (
+          <span className="text-xs text-muted-foreground italic">View only</span>
+        )}
       </div>
 
       {/* Loading */}
@@ -1199,17 +1221,21 @@ export default function AIWeeklyCFOPage() {
             Run your first bulletin to get a premium 11-section financial briefing — scores,
             cash breakdown, 7-day cashflow, FIRE tracker, property watch, tax alpha, and more.
           </p>
-          <Button
-            className="bg-cyan-500 hover:bg-cyan-400 text-background font-semibold"
-            onClick={handleGenerate}
-            disabled={generating}
-          >
-            {generating ? (
-              <><Loader2 size={14} className="mr-2 animate-spin" />Generating…</>
-            ) : (
-              <><BrainCircuit size={14} className="mr-2" />Generate First Bulletin</>
-            )}
-          </Button>
+          {canRun ? (
+            <Button
+              className="bg-cyan-500 hover:bg-cyan-400 text-background font-semibold"
+              onClick={handleGenerate}
+              disabled={generating}
+            >
+              {generating ? (
+                <><Loader2 size={14} className="mr-2 animate-spin" />Generating…</>
+              ) : (
+                <><BrainCircuit size={14} className="mr-2" />Generate First Bulletin</>
+              )}
+            </Button>
+          ) : (
+            <p className="text-xs text-muted-foreground italic">View only — ask the household owner to run the first bulletin.</p>
+          )}
         </div>
       )}
 

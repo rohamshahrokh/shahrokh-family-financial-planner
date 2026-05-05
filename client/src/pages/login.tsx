@@ -6,7 +6,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
 import familyImg from "@assets/family.jpeg";
 import { sbUsers } from "@/lib/supabaseClient";
-import type { UserRole } from "@/lib/store";
+import type { UserRole, HouseholdRole, Permission } from "@/lib/store";
+import { defaultPermissionsForRole } from "@/lib/store";
 import { resetDemoStore } from "@/lib/queryClient";
 import { FlaskConical, Lock } from "lucide-react";
 
@@ -15,7 +16,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
-  const { login, loginAsDemo, setCurrentUser, setRole } = useAppStore();
+  const { login, loginAsDemo, setCurrentUser, setRole, setHouseholdRole, setPermissions } = useAppStore();
   const { toast } = useToast();
   const [, navigate] = useLocation();
 
@@ -30,11 +31,28 @@ export default function LoginPage() {
         login();
         setCurrentUser(user.display_name);
         setRole(user.role as UserRole);
+
+        // Set household role — from Supabase column if present, else derive from legacy role
+        const hRole: HouseholdRole =
+          user.household_role ??                              // new column
+          (user.role === 'admin' ? 'owner' :                  // legacy fallback
+           user.role === 'family_user' ? 'partner' : 'viewer');
+        setHouseholdRole(hRole);
+
+        // Set permissions — from Supabase column if present, else derive from household role
+        const perms: Permission[] =
+          Array.isArray(user.permissions) && user.permissions.length > 0
+            ? user.permissions as Permission[]
+            : defaultPermissionsForRole(hRole);
+        setPermissions(perms);
+
         toast({
           title: `Welcome back, ${user.display_name}`,
-          description: user.role === "admin"
-            ? "Full admin access granted."
-            : "Family dashboard ready.",
+          description: hRole === 'owner'
+            ? 'Full household access granted.'
+            : hRole === 'partner'
+              ? 'Partner access granted — bulletin & insights visible.'
+              : 'Family dashboard ready.',
         });
         navigate("/dashboard");
       } else {

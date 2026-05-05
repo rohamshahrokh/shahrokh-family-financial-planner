@@ -8,6 +8,33 @@ import { persist, createJSONStorage } from "zustand/middleware";
 
 type CurrentUser = "Roham" | "Fara" | "Demo";
 export type UserRole = "admin" | "family_user" | "demo";
+export type HouseholdRole = "owner" | "partner" | "viewer" | "demo";
+
+/**
+ * Permission strings used for feature-level access control.
+ * household_role drives defaults; individual permissions can be toggled by owner.
+ */
+export type Permission =
+  | "view_bulletin"
+  | "run_bulletin"
+  | "view_ai_insights"
+  | "receive_telegram_alerts"
+  | "edit_financial_plan"
+  | "edit_expenses"
+  | "edit_bills"
+  | "manage_users"
+  | "manage_settings";
+
+/** Derive default permissions from household_role */
+export function defaultPermissionsForRole(role: HouseholdRole): Permission[] {
+  switch (role) {
+    case 'owner':   return ['view_bulletin','run_bulletin','view_ai_insights','receive_telegram_alerts','edit_financial_plan','edit_expenses','edit_bills','manage_users','manage_settings'];
+    case 'partner': return ['view_bulletin','run_bulletin','view_ai_insights','receive_telegram_alerts'];
+    case 'viewer':  return ['view_bulletin','view_ai_insights'];
+    case 'demo':    return [];
+    default:        return [];
+  }
+}
 export type ThemeMode = "dark" | "light";
 
 /** Apply the resolved theme class to <html>. */
@@ -26,6 +53,8 @@ interface AppState {
   privacyMode: boolean;          // true = numbers hidden (default for new users)
   currentUser: CurrentUser;      // which family member is logged in
   role: UserRole;                // admin = full access, family_user = restricted, demo = read-only fake
+  householdRole: HouseholdRole;  // owner | partner | viewer | demo
+  permissions: Permission[];     // fine-grained feature permissions from Supabase + household config
   login: () => void;
   loginAsDemo: () => void;
   logout: () => void;
@@ -36,6 +65,10 @@ interface AppState {
   togglePrivacy: () => void;
   setCurrentUser: (user: CurrentUser) => void;
   setRole: (role: UserRole) => void;
+  setHouseholdRole: (role: HouseholdRole) => void;
+  setPermissions: (perms: Permission[]) => void;
+  /** True if the current user has the given permission */
+  hasPermission: (perm: Permission) => boolean;
 }
 
 // Re-export forecast mode type for convenience
@@ -49,9 +82,11 @@ export const useAppStore = create<AppState>()(
       theme: "dark",
       lastSaved: null,
       chartView: "annual",
-      privacyMode: true,         // hidden by default
-      currentUser: "Roham",      // default user
-      role: "admin",             // default role
+      privacyMode: true,                     // hidden by default
+      currentUser: "Roham",                  // default user
+      role: "admin",                         // default role
+      householdRole: "owner",                // default household role
+      permissions: defaultPermissionsForRole('owner'),
 
       login: () => set({ isAuthenticated: true, isDemo: false }),
 
@@ -60,13 +95,17 @@ export const useAppStore = create<AppState>()(
         isDemo: true,
         currentUser: "Demo",
         role: "demo",
-        privacyMode: false,      // demo mode always shows values
+        householdRole: "demo",
+        permissions: [],
+        privacyMode: false,
       }),
 
       logout: () => set({
         isAuthenticated: false,
         isDemo: false,
         role: "admin",
+        householdRole: "owner",
+        permissions: defaultPermissionsForRole('owner'),
         currentUser: "Roham",
         privacyMode: true,
       }),
@@ -94,9 +133,20 @@ export const useAppStore = create<AppState>()(
       setCurrentUser: (user: CurrentUser) => set({ currentUser: user }),
 
       setRole: (role: UserRole) => set({ role }),
+
+      setHouseholdRole: (role: HouseholdRole) => set({ householdRole: role }),
+
+      setPermissions: (perms: Permission[]) => set({ permissions: perms }),
+
+      hasPermission: (perm: Permission) => {
+        const state = useAppStore.getState();
+        // owner always has all permissions regardless of stored array
+        if (state.householdRole === 'owner' || state.role === 'admin') return true;
+        return Array.isArray(state.permissions) && state.permissions.includes(perm);
+      },
     }),
     {
-      name: "shahrokh-app-state",           // localStorage key
+      name: "shahrokh-app-state",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         isAuthenticated: state.isAuthenticated,
@@ -106,6 +156,8 @@ export const useAppStore = create<AppState>()(
         privacyMode: state.privacyMode,
         currentUser: state.currentUser,
         role: state.role,
+        householdRole: state.householdRole,
+        permissions: state.permissions,
       }),
     }
   )
