@@ -471,36 +471,16 @@ export async function generateCFOReport(
   const offsetAnnualSaving = offsetBal * mortgageRate;
 
   // ── Income & surplus ──────────────────────────────────────────────────────
-  // Use income records if available (mirrors dashboard income tracker)
-  const FREQ_MULT: Record<string, number> = {
-    Weekly: 52/12, Fortnightly: 26/12, Monthly: 1,
-    Quarterly: 1/3, 'Semi-Annual': 1/6, Annual: 1/12,
-  };
-  let incomeTrackerMonthly = 0;
-  if (Array.isArray(incomeRows) && incomeRows.length > 0) {
-    // FIX: sf_income is a TRANSACTION LOG — each payslip is a separate row.
-    // Summing all 60 rows multiplied by frequency = catastrophic double-counting
-    // (e.g. 17 Fara payslip rows × fortnightly multiplier = $170K/month from one stream).
-    //
-    // Correct approach: deduplicate to ONE row per unique income stream
-    // (identified by description + member), keeping the MOST RECENT row for each.
-    // Sort newest-first so the first occurrence we encounter is the most recent.
-    const sorted = [...incomeRows].sort((a: any, b: any) =>
-      new Date(b.date ?? b.created_at ?? 0).getTime() - new Date(a.date ?? a.created_at ?? 0).getTime()
-    );
-    const seen = new Set<string>();
-    sorted.forEach((r: any) => {
-      if (r.recurring === false) return; // skip explicitly non-recurring
-      const key = `${(r.description ?? '').trim().toLowerCase()}|${(r.member ?? '').trim().toLowerCase()}`;
-      if (seen.has(key)) return; // already counted this stream — skip historical duplicates
-      seen.add(key);
-      incomeTrackerMonthly += safeNum(r.amount) * (FREQ_MULT[r.frequency] ?? 1);
-    });
-  }
-  const monthlyIncome   = incomeTrackerMonthly > 0
-    ? incomeTrackerMonthly
-    : safeNum(snap.monthly_income) || 22000;
-  const monthlyExpenses = safeNum(snap.monthly_expenses) || 8000;
+  // CRITICAL: Use snap.monthly_income DIRECTLY — same field dashboard.tsx reads.
+  // dashboard.tsx line 753: monthly_income: safeNum(s.monthly_income)
+  // dashboard.tsx line 785: const surplus = snap.monthly_income - snap.monthly_expenses
+  //
+  // Do NOT re-derive from sf_income transaction rows here — that produced a
+  // completely different value ($33K) vs the ledger value ($22K) because the
+  // dedup logic disagrees with how the income tracker stores payslip history.
+  // The snapshot field IS the single source of truth — use it, just like dashboard.
+  const monthlyIncome   = safeNum(snap.monthly_income) || 0;
+  const monthlyExpenses = safeNum(snap.monthly_expenses) || 0;
 
   // Cash buffer in months: how many months of expenses the liquid cash covers.
   // Placed HERE (after monthlyExpenses is defined) — was used at score/summary
@@ -631,26 +611,51 @@ export async function generateCFOReport(
   // ═══════════════════════════════════════════════════════════════════════════
   // SECTION 5: SMART ACTION (highest ROI single action)
   // ═══════════════════════════════════════════════════════════════════════════
-  // idleCash: total liquid cash above a 3-month emergency buffer
-  // Uses full liquidCash (everyday + savings + emergency + other) not just cashEveryday
-  const idleCash = liquidCash - monthlyExpenses * 3;
+  //
+  // CRITICAL FIX: Smart Action must NEVER recommend moving money to the offset
+  // when that money IS ALREADY in the offset. Offset is a separate account from
+  // everyday cash. We must measure only cash that is OUTSIDE the offset.
+  //
+  // cashOutsideOffset = everyday + savings + emergency + other (NOT offsetBal)
+  // This mirrors bestMoveEngine.ts V2: cash = everyday account only.
+  //
+  // Rule: only recommend "move to offset" if:
+  //   cashOutsideOffset > emergencyBuffer + minimumOperatingCash
+  //
+  // Example with user's actual data:
+  //   cashEveryday = $20K, offsetBal = $222K
+  //   cashOutsideOffset = $20K
+  //   emergencyBuffer = $24K (3 x monthlyExpenses $8K)
+  //   genuinelyIdleCash = $20K - $24K - $5K = -$9K (negative => NO recommendation)
+  //   => "Offset already optimised — $222K is reducing mortgage interest"
+  const cashOutsideOffset    = cashEveryday + cashSavings + cashEmergency + safeOther;
+  const emergencyBuffer      = monthlyExpenses > 0 ? monthlyExpenses * 3 : 0;
+  const minimumOperatingCash = 5000;
+  const genuinelyIdleCash    = cashOutsideOffset - emergencyBuffer - minimumOperatingCash;
+
+  // idleCash: used only for opportunity score below (full liquidCash incl. offset)
+  const idleCash = liquidCash - emergencyBuffer;
+
   let smartAction = '';
   let smartActionValue = '';
 
   if (monthlySurplus < 0) {
     smartAction = `Reduce monthly outflows by at least ${fmt(Math.abs(monthlySurplus))} — cashflow is negative`;
     smartActionValue = `${fmt(Math.abs(monthlySurplus * 12))} annual deficit to close`;
-  } else if (idleCash > 20000 && offsetBal > 0) {
-    // Offset account exists and has a balance — recommend topping it up
-    const saving = idleCash * mortgageRate;
-    smartAction = `Move ${fmt(Math.round(idleCash / 10000) * 10000)} idle cash to mortgage offset`;
+  } else if (genuinelyIdleCash > 5000 && safeNum(snap.mortgage) > 0) {
+    // Cash genuinely outside offset above buffer + operating float
+    const moveable = Math.round(genuinelyIdleCash / 1000) * 1000;
+    const saving   = moveable * mortgageRate;
+    smartAction = `Move ${fmt(moveable)} idle cash to mortgage offset`;
     smartActionValue = `Saves ~${fmt(saving)}/year in mortgage interest (guaranteed ${pct(mortgageRate * 100, 2)} return)`;
-  } else if (idleCash > 20000 && offsetBal === 0 && safeNum(snap.mortgage) > 0) {
-    // FIX: user has idle cash but offset_balance=0 in DB — this means offset account
-    // balance hasn’t been entered in Settings yet. Don’t recommend moving to an
-    // account that shows $0 — instead prompt user to configure their offset balance.
+  } else if (genuinelyIdleCash <= 5000 && offsetBal > 0 && safeNum(snap.mortgage) > 0) {
+    // Cash already deployed into offset — it is working correctly, say so
+    smartAction = `Offset already optimised — ${fmt(offsetBal)} is reducing mortgage interest`;
+    smartActionValue = `Saving ~${fmt(offsetAnnualSaving)}/year (guaranteed ${pct(mortgageRate * 100, 2)} tax-free return)`;
+  } else if (genuinelyIdleCash <= 5000 && offsetBal === 0 && safeNum(snap.mortgage) > 0) {
+    // No offset balance entered in Settings yet
     smartAction = `Set up your offset account balance in Settings to unlock cash optimisation`;
-    smartActionValue = `You have ${fmt(liquidCash)} in liquid cash — linking your offset could save ${fmt(liquidCash * mortgageRate)}/year in mortgage interest`;
+    smartActionValue = `You have ${fmt(cashOutsideOffset)} in cash — linking your offset could save ${fmt(cashOutsideOffset * mortgageRate)}/year`;
   } else if (safeNum(snap.other_debts) > 10000) {
     const debtSaving = safeNum(snap.other_debts) * 0.09;
     smartAction = `Pay down personal debts totalling ${fmt(safeNum(snap.other_debts))}`;
@@ -661,7 +666,7 @@ export async function generateCFOReport(
     smartAction = `Set up ${fmt(dcaAmt)}/month automated ETF DCA with your surplus`;
     smartActionValue = fireGainMonths > 0 ? `Brings FIRE forward by ~${(fireGainMonths / 12).toFixed(1)} years` : 'Accelerates wealth compounding';
   } else if (safeNum(snap.mortgage) > 0) {
-    const refinanceSaving = safeNum(snap.mortgage) * 0.005; // 0.5% rate improvement
+    const refinanceSaving = safeNum(snap.mortgage) * 0.005;
     smartAction = `Shop mortgage rates — a 0.5% improvement on ${fmt(safeNum(snap.mortgage))}`;
     smartActionValue = `Could save ~${fmt(refinanceSaving)}/year in repayments`;
   } else if (monthlySurplus > 500) {
@@ -906,8 +911,8 @@ export async function generateCFOReport(
     cfoInsight = `You are in the final stretch toward financial freedom — consistency and protecting against lifestyle creep are now the highest-priority moves.`;
   } else if (firePct > 40 && surplusRatio > 0.25) {
     cfoInsight = `Strong savings rate and growing wealth — deploying surplus into productive assets monthly will accelerate FIRE by years, not months.`;
-  } else if (idleCash > 50000) {
-    cfoInsight = `Significant idle cash is sitting outside your offset — every dollar moved saves guaranteed interest and quietly grows your net worth.`;
+  } else if (genuinelyIdleCash > 50000) {
+    cfoInsight = `You have ${fmt(genuinelyIdleCash)} in cash outside your offset — moving it saves guaranteed interest and quietly grows your net worth.`;
   } else if (cryptoPct > 35) {
     cfoInsight = `Portfolio is crypto-heavy right now — a partial rebalance into diversified ETFs would reduce volatility without sacrificing long-term returns.`;
   } else if (nwDelta > 10000) {
@@ -996,7 +1001,7 @@ export async function generateCFOReport(
   const summary   = `${nwLine} ${cashLine} ${fireLine} Smart action: ${smartAction.split('—')[0].trim()}.`;
 
   const opportunities: string[] = [];
-  if (idleCash > 20000)  opportunities.push(`Move idle ${fmt(idleCash)} to offset — saves ${fmt(idleCash * mortgageRate)}/year`);
+  if (genuinelyIdleCash > 5000 && safeNum(snap.mortgage) > 0)  opportunities.push(`Move ${fmt(Math.round(genuinelyIdleCash/1000)*1000)} idle cash outside offset — saves ${fmt(genuinelyIdleCash * mortgageRate)}/year`);
   if (superRoom > 5000)  opportunities.push(`${fmt(superRoom)} super contribution room remaining before 30 June`);
   if (negGearBenefit > 0) opportunities.push(`Negative gearing benefit: ${fmt(negGearBenefit)}/year`);
 
