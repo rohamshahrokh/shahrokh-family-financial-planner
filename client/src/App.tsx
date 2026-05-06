@@ -13,13 +13,14 @@
  *   - Logout clears auth and returns to /login
  */
 
-import { Switch, Route, Router, Redirect } from "wouter";
+import { Switch, Route, Router, Redirect, useLocation } from "wouter";
 import PwaInstallBanner from "@/components/PwaInstallBanner";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { useAppStore } from "./lib/store";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { trackPageView } from "./lib/analytics";
 
 import LoginPage          from "./pages/login";
 import DashboardPage      from "./pages/dashboard";
@@ -50,6 +51,30 @@ import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
 // ─── Page title hook ──────────────────────────────────────────────────────────
+
+// ─── Google Analytics 4 — SPA route tracking ─────────────────────────────────
+
+/**
+ * Listens to Wouter location changes and fires a GA4 page_view on every route
+ * transition. Production only — no-ops on localhost.
+ *
+ * Uses a prevPath ref so the initial mount fires exactly one page_view and
+ * subsequent navigations each fire exactly one, with zero duplicates.
+ */
+function useGoogleAnalytics() {
+  const [path] = useLocation();
+  const prevPath = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Only track in production (not localhost / dev server)
+    if (!import.meta.env.PROD) return;
+    // Skip if the path hasn't changed (e.g. hash-only or duplicate calls)
+    if (path === prevPath.current) return;
+    prevPath.current = path;
+    // Wait one tick so document.title has been updated by usePageTitle
+    setTimeout(() => trackPageView(path), 0);
+  }, [path]);
+}
 
 function usePageTitle(title: string) {
   useEffect(() => {
@@ -98,11 +123,18 @@ function LoginWrapper() {
 
 // ─── App router ───────────────────────────────────────────────────────────────
 
+/** Renders nothing — just fires GA page_view on every Wouter route change */
+function GATracker() {
+  useGoogleAnalytics();
+  return null;
+}
+
 function AppRouter() {
   const { isAuthenticated } = useAppStore();
 
   return (
     <Router>
+      <GATracker />
       <Switch>
         {/* Login */}
         <Route path="/login" component={LoginWrapper} />
