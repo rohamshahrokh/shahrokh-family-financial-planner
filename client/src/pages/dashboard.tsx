@@ -826,10 +826,44 @@ export default function DashboardPage() {
   const _safeOtherCash = (snap.other_cash > 0 && snap.other_cash === snap.offset_balance) ? 0 : snap.other_cash;
   const totalLiquidCash = snap.cash + snap.savings_cash + snap.emergency_cash + _safeOtherCash + snap.offset_balance;
 
-  const totalAssets   = snap.ppor + totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property;
-  const totalLiab     = snap.mortgage + snap.other_debts;
+  // ─── Investment property aggregates ───────────────────────────────────────
+  // Live row in `sf_properties` is the source of truth for IP value & loans.
+  // Snapshot-level `mortgage`/`ppor` only describe the family home (PPOR);
+  // they DO NOT include investment-property values, so net worth, debt, and
+  // property equity must read IPs separately to avoid showing $0 cards.
+  //
+  // We split into two buckets:
+  //   • settled IPs  → already owned today (settlement_date ≤ today)
+  //   • planned IPs  → contracted but not yet settled (future settlement_date)
+  // Today's snapshot uses ONLY settled IPs to avoid inflating current figures.
+  const _todayIso = new Date().toISOString().split('T')[0];
+  const _isSettled = (p: any) =>
+    !p?.settlement_date || (p.settlement_date as string) <= _todayIso;
+  const _isInvestmentProp = (p: any) => p?.type !== 'ppor' && p?.type !== 'owner_occupied';
+
+  const _settledIPs = (properties as any[] ?? []).filter((p) => _isInvestmentProp(p) && _isSettled(p));
+  const _plannedIPs = (properties as any[] ?? []).filter((p) => _isInvestmentProp(p) && !_isSettled(p));
+
+  const ipCurrentValueSettled = _settledIPs.reduce(
+    (s: number, p: any) => s + safeNum(p.current_value ?? p.purchase_price), 0);
+  const ipLoanBalanceSettled  = _settledIPs.reduce(
+    (s: number, p: any) => s + safeNum(p.loan_amount), 0);
+  const ipEquitySettled       = ipCurrentValueSettled - ipLoanBalanceSettled;
+
+  // Planned IPs (informational only — surfaced in card sub-text, NOT in net worth)
+  const ipCurrentValuePlanned = _plannedIPs.reduce(
+    (s: number, p: any) => s + safeNum(p.current_value ?? p.purchase_price), 0);
+  const ipLoanBalancePlanned  = _plannedIPs.reduce(
+    (s: number, p: any) => s + safeNum(p.loan_amount), 0);
+
+  // PPOR equity from snapshot (separate from IP equity)
+  const _ppoEquity = snap.ppor - snap.mortgage;
+
+  const totalAssets   = snap.ppor + totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property + ipCurrentValueSettled;
+  const totalLiab     = snap.mortgage + snap.other_debts + ipLoanBalanceSettled;
   const netWorth      = totalAssets - totalLiab;
-  const propertyEquity = snap.ppor - snap.mortgage;
+  // Combined property equity = PPOR equity + settled-IP equity (matches Total Assets / Liab)
+  const propertyEquity = _ppoEquity + ipEquitySettled;
   // Mortgage is already included in monthly_expenses — do not deduct again
   const monthlyMortgageRepay = 0;
   const surplus       = snap.monthly_income - snap.monthly_expenses;
@@ -1798,22 +1832,47 @@ export default function DashboardPage() {
           />
           <KpiCard
             label="TOTAL INVESTMENTS"
-            value={maskValue(formatCurrency(stocksTotal + cryptoTotal, true), privacyMode)}
-            subValue={stocksTotal + cryptoTotal === 0 ? "— Stocks + Crypto" : `Stocks: ${formatCurrency(stocksTotal, true)}`}
+            value={maskValue(formatCurrency(stocksTotal + cryptoTotal + ipCurrentValueSettled, true), privacyMode)}
+            subValue={(() => {
+              const parts: string[] = [];
+              if (ipCurrentValueSettled > 0) parts.push(`IPs ${formatCurrency(ipCurrentValueSettled, true)}`);
+              if (stocksTotal > 0)            parts.push(`Stocks ${formatCurrency(stocksTotal, true)}`);
+              if (cryptoTotal > 0)            parts.push(`Crypto ${formatCurrency(cryptoTotal, true)}`);
+              if (parts.length === 0 && ipCurrentValuePlanned > 0)
+                return `${formatCurrency(ipCurrentValuePlanned, true)} planned IP`;
+              return parts.length ? parts.join(" · ") : "— Stocks + Crypto + IP";
+            })()}
             icon={<BarChart2 />}
             accent="hsl(210,75%,52%)"
           />
           <KpiCard
             label="PROPERTY EQUITY"
             value={maskValue(formatCurrency(propertyEquity, true), privacyMode)}
-            subValue={`${Math.round((propertyEquity / (snap.ppor || 1)) * 100)}% LVR met`}
+            subValue={(() => {
+              const totalPropValue = snap.ppor + ipCurrentValueSettled;
+              if (totalPropValue <= 0) {
+                return ipCurrentValuePlanned > 0
+                  ? `${formatCurrency(ipCurrentValuePlanned, true)} planned`
+                  : "No property yet";
+              }
+              const lvr = Math.round((propertyEquity / totalPropValue) * 100);
+              return `${lvr}% equity · ${_settledIPs.length} IP${_settledIPs.length === 1 ? '' : 's'}`;
+            })()}
             icon={<Home />}
             accent="hsl(188,60%,48%)"
           />
           <KpiCard
             label="DEBT BALANCE"
             value={maskValue(formatCurrency(totalLiab, true), privacyMode)}
-            subValue="Mortgage + Debts"
+            subValue={(() => {
+              if (totalLiab <= 0 && ipLoanBalancePlanned > 0)
+                return `${formatCurrency(ipLoanBalancePlanned, true)} planned`;
+              const segs: string[] = [];
+              if (snap.mortgage > 0)         segs.push(`PPOR ${formatCurrency(snap.mortgage, true)}`);
+              if (ipLoanBalanceSettled > 0)  segs.push(`IP ${formatCurrency(ipLoanBalanceSettled, true)}`);
+              if (snap.other_debts > 0)      segs.push(`Other ${formatCurrency(snap.other_debts, true)}`);
+              return segs.length ? segs.join(" · ") : "Mortgage + Debts";
+            })()}
             trend={-1}
             icon={<CreditCard />}
             accent="hsl(5,70%,52%)"
@@ -1821,7 +1880,21 @@ export default function DashboardPage() {
           <KpiCard
             label="PASSIVE INCOME"
             value={maskValue(formatCurrency(passiveIncome, true), privacyMode)}
-            subValue="Rental + Dividends"
+            subValue={(() => {
+              if (passiveIncome > 0) return "Rental + Dividends (annual)";
+              if (_plannedIPs.length > 0) {
+                const projAnnual = _plannedIPs.reduce((s: number, p: any) => {
+                  const r = safeNum(p.weekly_rent);
+                  const v = safeNum(p.vacancy_rate) || 0;
+                  const m = safeNum(p.management_fee) || 0;
+                  return s + r * 52 * (1 - v / 100) * (1 - m / 100);
+                }, 0);
+                return projAnnual > 0
+                  ? `${formatCurrency(projAnnual, true)}/yr once IPs settle`
+                  : "None settled yet";
+              }
+              return "No rental / dividend income";
+            })()}
             icon={<Landmark />}
             accent="hsl(145,55%,42%)"
           />
