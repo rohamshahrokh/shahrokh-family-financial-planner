@@ -14,6 +14,26 @@ import { runCashEngine, getCashKPICards, type CashEvent } from "@/lib/cashEngine
 import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import { calcDepositPower, projectEquityTimeline } from "@/lib/equityEngine";
+// Authoritative dashboard source-of-truth bindings + selectors. See
+// docs/DASHBOARD_DATA_CONTRACT.md and client/src/lib/dashboardDataContract.ts.
+// The regression check (`npm run test:dashboard-contract`) fails the build
+// if these selectors stop binding to the documented Supabase fields.
+import {
+  selectStocksTotal as contractStocksTotal,
+  selectCryptoTotal as contractCryptoTotal,
+  selectIpCurrentValueSettled,
+  selectIpLoanBalanceSettled,
+  selectIpCurrentValuePlanned,
+  selectIpLoanBalancePlanned,
+  selectSettledIPs,
+  selectPlannedIPs,
+  selectTotalInvestments,
+  selectPropertyEquity,
+  selectDebtBalance,
+  selectPassiveIncome,
+  evaluateDataAvailability,
+  type DashboardInputs,
+} from "@/lib/dashboardDataContract";
 import { maskValue } from "@/components/PrivacyMask";
 import SaveButton, { useSaveOnEnter } from "@/components/SaveButton";
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from "react";
@@ -813,34 +833,29 @@ export default function DashboardPage() {
     };
   }, [snapshot, incomeRecords, expenses]);
 
-  // ─── Live stocks / crypto value (multi-source, picks highest available) ──────
-  // Three possible sources, each with different data shapes:
-  //   1. holdingsRaw  → unified portfolio API (asset_type + current_value)
-  //   2. sf_stocks / sf_crypto  → per-ticker rows with current_price *
-  //                                current_holding  (NOT current_value — that
-  //                                column doesn't exist in the live schema)
-  //   3. snap.stocks / snap.crypto  → manual aggregate on sf_snapshot
-  // Bug pre-fix: the dashboard only summed (1) and a non-existent
-  // `current_value` column on (2), producing 0 for users who entered values
-  // via the manual snapshot form (3).
-  const liveStocks = useMemo(() =>
-    (holdingsRaw ?? []).filter((h: any) => h.asset_type === "stock").reduce((sum: number, h: any) => sum + safeNum(h.current_value), 0),
-    [holdingsRaw]);
-  const liveCrypto = useMemo(() =>
-    (holdingsRaw ?? []).filter((h: any) => h.asset_type === "crypto").reduce((sum: number, h: any) => sum + safeNum(h.current_value), 0),
-    [holdingsRaw]);
-  // Per-ticker market value (current_price × current_holding) — fixes the
-  // bug where the previous code looked for a non-existent `current_value`.
-  const tickerStocksValue = (stocks ?? []).reduce(
-    (s: number, x: any) => s + safeNum(x.current_value ?? (safeNum(x.current_price) * safeNum(x.current_holding))),
-    0);
-  const tickerCryptoValue = (cryptos ?? []).reduce(
-    (s: number, x: any) => s + safeNum(x.current_value ?? (safeNum(x.current_price) * safeNum(x.current_holding))),
-    0);
-  // Pick the highest value among all sources so manual snapshot entries are
-  // never silently overridden by an empty live-holdings feed.
-  const stocksTotal = Math.max(liveStocks, tickerStocksValue, snap.stocks);
-  const cryptoTotal = Math.max(liveCrypto, tickerCryptoValue, snap.crypto);
+  // ─── Dashboard data-contract inputs ──────────────────────────────────────
+  // SOURCE-OF-TRUTH: docs/DASHBOARD_DATA_CONTRACT.md +
+  //                  client/src/lib/dashboardDataContract.ts
+  // Every KPI card derived below MUST go through a selector imported from
+  // the contract module. The regression script
+  // (`script/test-dashboard-contract.ts`) fails the build if any selector
+  // stops binding to the documented Supabase fields. Do not bypass the
+  // selectors with inline calculations — that is exactly the class of bug
+  // that produced silent $0 cards in production.
+  const _contractInputs: DashboardInputs = useMemo(() => ({
+    snapshot, properties, stocks, cryptos,
+    holdingsRaw, incomeRecords, expenses,
+  }), [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses]);
+
+  // ─── Live stocks / crypto value (delegates to data contract) ────────────
+  // Bug pre-fix: the dashboard only summed the unified holdings API and a
+  // non-existent `current_value` column on sf_stocks, producing 0 for users
+  // who entered values via the manual snapshot form. The selector now reads
+  // all three sources (unified holdings → per-ticker market value → manual
+  // snapshot aggregate) and returns the highest available, so manual
+  // entries are never silently overridden by an empty live feed.
+  const stocksTotal = contractStocksTotal(_contractInputs);
+  const cryptoTotal = contractCryptoTotal(_contractInputs);
 
   const _totalSuperNow = snap.super_roham + snap.super_fara;
 
@@ -851,44 +866,31 @@ export default function DashboardPage() {
   const _safeOtherCash = (snap.other_cash > 0 && snap.other_cash === snap.offset_balance) ? 0 : snap.other_cash;
   const totalLiquidCash = snap.cash + snap.savings_cash + snap.emergency_cash + _safeOtherCash + snap.offset_balance;
 
-  // ─── Investment property aggregates ───────────────────────────────────────
-  // Live row in `sf_properties` is the source of truth for IP value & loans.
-  // Snapshot-level `mortgage`/`ppor` only describe the family home (PPOR);
-  // they DO NOT include investment-property values, so net worth, debt, and
-  // property equity must read IPs separately to avoid showing $0 cards.
-  //
-  // We split into two buckets:
-  //   • settled IPs  → already owned today (settlement_date ≤ today)
-  //   • planned IPs  → contracted but not yet settled (future settlement_date)
-  // Today's snapshot uses ONLY settled IPs to avoid inflating current figures.
-  const _todayIso = new Date().toISOString().split('T')[0];
-  const _isSettled = (p: any) =>
-    !p?.settlement_date || (p.settlement_date as string) <= _todayIso;
-  const _isInvestmentProp = (p: any) => p?.type !== 'ppor' && p?.type !== 'owner_occupied';
-
-  const _settledIPs = (properties as any[] ?? []).filter((p) => _isInvestmentProp(p) && _isSettled(p));
-  const _plannedIPs = (properties as any[] ?? []).filter((p) => _isInvestmentProp(p) && !_isSettled(p));
-
-  const ipCurrentValueSettled = _settledIPs.reduce(
-    (s: number, p: any) => s + safeNum(p.current_value ?? p.purchase_price), 0);
-  const ipLoanBalanceSettled  = _settledIPs.reduce(
-    (s: number, p: any) => s + safeNum(p.loan_amount), 0);
+  // ─── Investment property aggregates (delegates to data contract) ─────────
+  // SOURCE-OF-TRUTH: docs/DASHBOARD_DATA_CONTRACT.md →
+  //   property_equity / debt_balance / total_investments
+  // All IP/stocks/crypto/property-equity logic lives in the contract module.
+  const _settledIPs           = useMemo(() => selectSettledIPs(_contractInputs), [_contractInputs]);
+  const _plannedIPs           = useMemo(() => selectPlannedIPs(_contractInputs), [_contractInputs]);
+  const ipCurrentValueSettled = selectIpCurrentValueSettled(_contractInputs);
+  const ipLoanBalanceSettled  = selectIpLoanBalanceSettled(_contractInputs);
   const ipEquitySettled       = ipCurrentValueSettled - ipLoanBalanceSettled;
-
-  // Planned IPs (informational only — surfaced in card sub-text, NOT in net worth)
-  const ipCurrentValuePlanned = _plannedIPs.reduce(
-    (s: number, p: any) => s + safeNum(p.current_value ?? p.purchase_price), 0);
-  const ipLoanBalancePlanned  = _plannedIPs.reduce(
-    (s: number, p: any) => s + safeNum(p.loan_amount), 0);
+  const ipCurrentValuePlanned = selectIpCurrentValuePlanned(_contractInputs);
+  const ipLoanBalancePlanned  = selectIpLoanBalancePlanned(_contractInputs);
 
   // PPOR equity from snapshot (separate from IP equity)
   const _ppoEquity = snap.ppor - snap.mortgage;
 
   const totalAssets   = snap.ppor + totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property + snap.other_assets + ipCurrentValueSettled;
-  const totalLiab     = snap.mortgage + snap.other_debts + ipLoanBalanceSettled;
+  const totalLiab     = selectDebtBalance(_contractInputs);
   const netWorth      = totalAssets - totalLiab;
   // Combined property equity = PPOR equity + settled-IP equity (matches Total Assets / Liab)
-  const propertyEquity = _ppoEquity + ipEquitySettled;
+  const propertyEquity = selectPropertyEquity(_contractInputs);
+
+  // Data-availability flags drive the "actual balances missing" banner below.
+  const dataAvailability = useMemo(() =>
+    evaluateDataAvailability(_contractInputs),
+  [_contractInputs]);
 
   // ─── [Dashboard] Diagnostic logs (TEMPORARY) ───────────────────────────────
   // Surface every input that drives the four KPI cards so the user can verify
@@ -896,13 +898,19 @@ export default function DashboardPage() {
   // current balances is confirmed and stable.
   if (typeof window !== 'undefined' && snapshot) {
     /* eslint-disable no-console */
+    // Per-source breakdowns are computed locally for the diagnostic log only;
+    // the headline figures above are the contract selectors' results.
+    const _diagLiveStocks  = (holdingsRaw ?? []).filter((h: any) => h.asset_type === 'stock').reduce((s: number, h: any) => s + safeNum(h.current_value), 0);
+    const _diagLiveCrypto  = (holdingsRaw ?? []).filter((h: any) => h.asset_type === 'crypto').reduce((s: number, h: any) => s + safeNum(h.current_value), 0);
+    const _diagTickerStocks = (stocks ?? []).reduce((s: number, x: any) => s + safeNum(x.current_value ?? safeNum(x.current_price) * safeNum(x.current_holding)), 0);
+    const _diagTickerCrypto = (cryptos ?? []).reduce((s: number, x: any) => s + safeNum(x.current_value ?? safeNum(x.current_price) * safeNum(x.current_holding)), 0);
     console.groupCollapsed('[Dashboard] KPI calculation inputs');
     console.log('TOTAL INVESTMENTS', {
       result_value: stocksTotal + cryptoTotal + ipCurrentValueSettled,
       stocksTotal, cryptoTotal, ipCurrentValueSettled,
       sources: {
-        liveStocks, tickerStocksValue, snap_stocks: snap.stocks,
-        liveCrypto, tickerCryptoValue, snap_crypto: snap.crypto,
+        liveStocks: _diagLiveStocks, tickerStocksValue: _diagTickerStocks, snap_stocks: snap.stocks,
+        liveCrypto: _diagLiveCrypto, tickerCryptoValue: _diagTickerCrypto, snap_crypto: snap.crypto,
         settled_ip_count: _settledIPs.length,
         planned_ip_count: _plannedIPs.length,
         planned_ip_value: ipCurrentValuePlanned,
@@ -1929,6 +1937,29 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          DATA-AVAILABILITY BANNER
+          Non-blocking advisory shown when every actual-balance source is
+          empty so users see WHY cards read $0 instead of silently looking
+          broken. Backed by `evaluateDataAvailability` from the data contract.
+          ═════════════════════════════════════════════════════════════════ */}
+      {dataAvailability.allActualEmpty && (
+        <div className="px-4 pb-2" data-testid="banner-no-actuals">
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+            <div className="font-semibold text-amber-200">
+              No actual balances entered yet
+            </div>
+            <div className="text-amber-100/80 text-xs mt-1">
+              The cards below show $0 because these sections are empty:{" "}
+              {dataAvailability.emptySections.join(", ")}.
+              {" "}Open the snapshot form, or the Properties / Stocks / Crypto
+              pages, to record current balances. Forecast and planned values
+              are not used for these headline cards.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ══════════════════════════════════════════════════════════════════
           KPI CARDS

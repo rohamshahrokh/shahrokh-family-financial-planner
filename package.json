@@ -9,6 +9,7 @@
     "build:client": "vite build",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "test:dashboard-contract": "tsx script/test-dashboard-contract.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
