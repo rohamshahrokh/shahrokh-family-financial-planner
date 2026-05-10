@@ -30,6 +30,7 @@
 import {
   KPI_DATA_CONTRACT,
   ALL_CONTRACT_KEYS,
+  SOURCE_OF_TRUTH,
   selectStocksTotal,
   selectCryptoTotal,
   selectIpCurrentValueSettled,
@@ -44,6 +45,12 @@ import {
   selectPassiveIncome,
   selectSuperCombined,
   selectCashToday,
+  selectMonthlyIncome,
+  selectMonthlyExpensesLedger,
+  selectMortgageRepayment,
+  selectOtherDebtRepayment,
+  selectSettledIpDebtService,
+  selectMonthlySurplus,
   evaluateDataAvailability,
   type DashboardInputs,
 } from "../client/src/lib/dashboardDataContract";
@@ -180,11 +187,31 @@ for (const col of ["cash", "savings_cash", "emergency_cash", "other_cash", "offs
     hasSource("cash_today", "sf_snapshot", col));
 }
 
-// monthly_surplus
+// monthly_surplus — sources cover income, expenses, AND debt service
 check("monthly_surplus reads sf_snapshot.monthly_income",
   hasSource("monthly_surplus", "sf_snapshot", "monthly_income"));
 check("monthly_surplus reads sf_snapshot.monthly_expenses",
   hasSource("monthly_surplus", "sf_snapshot", "monthly_expenses"));
+check("monthly_surplus reads sf_income.amount (ledger primary)",
+  hasSource("monthly_surplus", "sf_income", "amount"));
+check("monthly_surplus reads sf_expenses.amount (ledger primary)",
+  hasSource("monthly_surplus", "sf_expenses", "amount"));
+check("monthly_surplus reads sf_snapshot.mortgage (PMT principal)",
+  hasSource("monthly_surplus", "sf_snapshot", "mortgage"));
+check("monthly_surplus reads sf_snapshot.mortgage_rate (PMT rate)",
+  hasSource("monthly_surplus", "sf_snapshot", "mortgage_rate"));
+check("monthly_surplus reads sf_snapshot.mortgage_term_years (PMT term)",
+  hasSource("monthly_surplus", "sf_snapshot", "mortgage_term_years"));
+check("monthly_surplus reads sf_snapshot.other_debts (debt service)",
+  hasSource("monthly_surplus", "sf_snapshot", "other_debts"));
+check("monthly_surplus reads sf_properties.loan_amount (settled IP debt service)",
+  hasSource("monthly_surplus", "sf_properties", "loan_amount"));
+check("monthly_surplus FORBIDS sf_planned_investments",
+  hasForbidden("monthly_surplus", "sf_planned_investments"));
+check("monthly_surplus FORBIDS sf_scenario_* (planning data)",
+  hasForbidden("monthly_surplus", "sf_scenario_*"));
+check("monthly_surplus FORBIDS financial_snapshots (legacy)",
+  hasForbidden("monthly_surplus", "financial_snapshots"));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. Selector behaviour — fixture-driven sanity checks.
@@ -328,6 +355,193 @@ check("evaluateDataAvailability lists Stocks/Crypto/PPOR/Debts/Settled IPs as em
 const aFull = evaluateDataAvailability(fxBaseline);
 check("evaluateDataAvailability flags allActualEmpty=false when data present",
   aFull.allActualEmpty === false);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. Source-of-truth map & SoT-aware selectors
+//    These invariants pin the architectural rule:
+//      ledger > sub-fields > master override for income/expenses
+//      mortgage_repayment is DERIVED via PMT, never a free field
+//      surplus subtracts mortgage + other_debt + IP debt service
+// ─────────────────────────────────────────────────────────────────────────────
+
+process.stdout.write("\n[5/5] Source-of-truth selectors\n");
+
+// SOURCE_OF_TRUTH map shape
+check("SOURCE_OF_TRUTH map exposes monthly_income owned by ledger",
+  SOURCE_OF_TRUTH.monthly_income?.ownedBy === "ledger");
+check("SOURCE_OF_TRUTH map exposes monthly_expenses owned by budget",
+  SOURCE_OF_TRUTH.monthly_expenses?.ownedBy === "budget");
+check("SOURCE_OF_TRUTH map exposes mortgage_balance owned by debt_module",
+  SOURCE_OF_TRUTH.mortgage_balance?.ownedBy === "debt_module");
+check("SOURCE_OF_TRUTH map exposes mortgage_repayment owned by derived",
+  SOURCE_OF_TRUTH.mortgage_repayment?.ownedBy === "derived");
+check("SOURCE_OF_TRUTH map exposes super_combined owned by derived",
+  SOURCE_OF_TRUTH.super_combined?.ownedBy === "derived");
+check("SOURCE_OF_TRUTH map exposes cash_savings owned by settings",
+  SOURCE_OF_TRUTH.cash_savings?.ownedBy === "settings");
+check("SOURCE_OF_TRUTH map flags monthly_expenses duplicate",
+  Array.isArray(SOURCE_OF_TRUTH.monthly_expenses?.duplicates) &&
+  SOURCE_OF_TRUTH.monthly_expenses!.duplicates!.length > 0);
+
+// Mortgage PMT fixture: $1.2M @ 6.5% / 30y ≈ $7,584/mo
+const fxMortgage: DashboardInputs = {
+  ...fxBaseline,
+  snapshot: {
+    ...fxBaseline.snapshot,
+    mortgage: 1_200_000, mortgage_rate: 6.5, mortgage_term_years: 30,
+  },
+};
+check("selectMortgageRepayment($1.2M, 6.5%, 30y) ≈ $7,584/mo",
+  approx(selectMortgageRepayment(fxMortgage), 7_584, 2),
+  `got ${selectMortgageRepayment(fxMortgage).toFixed(2)}`);
+
+// Defaults: when rate/term missing, fall back to 6.5% / 30y
+const fxMortgageDefaults: DashboardInputs = {
+  ...fxBaseline,
+  snapshot: { ...fxBaseline.snapshot, mortgage: 500_000, mortgage_rate: 0, mortgage_term_years: 0 },
+};
+check("selectMortgageRepayment defaults to 6.5%/30y when fields missing ($500k ≈ $3,160)",
+  approx(selectMortgageRepayment(fxMortgageDefaults), 3_160, 5),
+  `got ${selectMortgageRepayment(fxMortgageDefaults).toFixed(2)}`);
+
+// Zero principal => zero repayment
+const fxNoMortgage: DashboardInputs = {
+  ...fxBaseline, snapshot: { ...fxBaseline.snapshot, mortgage: 0 },
+};
+check("selectMortgageRepayment returns 0 when principal=0",
+  selectMortgageRepayment(fxNoMortgage) === 0);
+
+// Other-debt heuristic: $19k * 0.15 / 12 = $237.50
+const fxOtherDebt: DashboardInputs = {
+  ...fxBaseline, snapshot: { ...fxBaseline.snapshot, other_debts: 19_000 },
+};
+check("selectOtherDebtRepayment($19k) ≈ $237.50",
+  approx(selectOtherDebtRepayment(fxOtherDebt), 237.5, 0.5),
+  `got ${selectOtherDebtRepayment(fxOtherDebt).toFixed(2)}`);
+
+// selectMonthlyExpensesLedger — ledger wins over manual override
+const fxExpensesLedger: DashboardInputs = {
+  ...fxBaseline,
+  snapshot: { ...fxBaseline.snapshot, monthly_expenses: 4_500 }, // the bug value
+  expenses: [
+    { date: "2026-05-01", amount: 15_000 },
+    { date: "2026-04-01", amount: 15_000 },
+    { date: "2026-03-01", amount: 15_000 },
+    { date: "2026-02-01", amount: 15_000 },
+    { date: "2026-01-01", amount: 15_000 },
+    { date: "2025-12-01", amount: 15_000 },
+  ],
+};
+check("selectMonthlyExpensesLedger uses ledger ($15k avg), NOT manual $4,500",
+  approx(selectMonthlyExpensesLedger(fxExpensesLedger), 15_000, 1),
+  `got ${selectMonthlyExpensesLedger(fxExpensesLedger)}`);
+
+// And when ledger is empty, falls back to snapshot.monthly_expenses
+const fxExpensesFallback: DashboardInputs = {
+  ...fxBaseline,
+  snapshot: { ...fxBaseline.snapshot, monthly_expenses: 4_500 },
+  expenses: [],
+};
+check("selectMonthlyExpensesLedger falls back to snapshot.monthly_expenses when ledger empty",
+  selectMonthlyExpensesLedger(fxExpensesFallback) === 4_500);
+
+// selectMonthlyIncome — ledger > sub-fields > master
+const fxIncomeLedger: DashboardInputs = {
+  ...fxBaseline,
+  snapshot: { ...fxBaseline.snapshot, monthly_income: 99_999, // master should be ignored
+              roham_monthly_income: 0, fara_monthly_income: 0 },
+  incomeRecords: [
+    { date: "2026-05-01", amount: 22_000 },
+    { date: "2026-04-01", amount: 22_000 },
+    { date: "2026-03-01", amount: 22_000 },
+    { date: "2026-02-01", amount: 22_000 },
+    { date: "2026-01-01", amount: 22_000 },
+    { date: "2025-12-01", amount: 22_000 },
+  ],
+};
+check("selectMonthlyIncome prefers ledger over master override",
+  approx(selectMonthlyIncome(fxIncomeLedger), 22_000, 1),
+  `got ${selectMonthlyIncome(fxIncomeLedger)}`);
+
+const fxIncomeSubfields: DashboardInputs = {
+  ...fxBaseline,
+  snapshot: { ...fxBaseline.snapshot,
+              roham_monthly_income: 11_140, fara_monthly_income: 10_800,
+              rental_income_total: 0, other_income: 0,
+              monthly_income: 99_999 },
+  incomeRecords: [],
+};
+check("selectMonthlyIncome prefers sub-fields ($21,940) over master ($99,999) when ledger empty",
+  approx(selectMonthlyIncome(fxIncomeSubfields), 21_940, 1),
+  `got ${selectMonthlyIncome(fxIncomeSubfields)}`);
+
+const fxIncomeMaster: DashboardInputs = {
+  ...fxBaseline,
+  snapshot: { ...fxBaseline.snapshot,
+              roham_monthly_income: 0, fara_monthly_income: 0,
+              rental_income_total: 0, other_income: 0,
+              monthly_income: 12_500 },
+  incomeRecords: [],
+};
+check("selectMonthlyIncome uses master only when ledger and sub-fields are empty",
+  selectMonthlyIncome(fxIncomeMaster) === 12_500);
+
+// selectMonthlySurplus — the $17K bug regression fixture
+//   income=$21,940  expenses(ledger)=$15,150  mortgage $1.2M/6.5%/30y => ~$7,584
+//   other_debts=$19,000 => ~$237.50
+//   settled IP loan $600k => extra debt service ~$3,792
+//   surplus ≈ 21,940 - 15,150 - 7,584 - 237.5 - 3,792 ≈ -4,824 (NEGATIVE, far from $17K)
+const fxSurplusBug: DashboardInputs = {
+  todayIso: fixedToday,
+  snapshot: {
+    cash: 0, savings_cash: 40_000, emergency_cash: 0,
+    other_cash: 0, offset_balance: 222_000,
+    ppor: 0, mortgage: 1_200_000, mortgage_rate: 6.5, mortgage_term_years: 30,
+    other_debts: 19_000,
+    roham_super_balance: 49_500, fara_super_balance: 38_500,
+    monthly_income: 21_940, monthly_expenses: 4_500, // <-- the buggy override
+  },
+  properties: [
+    { id: 1, type: "investment", current_value: 750_000, loan_amount: 600_000,
+      settlement_date: "2024-01-01", weekly_rent: 600, vacancy_rate: 5, management_fee: 8 },
+  ],
+  stocks: [], cryptos: [], holdingsRaw: [],
+  incomeRecords: [
+    { date: "2026-05-01", amount: 21_940 },
+    { date: "2026-04-01", amount: 21_940 },
+    { date: "2026-03-01", amount: 21_940 },
+    { date: "2026-02-01", amount: 21_940 },
+    { date: "2026-01-01", amount: 21_940 },
+    { date: "2025-12-01", amount: 21_940 },
+  ],
+  expenses: [
+    { date: "2026-05-01", amount: 15_150 },
+    { date: "2026-04-01", amount: 15_150 },
+    { date: "2026-03-01", amount: 15_150 },
+    { date: "2026-02-01", amount: 15_150 },
+    { date: "2026-01-01", amount: 15_150 },
+    { date: "2025-12-01", amount: 15_150 },
+  ],
+};
+const surplusBug = selectMonthlySurplus(fxSurplusBug);
+check("selectMonthlySurplus uses ledger expenses, NOT $4,500 snapshot override",
+  Math.abs(surplusBug - (21_940 - 4_500)) > 10_000,
+  `surplus=${surplusBug} — must be far from naive income-snapshot=$17,440`);
+check("selectMonthlySurplus subtracts mortgage P&I (~$7,584)",
+  surplusBug < 21_940 - 15_150 - 5_000,
+  `surplus=${surplusBug} — must be at least ~$5k below (income-ledger expenses) due to mortgage`);
+check("selectMonthlySurplus subtracts settled-IP debt service",
+  selectSettledIpDebtService(fxSurplusBug) > 3_000,
+  `IP debt service=${selectSettledIpDebtService(fxSurplusBug).toFixed(2)} — must be ≥ $3k for $600k loan`);
+check("selectMonthlySurplus is realistically near zero or negative for this fixture",
+  surplusBug < 0,
+  `surplus=${surplusBug} — expected negative once all debt service is included`);
+
+// Plan-expenses must mirror budget when override is OFF
+// (we simulate the financial-plan side by re-using selectMonthlyExpensesLedger)
+check("financial-plan auto-mode expenses === selectMonthlyExpensesLedger",
+  selectMonthlyExpensesLedger(fxExpensesLedger) ===
+    selectMonthlyExpensesLedger({ ...fxExpensesLedger }));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Result

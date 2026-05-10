@@ -21,12 +21,25 @@ import { apiRequest } from "@/lib/queryClient";
 import { localStore } from "@/lib/localStore";
 import { useLocation } from "wouter";
 import { formatCurrency, safeNum } from "@/lib/finance";
+// Single-source-of-truth selectors. Financial Plan now DISPLAYS derived values
+// (income from ledger, expenses from budget, mortgage repayment from debt
+// module, combined super) and only allows manual entry when the user
+// explicitly toggles "Override". See docs/DASHBOARD_DATA_CONTRACT.md.
+import {
+  selectMonthlyIncome,
+  selectMonthlyExpensesLedger,
+  selectMortgageRepayment,
+  selectSuperCombined,
+  selectCashToday,
+  SOURCE_OF_TRUTH,
+  type DashboardInputs,
+} from "@/lib/dashboardDataContract";
 import SaveButton from "@/components/SaveButton";
 import {
   ClipboardList, Home, TrendingUp, Bitcoin, Calendar, CheckCircle, AlertCircle,
   ArrowRight, DollarSign, RefreshCw, Wallet, Building, Car, CreditCard,
   Briefcase, PiggyBank, Globe, ChevronDown, ChevronRight, Edit3, Target,
-  ShieldCheck, BarChart2,
+  ShieldCheck, BarChart2, Lock, Unlock, Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -123,6 +136,96 @@ function FieldRow({
   );
 }
 
+/**
+ * Read-only display for a derived (single-source-of-truth) value, with an
+ * "Edit in X" deep-link AND an optional manual-override toggle. When the user
+ * flips the toggle, an editable input appears — the override value writes
+ * to its own column on the snapshot (consumed only when the SoT source is
+ * empty).
+ */
+function DerivedFieldRow({
+  label,
+  derivedValue,
+  sourceLabel,
+  editHref,
+  overrideKey,
+  draft,
+  upd,
+  hint,
+  navigate,
+}: {
+  label: string;
+  derivedValue: number;
+  sourceLabel: string;          // e.g. "Auto-calculated from Monthly Budget"
+  editHref?: string;            // route to deep-link, e.g. "/budget"
+  overrideKey?: keyof SnapshotDraft; // when present, an override toggle is shown
+  draft: SnapshotDraft;
+  upd: (k: keyof SnapshotDraft) => (v: string) => void;
+  hint?: string;
+  navigate: (to: string) => void;
+}) {
+  const overrideVal = overrideKey ? safeNum(draft[overrideKey] as any) : 0;
+  const [override, setOverride] = useState(overrideKey ? overrideVal > 0 : false);
+  return (
+    <div className="py-2.5 border-b border-border/40 last:border-0">
+      <div className="grid grid-cols-2 sm:grid-cols-3 items-center gap-2">
+        <div>
+          <p className="text-xs font-medium text-foreground">{label}</p>
+          <p className="text-[10px] text-emerald-400 mt-0.5 flex items-center gap-1">
+            <Lock className="w-2.5 h-2.5" />
+            {sourceLabel}
+          </p>
+          {hint && <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>}
+        </div>
+        <div className="col-span-1 sm:col-span-2">
+          {!override ? (
+            <div className="flex items-center gap-2 justify-end">
+              <span className="text-sm font-mono text-foreground">{formatCurrency(derivedValue, true)}</span>
+              {editHref && (
+                <button
+                  type="button"
+                  onClick={() => navigate(editHref)}
+                  className="text-[10px] underline text-muted-foreground hover:text-foreground"
+                >
+                  edit source
+                </button>
+              )}
+              {overrideKey && (
+                <button
+                  type="button"
+                  onClick={() => setOverride(true)}
+                  className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-0.5"
+                  title="Enable manual override"
+                >
+                  <Unlock className="w-2.5 h-2.5" /> override
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 justify-end">
+              <span className="text-xs text-amber-400 shrink-0">override</span>
+              <span className="text-xs text-muted-foreground w-4 shrink-0">$</span>
+              <Input
+                type="number"
+                value={overrideKey ? (draft[overrideKey] as any) : 0}
+                onChange={e => overrideKey && upd(overrideKey)(e.target.value)}
+                className="h-8 text-sm text-right font-mono max-w-[140px]"
+              />
+              <button
+                type="button"
+                onClick={() => { setOverride(false); if (overrideKey) upd(overrideKey)("0"); }}
+                className="text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                clear
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DcaSummaryRow({ label, amount, frequency, active }: {
   label: string; amount: number; frequency: string; active: boolean;
 }) {
@@ -190,6 +293,10 @@ export default function MyFinancialPlan() {
   const { data: expenses = [] } = useQuery<any[]>({
     queryKey: ["/api/expenses"],
     queryFn: () => apiRequest("GET", "/api/expenses").then(r => r.json()),
+  });
+  const { data: incomeRecords = [] } = useQuery<any[]>({
+    queryKey: ["/api/income"],
+    queryFn: () => apiRequest("GET", "/api/income").then(r => r.json()),
   });
 
   // ── Snapshot draft state ────────────────────────────────────────────────────
@@ -270,6 +377,21 @@ export default function MyFinancialPlan() {
 
     toast({ title: "Saved Successfully", description: "Saved to ledger and cloud." });
   }, [qc, toast]);
+
+  // ─── Single-source-of-truth derived values ────────────────────────────
+  // These are the canonical values the Dashboard reads. Financial Plan now
+  // surfaces them as read-only displays so the user can verify them in one
+  // place — manual override toggles are provided for cases where the ledger
+  // is sparse and the user wants to inject an assumption.
+  const sotInputs = useMemo<DashboardInputs>(() => ({
+    snapshot, properties, stocks: [], cryptos: [], holdingsRaw: [],
+    incomeRecords, expenses,
+  }), [snapshot, properties, incomeRecords, expenses]);
+  const sotMonthlyIncome    = selectMonthlyIncome(sotInputs);
+  const sotMonthlyExpenses  = selectMonthlyExpensesLedger(sotInputs);
+  const sotMortgageRepayment = selectMortgageRepayment(sotInputs);
+  const sotSuperCombined    = selectSuperCombined(sotInputs);
+  const sotCashToday        = selectCashToday(sotInputs);
 
   // Derived totals
   const d = draft;
@@ -404,9 +526,30 @@ export default function MyFinancialPlan() {
       ═══════════════════════════════════════════════════════════════════ */}
       <SectionCard title="Assets" icon={<Wallet className="w-4 h-4 text-primary" />}>
         <div className="pt-3">
+          {/* SoT advisory — prevents users entering the same \$ amount in two places. */}
+          <div className="mb-3 rounded-md border border-sky-500/30 bg-sky-500/10 p-2.5 text-[11px] text-sky-100/90 flex gap-2">
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-sky-300" />
+            <span>
+              Cash buckets <strong>Savings / Emergency / Other</strong> are owned by
+              <strong> Settings → Cash Allocation</strong>. Entering the same amount
+              here AND there double-counts on the Dashboard.
+            </span>
+          </div>
+
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2">Liquid Cash</p>
-          <FieldRow label="Cash / Transaction Account" value={draft.cash} onChange={upd("cash")} hint="Checking, savings accounts" />
+          <FieldRow label="Cash / Transaction Account" value={draft.cash} onChange={upd("cash")} hint="Checking only — savings/emergency/other are in Settings" />
           <FieldRow label="Offset Account Balance" value={draft.offset_balance} onChange={upd("offset_balance")} hint="Mortgage offset account" />
+
+          {/* Read-only total cash (derived) so the user sees the single number
+              the Dashboard will show — reads sf_snapshot.{cash, savings_cash,
+              emergency_cash, other_cash, offset_balance}. */}
+          <div className="mt-1 mb-2 rounded-md bg-secondary/30 p-2 text-[11px] flex items-center justify-between">
+            <span className="text-muted-foreground flex items-center gap-1">
+              <Lock className="w-2.5 h-2.5 text-emerald-400" />
+              Cash Today (all buckets + offset)
+            </span>
+            <span className="font-mono text-foreground">{formatCurrency(sotCashToday, true)}</span>
+          </div>
 
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2 mt-4">Property</p>
           <FieldRow label="PPOR Market Value" value={draft.ppor} onChange={upd("ppor")} hint="Principal place of residence" />
@@ -417,9 +560,17 @@ export default function MyFinancialPlan() {
           <FieldRow label="Crypto (manual override)" value={draft.crypto} onChange={upd("crypto")} hint="Used when no holdings table exists" />
 
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2 mt-4">Superannuation</p>
-          <FieldRow label="Super Balance (combined)" value={draft.super_balance} onChange={upd("super_balance")} hint="Total super if not using per-person" />
-          <FieldRow label="Roham — Super Balance" value={draft.roham_super_balance} onChange={upd("roham_super_balance")} hint="Roham's super fund balance" />
-          <FieldRow label="Fara — Super Balance" value={draft.fara_super_balance} onChange={upd("fara_super_balance")} hint="Fara's super fund balance" />
+          {/* SoT rule: combined super = roham_super + fara_super. The legacy
+              `super_balance` master column is now a fallback only. */}
+          <div className="mb-2 rounded-md bg-secondary/30 p-2 text-[11px] flex items-center justify-between">
+            <span className="text-muted-foreground flex items-center gap-1">
+              <Lock className="w-2.5 h-2.5 text-emerald-400" />
+              Super (combined) — auto-calculated from Roham + Fara
+            </span>
+            <span className="font-mono text-foreground">{formatCurrency(sotSuperCombined, true)}</span>
+          </div>
+          <FieldRow label="Roham — Super Balance" value={draft.roham_super_balance} onChange={upd("roham_super_balance")} hint="Roham's super fund balance (single source of truth)" />
+          <FieldRow label="Fara — Super Balance" value={draft.fara_super_balance} onChange={upd("fara_super_balance")} hint="Fara's super fund balance (single source of truth)" />
 
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2 mt-4">Other</p>
           <FieldRow label="Vehicles (estimated value)" value={draft.cars} onChange={upd("cars")} hint="Car fleet current market value" />
@@ -432,9 +583,11 @@ export default function MyFinancialPlan() {
                 cash: draft.cash, offset_balance: draft.offset_balance,
                 ppor: draft.ppor, iran_property: draft.iran_property,
                 stocks: draft.stocks, crypto: draft.crypto,
-                super_balance: draft.super_balance,
-                roham_super_balance: draft.roham_super_balance,
-                fara_super_balance: draft.fara_super_balance,
+                // SoT rule: super_balance is DERIVED from per-person fields.
+                // Always overwrite the legacy master column to keep it in sync.
+                super_balance:        safeNum(draft.roham_super_balance) + safeNum(draft.fara_super_balance),
+                roham_super_balance:  draft.roham_super_balance,
+                fara_super_balance:   draft.fara_super_balance,
                 cars: draft.cars,
               })}
             />
@@ -447,8 +600,25 @@ export default function MyFinancialPlan() {
       ═══════════════════════════════════════════════════════════════════ */}
       <SectionCard title="Liabilities" icon={<CreditCard className="w-4 h-4 text-red-400" />}>
         <div className="pt-3">
+          <div className="mb-3 rounded-md border border-sky-500/30 bg-sky-500/10 p-2.5 text-[11px] text-sky-100/90 flex gap-2">
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-sky-300" />
+            <span>
+              Mortgage balance and rate/term are owned by the <strong>Debt Module</strong>.
+              Edit here for convenience; the canonical source is <strong>Debt Strategy</strong>.
+            </span>
+          </div>
           <FieldRow label="Mortgage (PPOR)" value={draft.mortgage} onChange={upd("mortgage")} hint="Outstanding PPOR mortgage balance" />
           <FieldRow label="Other Debts (car, personal, CC)" value={draft.other_debts} onChange={upd("other_debts")} hint="Combined other liabilities" />
+
+          {/* Read-only mortgage repayment (PMT) so the user can see what the
+              Dashboard surplus calculation will deduct each month. */}
+          <div className="mt-1 mb-2 rounded-md bg-secondary/30 p-2 text-[11px] flex items-center justify-between">
+            <span className="text-muted-foreground flex items-center gap-1">
+              <Lock className="w-2.5 h-2.5 text-emerald-400" />
+              Estimated monthly repayment (P&amp;I)
+            </span>
+            <span className="font-mono text-foreground">{formatCurrency(Math.round(sotMortgageRepayment), true)} /mo</span>
+          </div>
 
           <div className="mt-4 pt-3 border-t border-border/60 flex items-center justify-between">
             <p className="text-xs text-muted-foreground">Total Liabilities: <span className="text-red-400 font-semibold">{formatCurrency(totalLiabilities, true)}</span></p>
@@ -465,7 +635,26 @@ export default function MyFinancialPlan() {
       ═══════════════════════════════════════════════════════════════════ */}
       <SectionCard title="Income" icon={<Briefcase className="w-4 h-4 text-emerald-400" />}>
         <div className="pt-3">
-          <FieldRow label="Combined Monthly Income" value={draft.monthly_income} onChange={upd("monthly_income")} hint="MASTER FIELD — this is what all pages (ledger, dashboard, FIRE) read" />
+          {/* SoT advisory: the Income Tracker (sf_income ledger) is the primary
+              source. Manual sub-fields are fallbacks only. The master
+              `monthly_income` column is a last-resort override and should
+              normally be left at 0 once the ledger has data. */}
+          <div className="mb-3 rounded-md border border-sky-500/30 bg-sky-500/10 p-2.5 text-[11px] text-sky-100/90 flex gap-2">
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-sky-300" />
+            <span>
+              The Dashboard prefers the <strong>Income Tracker</strong> ledger
+              (last 6mo). Manual fields below are <em>fallbacks</em> used only
+              when the ledger is empty.
+            </span>
+          </div>
+          <div className="mb-2 rounded-md bg-secondary/30 p-2 text-[11px] flex items-center justify-between">
+            <span className="text-muted-foreground flex items-center gap-1">
+              <Lock className="w-2.5 h-2.5 text-emerald-400" />
+              Monthly Income (single source of truth)
+            </span>
+            <span className="font-mono text-foreground">{formatCurrency(sotMonthlyIncome, true)} /mo</span>
+          </div>
+          <FieldRow label="Combined Monthly Income" value={draft.monthly_income} onChange={upd("monthly_income")} hint="Master fallback — only used when ledger + sub-fields are empty" />
           <FieldRow label="Roham — Monthly Net Salary" value={draft.roham_monthly_income} onChange={upd("roham_monthly_income")} hint="Roham's after-tax monthly income" />
           <FieldRow label="Fara — Monthly Net Salary" value={draft.fara_monthly_income} onChange={upd("fara_monthly_income")} hint="Fara's after-tax monthly income" />
           <FieldRow label="Rental Income (total monthly)" value={draft.rental_income_total} onChange={upd("rental_income_total")} hint="All IPs combined gross rental" />
@@ -509,7 +698,28 @@ export default function MyFinancialPlan() {
       ═══════════════════════════════════════════════════════════════════ */}
       <SectionCard title="Monthly Expenses" icon={<DollarSign className="w-4 h-4 text-amber-400" />}>
         <div className="pt-3">
-          <FieldRow label="Core Living Expenses" value={draft.monthly_expenses} onChange={upd("monthly_expenses")} hint="Groceries, dining, transport, lifestyle" />
+          {/* SoT advisory: Monthly Budget is the canonical source. This bug-fix
+              prevents the May-2026 "$17K surplus" regression, where a stale
+              manual \$4,500 override silently won over the \~\$15K/mo ledger. */}
+          <div className="mb-3 rounded-md border border-sky-500/30 bg-sky-500/10 p-2.5 text-[11px] text-sky-100/90 flex gap-2">
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-sky-300" />
+            <span>
+              Core expenses are owned by the <strong>Monthly Budget / Ledger</strong>
+              (sf_expenses). The Dashboard reads the trailing 6mo average. Use
+              the override below ONLY if your ledger is empty or incomplete.
+            </span>
+          </div>
+          <DerivedFieldRow
+            label="Core Living Expenses"
+            derivedValue={sotMonthlyExpenses}
+            sourceLabel="Auto-calculated from Monthly Budget (6mo avg)"
+            editHref="/budget"
+            overrideKey="monthly_expenses"
+            draft={draft}
+            upd={upd}
+            hint="Override only when ledger is sparse"
+            navigate={navigate}
+          />
           <FieldRow label="Childcare (monthly)" value={draft.childcare_monthly} onChange={upd("childcare_monthly")} hint="Daycare, school fees, activities" />
           <FieldRow label="Insurance (monthly)" value={draft.insurance_monthly} onChange={upd("insurance_monthly")} hint="Health, life, income protection, home" />
           <FieldRow label="Utilities (monthly)" value={draft.utilities_monthly} onChange={upd("utilities_monthly")} hint="Electricity, gas, internet, phone" />

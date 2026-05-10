@@ -31,6 +31,12 @@ import {
   selectPropertyEquity,
   selectDebtBalance,
   selectPassiveIncome,
+  selectMonthlyIncome,
+  selectMonthlyExpensesLedger,
+  selectMortgageRepayment,
+  selectOtherDebtRepayment,
+  selectSettledIpDebtService,
+  selectMonthlySurplus,
   evaluateDataAvailability,
   type DashboardInputs,
 } from "@/lib/dashboardDataContract";
@@ -962,11 +968,44 @@ export default function DashboardPage() {
     console.groupEnd();
     /* eslint-enable no-console */
   }
-  // Mortgage is already included in monthly_expenses — do not deduct again
-  const monthlyMortgageRepay = 0;
-  const surplus       = snap.monthly_income - snap.monthly_expenses;
-  const totalMonthlyOutgoings = snap.monthly_expenses;
-  const savingsRate   = calcSavingsRate(snap.monthly_income, snap.monthly_expenses);
+  // ─── MONTHLY SURPLUS — single-source-of-truth derivation ────────────────
+  // SOURCE-OF-TRUTH: docs/DASHBOARD_DATA_CONTRACT.md → monthly_surplus +
+  //                  client/src/lib/dashboardDataContract.ts SOURCE_OF_TRUTH map.
+  //
+  // Prior bug (May 2026 "$17K surplus"):
+  //   const surplus = snap.monthly_income - snap.monthly_expenses;
+  //   const monthlyMortgageRepay = 0;
+  // This silently:
+  //   1. ate the manual sf_snapshot.monthly_expenses override (\$4,500) and
+  //      ignored the \~\$15K/mo ledger truth; and
+  //   2. assumed mortgage was already in `expenses`, which is false —
+  //      sf_expenses categories never include mortgage P&I.
+  //
+  // New formula (enforced by selectors):
+  //   surplus = monthlyIncome (ledger → sub-fields → master)
+  //           − monthlyExpensesLedger (ledger → manual)
+  //           − mortgageRepayment (PMT from debt module)
+  //           − otherDebtRepayment (cards/personal loans)
+  //           − settledIpDebtService (each IP loan amortised separately)
+  const monthlyIncomeSOT       = selectMonthlyIncome(_contractInputs);
+  const monthlyExpensesSOT     = selectMonthlyExpensesLedger(_contractInputs);
+  const monthlyMortgageRepay   = selectMortgageRepayment(_contractInputs);
+  const monthlyOtherDebtRepay  = selectOtherDebtRepayment(_contractInputs);
+  const monthlyIpDebtService   = selectSettledIpDebtService(_contractInputs);
+  const totalMonthlyOutgoings  = monthlyExpensesSOT
+    + monthlyMortgageRepay
+    + monthlyOtherDebtRepay
+    + monthlyIpDebtService;
+  const surplus                = selectMonthlySurplus(_contractInputs);
+  const savingsRate            = calcSavingsRate(monthlyIncomeSOT, totalMonthlyOutgoings);
+
+  // Down-stream forecasts/projections still reference snap.monthly_income
+  // and snap.monthly_expenses. Rebind the surface of `snap` to the SOT values
+  // so the entire page reads from the same single source. The original `snap`
+  // memo still exposes the raw snapshot fields for any caller that needs
+  // them explicitly (none below currently do).
+  snap.monthly_income   = monthlyIncomeSOT;
+  snap.monthly_expenses = monthlyExpensesSOT;
 
   // ─── NG Summary ───────────────────────────────────────────────────────────
   const ngSummary = useMemo<NGSummary>(() => {
@@ -1425,7 +1464,8 @@ export default function DashboardPage() {
     const currentInvestable = totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal;
     const requiredFIRE = (10000 * 12) / 0.04;
     const fireProgress = Math.min(100, Math.round((currentInvestable / requiredFIRE) * 100));
-    const totalMonthly = snap.monthly_expenses + monthlyMortgageRepay;
+    // Use canonical totalMonthlyOutgoings so emergency-fund coverage matches the surplus formula.
+    const totalMonthly = totalMonthlyOutgoings;
     const monthsCovered = (totalLiquidCash) / totalMonthly;
     const emergencyScore = Math.min(100, Math.round((monthsCovered / 6) * 100));
     const totalDebt = snap.mortgage + snap.other_debts;
@@ -1764,7 +1804,7 @@ export default function DashboardPage() {
 
   const monthlyCFBarData = [
     { name: "Income", value: snap.monthly_income },
-    { name: "Expenses", value: snap.monthly_expenses + monthlyMortgageRepay },
+    { name: "Expenses", value: totalMonthlyOutgoings },
     { name: "Surplus", value: Math.max(0, surplus) },
   ];
   const MONTHLY_CF_COLORS = ["hsl(142,60%,45%)", "hsl(0,72%,51%)", "hsl(43,85%,55%)"];
@@ -1969,7 +2009,16 @@ export default function DashboardPage() {
           <KpiCard
             label="MONTHLY SURPLUS"
             value={maskValue(formatCurrency(surplus, true), privacyMode)}
-            subValue={`${maskValue(formatCurrency(surplus * 12, true), privacyMode)} / year`}
+            subValue={
+              maskValue(
+                // Show the full SoT breakdown so users can verify what's in/out.
+                `Inc ${formatCurrency(monthlyIncomeSOT, true)} − Exp ${formatCurrency(monthlyExpensesSOT, true)} − Debt ${formatCurrency(
+                  monthlyMortgageRepay + monthlyOtherDebtRepay + monthlyIpDebtService,
+                  true,
+                )}`,
+                privacyMode,
+              )
+            }
             trend={surplus >= 0 ? 1 : -1}
             icon={<PiggyBank />}
             accent="hsl(142,60%,45%)"
@@ -2807,7 +2856,7 @@ export default function DashboardPage() {
             {/* TAB: RISK */}
             {wdcTab === "RISK" && (() => {
               const liquidCash = totalLiquidCash;
-              const totalMonthlyOut = snap.monthly_expenses + monthlyMortgageRepay;
+              const totalMonthlyOut = totalMonthlyOutgoings;
               const monthsCov = totalMonthlyOut > 0 ? liquidCash / totalMonthlyOut : 0;
               const debtRatio = snap.monthly_income > 0 ? totalLiab / (snap.monthly_income * 12) : 0;
               const propPct = totalAssets > 0 ? (snap.ppor / totalAssets) * 100 : 0;

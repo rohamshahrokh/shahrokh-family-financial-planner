@@ -63,18 +63,32 @@ export const KPI_DATA_CONTRACT: Record<string, CardContract> = {
   monthly_surplus: {
     label: "MONTHLY SURPLUS",
     tier: "actual",
-    formula: "monthly_income - monthly_expenses",
+    formula:
+      "monthlyIncome - monthlyExpensesLedger - mortgageRepayment - otherDebtRepayment",
     sources: [
-      { table: "sf_snapshot", column: "monthly_income",          note: "primary master" },
-      { table: "sf_snapshot", column: "roham_monthly_income",    note: "fallback sub-field" },
-      { table: "sf_snapshot", column: "fara_monthly_income",     note: "fallback sub-field" },
-      { table: "sf_snapshot", column: "rental_income_total",     note: "fallback sub-field" },
-      { table: "sf_snapshot", column: "other_income",            note: "fallback sub-field" },
-      { table: "sf_income",   column: "amount",                  note: "trailing 6mo avg fallback" },
-      { table: "sf_snapshot", column: "monthly_expenses",        note: "expenses primary" },
-      { table: "sf_expenses", column: "amount",                  note: "trailing 6mo avg fallback" },
+      // Income (SoT: sf_income ledger → sub-fields → master)
+      { table: "sf_income",   column: "amount",                  note: "trailing 6mo average — PRIMARY when populated" },
+      { table: "sf_snapshot", column: "roham_monthly_income",    note: "sub-field fallback" },
+      { table: "sf_snapshot", column: "fara_monthly_income",     note: "sub-field fallback" },
+      { table: "sf_snapshot", column: "rental_income_total",     note: "sub-field fallback" },
+      { table: "sf_snapshot", column: "other_income",            note: "sub-field fallback" },
+      { table: "sf_snapshot", column: "monthly_income",          note: "manual master override (last)" },
+      // Expenses (SoT: sf_expenses ledger)
+      { table: "sf_expenses", column: "amount",                  note: "trailing 6mo average — PRIMARY" },
+      { table: "sf_snapshot", column: "monthly_expenses",        note: "manual override only when ledger empty" },
+      // Debt service (SoT: debt module amortisation)
+      { table: "sf_snapshot", column: "mortgage",                note: "PPOR principal — drives PMT" },
+      { table: "sf_snapshot", column: "mortgage_rate",           note: "annual % for PMT" },
+      { table: "sf_snapshot", column: "mortgage_term_years",     note: "remaining term for PMT" },
+      { table: "sf_snapshot", column: "other_debts",             note: "non-property debt balance — 0.15/12 minimum payment heuristic" },
+      { table: "sf_properties", column: "loan_amount",           note: "settled IPs amortised separately" },
     ],
-    fallback: "Returns 0 if every income and expense source is empty.",
+    fallback: "Returns 0 if every income/expense/debt source is empty.",
+    forbidden: [
+      "sf_planned_investments",  // planning data, not actuals
+      "sf_scenario_*",           // scenarios are forecasts only
+      "financial_snapshots",     // legacy/unused
+    ],
   },
 
   total_investments: {
@@ -175,6 +189,39 @@ export const KPI_DATA_CONTRACT: Record<string, CardContract> = {
     fallback: "Falls through to subtotals; cannot be silently zeroed.",
   },
 } as const;
+
+/**
+ * Source-of-Truth map for every value that can be edited from more than one
+ * surface (Settings, Financial Plan, Dashboard summary, Budget page).
+ *
+ * RULE: a value is OWNED by exactly one source. Other surfaces may DISPLAY it
+ * read-only, with the "editIn" label shown next to the field. The Financial
+ * Plan page MUST gate manual edits behind an explicit `override = true` flag
+ * on the snapshot row.
+ *
+ * Adding a new shared field? Add it here AND update the regression script.
+ */
+export const SOURCE_OF_TRUTH: Record<string, {
+  ownedBy: "settings" | "budget" | "debt_module" | "ledger" | "derived";
+  editIn: string;          // UI label, e.g. "Edit in Settings"
+  storedAs: string;        // dot-path on snapshot row OR formula
+  duplicates?: string[];   // fields that USED to be edited elsewhere
+}> = {
+  monthly_income:     { ownedBy: "ledger",      editIn: "Edit in Income (ledger)",   storedAs: "derived: 6mo avg of sf_income.amount, then sf_snapshot.{roham|fara}_monthly_income" },
+  monthly_expenses:   { ownedBy: "budget",      editIn: "Edit in Monthly Budget",     storedAs: "derived: 6mo avg of sf_expenses.amount", duplicates: ["sf_snapshot.monthly_expenses (now override-only)"] },
+  mortgage_balance:   { ownedBy: "debt_module", editIn: "Edit in Debt Module",        storedAs: "sf_snapshot.mortgage" },
+  mortgage_repayment: { ownedBy: "derived",     editIn: "Auto from Debt Module",      storedAs: "calcMonthlyRepayment(mortgage, mortgage_rate, mortgage_term_years)" },
+  other_debts:        { ownedBy: "debt_module", editIn: "Edit in Debt Module",        storedAs: "sf_snapshot.other_debts" },
+  cash_transaction:   { ownedBy: "settings",    editIn: "Edit in Settings → Cash",     storedAs: "sf_snapshot.cash" },
+  cash_savings:       { ownedBy: "settings",    editIn: "Edit in Settings → Cash",     storedAs: "sf_snapshot.savings_cash" },
+  cash_emergency:     { ownedBy: "settings",    editIn: "Edit in Settings → Cash",     storedAs: "sf_snapshot.emergency_cash" },
+  cash_other:         { ownedBy: "settings",    editIn: "Edit in Settings → Cash",     storedAs: "sf_snapshot.other_cash" },
+  offset_balance:     { ownedBy: "settings",    editIn: "Edit in Settings → Cash",     storedAs: "sf_snapshot.offset_balance" },
+  roham_super:        { ownedBy: "settings",    editIn: "Edit in Settings → Super",    storedAs: "sf_snapshot.roham_super_balance" },
+  fara_super:         { ownedBy: "settings",    editIn: "Edit in Settings → Super",    storedAs: "sf_snapshot.fara_super_balance" },
+  super_combined:     { ownedBy: "derived",     editIn: "Auto from Settings",         storedAs: "roham_super + fara_super", duplicates: ["sf_snapshot.super_balance (now display-only fallback)"] },
+  ppor_value:         { ownedBy: "settings",    editIn: "Edit in Settings → Property", storedAs: "sf_snapshot.ppor" },
+};
 
 /**
  * Inputs every selector accepts. Keep this minimal; selectors must be
@@ -316,6 +363,144 @@ export function selectSuperCombined(i: DashboardInputs): number {
   const fara  = num(i.snapshot?.fara_super_balance  ?? i.snapshot?.super_fara);
   const master = num(i.snapshot?.super_balance);
   return roham + fara > 0 ? roham + fara : master;
+}
+
+// ─── Income / Expenses / Debt service (single source of truth) ─────────────
+
+/**
+ * Average a list of dated amount records over the last `monthsBack` months.
+ * Returns 0 when the list is empty or every row is out of window.
+ */
+function trailingMonthlyAverage(
+  rows: any[] | undefined,
+  todayIso: string,
+  monthsBack = 6,
+): number {
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+  const today = new Date(todayIso);
+  const cutoff = new Date(today);
+  cutoff.setMonth(cutoff.getMonth() - monthsBack);
+  const cutoffIso = cutoff.toISOString().split("T")[0];
+  let total = 0;
+  for (const r of rows) {
+    const d = (r?.date ?? "") as string;
+    if (d >= cutoffIso) total += num(r.amount);
+  }
+  return total > 0 ? total / monthsBack : 0;
+}
+
+/**
+ * Monthly income (single source of truth).
+ * Order of precedence:
+ *   1. Trailing 6mo average of sf_income.amount  (ledger — PRIMARY)
+ *   2. Sum of sf_snapshot.{roham,fara}_monthly_income + rental + other
+ *   3. sf_snapshot.monthly_income (manual master override — LAST resort)
+ */
+export function selectMonthlyIncome(i: DashboardInputs): number {
+  const today = todayIsoFor(i);
+  const ledger = trailingMonthlyAverage(i.incomeRecords, today);
+  if (ledger > 0) return Math.round(ledger);
+  const s = i.snapshot ?? {};
+  const subFields =
+    num(s.roham_monthly_income) +
+    num(s.fara_monthly_income) +
+    num(s.rental_income_total) +
+    num(s.other_income);
+  if (subFields > 0) return subFields;
+  return num(s.monthly_income);
+}
+
+/**
+ * Monthly expenses (single source of truth).
+ * Order of precedence:
+ *   1. Trailing 6mo average of sf_expenses.amount  (ledger — PRIMARY)
+ *   2. sf_snapshot.monthly_expenses (manual override — fallback only)
+ *
+ * This is the field that produced the "$17K surplus" regression: the manual
+ * snapshot override of \$4,500 was silently winning over the ledger truth of
+ * ~\$15K/mo. Ledger now wins whenever it has data.
+ */
+export function selectMonthlyExpensesLedger(i: DashboardInputs): number {
+  const today = todayIsoFor(i);
+  const ledger = trailingMonthlyAverage(i.expenses, today);
+  if (ledger > 0) return Math.round(ledger);
+  return num(i.snapshot?.monthly_expenses);
+}
+
+/**
+ * Monthly mortgage repayment (P&I) for the PPOR, derived from the debt module.
+ * Uses the standard amortisation formula:
+ *   PMT = P r (1+r)^n / ((1+r)^n - 1)   where r = annualRate/12, n = term×12
+ *
+ * Pulls principal/rate/term from sf_snapshot — the debt module stores them
+ * there as it is the single source of truth for these fields.
+ */
+export function selectMortgageRepayment(i: DashboardInputs): number {
+  const s = i.snapshot ?? {};
+  const principal = num(s.mortgage);
+  if (principal <= 0) return 0;
+  const annualRate = num(s.mortgage_rate) || 6.5;
+  const termYears = num(s.mortgage_term_years) || 30;
+  const r = annualRate / 100 / 12;
+  const n = termYears * 12;
+  if (r === 0) return principal / n;
+  return (principal * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+}
+
+/**
+ * Estimated monthly minimum payment on non-property debt (cards, personal
+ * loans). 0.15 annual / 12 is the same heuristic used elsewhere in the app
+ * (dashboard "hiddenMonthly" calc) so behaviour stays consistent.
+ */
+export function selectOtherDebtRepayment(i: DashboardInputs): number {
+  const otherDebt = num(i.snapshot?.other_debts);
+  if (otherDebt <= 0) return 0;
+  return (otherDebt * 0.15) / 12;
+}
+
+/**
+ * Monthly debt service for settled investment properties. Each property's
+ * loan is amortised at the snapshot mortgage_rate over the remaining term.
+ * Planned IPs (settlement_date > today) are excluded.
+ */
+export function selectSettledIpDebtService(i: DashboardInputs): number {
+  const s = i.snapshot ?? {};
+  const annualRate = num(s.mortgage_rate) || 6.5;
+  const termYears = num(s.mortgage_term_years) || 30;
+  const r = annualRate / 100 / 12;
+  const n = termYears * 12;
+  return selectSettledIPs(i).reduce((sum: number, p: any) => {
+    const principal = num(p.loan_amount);
+    if (principal <= 0) return sum;
+    if (r === 0) return sum + principal / n;
+    return sum + (principal * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+  }, 0);
+}
+
+/**
+ * MONTHLY SURPLUS — the headline KPI.
+ *
+ * Formula:
+ *   surplus = monthlyIncome
+ *           − monthlyExpensesLedger          (ledger does NOT include mortgage)
+ *           − mortgageRepayment              (PPOR P&I from debt module)
+ *           − otherDebtRepayment             (cards/personal loans minimum)
+ *           − settledIpDebtService           (IP loan P&I, settled only)
+ *
+ * The old formula was `income − expenses` with no debt service, which silently
+ * over-reported surplus by the entire mortgage repayment (~\$7,584/mo at
+ * \$1.2M principal). This selector is now the only path that produces the
+ * dashboard surplus number; manual sf_snapshot.monthly_expenses overrides are
+ * relegated to a ledger-empty fallback.
+ */
+export function selectMonthlySurplus(i: DashboardInputs): number {
+  return Math.round(
+    selectMonthlyIncome(i)
+      - selectMonthlyExpensesLedger(i)
+      - selectMortgageRepayment(i)
+      - selectOtherDebtRepayment(i)
+      - selectSettledIpDebtService(i),
+  );
 }
 
 export function selectCashToday(i: DashboardInputs): number {

@@ -169,6 +169,71 @@ balance data yet.
 
 ---
 
+## Source of truth map
+
+This table mirrors the `SOURCE_OF_TRUTH` constant exported from
+`client/src/lib/dashboardDataContract.ts`. Every shared field below has ONE
+owner; all other surfaces (Dashboard, Financial Plan, AI CFO, Forecasts) are
+read‑only consumers that derive their values from these sources.
+
+The architectural rule:
+
+- **Ledger / Monthly Budget** = source of truth for *actual* expenses
+- **Debt module** = source of truth for *mortgage* and *debt repayments/balances*
+- **Settings / Profile** = source of truth for *stable profile values* (cash, offset, super per person, PPOR value)
+- **My Financial Plan** = *planning assumptions only*, never duplicate actuals
+- **Dashboard** = *calculated output only*, never a data‑entry source
+
+| Field | Owner | Edit in | Stored as / Formula | Duplicates eliminated |
+|---|---|---|---|---|
+| `monthly_income` | ledger | Income (ledger) | 6mo avg of `sf_income.amount`, then `sf_snapshot.{roham,fara}_monthly_income`, then `monthly_income` | — |
+| `monthly_expenses` | budget | Monthly Budget | 6mo avg of `sf_expenses.amount` | `sf_snapshot.monthly_expenses` (now override‑only fallback) |
+| `mortgage_balance` | debt_module | Debt Module | `sf_snapshot.mortgage` | — |
+| `mortgage_repayment` | derived | Auto from Debt Module | `PMT(mortgage, mortgage_rate, mortgage_term_years)` | Previously hard‑coded `0` in dashboard surplus calc |
+| `other_debts` | debt_module | Debt Module | `sf_snapshot.other_debts` | — |
+| `cash_transaction` | settings | Settings → Cash | `sf_snapshot.cash` | — |
+| `cash_savings` | settings | Settings → Cash | `sf_snapshot.savings_cash` | — |
+| `cash_emergency` | settings | Settings → Cash | `sf_snapshot.emergency_cash` | — |
+| `cash_other` | settings | Settings → Cash | `sf_snapshot.other_cash` | Auto‑zeroed when equal to `offset_balance` |
+| `offset_balance` | settings | Settings → Cash | `sf_snapshot.offset_balance` | — |
+| `roham_super` | settings | Settings → Super | `sf_snapshot.roham_super_balance` | — |
+| `fara_super` | settings | Settings → Super | `sf_snapshot.fara_super_balance` | — |
+| `super_combined` | derived | Auto from Settings | `roham_super + fara_super` | `sf_snapshot.super_balance` (now display‑only fallback) |
+| `ppor_value` | settings | Settings → Property | `sf_snapshot.ppor` | — |
+
+### How My Financial Plan consumes this
+
+Every shared field in **My Financial Plan** renders via a `DerivedFieldRow`:
+
+- **Lock mode (default):** Field shows the SoT value with an “Auto‑calculated
+  from X” label and an “Edit source” deep link to the owning page.
+- **Override mode (explicit toggle):** Lets the user enter a planning
+  assumption that overrides the SoT value *for plan calculations only*. The
+  Dashboard never reads plan overrides.
+
+Advisory banners flag the rule in each section (Assets / Liabilities /
+Income / Expenses) so the user knows where to edit actual values.
+
+### Monthly Surplus formula
+
+The **only** path that produces the Dashboard surplus number is
+`selectMonthlySurplus`:
+
+```
+surplus = monthlyIncome
+        − monthlyExpensesLedger        (ledger never includes mortgage)
+        − mortgageRepayment            (PPOR P&I via PMT)
+        − otherDebtRepayment           (0.15/12 minimum payment heuristic)
+        − settledIpDebtService         (per‑IP PMT, planned IPs excluded)
+```
+
+The pre‑fix formula was `income − expenses` with `mortgageRepay = 0` and
+`monthly_expenses = $4,500` (manual snapshot override) winning over the
+ledger’s ~$15K/mo, producing a phantom $17K surplus. Both bugs are now
+pinned by `script/test-dashboard-contract.ts`.
+
+---
+
 ## When this contract changes
 
 1. Edit `client/src/lib/dashboardDataContract.ts` (the typed contract).
