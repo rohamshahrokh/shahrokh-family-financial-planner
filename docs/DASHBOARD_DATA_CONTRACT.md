@@ -214,23 +214,54 @@ Every shared field in **My Financial Plan** renders via a `DerivedFieldRow`:
 Advisory banners flag the rule in each section (Assets / Liabilities /
 Income / Expenses) so the user knows where to edit actual values.
 
-### Monthly Surplus formula
+### Monthly Surplus formula (debt‑aware)
 
 The **only** path that produces the Dashboard surplus number is
-`selectMonthlySurplus`:
+`selectMonthlySurplus`. It runs in one of two modes, gated by
+`selectExpensesIncludesDebt(inputs)`:
+
+**Mode A — expenses already include mortgage/debt (default for this app):**
+
+```
+surplus = monthlyIncome − monthlyExpensesLedger
+```
+
+This is the case when the user logs ledger rows like `Housing / Mortgage`,
+`Debt Repayment`, `Car Loan`, etc. — the $15K/mo total already contains
+the ~$8K of debt service, so we MUST NOT subtract debt again.
+
+**Mode B — expenses are core‑living only, debt tracked separately:**
 
 ```
 surplus = monthlyIncome
-        − monthlyExpensesLedger        (ledger never includes mortgage)
-        − mortgageRepayment            (PPOR P&I via PMT)
-        − otherDebtRepayment           (0.15/12 minimum payment heuristic)
-        − settledIpDebtService         (per‑IP PMT, planned IPs excluded)
+        − monthlyExpensesLedger
+        − mortgageRepayment        (PPOR P&I via PMT)
+        − otherDebtRepayment       (0.15/12 minimum payment heuristic)
+        − settledIpDebtService     (per‑IP PMT, planned IPs excluded)
 ```
 
-The pre‑fix formula was `income − expenses` with `mortgageRepay = 0` and
-`monthly_expenses = $4,500` (manual snapshot override) winning over the
-ledger’s ~$15K/mo, producing a phantom $17K surplus. Both bugs are now
-pinned by `script/test-dashboard-contract.ts`.
+**Mode selection (in priority order):**
+
+1. Explicit override: `sf_snapshot.expenses_includes_debt` (boolean).
+2. Auto‑detect: any ledger row whose category contains `mortgage`,
+   `home loan`, `debt repayment`, `loan repayment`, `car loan`,
+   `personal loan`, `credit card`, `investment loan`, or `ip loan` flips
+   the mode to **Mode A**.
+3. If neither ledger nor explicit override is available, default to
+   **Mode A** (manual `monthly_expenses` total is treated as inclusive).
+
+**Dashboard subtitle reflects the active mode:**
+
+- Mode A: `Inc $22K − Exp $15K (debt incl.) = $7K`
+- Mode B: `Inc $22K − Exp $7K − Debt $8K = $7K`
+
+**Historical bugs both pinned by regression:**
+
+- v0 (`income − expenses` with `mortgageRepay = 0`, snapshot $4,500
+  overriding ledger $15K) ⇒ phantom $17,440 surplus.
+- v1 SoT (always subtract debt) ⇒ **double‑count** because ledger rows
+  already contained `Housing / Mortgage` $3,750/mo and `Debt Repayment`
+  rows. Test `PARITY: MODE A surplus === MODE B surplus` prevents both.
 
 ---
 

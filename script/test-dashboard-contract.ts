@@ -50,6 +50,8 @@ import {
   selectMortgageRepayment,
   selectOtherDebtRepayment,
   selectSettledIpDebtService,
+  selectMonthlyDebtService,
+  selectExpensesIncludesDebt,
   selectMonthlySurplus,
   evaluateDataAvailability,
   type DashboardInputs,
@@ -486,62 +488,160 @@ const fxIncomeMaster: DashboardInputs = {
 check("selectMonthlyIncome uses master only when ledger and sub-fields are empty",
   selectMonthlyIncome(fxIncomeMaster) === 12_500);
 
-// selectMonthlySurplus — the $17K bug regression fixture
-//   income=$21,940  expenses(ledger)=$15,150  mortgage $1.2M/6.5%/30y => ~$7,584
-//   other_debts=$19,000 => ~$237.50
-//   settled IP loan $600k => extra debt service ~$3,792
-//   surplus ≈ 21,940 - 15,150 - 7,584 - 237.5 - 3,792 ≈ -4,824 (NEGATIVE, far from $17K)
-const fxSurplusBug: DashboardInputs = {
+// selectMonthlySurplus — debt-aware regression fixtures
+// =====================================================
+// We must verify BOTH modes produce the same answer when the underlying
+// economic reality is identical — i.e. whether the user logs
+//   $15K "all-in" expenses including mortgage, OR
+//   $7K "core" expenses + $8K debt service tracked separately
+// the surplus must be the SAME number, never double-subtracted.
+
+const SHARED_INCOME = 22_000;
+const SHARED_DEBT_SVC = 8_000; // mortgage P&I + other debt + IP P&I, combined
+const SHARED_CORE_EXP = 7_000; // core living only, no debt
+const SHARED_TOTAL_EXP = SHARED_CORE_EXP + SHARED_DEBT_SVC; // 15_000
+
+// To produce ~$8,000/mo of debt service we use a mortgage ~$1.265M @ 6.5%/30y
+// (≈ $7,994) + $19k other debts (≈ $237.50). Close enough to $8k for the test.
+const SURPLUS_FX_BASE = {
   todayIso: fixedToday,
   snapshot: {
-    cash: 0, savings_cash: 40_000, emergency_cash: 0,
-    other_cash: 0, offset_balance: 222_000,
+    cash: 0, savings_cash: 0, emergency_cash: 0, other_cash: 0, offset_balance: 0,
+    ppor: 0,
+    mortgage: 1_265_000, mortgage_rate: 6.5, mortgage_term_years: 30, // ≈ $7,994/mo
+    other_debts: 0, // keep the debt service clean at ≈ $7,994 for arithmetic
+    roham_super_balance: 0, fara_super_balance: 0,
+  },
+  properties: [], stocks: [], cryptos: [], holdingsRaw: [],
+} as const;
+
+function monthsOf(amount: number, category?: string) {
+  return [
+    { date: "2026-05-01", amount, category },
+    { date: "2026-04-01", amount, category },
+    { date: "2026-03-01", amount, category },
+    { date: "2026-02-01", amount, category },
+    { date: "2026-01-01", amount, category },
+    { date: "2025-12-01", amount, category },
+  ];
+}
+function incomeMonths(amount: number) {
+  return monthsOf(amount).map(r => ({ date: r.date, amount: r.amount }));
+}
+
+// Compute the actual debt-service for the shared fixture so the equality
+// assertion below is exact rather than approximate (the contract changes the
+// PMT result; we measure it once and reuse).
+const probeDebt: DashboardInputs = {
+  ...SURPLUS_FX_BASE,
+  incomeRecords: [], expenses: [],
+};
+const DEBT_SVC_ACTUAL = selectMonthlyDebtService(probeDebt);
+const CORE_EXP_FOR_PARITY = Math.round(SHARED_TOTAL_EXP - DEBT_SVC_ACTUAL);
+
+// MODE A — expenses include mortgage/debt (auto-detect via category)
+// Ledger rows have "Housing / Mortgage" + "Debt Repayment" categories.
+// Expected: surplus = income - expenses, NO debt subtraction.
+const fxInclDebt: DashboardInputs = {
+  ...SURPLUS_FX_BASE,
+  incomeRecords: incomeMonths(SHARED_INCOME),
+  expenses: [
+    // Total $15,000/mo: $7k living + $8k debt-flavoured, debt rows are tagged
+    ...monthsOf(SHARED_CORE_EXP, "Groceries"),
+    ...monthsOf(SHARED_DEBT_SVC, "Housing / Mortgage"),
+  ],
+};
+const surplusInclDebt = selectMonthlySurplus(fxInclDebt);
+check("MODE A: auto-detects expensesIncludesDebt=true via category keyword",
+  selectExpensesIncludesDebt(fxInclDebt) === true);
+check(`MODE A: income $22K - expenses $15K (debt inside) = surplus ≈ $7K (got ${surplusInclDebt})`,
+  approx(surplusInclDebt, 7_000, 1));
+check("MODE A: surplus does NOT subtract debt twice",
+  surplusInclDebt > SHARED_INCOME - SHARED_TOTAL_EXP - 100,
+  `surplus=${surplusInclDebt} — must NOT be reduced by another \$8k of debt service`);
+
+// MODE B — expenses EXCLUDE mortgage/debt (core-living only)
+// Ledger rows are tagged "Groceries" / "Utilities" only — auto-detect=false.
+// Expected: surplus = income - expenses - debt service.
+const fxExclDebt: DashboardInputs = {
+  ...SURPLUS_FX_BASE,
+  incomeRecords: incomeMonths(SHARED_INCOME),
+  expenses: monthsOf(CORE_EXP_FOR_PARITY, "Groceries"),
+};
+const surplusExclDebt = selectMonthlySurplus(fxExclDebt);
+check("MODE B: auto-detects expensesIncludesDebt=false (no debt-flavoured rows)",
+  selectExpensesIncludesDebt(fxExclDebt) === false);
+check(`MODE B: income $22K - core $${CORE_EXP_FOR_PARITY} - debt service ≈ surplus $7K (got ${surplusExclDebt})`,
+  approx(surplusExclDebt, 7_000, 1));
+
+// PARITY — the headline invariant: same economic reality => same surplus,
+// regardless of how the user splits expenses vs debt service.
+check("PARITY: MODE A surplus === MODE B surplus (no double-count, no missing-count)",
+  Math.abs(surplusInclDebt - surplusExclDebt) <= 1,
+  `inclDebt=${surplusInclDebt}  exclDebt=${surplusExclDebt}`);
+
+// EXPLICIT OVERRIDE — snapshot.expenses_includes_debt forces the mode
+const fxExplicitInclude: DashboardInputs = {
+  ...SURPLUS_FX_BASE,
+  snapshot: { ...SURPLUS_FX_BASE.snapshot, expenses_includes_debt: true },
+  incomeRecords: incomeMonths(SHARED_INCOME),
+  // No category tags — auto-detect would say false, but the explicit override wins.
+  expenses: monthsOf(SHARED_TOTAL_EXP),
+};
+check("OVERRIDE: snapshot.expenses_includes_debt=true forces include-mode",
+  selectExpensesIncludesDebt(fxExplicitInclude) === true &&
+    approx(selectMonthlySurplus(fxExplicitInclude), 7_000, 1));
+
+const fxExplicitExclude: DashboardInputs = {
+  ...SURPLUS_FX_BASE,
+  snapshot: { ...SURPLUS_FX_BASE.snapshot, expenses_includes_debt: false },
+  incomeRecords: incomeMonths(SHARED_INCOME),
+  // Debt-flavoured rows present, but explicit override forces exclude-mode.
+  expenses: monthsOf(CORE_EXP_FOR_PARITY, "Housing / Mortgage"),
+};
+check("OVERRIDE: snapshot.expenses_includes_debt=false forces exclude-mode",
+  selectExpensesIncludesDebt(fxExplicitExclude) === false &&
+    approx(selectMonthlySurplus(fxExplicitExclude), 7_000, 1));
+
+// SNAPSHOT-ONLY FALLBACK — no ledger; manual master is treated as inclusive
+const fxSnapshotOnly: DashboardInputs = {
+  ...SURPLUS_FX_BASE,
+  snapshot: { ...SURPLUS_FX_BASE.snapshot, monthly_income: SHARED_INCOME, monthly_expenses: SHARED_TOTAL_EXP },
+  incomeRecords: [], expenses: [],
+};
+check("FALLBACK: snapshot-only mode defaults expensesIncludesDebt=true (no debt re-subtracted)",
+  selectExpensesIncludesDebt(fxSnapshotOnly) === true &&
+    approx(selectMonthlySurplus(fxSnapshotOnly), 7_000, 1));
+
+// $17K phantom-surplus regression (the original bug from #FixSingleSourceOfTruth)
+// Snapshot override $4,500, ledger $15K, income $21,940 — ledger must win,
+// and we must never see $17,440 again.
+const fxPhantom17k: DashboardInputs = {
+  todayIso: fixedToday,
+  snapshot: {
+    cash: 0, savings_cash: 40_000, emergency_cash: 0, other_cash: 0, offset_balance: 222_000,
     ppor: 0, mortgage: 1_200_000, mortgage_rate: 6.5, mortgage_term_years: 30,
     other_debts: 19_000,
-    roham_super_balance: 49_500, fara_super_balance: 38_500,
-    monthly_income: 21_940, monthly_expenses: 4_500, // <-- the buggy override
+    monthly_income: 21_940, monthly_expenses: 4_500,
   },
   properties: [
     { id: 1, type: "investment", current_value: 750_000, loan_amount: 600_000,
       settlement_date: "2024-01-01", weekly_rent: 600, vacancy_rate: 5, management_fee: 8 },
   ],
   stocks: [], cryptos: [], holdingsRaw: [],
-  incomeRecords: [
-    { date: "2026-05-01", amount: 21_940 },
-    { date: "2026-04-01", amount: 21_940 },
-    { date: "2026-03-01", amount: 21_940 },
-    { date: "2026-02-01", amount: 21_940 },
-    { date: "2026-01-01", amount: 21_940 },
-    { date: "2025-12-01", amount: 21_940 },
-  ],
+  incomeRecords: incomeMonths(21_940),
   expenses: [
-    { date: "2026-05-01", amount: 15_150 },
-    { date: "2026-04-01", amount: 15_150 },
-    { date: "2026-03-01", amount: 15_150 },
-    { date: "2026-02-01", amount: 15_150 },
-    { date: "2026-01-01", amount: 15_150 },
-    { date: "2025-12-01", amount: 15_150 },
+    ...monthsOf(11_400, "Groceries"),
+    ...monthsOf(3_750, "Housing / Mortgage"),
   ],
 };
-const surplusBug = selectMonthlySurplus(fxSurplusBug);
-check("selectMonthlySurplus uses ledger expenses, NOT $4,500 snapshot override",
-  Math.abs(surplusBug - (21_940 - 4_500)) > 10_000,
-  `surplus=${surplusBug} — must be far from naive income-snapshot=$17,440`);
-check("selectMonthlySurplus subtracts mortgage P&I (~$7,584)",
-  surplusBug < 21_940 - 15_150 - 5_000,
-  `surplus=${surplusBug} — must be at least ~$5k below (income-ledger expenses) due to mortgage`);
-check("selectMonthlySurplus subtracts settled-IP debt service",
-  selectSettledIpDebtService(fxSurplusBug) > 3_000,
-  `IP debt service=${selectSettledIpDebtService(fxSurplusBug).toFixed(2)} — must be ≥ $3k for $600k loan`);
-check("selectMonthlySurplus is realistically near zero or negative for this fixture",
-  surplusBug < 0,
-  `surplus=${surplusBug} — expected negative once all debt service is included`);
-
-// Plan-expenses must mirror budget when override is OFF
-// (we simulate the financial-plan side by re-using selectMonthlyExpensesLedger)
-check("financial-plan auto-mode expenses === selectMonthlyExpensesLedger",
-  selectMonthlyExpensesLedger(fxExpensesLedger) ===
-    selectMonthlyExpensesLedger({ ...fxExpensesLedger }));
+const surplusPhantom = selectMonthlySurplus(fxPhantom17k);
+check("REGRESSION: surplus never re-equals the $17,440 phantom",
+  Math.abs(surplusPhantom - 17_440) > 5_000,
+  `surplus=${surplusPhantom}`);
+check("REGRESSION: surplus uses ledger ($15,150 total), not $4,500 snapshot override",
+  surplusPhantom < 21_940 - 4_500 - 1_000,
+  `surplus=${surplusPhantom}— ledger total $15,150 must win over snapshot $4,500`);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Result

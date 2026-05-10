@@ -64,7 +64,7 @@ export const KPI_DATA_CONTRACT: Record<string, CardContract> = {
     label: "MONTHLY SURPLUS",
     tier: "actual",
     formula:
-      "monthlyIncome - monthlyExpensesLedger - mortgageRepayment - otherDebtRepayment",
+      "income - expenses [- debt if NOT already in expenses] (selectExpensesIncludesDebt gates the debt subtraction; default true)",
     sources: [
       // Income (SoT: sf_income ledger → sub-fields → master)
       { table: "sf_income",   column: "amount",                  note: "trailing 6mo average — PRIMARY when populated" },
@@ -478,29 +478,102 @@ export function selectSettledIpDebtService(i: DashboardInputs): number {
 }
 
 /**
+ * Aggregate monthly debt service from the debt module:
+ *   PPOR mortgage P&I + other debt minimum + settled IP P&I
+ * This is the ONE figure to subtract from surplus when expenses are net of debt.
+ */
+export function selectMonthlyDebtService(i: DashboardInputs): number {
+  return (
+    selectMortgageRepayment(i)
+      + selectOtherDebtRepayment(i)
+      + selectSettledIpDebtService(i)
+  );
+}
+
+/**
+ * Category keywords that indicate a ledger row is a debt repayment, not a
+ * living expense. Case-insensitive substring match. Keep this list narrow so
+ * we don't accidentally flag general living expenses.
+ */
+const DEBT_CATEGORY_KEYWORDS = [
+  "mortgage",
+  "home loan",
+  "housing / mortgage",
+  "debt repayment",
+  "loan repayment",
+  "car loan",
+  "personal loan",
+  "credit card",
+  "investment loan",
+  "ip loan",
+];
+
+function looksLikeDebtCategory(cat: unknown): boolean {
+  if (typeof cat !== "string") return false;
+  const c = cat.toLowerCase();
+  return DEBT_CATEGORY_KEYWORDS.some(k => c.includes(k));
+}
+
+/**
+ * Does the expense source already include mortgage / debt repayments?
+ *
+ * Priority:
+ *   1. Explicit override on snapshot.expenses_includes_debt (true/false)
+ *   2. Auto-detect: scan recent sf_expenses rows for debt-flavoured categories.
+ *      If ANY exist, the ledger is treated as already-inclusive.
+ *   3. Fallback when ledger empty: assume snapshot.monthly_expenses is a
+ *      household total that INCLUDES debt (this is how most users enter it,
+ *      and is the safer default — under-subtraction is safer than the
+ *      $17K phantom-surplus over-subtraction we just fixed).
+ */
+export function selectExpensesIncludesDebt(i: DashboardInputs): boolean {
+  const s: any = i.snapshot ?? {};
+  if (typeof s.expenses_includes_debt === "boolean") {
+    return s.expenses_includes_debt;
+  }
+  if (typeof s.debt_already_included_in_expenses === "boolean") {
+    return s.debt_already_included_in_expenses;
+  }
+  const rows = Array.isArray(i.expenses) ? i.expenses : [];
+  if (rows.length > 0) {
+    return rows.some((r: any) => looksLikeDebtCategory(r?.category));
+  }
+  return true; // snapshot-only mode: treat manual total as inclusive
+}
+
+/**
  * MONTHLY SURPLUS — the headline KPI.
  *
- * Formula:
- *   surplus = monthlyIncome
- *           − monthlyExpensesLedger          (ledger does NOT include mortgage)
- *           − mortgageRepayment              (PPOR P&I from debt module)
- *           − otherDebtRepayment             (cards/personal loans minimum)
- *           − settledIpDebtService           (IP loan P&I, settled only)
+ * Two modes, gated by `selectExpensesIncludesDebt`:
  *
- * The old formula was `income − expenses` with no debt service, which silently
- * over-reported surplus by the entire mortgage repayment (~\$7,584/mo at
- * \$1.2M principal). This selector is now the only path that produces the
- * dashboard surplus number; manual sf_snapshot.monthly_expenses overrides are
- * relegated to a ledger-empty fallback.
+ *   A) expensesIncludesDebt = true   (DEFAULT — ledger has Mortgage/Loan rows,
+ *                                     OR snapshot-only fallback)
+ *      surplus = monthlyIncome − monthlyExpensesLedger
+ *      (debt is already baked into expenses; do NOT subtract it again)
+ *
+ *   B) expensesIncludesDebt = false  (ledger is core-living-only, debt tracked
+ *                                     separately in debt module)
+ *      surplus = monthlyIncome − monthlyExpensesLedger
+ *                              − mortgageRepayment
+ *                              − otherDebtRepayment
+ *                              − settledIpDebtService
+ *
+ * History (regressions this selector now pins):
+ *   • Original bug: `income − expenses` with `monthlyMortgageRepay = 0` and
+ *     `monthly_expenses = $4,500` snapshot override winning over ledger ⇒
+ *     phantom \$17K surplus.
+ *   • SoT-v1 fix over-corrected: it ALWAYS subtracted mortgage + other_debt,
+ *     which double-counted because ledger rows already included "Housing /
+ *     Mortgage" \$3,750/mo + "Debt Repayment" \$1,460/mo + "Car Loan" rows.
+ *   • SoT-v2 (this version): debt-aware, with override + auto-detect.
  */
 export function selectMonthlySurplus(i: DashboardInputs): number {
-  return Math.round(
-    selectMonthlyIncome(i)
-      - selectMonthlyExpensesLedger(i)
-      - selectMortgageRepayment(i)
-      - selectOtherDebtRepayment(i)
-      - selectSettledIpDebtService(i),
-  );
+  const income = selectMonthlyIncome(i);
+  const expenses = selectMonthlyExpensesLedger(i);
+  if (selectExpensesIncludesDebt(i)) {
+    return Math.round(income - expenses);
+  }
+  return Math.round(income - expenses - selectMonthlyDebtService(i));
 }
 
 export function selectCashToday(i: DashboardInputs): number {

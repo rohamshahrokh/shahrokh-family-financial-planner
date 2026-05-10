@@ -36,6 +36,8 @@ import {
   selectMortgageRepayment,
   selectOtherDebtRepayment,
   selectSettledIpDebtService,
+  selectMonthlyDebtService,
+  selectExpensesIncludesDebt,
   selectMonthlySurplus,
   evaluateDataAvailability,
   type DashboardInputs,
@@ -992,10 +994,17 @@ export default function DashboardPage() {
   const monthlyMortgageRepay   = selectMortgageRepayment(_contractInputs);
   const monthlyOtherDebtRepay  = selectOtherDebtRepayment(_contractInputs);
   const monthlyIpDebtService   = selectSettledIpDebtService(_contractInputs);
-  const totalMonthlyOutgoings  = monthlyExpensesSOT
-    + monthlyMortgageRepay
-    + monthlyOtherDebtRepay
-    + monthlyIpDebtService;
+  const monthlyDebtServiceSOT  = selectMonthlyDebtService(_contractInputs);
+  // True when expenses already include mortgage/debt rows (ledger has
+  // "Housing / Mortgage", "Debt Repayment", etc.). In that case we MUST NOT
+  // subtract debt again — doing so double-counts.
+  const expensesIncludesDebt   = selectExpensesIncludesDebt(_contractInputs);
+  // For downstream cards/charts that need the household's true monthly
+  // outflow: when debt is already in expenses, outgoings == expenses;
+  // otherwise add debt service.
+  const totalMonthlyOutgoings  = expensesIncludesDebt
+    ? monthlyExpensesSOT
+    : monthlyExpensesSOT + monthlyDebtServiceSOT;
   const surplus                = selectMonthlySurplus(_contractInputs);
   const savingsRate            = calcSavingsRate(monthlyIncomeSOT, totalMonthlyOutgoings);
 
@@ -1572,11 +1581,15 @@ export default function DashboardPage() {
       const cat = e.category || "Other";
       cats[cat] = (cats[cat] || 0) + safeNum(e.monthly_amount || e.amount);
     });
-    if (snap.mortgage > 0) cats["Mortgage"] = (cats["Mortgage"] || 0) + monthlyMortgageRepay;
+    // Only add a separate "Mortgage" slice if expenses DO NOT already include
+    // mortgage rows — otherwise the pie double-counts the same dollars.
+    if (!expensesIncludesDebt && snap.mortgage > 0) {
+      cats["Mortgage"] = (cats["Mortgage"] || 0) + monthlyMortgageRepay;
+    }
     return Object.entries(cats).map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 7);
-  }, [expenses, snap.mortgage]);
+  }, [expenses, snap.mortgage, expensesIncludesDebt, monthlyMortgageRepay]);
 
   // ─── NG per-property display ──────────────────────────────────────────────
   const ngProperties = useMemo(() => {
@@ -2011,11 +2024,10 @@ export default function DashboardPage() {
             value={maskValue(formatCurrency(surplus, true), privacyMode)}
             subValue={
               maskValue(
-                // Show the full SoT breakdown so users can verify what's in/out.
-                `Inc ${formatCurrency(monthlyIncomeSOT, true)} − Exp ${formatCurrency(monthlyExpensesSOT, true)} − Debt ${formatCurrency(
-                  monthlyMortgageRepay + monthlyOtherDebtRepay + monthlyIpDebtService,
-                  true,
-                )}`,
+                // Debt-aware breakdown so users can verify what's in/out.
+                expensesIncludesDebt
+                  ? `Inc ${formatCurrency(monthlyIncomeSOT, true)} − Exp ${formatCurrency(monthlyExpensesSOT, true)} (debt incl.) = ${formatCurrency(surplus, true)}`
+                  : `Inc ${formatCurrency(monthlyIncomeSOT, true)} − Exp ${formatCurrency(monthlyExpensesSOT, true)} − Debt ${formatCurrency(monthlyDebtServiceSOT, true)} = ${formatCurrency(surplus, true)}`,
                 privacyMode,
               )
             }
