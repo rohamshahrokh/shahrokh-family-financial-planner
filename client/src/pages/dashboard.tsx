@@ -733,7 +733,57 @@ export default function DashboardPage() {
 
   const snap = useMemo(() => {
     if (!snapshot) return SNAP_ZERO;
-    const s = snapshot;
+    const s: any = snapshot;
+
+    // ── Super: schema columns are roham_super_balance / fara_super_balance ──
+    // Legacy code referenced super_roham / super_fara which no longer exist on
+    // sf_snapshot. Read the per-person balances and fall back to the legacy
+    // names + the aggregate super_balance for backward compatibility.
+    const superRoham = safeNum(
+      s.roham_super_balance ?? s.super_roham ?? 0
+    );
+    const superFara  = safeNum(
+      s.fara_super_balance  ?? s.super_fara  ?? 0
+    );
+    // If master super_balance is 0 but per-person balances exist, surface the sum.
+    const superMaster = safeNum(s.super_balance);
+    const superTotal  = superMaster > 0 ? superMaster : (superRoham + superFara);
+
+    // ── Income: master monthly_income may be 0 while sub-fields hold the truth ──
+    // Order of precedence: master snapshot field → sum of sub-fields → derived
+    // from the last 6 months of sf_income transactions (handled below).
+    const masterIncome = safeNum(s.monthly_income);
+    const subIncomeMonthly =
+      safeNum(s.roham_monthly_income) +
+      safeNum(s.fara_monthly_income) +
+      safeNum(s.rental_income_total) +
+      safeNum(s.other_income);
+    let monthlyIncome = masterIncome > 0 ? masterIncome : subIncomeMonthly;
+
+    // Fallback: derive from sf_income transactions in the last 6 months.
+    // Only used if both master + sub-fields are zero so user-entered values
+    // always take precedence.
+    if (monthlyIncome === 0 && Array.isArray(incomeRecords) && incomeRecords.length > 0) {
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      const cutoff = sixMonthsAgo.toISOString().split('T')[0];
+      const recent = incomeRecords.filter((r: any) => (r.date ?? '') >= cutoff);
+      const total  = recent.reduce((sum: number, r: any) => sum + safeNum(r.amount), 0);
+      if (total > 0) monthlyIncome = Math.round(total / 6);
+    }
+
+    // ── Expenses: master monthly_expenses may be 0; derive from sf_expenses ──
+    const masterExpenses = safeNum(s.monthly_expenses);
+    let monthlyExpenses = masterExpenses;
+    if (monthlyExpenses === 0 && Array.isArray(expenses) && expenses.length > 0) {
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      const cutoff = sixMonthsAgo.toISOString().split('T')[0];
+      const recent = expenses.filter((e: any) => (e.date ?? '') >= cutoff);
+      const total  = recent.reduce((sum: number, e: any) => sum + safeNum(e.amount), 0);
+      if (total > 0) monthlyExpenses = Math.round(total / 6);
+    }
+
     return {
       ppor:             safeNum(s.ppor),
       // Everyday cash (transaction/chequing account)
@@ -743,19 +793,19 @@ export default function DashboardPage() {
       savings_cash:     safeNum(s.savings_cash),
       emergency_cash:   safeNum(s.emergency_cash),
       other_cash:       safeNum(s.other_cash),
-      super_balance:    safeNum(s.super_balance),
-      super_roham:      safeNum(s.super_roham ?? s.super_balance),
-      super_fara:       safeNum(s.super_fara),
+      super_balance:    superTotal,
+      super_roham:      superRoham,
+      super_fara:       superFara,
       cars:             safeNum(s.cars),
       iran_property:    safeNum(s.iran_property),
       mortgage:         safeNum(s.mortgage),
       other_debts:      safeNum(s.other_debts),
-      monthly_income:   safeNum(s.monthly_income),
-      monthly_expenses: safeNum(s.monthly_expenses),
+      monthly_income:   monthlyIncome,
+      monthly_expenses: monthlyExpenses,
       mortgage_rate:    safeNum(s.mortgage_rate) || 6.5,
       mortgage_term_years: safeNum(s.mortgage_term_years) || 30,
     };
-  }, [snapshot]);
+  }, [snapshot, incomeRecords, expenses]);
 
   // Live stocks / crypto from holdings
   const liveStocks = useMemo(() =>
