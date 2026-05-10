@@ -798,6 +798,12 @@ export default function DashboardPage() {
       super_fara:       superFara,
       cars:             safeNum(s.cars),
       iran_property:    safeNum(s.iran_property),
+      // Manual portfolio totals on the snapshot itself — these are user-entered
+      // aggregates (e.g. “I have \$50k in stocks”) that should be surfaced when
+      // the per-ticker holdings tables are empty.
+      stocks:           safeNum(s.stocks),
+      crypto:           safeNum(s.crypto),
+      other_assets:     safeNum(s.other_assets),
       mortgage:         safeNum(s.mortgage),
       other_debts:      safeNum(s.other_debts),
       monthly_income:   monthlyIncome,
@@ -807,15 +813,34 @@ export default function DashboardPage() {
     };
   }, [snapshot, incomeRecords, expenses]);
 
-  // Live stocks / crypto from holdings
+  // ─── Live stocks / crypto value (multi-source, picks highest available) ──────
+  // Three possible sources, each with different data shapes:
+  //   1. holdingsRaw  → unified portfolio API (asset_type + current_value)
+  //   2. sf_stocks / sf_crypto  → per-ticker rows with current_price *
+  //                                current_holding  (NOT current_value — that
+  //                                column doesn't exist in the live schema)
+  //   3. snap.stocks / snap.crypto  → manual aggregate on sf_snapshot
+  // Bug pre-fix: the dashboard only summed (1) and a non-existent
+  // `current_value` column on (2), producing 0 for users who entered values
+  // via the manual snapshot form (3).
   const liveStocks = useMemo(() =>
     (holdingsRaw ?? []).filter((h: any) => h.asset_type === "stock").reduce((sum: number, h: any) => sum + safeNum(h.current_value), 0),
     [holdingsRaw]);
   const liveCrypto = useMemo(() =>
     (holdingsRaw ?? []).filter((h: any) => h.asset_type === "crypto").reduce((sum: number, h: any) => sum + safeNum(h.current_value), 0),
     [holdingsRaw]);
-  const stocksTotal = liveStocks || (stocks ?? []).reduce((s: number, x: any) => s + safeNum(x.current_value), 0);
-  const cryptoTotal = liveCrypto || (cryptos ?? []).reduce((s: number, x: any) => s + safeNum(x.current_value), 0);
+  // Per-ticker market value (current_price × current_holding) — fixes the
+  // bug where the previous code looked for a non-existent `current_value`.
+  const tickerStocksValue = (stocks ?? []).reduce(
+    (s: number, x: any) => s + safeNum(x.current_value ?? (safeNum(x.current_price) * safeNum(x.current_holding))),
+    0);
+  const tickerCryptoValue = (cryptos ?? []).reduce(
+    (s: number, x: any) => s + safeNum(x.current_value ?? (safeNum(x.current_price) * safeNum(x.current_holding))),
+    0);
+  // Pick the highest value among all sources so manual snapshot entries are
+  // never silently overridden by an empty live-holdings feed.
+  const stocksTotal = Math.max(liveStocks, tickerStocksValue, snap.stocks);
+  const cryptoTotal = Math.max(liveCrypto, tickerCryptoValue, snap.crypto);
 
   const _totalSuperNow = snap.super_roham + snap.super_fara;
 
@@ -859,11 +884,76 @@ export default function DashboardPage() {
   // PPOR equity from snapshot (separate from IP equity)
   const _ppoEquity = snap.ppor - snap.mortgage;
 
-  const totalAssets   = snap.ppor + totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property + ipCurrentValueSettled;
+  const totalAssets   = snap.ppor + totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property + snap.other_assets + ipCurrentValueSettled;
   const totalLiab     = snap.mortgage + snap.other_debts + ipLoanBalanceSettled;
   const netWorth      = totalAssets - totalLiab;
   // Combined property equity = PPOR equity + settled-IP equity (matches Total Assets / Liab)
   const propertyEquity = _ppoEquity + ipEquitySettled;
+
+  // ─── [Dashboard] Diagnostic logs (TEMPORARY) ───────────────────────────────
+  // Surface every input that drives the four KPI cards so the user can verify
+  // exactly what the dashboard is reading. Remove once the source-of-truth for
+  // current balances is confirmed and stable.
+  if (typeof window !== 'undefined' && snapshot) {
+    /* eslint-disable no-console */
+    console.groupCollapsed('[Dashboard] KPI calculation inputs');
+    console.log('TOTAL INVESTMENTS', {
+      result_value: stocksTotal + cryptoTotal + ipCurrentValueSettled,
+      stocksTotal, cryptoTotal, ipCurrentValueSettled,
+      sources: {
+        liveStocks, tickerStocksValue, snap_stocks: snap.stocks,
+        liveCrypto, tickerCryptoValue, snap_crypto: snap.crypto,
+        settled_ip_count: _settledIPs.length,
+        planned_ip_count: _plannedIPs.length,
+        planned_ip_value: ipCurrentValuePlanned,
+      },
+    });
+    console.log('PROPERTY EQUITY', {
+      result_value: propertyEquity,
+      ppor_equity: _ppoEquity,
+      ip_equity_settled: ipEquitySettled,
+      sources: {
+        ppor: snap.ppor, mortgage: snap.mortgage,
+        ipCurrentValueSettled, ipLoanBalanceSettled,
+        ipCurrentValuePlanned, ipLoanBalancePlanned,
+      },
+    });
+    console.log('DEBT BALANCE', {
+      result_value: totalLiab,
+      sources: {
+        snap_mortgage: snap.mortgage,
+        snap_other_debts: snap.other_debts,
+        ipLoanBalanceSettled, ipLoanBalancePlanned,
+      },
+    });
+    console.log('SNAPSHOT_RAW (key fields)', {
+      ppor: (snapshot as any)?.ppor, mortgage: (snapshot as any)?.mortgage,
+      stocks: (snapshot as any)?.stocks, crypto: (snapshot as any)?.crypto,
+      other_assets: (snapshot as any)?.other_assets,
+      other_debts: (snapshot as any)?.other_debts,
+      super_balance: (snapshot as any)?.super_balance,
+      roham_super_balance: (snapshot as any)?.roham_super_balance,
+      fara_super_balance: (snapshot as any)?.fara_super_balance,
+    });
+    console.log('PROPERTIES_RAW', (properties as any[] ?? []).map((p: any) => ({
+      id: p.id, name: p.name, type: p.type,
+      current_value: p.current_value, loan_amount: p.loan_amount,
+      settlement_date: p.settlement_date, weekly_rent: p.weekly_rent,
+    })));
+    console.log('STOCKS_RAW', (stocks ?? []).map((x: any) => ({
+      ticker: x.ticker, current_price: x.current_price,
+      current_holding: x.current_holding,
+      mv: safeNum(x.current_price) * safeNum(x.current_holding),
+    })));
+    console.log('CRYPTO_RAW', (cryptos ?? []).map((x: any) => ({
+      symbol: x.symbol, current_price: x.current_price,
+      current_holding: x.current_holding,
+      mv: safeNum(x.current_price) * safeNum(x.current_holding),
+    })));
+    console.log('HOLDINGS_RAW (unified API)', (holdingsRaw ?? []));
+    console.groupEnd();
+    /* eslint-enable no-console */
+  }
   // Mortgage is already included in monthly_expenses — do not deduct again
   const monthlyMortgageRepay = 0;
   const surplus       = snap.monthly_income - snap.monthly_expenses;
@@ -905,22 +995,45 @@ export default function DashboardPage() {
     });
   }, [snapshot, snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
   const year10NW      = projection[9]?.endNetWorth || netWorth;
-  // Passive income: only count properties already settled + actual stock/crypto dividends today
-  // projection[0] includes future planned properties (e.g. July IP) which inflates today's figure
+  // Passive income: rental from settled IPs + snapshot-level rental_income_total
+  // + estimated dividends from current stock / crypto holdings.
+  // "Settled" = settlement_date ≤ today (planned IPs still in the future are
+  // surfaced in the card sub-text, never added to current passive income).
   const todayStr = new Date().toISOString().split('T')[0];
   const passiveIncome = useMemo(() => {
     const settledProperties = (properties ?? []).filter((p: any) =>
-      p.type !== 'ppor' && p.settlement_date && p.settlement_date <= todayStr
+      p.type !== 'ppor' && p.type !== 'owner_occupied' &&
+      (!p.settlement_date || p.settlement_date <= todayStr)
     );
-    const annualRental = settledProperties.reduce((sum: number, p: any) => {
+    const annualRentalFromIPs = settledProperties.reduce((sum: number, p: any) => {
       const wRent = safeNum(p.weekly_rent);
       const vacancy = safeNum(p.vacancy_rate) || 0;
       const mgmt = safeNum(p.management_fee) || 0;
       return sum + wRent * 52 * (1 - vacancy / 100) * (1 - mgmt / 100);
     }, 0);
+    // Manual rental override on the snapshot (annualises monthly rental_income_total)
+    const annualRentalManual = safeNum((snapshot as any)?.rental_income_total) * 12;
+    const annualRental = Math.max(annualRentalFromIPs, annualRentalManual);
+    // Manual other-income override (treat as passive too)
+    const annualOtherPassive = safeNum((snapshot as any)?.other_income) * 12;
     const annualDividends = stocksTotal * 0.02 + cryptoTotal * 0.01;
-    return Math.round(annualRental + annualDividends);
-  }, [properties, stocksTotal, cryptoTotal, todayStr]);
+    const total = Math.round(annualRental + annualOtherPassive + annualDividends);
+    if (typeof window !== 'undefined') {
+      // eslint-disable-next-line no-console
+      console.log('[Dashboard] PASSIVE INCOME', {
+        result_value: total,
+        annualRentalFromIPs, annualRentalManual,
+        annualOtherPassive, annualDividends,
+        sources: {
+          settled_ip_count: settledProperties.length,
+          rental_income_total_monthly: (snapshot as any)?.rental_income_total,
+          other_income_monthly: (snapshot as any)?.other_income,
+          stocksTotal, cryptoTotal,
+        },
+      });
+    }
+    return total;
+  }, [properties, stocksTotal, cryptoTotal, todayStr, snapshot]);
 
   // ─── Equity Engine ─────────────────────────────────────────────────────────
   // Investment properties (all non-PPOR from /api/properties)
