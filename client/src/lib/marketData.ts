@@ -117,157 +117,123 @@ export function isFresh(entry: PriceEntry | null, ttl: number): boolean {
   return Date.now() - entry.fetchedAt < ttl;
 }
 
-// ─── Proxy helpers ────────────────────────────────────────────────────────────
+// ─── Server-side market-data snapshot ────────────────────────────────────────
+//
+// All upstream price/news/F&G/FX fetches go through our own serverless
+// function /api/market-data (api/market-data.ts). That endpoint already
+// implements Yahoo/Stooq/CoinGecko/Binance fallback, RSS, and per-symbol
+// isolation, and runs server-side so there is NO browser CORS exposure.
+//
+// We share a single in-flight promise so dozens of fetchStockPrice() callers
+// turn into ONE HTTP request, with a short memo (30s) on top of the server's
+// own 2-5 min cache.
 
-const PROXIES = [
-  (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-];
+interface ServerSnapshot {
+  prices: Record<string, { price: number; change: number; source: string }>;
+  indices: Record<string, { price: number; change: number; source: string }>;
+  news: Record<string, unknown[]>;
+  fearGreed: number | null;
+  fearGreedLabel: string;
+  lastUpdated: string;
+  dataStatus: 'live' | 'partial' | 'cached' | 'failed';
+  stale: boolean;
+  failedSymbols: string[];
+}
 
-async function fetchWithProxy(url: string, parseJson = true): Promise<any | null> {
-  for (const mkProxy of PROXIES) {
-    const proxy = mkProxy(url);
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const res = await fetch(proxy, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
-        if (!res.ok) continue;
-        if (parseJson) return await res.json();
-        return await res.text();
-      } catch { /* try next */ }
-    }
+const SNAPSHOT_MEMO_TTL = 30_000; // 30s — server already caches 2–5 min
+let _snapshotMemo: { ts: number; data: ServerSnapshot } | null = null;
+let _snapshotInflight: Promise<ServerSnapshot | null> | null = null;
+
+async function fetchServerSnapshot(): Promise<ServerSnapshot | null> {
+  // Reuse fresh memo
+  if (_snapshotMemo && Date.now() - _snapshotMemo.ts < SNAPSHOT_MEMO_TTL) {
+    return _snapshotMemo.data;
   }
-  return null;
+  // Coalesce concurrent callers
+  if (_snapshotInflight) return _snapshotInflight;
+
+  _snapshotInflight = (async () => {
+    try {
+      const res = await fetch('/api/market-data', {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as ServerSnapshot;
+      _snapshotMemo = { ts: Date.now(), data };
+      return data;
+    } catch {
+      return null;
+    } finally {
+      _snapshotInflight = null;
+    }
+  })();
+  return _snapshotInflight;
 }
 
-// ─── Stock price fetchers ─────────────────────────────────────────────────────
+// ─── Stock price (via server proxy) ──────────────────────────────────────────
 
-async function fetchStockYahoo(ticker: string): Promise<PriceEntry | null> {
-  const sym = YAHOO_TICKER_MAP[ticker] ?? ticker;
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=2d`;
-  const data = await fetchWithProxy(url, true);
-  if (!data) return null;
-  const meta = data?.chart?.result?.[0]?.meta;
-  if (!meta) return null;
-  const price = meta.regularMarketPrice ?? 0;
-  if (!price) return null;
-  const prev = meta.chartPreviousClose ?? meta.previousClose ?? price;
-  const change24h = prev > 0 ? ((price - prev) / prev) * 100 : 0;
-  return { price, change24h, fetchedAt: Date.now(), source: "yahoo" };
-}
-
-async function fetchStockStooq(ticker: string): Promise<PriceEntry | null> {
-  // Stooq uses lowercase symbols
-  const sym = ticker.toLowerCase();
-  const url = `https://stooq.com/q/l/?s=${sym}&f=sd2t2ohlcvn&h&e=csv`;
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
-    if (!res.ok) return null;
-    const csv = await res.text();
-    const lines = csv.trim().split("\n");
-    if (lines.length < 2) return null;
-    const cols = lines[1].split(",");
-    const price = parseFloat(cols[6] ?? "0");
-    const open  = parseFloat(cols[3] ?? "0");
-    if (!price) return null;
-    const change24h = open > 0 ? ((price - open) / open) * 100 : 0;
-    return { price, change24h, fetchedAt: Date.now(), source: "stooq" };
-  } catch { return null; }
+function snapshotPriceToEntry(
+  p: { price: number; change: number; source: string } | undefined,
+): PriceEntry | null {
+  if (!p || !p.price || p.price <= 0) return null;
+  return {
+    price: p.price,
+    change24h: p.change ?? 0,
+    fetchedAt: Date.now(),
+    source: p.source ?? 'server',
+  };
 }
 
 /**
- * Fetch a single stock price with multi-source fallback.
- * Returns cached value if still fresh.
- * Returns stale cache if all sources fail (never blank).
+ * Fetch a single stock price via /api/market-data (server-side fallback chain).
+ * Returns cached value if still fresh. Returns stale cache if the server
+ * snapshot is unavailable (never blank).
  */
 export async function fetchStockPrice(ticker: string): Promise<PriceEntry | null> {
   const cached = getCached(ticker);
   if (isFresh(cached, STOCK_TTL)) return cached;
 
-  const sources = [
-    () => fetchStockYahoo(ticker),
-    () => fetchStockStooq(ticker),
-  ];
-
-  for (const src of sources) {
-    try {
-      const result = await src();
-      if (result) {
-        setCached(ticker, result);
-        return result;
-      }
-    } catch { /* try next */ }
+  const snap = await fetchServerSnapshot();
+  const entry = snapshotPriceToEntry(snap?.prices[ticker.toUpperCase()]);
+  if (entry) {
+    setCached(ticker, entry);
+    return entry;
   }
 
-  // All sources failed — return stale cache if available
   if (cached) {
-    console.warn(`[MarketData] All sources failed for ${ticker} — using stale cache (${Math.round((Date.now() - cached.fetchedAt) / 60000)} min old)`);
+    console.warn(
+      `[MarketData] No live price for ${ticker} — using stale cache (${Math.round(
+        (Date.now() - cached.fetchedAt) / 60000,
+      )} min old)`,
+    );
     return cached;
   }
-  console.error(`[MarketData] No data at all for ${ticker}`);
+  console.warn(`[MarketData] No data at all for ${ticker}`);
   return null;
 }
 
-// ─── Crypto price fetchers ────────────────────────────────────────────────────
-
-async function fetchCryptoCoinGecko(symbol: string): Promise<PriceEntry | null> {
-  const id = COINGECKO_ID[symbol.toUpperCase()] ?? symbol.toLowerCase();
-  try {
-    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
-    if (!res.ok) throw new Error("coingecko failed");
-    const data = await res.json();
-    const entry = data[id];
-    if (!entry?.usd) return null;
-    return {
-      price: entry.usd,
-      change24h: entry.usd_24h_change ?? 0,
-      fetchedAt: Date.now(),
-      source: "coingecko",
-    };
-  } catch { return null; }
-}
-
-async function fetchCryptoBinance(symbol: string): Promise<PriceEntry | null> {
-  const pair = BINANCE_PAIR[symbol.toUpperCase()];
-  if (!pair) return null;
-  try {
-    const ticker24h = await fetch(
-      `https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`,
-      { signal: AbortSignal.timeout(FETCH_TIMEOUT) }
-    );
-    if (!ticker24h.ok) return null;
-    const d = await ticker24h.json();
-    const price = parseFloat(d.lastPrice ?? "0");
-    if (!price) return null;
-    const change24h = parseFloat(d.priceChangePercent ?? "0");
-    return { price, change24h, fetchedAt: Date.now(), source: "binance" };
-  } catch { return null; }
-}
+// ─── Crypto price (via server proxy) ─────────────────────────────────────────
 
 export async function fetchCryptoPrice(symbol: string): Promise<PriceEntry | null> {
   const cached = getCached(symbol);
   if (isFresh(cached, CRYPTO_TTL)) return cached;
 
-  const sources = [
-    () => fetchCryptoCoinGecko(symbol),
-    () => fetchCryptoBinance(symbol),
-  ];
-
-  for (const src of sources) {
-    try {
-      const result = await src();
-      if (result) {
-        setCached(symbol, result);
-        return result;
-      }
-    } catch { /* try next */ }
+  const snap = await fetchServerSnapshot();
+  const entry = snapshotPriceToEntry(snap?.prices[symbol.toUpperCase()]);
+  if (entry) {
+    setCached(symbol, entry);
+    return entry;
   }
 
   if (cached) {
-    console.warn(`[MarketData] All sources failed for ${symbol} — using stale cache (${Math.round((Date.now() - cached.fetchedAt) / 60000)} min old)`);
+    console.warn(
+      `[MarketData] No live price for ${symbol} — using stale cache (${Math.round(
+        (Date.now() - cached.fetchedAt) / 60000,
+      )} min old)`,
+    );
     return cached;
   }
-  console.error(`[MarketData] No crypto data at all for ${symbol}`);
+  console.warn(`[MarketData] No crypto data at all for ${symbol}`);
   return null;
 }
 
@@ -323,59 +289,28 @@ export async function fetchAllCryptoPrices(
   return results;
 }
 
-// ─── Index fetch ──────────────────────────────────────────────────────────────
-
-const INDEX_SYMBOLS: Record<string, string> = {
-  SP500:  "%5EGSPC",
-  NASDAQ: "%5EIXIC",
-  DOW:    "%5EDJI",
-};
+// ─── Index fetch (via server proxy) ──────────────────────────────────────────
 
 export async function fetchMarketIndices(): Promise<Record<string, PriceEntry>> {
   const results: Record<string, PriceEntry> = {};
+  const keys = ['SP500', 'NASDAQ', 'DOW', 'VIX', 'GOLD', 'OIL', 'AUDUSD'];
 
-  await Promise.allSettled(
-    Object.entries(INDEX_SYMBOLS).map(async ([key, stooqSym]) => {
-      // Try Yahoo first
-      const yahooTicker = key === "SP500" ? "^GSPC" : key === "NASDAQ" ? "^IXIC" : "^DJI";
-      const cacheKey = `IDX_${key}`;
-      const cached = getCached(cacheKey);
-      if (isFresh(cached, STOCK_TTL)) { results[key] = cached!; return; }
+  // Floor: last-known cache so UI never blanks during fetch
+  for (const k of keys) {
+    const cached = getCached(`IDX_${k}`);
+    if (cached) results[k] = cached;
+  }
 
-      // Primary: Yahoo via proxy
-      const yEntry = await fetchStockYahoo(yahooTicker);
-      if (yEntry) {
-        setCached(cacheKey, yEntry);
-        results[key] = yEntry;
-        return;
-      }
+  const snap = await fetchServerSnapshot();
+  if (!snap) return results;
 
-      // Fallback: Stooq CSV
-      try {
-        const url = `https://stooq.com/q/l/?s=${stooqSym}&f=sd2t2ohlcvn&h&e=csv`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
-        if (res.ok) {
-          const csv = await res.text();
-          const lines = csv.trim().split("\n");
-          if (lines.length >= 2) {
-            const cols = lines[1].split(",");
-            const price = parseFloat(cols[6] ?? "0");
-            const open  = parseFloat(cols[3] ?? "0");
-            if (price) {
-              const change24h = open > 0 ? ((price - open) / open) * 100 : 0;
-              const entry: PriceEntry = { price, change24h, fetchedAt: Date.now(), source: "stooq" };
-              setCached(cacheKey, entry);
-              results[key] = entry;
-              return;
-            }
-          }
-        }
-      } catch {}
-
-      if (cached) results[key] = cached;
-    })
-  );
-
+  for (const k of keys) {
+    const entry = snapshotPriceToEntry(snap.indices[k]);
+    if (entry) {
+      setCached(`IDX_${k}`, entry);
+      results[k] = entry;
+    }
+  }
   return results;
 }
 
@@ -394,17 +329,15 @@ export async function fetchFearGreed(): Promise<FearGreedResult> {
     }
   } catch {}
 
-  try {
-    const res = await fetch("https://api.alternative.me/fng/?limit=1", { signal: AbortSignal.timeout(5000) });
-    if (res.ok) {
-      const fg = await res.json();
-      const value = parseInt(fg?.data?.[0]?.value ?? "50");
-      const label = fg?.data?.[0]?.value_classification ?? "";
-      const result = { value, label };
-      try { localStorage.setItem(CACHE_KEY_FG, JSON.stringify({ data: result, ts: Date.now() })); } catch {}
-      return result;
-    }
-  } catch {}
+  // Server proxy carries Fear & Greed in the same snapshot — no extra request.
+  const snap = await fetchServerSnapshot();
+  if (snap && snap.fearGreed != null) {
+    const result = { value: snap.fearGreed, label: snap.fearGreedLabel || '' };
+    try {
+      localStorage.setItem(CACHE_KEY_FG, JSON.stringify({ data: result, ts: Date.now() }));
+    } catch {}
+    return result;
+  }
   return { value: 50, label: "Neutral" };
 }
 
@@ -421,24 +354,15 @@ export async function fetchAudUsdRate(): Promise<number> {
     }
   } catch {}
 
-  try {
-    // Stooq AUDUSD
-    const res = await fetch("https://stooq.com/q/l/?s=audusd&f=sd2t2ohlcvn&h&e=csv", {
-      signal: AbortSignal.timeout(6000),
-    });
-    if (res.ok) {
-      const csv = await res.text();
-      const lines = csv.trim().split("\n");
-      if (lines.length >= 2) {
-        const cols = lines[1].split(",");
-        const rate = parseFloat(cols[6] ?? "0");
-        if (rate > 0) {
-          try { localStorage.setItem(CACHE_KEY_FX, JSON.stringify({ rate, ts: Date.now() })); } catch {}
-          return rate;
-        }
-      }
-    }
-  } catch {}
+  // AUDUSD comes back inside indices on the server proxy.
+  const snap = await fetchServerSnapshot();
+  const rate = snap?.indices?.AUDUSD?.price;
+  if (rate && rate > 0) {
+    try {
+      localStorage.setItem(CACHE_KEY_FX, JSON.stringify({ rate, ts: Date.now() }));
+    } catch {}
+    return rate;
+  }
 
   return 0.65; // fallback
 }

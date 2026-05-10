@@ -617,19 +617,24 @@ export const sbUsers = {
 };
 
 // ─── FIRE Settings ────────────────────────────────────────────────────────────
+//
+// LEGACY: `sf_fire_settings` does NOT exist in production. The live FIRE
+// settings are stored in `mc_fire_settings` (single row keyed by id).
+// This shim preserves the public API but reads/writes the real table so the
+// dashboard stops 404-ing while we migrate the calling code to sbMCFireSettings.
 
 const FIRE_SETTINGS_ID = "shahrokh-family-main";
 
 export const sbFireSettings = {
   async get(): Promise<any | null> {
     try {
-      const rows = await sbGet("sf_fire_settings", `id=eq.${FIRE_SETTINGS_ID}`);
+      const rows = await sbGet("mc_fire_settings", `id=eq.${FIRE_SETTINGS_ID}`);
       return rows[0] ?? null;
     } catch { return null; }
   },
   async upsert(data: object): Promise<any | null> {
     try {
-      return await sbUpsert("sf_fire_settings", {
+      return await sbUpsert("mc_fire_settings", {
         id: FIRE_SETTINGS_ID,
         ...data,
         updated_at: new Date().toISOString(),
@@ -639,60 +644,48 @@ export const sbFireSettings = {
 };
 
 // ─── FIRE Scenario Config ─────────────────────────────────────────────────────
+//
+// LEGACY: `sf_fire_scenario_config` does NOT exist in production. The live
+// FIRE flow uses Monte Carlo presets (`mc_fire_presets`) instead. We do NOT
+// silently redirect writes here because the schemas differ — quietly mutating
+// presets could corrupt MC behavior. Reads return [], writes are no-ops.
+// The dashboard's FIREPathCard already tolerates an empty array.
 
 export const sbFireScenarioConfig = {
   async getAll(): Promise<any[]> {
-    try {
-      return await sbGet("sf_fire_scenario_config", `record_owner=eq.${FIRE_SETTINGS_ID}&order=id.asc`);
-    } catch { return []; }
+    return [];
   },
-  async upsert(data: { scenario_id: string; [key: string]: any }): Promise<any | null> {
-    try {
-      return await sbUpsert("sf_fire_scenario_config", {
-        record_owner: FIRE_SETTINGS_ID,
-        ...data,
-        updated_at: new Date().toISOString(),
-      });
-    } catch { return null; }
+  async upsert(_data: { scenario_id: string; [key: string]: any }): Promise<any | null> {
+    return null;
   },
-  async upsertAll(rows: any[]): Promise<void> {
-    try {
-      for (const row of rows) {
-        await sbUpsert("sf_fire_scenario_config", {
-          record_owner: FIRE_SETTINGS_ID,
-          ...row,
-          updated_at: new Date().toISOString(),
-        });
-      }
-    } catch { /* swallow */ }
+  async upsertAll(_rows: any[]): Promise<void> {
+    /* no-op: legacy table removed */
   },
 };
 
 // ─── FIRE Year Assumptions ────────────────────────────────────────────────────
+//
+// LEGACY: `sf_fire_year_assumptions` does NOT exist in production. Year-by-year
+// assumptions live in `sf_forecast_assumptions` (which already has
+// `assumption_year` and `record_owner` columns). We redirect READS so the
+// dashboard renders. WRITES are intentionally no-ops to avoid mutating live
+// forecast data through a legacy code path — forecast saves should go through
+// forecastStore.sbSaveAssumptions.
 
 export const sbFireYearAssumptions = {
   async getAll(): Promise<any[]> {
     try {
-      return await sbGet("sf_fire_year_assumptions", `record_owner=eq.${FIRE_SETTINGS_ID}&order=assumption_year.asc`);
+      return await sbGet(
+        "sf_forecast_assumptions",
+        `record_owner=eq.${FIRE_SETTINGS_ID}&order=assumption_year.asc`,
+      );
     } catch { return []; }
   },
-  async upsert(data: { assumption_year: number; [key: string]: any }): Promise<any | null> {
-    try {
-      return await sbUpsert("sf_fire_year_assumptions", {
-        record_owner: FIRE_SETTINGS_ID,
-        ...data,
-      });
-    } catch { return null; }
+  async upsert(_data: { assumption_year: number; [key: string]: any }): Promise<any | null> {
+    return null;
   },
-  async upsertAll(rows: any[]): Promise<void> {
-    try {
-      for (const row of rows) {
-        await sbUpsert("sf_fire_year_assumptions", {
-          record_owner: FIRE_SETTINGS_ID,
-          ...row,
-        });
-      }
-    } catch { /* swallow */ }
+  async upsertAll(_rows: any[]): Promise<void> {
+    /* no-op: writes must go through forecastStore.sbSaveAssumptions */
   },
 };
 

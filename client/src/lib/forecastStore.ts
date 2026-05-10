@@ -173,19 +173,34 @@ const HEADERS = {
   Prefer: 'return=representation',
 };
 
+// sf_forecast_assumptions live schema:
+//   owner column = record_owner (NOT owner_id)
+//   year column  = assumption_year (NOT year)
+// The local YearAssumptions type still uses { year } — we map at the boundary.
 export async function sbLoadAssumptions(): Promise<YearAssumptions[]> {
   const res = await fetch(
-    `${SB_URL}/rest/v1/sf_forecast_assumptions?owner_id=eq.${OWNER}&order=year.asc`,
+    `${SB_URL}/rest/v1/sf_forecast_assumptions?record_owner=eq.${OWNER}&order=assumption_year.asc`,
     { headers: HEADERS }
   );
   if (!res.ok) return [];
-  return res.json();
+  const rows = await res.json();
+  // Map DB → app shape: assumption_year → year
+  return rows.map((r: any) => ({ ...r, year: r.assumption_year ?? r.year }));
 }
 
 export async function sbSaveAssumptions(rows: YearAssumptions[]): Promise<void> {
-  const payload = rows.map(r => ({ ...r, owner_id: OWNER, updated_at: new Date().toISOString() }));
+  // Map app → DB shape: year → assumption_year, owner_id → record_owner
+  const payload = rows.map(r => {
+    const { year, ...rest } = r as any;
+    return {
+      ...rest,
+      record_owner: OWNER,
+      assumption_year: year,
+      updated_at: new Date().toISOString(),
+    };
+  });
   await fetch(
-    `${SB_URL}/rest/v1/sf_forecast_assumptions?on_conflict=owner_id,year`,
+    `${SB_URL}/rest/v1/sf_forecast_assumptions?on_conflict=record_owner,assumption_year`,
     {
       method: 'POST',
       headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=representation' },
