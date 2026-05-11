@@ -45,8 +45,21 @@
  * Exit 0 on all pass, 1 on any failure.
  */
 
-import { generateQuickDecisionCandidates } from "../client/src/lib/scenarioV2/decisionEngine/candidateGenerator";
-import type { QuickDecisionInput } from "../client/src/lib/scenarioV2/decisionEngine/candidateGenerator";
+import {
+  generateQuickDecisionCandidates,
+  getQuestionPreset,
+  listQuestionPresets,
+} from "../client/src/lib/scenarioV2/decisionEngine/candidateGenerator";
+import type {
+  QuickDecisionInput,
+  QuickDecisionQuestionKind,
+} from "../client/src/lib/scenarioV2/decisionEngine/candidateGenerator";
+import {
+  PROFILE_REGISTRY,
+  listInvestorProfiles,
+  getProfileWeights,
+} from "../client/src/lib/scenarioV2/registry";
+import type { InvestorProfile } from "../client/src/lib/scenarioV2/registry";
 import type { DashboardInputs } from "../client/src/lib/dashboardDataContract";
 
 // ─── Test harness ────────────────────────────────────────────────────────────
@@ -377,6 +390,167 @@ function inputFor(
     "Every discarded entry references its stage correctly",
     healthyOut.discarded.every(d => ["behavioural", "safety_ceiling"].includes(d.stage)),
   );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  section("9. Question presets registry");
+
+  assert(
+    "All 6 question kinds have presets",
+    listQuestionPresets().length === 6,
+  );
+  const presetKinds: QuickDecisionQuestionKind[] = [
+    "deploy_capital", "buy_property", "super_vs_invest",
+    "debt_vs_invest", "fire_acceleration", "downside_protection",
+  ];
+  for (const k of presetKinds) {
+    const p = getQuestionPreset(k);
+    assert(`Preset for '${k}' has positive default capital`, p.defaults.capital > 0);
+    assert(`Preset for '${k}' has reasonable horizon`, p.defaults.horizonYears >= 5 && p.defaults.horizonYears <= 30);
+    assert(`Preset for '${k}' references a valid investor profile`,
+      Object.keys(PROFILE_REGISTRY).includes(p.defaults.investorProfile));
+  }
+
+  section("10. Question-switching bug regression (CRITICAL)");
+
+  // Run for each question kind — every one must produce a non-empty
+  // (ranked OR discarded) result, blueprintsForQuestion() must dispatch
+  // correctly, and no kind must error.
+  const perKind: Record<string, { ranked: number; discarded: number }> = {};
+  for (const k of presetKinds) {
+    const out = await generateQuickDecisionCandidates({
+      dashboardInputs: healthySnapshot(),
+      question: { kind: k, capital: getQuestionPreset(k).defaults.capital },
+      horizonYears: getQuestionPreset(k).defaults.horizonYears,
+      household: {
+        dependants: getQuestionPreset(k).defaults.dependants,
+        incomeVolatility: getQuestionPreset(k).defaults.incomeVolatility,
+      },
+      simulationCount: 60,
+      taxContext: { annualGrossIncome: 250_000, hasHelpDebt: false, hasPrivateHospitalCover: true },
+    });
+    perKind[k] = { ranked: out.ranked.length, discarded: out.discarded.length };
+    assert(`Question '${k}' returns non-empty (ranked OR discarded)`,
+      out.ranked.length + out.discarded.length > 0);
+    assert(`Question '${k}' returns matching question field`, out.question === k);
+    assert(`Question '${k}' returns a valid investorProfile`,
+      Object.keys(PROFILE_REGISTRY).includes(out.investorProfile));
+  }
+
+  // Different questions must produce different blueprint sets
+  // (compare blueprint id sets — they should NOT be identical across kinds)
+  const idSets: Record<string, Set<string>> = {};
+  for (const k of presetKinds) {
+    const out = await generateQuickDecisionCandidates({
+      dashboardInputs: healthySnapshot(),
+      question: { kind: k, capital: 50_000 },
+      household: { dependants: 0, incomeVolatility: 0.10 },
+      simulationCount: 40,
+      taxContext: { annualGrossIncome: 200_000, hasHelpDebt: false, hasPrivateHospitalCover: true },
+    });
+    idSets[k] = new Set([...out.ranked, ...out.discarded].map(c => c.id));
+  }
+  // Compare deploy_capital vs downside_protection — they should differ
+  const deploySet = idSets["deploy_capital"];
+  const downsideSet = idSets["downside_protection"];
+  const symDiff = [...deploySet].filter(x => !downsideSet.has(x)).length
+    + [...downsideSet].filter(x => !deploySet.has(x)).length;
+  assert("deploy_capital and downside_protection produce DIFFERENT blueprint sets",
+    symDiff > 0, `symDiff=${symDiff}`);
+
+  // A → B → A must produce identical output for A both times (deterministic across
+  // question switches). Same dashboardInputs, same params.
+  const inputA: QuickDecisionInput = {
+    dashboardInputs: healthySnapshot(),
+    question: { kind: "deploy_capital", capital: 50_000 },
+    horizonYears: 15,
+    household: { dependants: 0, incomeVolatility: 0.10 },
+    simulationCount: 40,
+    taxContext: { annualGrossIncome: 200_000, hasHelpDebt: false, hasPrivateHospitalCover: true },
+  };
+  const inputB: QuickDecisionInput = {
+    ...inputA,
+    question: { kind: "fire_acceleration", capital: 75_000 },
+  };
+  const outA1 = await generateQuickDecisionCandidates(inputA);
+  const outB  = await generateQuickDecisionCandidates(inputB);
+  const outA2 = await generateQuickDecisionCandidates(inputA);
+
+  assert("After A→B→A, the second A run matches first A run (ids)",
+    outA1.ranked.map(c => c.id).join("|") === outA2.ranked.map(c => c.id).join("|"));
+  assert("After A→B→A, the second A run matches first A run (scores)",
+    outA1.ranked.map(c => c.score.score.toFixed(2)).join("|") ===
+    outA2.ranked.map(c => c.score.score.toFixed(2)).join("|"));
+  assert("B run uses fire_acceleration question",
+    outB.question === "fire_acceleration");
+
+  section("11. Investor profile re-weighting (Phase 2.1)");
+
+  assert("6 investor profiles registered",
+    listInvestorProfiles().length === 6);
+
+  const profilesToCheck: InvestorProfile[] = [
+    "conservative", "balanced", "aggressive", "fire_focused", "wealth_max", "cashflow_safe",
+  ];
+  for (const p of profilesToCheck) {
+    const w = getProfileWeights(p);
+    const convex = w.survival + w.liquidity + w.riskAdjusted + w.fire + w.terminalNw;
+    assert(`Profile '${p}' convex weights sum to 1.0`,
+      Math.abs(convex - 1.0) < 1e-6, `convex=${convex.toFixed(6)}`);
+  }
+
+  // Aggressive profile should weight riskAdjusted heavier than balanced
+  const balW = getProfileWeights("balanced");
+  const aggW = getProfileWeights("aggressive");
+  assert("Aggressive profile has higher riskAdjusted weight than balanced",
+    aggW.riskAdjusted > balW.riskAdjusted);
+  assert("Aggressive profile has higher terminalNw weight than balanced",
+    aggW.terminalNw > balW.terminalNw);
+
+  // Conservative profile should weight survival + liquidity heavier than balanced
+  const consW = getProfileWeights("conservative");
+  assert("Conservative profile has higher survival weight than balanced",
+    consW.survival > balW.survival);
+  assert("Conservative profile has higher liquidity weight than balanced",
+    consW.liquidity > balW.liquidity);
+
+  // Running same question with different profiles should produce different rankings
+  // (or at least different scores) — same MC math, different weights
+  const inputConservative = await generateQuickDecisionCandidates({
+    ...inputA,
+    investorProfile: "conservative",
+  });
+  const inputAggressive = await generateQuickDecisionCandidates({
+    ...inputA,
+    investorProfile: "aggressive",
+  });
+  assert("Conservative profile uses conservative weights",
+    inputConservative.investorProfile === "conservative");
+  assert("Aggressive profile uses aggressive weights",
+    inputAggressive.investorProfile === "aggressive");
+  // Scores should differ between profiles (at least the winner's score, since
+  // the same candidates were filtered by the same MC but weights differ)
+  const consScores = inputConservative.ranked.map(c => c.score.score.toFixed(2)).join("|");
+  const aggScores  = inputAggressive.ranked.map(c => c.score.score.toFixed(2)).join("|");
+  assert("Conservative and aggressive profiles produce different score arrays",
+    consScores !== aggScores,
+    `cons=${consScores.slice(0, 40)} agg=${aggScores.slice(0, 40)}`);
+
+  // MC results MUST be identical between profiles (deterministic raw outputs)
+  // even when scoring differs. Compare ranked-or-discarded raw IDs and base hash.
+  assert("Different profiles share same basePlanHash (raw math unchanged)",
+    inputConservative.basePlanHash === inputAggressive.basePlanHash);
+  const consIds = new Set([
+    ...inputConservative.ranked.map(c => c.id),
+    ...inputConservative.discarded.map(d => d.id),
+  ]);
+  const aggIds = new Set([
+    ...inputAggressive.ranked.map(c => c.id),
+    ...inputAggressive.discarded.map(d => d.id),
+  ]);
+  const sameIds = consIds.size === aggIds.size
+    && [...consIds].every(id => aggIds.has(id));
+  assert("Different profiles share same candidate ID set (filtering unchanged)",
+    sameIds);
 
   // ─── Summary ───────────────────────────────────────────────────────────────
 

@@ -36,7 +36,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
   Trophy, Shield, Droplet, TrendingDown, Target, Info, Eye, EyeOff, ShieldAlert,
-  Beaker, ListChecks, XCircle, Activity,
+  Beaker, ListChecks, XCircle, Activity, SlidersHorizontal,
 } from "lucide-react";
 
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
@@ -45,10 +45,17 @@ import {
 } from "@/lib/dashboardDataContract";
 import {
   generateQuickDecisionCandidates,
+  getQuestionPreset,
+  listQuestionPresets,
+  QUESTION_PRESETS,
   type QuickDecisionOutput,
   type RankedCandidate,
   type QuickDecisionQuestionKind,
 } from "@/lib/scenarioV2/decisionEngine/candidateGenerator";
+import {
+  listInvestorProfiles,
+  type InvestorProfile,
+} from "@/lib/scenarioV2/registry";
 
 // Embedded power-user tab — re-uses every line of premium Scenario Lab UX.
 import ScenarioCompareV2Page from "./scenario-compare-v2";
@@ -77,14 +84,17 @@ function useMaskFmt(hidden: boolean) {
 
 // ─── Question kind metadata ──────────────────────────────────────────────────
 
-const QUESTION_OPTIONS: { value: QuickDecisionQuestionKind; label: string; sub: string }[] = [
-  { value: "deploy_capital",       label: "Where do I deploy capital?",     sub: "Compare 15+ paths for cash you have available" },
-  { value: "buy_property",         label: "Is now the right time to buy?",  sub: "Property timing + buffer analysis" },
-  { value: "super_vs_invest",      label: "Super vs ETF outside?",          sub: "Concessional cap-aware super vs taxable invest" },
-  { value: "debt_vs_invest",       label: "Pay down debt or invest?",       sub: "Offset / mortgage prepay vs market" },
-  { value: "fire_acceleration",    label: "How do I get to FIRE faster?",   sub: "Survivability-first FIRE acceleration" },
-  { value: "downside_protection",  label: "Protect against a downturn",     sub: "Stress-tested defensive paths" },
-];
+// Question pill metadata. Labels + descriptions are sourced from the engine's
+// QUESTION_PRESETS registry so a question added to the engine flows through to UI.
+const QUESTION_OPTIONS: { value: QuickDecisionQuestionKind; label: string; sub: string }[] =
+  listQuestionPresets().map(p => ({
+    value: p.kind,
+    label: p.label,
+    sub: p.description,
+  }));
+
+const DEFAULT_QUESTION: QuickDecisionQuestionKind = "deploy_capital";
+const DEFAULT_PRESET = QUESTION_PRESETS[DEFAULT_QUESTION];
 
 // ─── Quick Decision Tab ──────────────────────────────────────────────────────
 
@@ -139,11 +149,12 @@ function QuickDecisionTab() {
   const { fmt$, fmt$k, fmt$M, pct, sentence } = useMaskFmt(privacyMode);
 
   // ── User question input ────────────────────────────────────────────────────
-  const [question, setQuestion] = useState<QuickDecisionQuestionKind>("deploy_capital");
-  const [capital, setCapital] = useState<number>(50_000);
-  const [horizonYears, setHorizonYears] = useState<number>(15);
-  const [dependants, setDependants] = useState<number>(0);
-  const [incomeVolatility, setIncomeVolatility] = useState<number>(0.15);
+  const [question, setQuestion] = useState<QuickDecisionQuestionKind>(DEFAULT_QUESTION);
+  const [capital, setCapital] = useState<number>(DEFAULT_PRESET.defaults.capital);
+  const [horizonYears, setHorizonYears] = useState<number>(DEFAULT_PRESET.defaults.horizonYears);
+  const [dependants, setDependants] = useState<number>(DEFAULT_PRESET.defaults.dependants);
+  const [incomeVolatility, setIncomeVolatility] = useState<number>(DEFAULT_PRESET.defaults.incomeVolatility);
+  const [investorProfile, setInvestorProfile] = useState<InvestorProfile>(DEFAULT_PRESET.defaults.investorProfile);
   const [hasHelpDebt, setHasHelpDebt] = useState<boolean>(false);
   const [hasPrivateHospitalCover, setHasPrivateHospitalCover] = useState<boolean>(true);
 
@@ -153,6 +164,53 @@ function QuickDecisionTab() {
   const [error, setError] = useState<string | null>(null);
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
   const [showDiscarded, setShowDiscarded] = useState(false);
+
+  // ── Question-switching reset (Session 6 bug fix) ──────────────────────────
+  //
+  // When the user picks a different preset card, we MUST:
+  //   1. clear stale output (candidates from the old preset)
+  //   2. clear stale errors/loading/expansion/discarded panel state
+  //   3. load THIS preset's realistic defaults for capital/horizon/etc.
+  //   4. load THIS preset's default investor profile (scoring weights)
+  //
+  // Without this effect, the "Generate paths" button feels broken after a switch
+  // because filter results from the wrong context persist.
+  useEffect(() => {
+    const preset = getQuestionPreset(question);
+    setOutput(null);
+    setError(null);
+    setExpandedCandidateId(null);
+    setShowDiscarded(false);
+    setCapital(preset.defaults.capital);
+    setHorizonYears(preset.defaults.horizonYears);
+    setDependants(preset.defaults.dependants);
+    setIncomeVolatility(preset.defaults.incomeVolatility);
+    setInvestorProfile(preset.defaults.investorProfile);
+  }, [question]);
+
+  // When the user manually changes the investor profile, invalidate the cached
+  // output so the score axes shown match the currently-selected weights.
+  useEffect(() => {
+    setOutput(null);
+    setExpandedCandidateId(null);
+  }, [investorProfile]);
+
+  // ── Run-button validity ────────────────────────────────────────────────────
+  // Button is disabled ONLY when inputs are invalid or a run is in flight.
+  // Anything that resets state above also restores validity, so the button can
+  // never silently get stuck disabled after a question switch.
+  const canRun = useMemo(
+    () =>
+      Boolean(dashboardInputs) &&
+      capital > 0 &&
+      horizonYears >= 5 &&
+      horizonYears <= 30 &&
+      dependants >= 0 &&
+      dependants <= 6 &&
+      incomeVolatility >= 0 &&
+      incomeVolatility <= 0.5,
+    [dashboardInputs, capital, horizonYears, dependants, incomeVolatility],
+  );
 
   // ── Run ────────────────────────────────────────────────────────────────────
   async function run() {
@@ -171,6 +229,7 @@ function QuickDecisionTab() {
         question: { kind: question, capital },
         horizonYears,
         household: { dependants, incomeVolatility },
+        investorProfile,
         simulationCount: 300,    // good balance of speed + signal for UX
         taxContext: {
           annualGrossIncome,
@@ -317,6 +376,36 @@ function QuickDecisionTab() {
             </label>
           </div>
 
+          {/* Investor profile selector (Phase 2.1) */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <SlidersHorizontal className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+              <Label className="text-xs font-medium">Investor profile</Label>
+              <span className="text-[10px] text-muted-foreground">
+                re-weights ranking · raw math unchanged
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+              {listInvestorProfiles().map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => setInvestorProfile(p.id)}
+                  className={`text-left rounded-lg border p-2 transition-all min-h-[64px]
+                    ${investorProfile === p.id
+                      ? "border-violet-500 bg-violet-50 dark:bg-violet-950/40 ring-2 ring-violet-200 dark:ring-violet-800"
+                      : "border-border bg-card hover:bg-muted/50"}`}
+                  aria-pressed={investorProfile === p.id}
+                  title={p.description}
+                >
+                  <div className="text-[11px] font-semibold text-foreground truncate">{p.label}</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">
+                    {p.description}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {liveReadouts && (
             <div className="rounded-lg border border-border bg-card/50 p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <ReadoutTile label="Monthly income"    value={fmt$(liveReadouts.income)}   />
@@ -332,7 +421,7 @@ function QuickDecisionTab() {
             </div>
             <Button
               onClick={run}
-              disabled={running || !dashboardInputs}
+              disabled={running || !canRun}
               className="min-w-[160px]"
             >
               {running ? (
@@ -365,6 +454,14 @@ function QuickDecisionTab() {
                 </div>
                 <CardTitle className="text-base sm:text-xl">{winner.label}</CardTitle>
                 <CardDescription className="text-xs">{sentence(winner.headline)}</CardDescription>
+                {output && (
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <SlidersHorizontal className="h-3 w-3 text-violet-600 dark:text-violet-400" />
+                    <span className="text-[10px] uppercase tracking-wide font-semibold text-violet-700 dark:text-violet-400">
+                      Ranked under: {output.investorProfile.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="text-right">
                 <div className="text-2xl sm:text-3xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">

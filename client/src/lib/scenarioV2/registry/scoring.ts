@@ -63,6 +63,131 @@ export const DEFAULT_SCORE_WEIGHTS: ScoreWeights = {
   leveragePenalty:  0.15,  // multiplied by max(0, worstIpLvr − 0.80) × 10
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Investor profiles — re-weight scoring without touching deterministic math
+//
+// Profiles change RANKING ORDER, PENALTY SEVERITY, and NARRATIVE
+// Profiles DO NOT change Monte Carlo outputs, simulation paths, or hard math.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type InvestorProfile =
+  | "balanced"        // engine default — survivability first, balanced
+  | "conservative"    // survivability + liquidity heavy
+  | "aggressive"      // risk-adjusted CAGR + terminal NW
+  | "fire_focused"    // FIRE accel heavy, downside hard-penalised
+  | "wealth_max"      // terminal NW heavy, accepts more vol
+  | "cashflow_safe";  // liquidity + DSR + leverage penalties strongest
+
+export interface InvestorProfileSpec {
+  id: InvestorProfile;
+  label: string;
+  description: string;
+  weights: ScoreWeights;
+  /** When true, this profile applies sterner LVR / DSR / liquidity penalties. */
+  sternerPenalties?: boolean;
+}
+
+export const PROFILE_REGISTRY: Record<InvestorProfile, InvestorProfileSpec> = {
+  balanced: {
+    id: "balanced",
+    label: "Balanced (engine default)",
+    description: "Survivability-first, then liquidity, risk-adjusted return, FIRE, terminal NW.",
+    weights: { ...DEFAULT_SCORE_WEIGHTS },
+  },
+  conservative: {
+    id: "conservative",
+    label: "Conservative",
+    description: "Heavy survival + liquidity. Penalises leverage and refi pressure more.",
+    weights: {
+      survival:         0.40,
+      liquidity:        0.30,
+      riskAdjusted:     0.15,
+      fire:             0.05,
+      terminalNw:       0.10,
+      refinancePenalty: 0.15,
+      leveragePenalty:  0.20,
+    },
+    sternerPenalties: true,
+  },
+  aggressive: {
+    id: "aggressive",
+    label: "Aggressive",
+    description: "Maximises risk-adjusted CAGR and terminal NW. Accepts more volatility but keeps the LVR ceiling.",
+    weights: {
+      survival:         0.20,
+      liquidity:        0.10,
+      riskAdjusted:     0.35,
+      fire:             0.15,
+      terminalNw:       0.20,
+      refinancePenalty: 0.05,
+      leveragePenalty:  0.08,
+    },
+  },
+  fire_focused: {
+    id: "fire_focused",
+    label: "FIRE-focused",
+    description: "Pulls retirement date forward. Downside heavily penalised; liquidity floor stricter.",
+    weights: {
+      survival:         0.30,
+      liquidity:        0.20,
+      riskAdjusted:     0.15,
+      fire:             0.25,
+      terminalNw:       0.10,
+      refinancePenalty: 0.10,
+      leveragePenalty:  0.15,
+    },
+    sternerPenalties: true,
+  },
+  wealth_max: {
+    id: "wealth_max",
+    label: "Wealth-max",
+    description: "Optimises terminal net worth. Accepts more leverage and volatility within hard ceilings.",
+    weights: {
+      survival:         0.20,
+      liquidity:        0.10,
+      riskAdjusted:     0.20,
+      fire:             0.10,
+      terminalNw:       0.40,
+      refinancePenalty: 0.06,
+      leveragePenalty:  0.10,
+    },
+  },
+  cashflow_safe: {
+    id: "cashflow_safe",
+    label: "Cashflow-safe",
+    description: "Strong liquidity + DSR/leverage penalties. Best for variable-income or single-earner households.",
+    weights: {
+      survival:         0.30,
+      liquidity:        0.35,
+      riskAdjusted:     0.15,
+      fire:             0.05,
+      terminalNw:       0.15,
+      refinancePenalty: 0.20,
+      leveragePenalty:  0.25,
+    },
+    sternerPenalties: true,
+  },
+};
+
+export function getProfileWeights(profile: InvestorProfile): ScoreWeights {
+  return { ...PROFILE_REGISTRY[profile].weights };
+}
+
+export function listInvestorProfiles(): InvestorProfileSpec[] {
+  return Object.values(PROFILE_REGISTRY);
+}
+
+// Validate every profile's weights at module-load time so a typo can't ship.
+Object.values(PROFILE_REGISTRY).forEach(p => {
+  const convex = p.weights.survival + p.weights.liquidity + p.weights.riskAdjusted +
+                 p.weights.fire + p.weights.terminalNw;
+  if (Math.abs(convex - 1.0) > 1e-6) {
+    throw new Error(
+      `Profile '${p.id}' convex weights must sum to 1.0, got ${convex.toFixed(6)}`,
+    );
+  }
+});
+
 export interface ScoreBreakdownEntry {
   axis: keyof Omit<ScoreInputs, "refinancePressureBand" | "referenceTerminalNw">;
   rawValue: number;

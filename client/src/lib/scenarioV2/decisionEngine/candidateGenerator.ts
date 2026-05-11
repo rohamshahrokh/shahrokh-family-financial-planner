@@ -45,8 +45,11 @@ import {
   concessionalSuperCap,
   // Scoring
   compositeScore,
+  getProfileWeights,
   type CompositeScore,
   type ScoreInputs,
+  type ScoreWeights,
+  type InvestorProfile,
   // Types
   type DsrBand,
   type RefinancePressureBand,
@@ -78,6 +81,11 @@ export interface QuickDecisionInput {
     dependants: number;
     incomeVolatility: number;   // 0..1
   };
+  /**
+   * Investor profile re-weights the composite score WITHOUT changing the
+   * Monte Carlo math. Defaults to the question's preset profile when omitted.
+   */
+  investorProfile?: InvestorProfile;
   /** Constraints (defaults applied if omitted). */
   constraints?: Partial<{
     maxLvr: number;              // default 0.85 — absolute ceiling
@@ -95,6 +103,77 @@ export interface QuickDecisionInput {
     hasHelpDebt: boolean;
     hasPrivateHospitalCover: boolean;
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-question presets — each question kind has its own:
+//   1. realistic default capital, horizon
+//   2. default investor profile (scoring weights)
+//   3. default blueprint set
+//   4. behavioural-realism overrides
+//
+// These are pure data, deterministic, and exposed to the UI so switching
+// questions cleanly resets inputs to sensible values.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface QuestionPreset {
+  kind: QuickDecisionQuestionKind;
+  label: string;
+  description: string;
+  defaults: {
+    capital: number;
+    horizonYears: number;
+    dependants: number;
+    incomeVolatility: number;
+    investorProfile: InvestorProfile;
+  };
+}
+
+export const QUESTION_PRESETS: Record<QuickDecisionQuestionKind, QuestionPreset> = {
+  deploy_capital: {
+    kind: "deploy_capital",
+    label: "Where do I deploy capital?",
+    description: "Compare 15+ allocation × timing paths for cash you have available.",
+    defaults: { capital: 50_000, horizonYears: 15, dependants: 0, incomeVolatility: 0.15, investorProfile: "balanced" },
+  },
+  buy_property: {
+    kind: "buy_property",
+    label: "Is now the right time to buy?",
+    description: "Property timing + buffer analysis. Compares buying now vs building buffer first.",
+    defaults: { capital: 200_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.10, investorProfile: "conservative" },
+  },
+  super_vs_invest: {
+    kind: "super_vs_invest",
+    label: "Super vs ETF outside?",
+    description: "Concessional-cap-aware super vs taxable ETF investment.",
+    defaults: { capital: 30_000, horizonYears: 20, dependants: 0, incomeVolatility: 0.10, investorProfile: "balanced" },
+  },
+  debt_vs_invest: {
+    kind: "debt_vs_invest",
+    label: "Pay down debt or invest?",
+    description: "Offset/prepay vs taxable ETF vs concessional super.",
+    defaults: { capital: 40_000, horizonYears: 15, dependants: 1, incomeVolatility: 0.15, investorProfile: "cashflow_safe" },
+  },
+  fire_acceleration: {
+    kind: "fire_acceleration",
+    label: "How do I get to FIRE faster?",
+    description: "Survivability-first FIRE acceleration. Heavy weighting on time-to-FIRE.",
+    defaults: { capital: 75_000, horizonYears: 20, dependants: 0, incomeVolatility: 0.15, investorProfile: "fire_focused" },
+  },
+  downside_protection: {
+    kind: "downside_protection",
+    label: "Protect against a downturn",
+    description: "Stress-tested defensive paths. Heavier offset, cash, defensive ETF.",
+    defaults: { capital: 50_000, horizonYears: 10, dependants: 1, incomeVolatility: 0.20, investorProfile: "conservative" },
+  },
+};
+
+export function getQuestionPreset(kind: QuickDecisionQuestionKind): QuestionPreset {
+  return QUESTION_PRESETS[kind];
+}
+
+export function listQuestionPresets(): QuestionPreset[] {
+  return Object.values(QUESTION_PRESETS);
 }
 
 export interface DiscardedCandidate {
@@ -136,6 +215,8 @@ export interface RankedCandidate {
 export interface QuickDecisionOutput {
   question: QuickDecisionQuestionKind;
   capital?: number;
+  /** Investor profile actually used for scoring (resolved from input or question preset). */
+  investorProfile: InvestorProfile;
   ranked: RankedCandidate[];
   discarded: DiscardedCandidate[];
   basePlanHash: string;
@@ -232,6 +313,97 @@ function blueprintsForDeployCapital(): CandidateBlueprint[] {
     make("etf_then_super",        "ETF DCA → Super top-up at FY end",         "ETF → Super",     "etf_dca24_100",         "dca24", true),
     make("offset_then_etf",       "Offset now → ETF DCA in 6mo",              "Off → ETF",       "offset_100",            "now", true),
   ];
+}
+
+// Helper used by every question-specific blueprint factory
+function mk(
+  id: string, label: string, shortLabel: string,
+  allocation: AllocationAxis, timing: TimingAxis, composite = false,
+): CandidateBlueprint {
+  return { id, label, shortLabel, allocation, timing, composite };
+}
+
+// Property timing decision — buy now vs build buffer first vs wait
+function blueprintsForBuyProperty(): CandidateBlueprint[] {
+  return [
+    mk("ip_now",                "Buy IP now (full deposit)",                "IP now",          "property_deposit_100",  "now"),
+    mk("ip_6mo",                "Buy IP in 6mo (build small buffer)",       "IP @ 6mo",        "property_deposit_100",  "month6"),
+    mk("ip_18mo",               "Buy IP in 18mo (build full buffer)",       "IP @ 18mo",       "property_deposit_100",  "month18"),
+    mk("offset_first_then_ip",  "Offset buffer first → IP in 18mo",          "Offset → IP",     "offset_100",            "now", true),
+    mk("defer_offset_only",     "Defer property: offset only",              "Offset only",     "offset_100",            "now"),
+    mk("defer_etf_dca",         "Defer property: ETF DCA 24mo",             "ETF DCA",         "etf_dca24_100",         "dca24"),
+    mk("defer_50_50_etf_off",   "Defer property: 50/50 ETF/Offset",         "ETF 50 / Off 50", "offset50_etf50",        "now"),
+    mk("defer_etf_super_50",    "Defer property: 50/50 ETF/Super",          "ETF 50 / Sup 50", "etf50_super50",         "now"),
+    mk("defer_etf_super_crypto","Defer property: 40/40/20 ETF/Sup/Crypto",  "Diversified",     "etf40_super40_crypto20","now"),
+  ];
+}
+
+// Super vs ETF — cap-aware super, fully taxable ETF, mixed
+function blueprintsForSuperVsInvest(): CandidateBlueprint[] {
+  return [
+    mk("super_full_now",        "100% Concessional super (cap-aware)",       "Super 100%",      "super_concessional_100","now"),
+    mk("etf_full_lump_now",     "100% ETF lump-sum (taxable)",               "ETF lump",        "etf_lump_100",          "now"),
+    mk("etf_dca12_now",         "100% ETF DCA 12mo (taxable)",               "ETF DCA 12mo",    "etf_dca24_100",         "dca12"),
+    mk("etf_dca24_now",         "100% ETF DCA 24mo (taxable)",               "ETF DCA 24mo",    "etf_dca24_100",         "dca24"),
+    mk("etf50_super50",         "50/50 ETF + Super",                         "ETF 50 / Sup 50", "etf50_super50",         "now"),
+    mk("etf30_super70",         "70% Super / 30% ETF (super-leaning)",        "Sup 70 / ETF 30", "etf50_super50",         "now"),  // approximate via 50/50 — caller clips on cap
+    mk("etf70_super30",         "70% ETF / 30% Super (taxable-leaning)",     "ETF 70 / Sup 30", "etf70_offset30",        "now"),
+    mk("etf_then_super",        "ETF DCA → Super top-up at FY end",          "ETF → Super",     "etf_dca24_100",         "dca24", true),
+  ];
+}
+
+// Debt vs invest — offset, prepay, ETF, super, splits
+function blueprintsForDebtVsInvest(): CandidateBlueprint[] {
+  return [
+    mk("offset_now",            "100% Offset (pay down mortgage cost)",      "Offset",          "offset_100",            "now"),
+    mk("offset_6mo",            "100% Offset (wait 6mo)",                    "Offset @ 6mo",    "offset_100",            "month6"),
+    mk("etf_lump_now",          "100% ETF lump-sum (invest)",                "ETF lump",        "etf_lump_100",          "now"),
+    mk("etf_dca24_now",         "100% ETF DCA 24mo (invest)",                "ETF DCA 24mo",    "etf_dca24_100",         "dca24"),
+    mk("super_now",             "100% Concessional super",                   "Super",           "super_concessional_100","now"),
+    mk("etf70_offset30",        "70/30 ETF/Offset",                          "ETF 70 / Off 30", "etf70_offset30",        "now"),
+    mk("offset50_etf50",        "50/50 Offset/ETF",                          "Off 50 / ETF 50", "offset50_etf50",        "now"),
+    mk("offset_then_etf",       "Offset now → ETF DCA in 6mo",               "Off → ETF",       "offset_100",            "now", true),
+  ];
+}
+
+// FIRE acceleration — maximise wealth-creation paths within survivability
+function blueprintsForFireAcceleration(): CandidateBlueprint[] {
+  return [
+    mk("etf_lump_now",          "100% ETF lump-sum",                         "ETF lump",        "etf_lump_100",          "now"),
+    mk("etf_dca12_now",         "100% ETF DCA 12mo",                         "ETF DCA 12mo",    "etf_dca24_100",         "dca12"),
+    mk("etf_dca24_now",         "100% ETF DCA 24mo",                         "ETF DCA 24mo",    "etf_dca24_100",         "dca24"),
+    mk("super_now",             "100% Concessional super (tax-advantaged)",  "Super",           "super_concessional_100","now"),
+    mk("etf50_super50",         "50/50 ETF/Super",                           "ETF 50 / Sup 50", "etf50_super50",         "now"),
+    mk("etf40_super40_crypto20","40/40/20 ETF/Super/Crypto (growth tilt)",   "Diversified",     "etf40_super40_crypto20","now"),
+    mk("ip_18mo",               "IP @ 18mo (leveraged growth)",              "IP @ 18mo",       "property_deposit_100",  "month18"),
+    mk("etf_then_super",        "ETF DCA → Super top-up at FY end",          "ETF → Super",     "etf_dca24_100",         "dca24", true),
+    mk("offset_then_ip",        "Offset now → IP in 18mo",                   "Offset → IP",     "offset_100",            "now", true),
+  ];
+}
+
+// Downside protection — defensive paths only
+function blueprintsForDownsideProtection(): CandidateBlueprint[] {
+  return [
+    mk("offset_now",            "100% Offset (max cash defence)",            "Offset",          "offset_100",            "now"),
+    mk("offset_6mo",            "100% Offset (wait 6mo, hold cash)",         "Offset @ 6mo",    "offset_100",            "month6"),
+    mk("offset50_etf50",        "50/50 Offset/ETF (balanced defence)",       "Off 50 / ETF 50", "offset50_etf50",        "now"),
+    mk("etf_dca24_now",         "ETF DCA 24mo (time diversification)",       "ETF DCA 24mo",    "etf_dca24_100",         "dca24"),
+    mk("etf70_offset30",        "70/30 ETF/Offset",                          "ETF 70 / Off 30", "etf70_offset30",        "now"),
+    mk("super_now",             "100% Concessional super (preservation)",    "Super",           "super_concessional_100","now"),
+    mk("etf50_super50",         "50/50 ETF/Super (tax-defended growth)",     "ETF 50 / Sup 50", "etf50_super50",         "now"),
+  ];
+}
+
+// Top-level dispatcher — each question kind gets its own realistic blueprint set
+function blueprintsForQuestion(kind: QuickDecisionQuestionKind): CandidateBlueprint[] {
+  switch (kind) {
+    case "deploy_capital":      return blueprintsForDeployCapital();
+    case "buy_property":        return blueprintsForBuyProperty();
+    case "super_vs_invest":     return blueprintsForSuperVsInvest();
+    case "debt_vs_invest":      return blueprintsForDebtVsInvest();
+    case "fire_acceleration":   return blueprintsForFireAcceleration();
+    case "downside_protection": return blueprintsForDownsideProtection();
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -830,6 +1002,12 @@ export async function generateQuickDecisionCandidates(
   const simulationCount = input.simulationCount ?? QUICK_SIM_COUNT;
   const ctx = deriveCtx(input);
 
+  // Resolve investor profile -> scoring weights
+  // Falls back to the question's preset profile when caller omits one
+  const profileId: InvestorProfile = input.investorProfile
+    ?? QUESTION_PRESETS[input.question.kind].defaults.investorProfile;
+  const profileWeights: ScoreWeights = getProfileWeights(profileId);
+
   // Build assumption set with registry defaults + overrides
   const baseAssumptions = (input.assumptions
     ? { ...input.assumptions }
@@ -848,7 +1026,7 @@ export async function generateQuickDecisionCandidates(
     hasPrivateHospitalCover: input.taxContext?.hasPrivateHospitalCover ?? true,
   });
 
-  const blueprints = blueprintsForDeployCapital();
+  const blueprints = blueprintsForQuestion(input.question.kind);
   const discarded: DiscardedCandidate[] = [];
   const ranked: RankedCandidate[] = [];
 
@@ -897,7 +1075,7 @@ export async function generateQuickDecisionCandidates(
     }
 
     const scoreInputs = buildScoreInputs(result, safety.bands, baseResult, horizonMonths);
-    const score = compositeScore(scoreInputs);
+    const score = compositeScore(scoreInputs, profileWeights);
     const traceAssumptions: BasePlanAssumptions = {
       inflation: 0.03, incomeGrowth: 0.035, expenseGrowth: 0.03,
       stockReturn: 0.10, stockVol: 0.18, cryptoReturn: 0.20, cryptoVol: 0.60,
@@ -946,6 +1124,7 @@ export async function generateQuickDecisionCandidates(
   return {
     question: input.question.kind,
     capital: input.question.capital,
+    investorProfile: profileId,
     ranked,
     discarded,
     basePlanHash: baseResult.snapshotHash,
