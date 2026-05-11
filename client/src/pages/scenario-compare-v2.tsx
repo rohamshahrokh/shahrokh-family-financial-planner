@@ -589,6 +589,31 @@ export default function ScenarioCompareV2Page() {
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto" ref={reportRef}>
+      {/* Active banner — proves the new UI is what you're looking at */}
+      <div
+        data-testid="scenario-engine-v2-active-banner"
+        className="relative overflow-hidden rounded-lg border-2 border-purple-300 bg-gradient-to-r from-purple-600 via-fuchsia-600 to-indigo-600 p-4 shadow-lg"
+      >
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 ring-2 ring-white/40">
+              <Beaker className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <div className="text-white text-base font-bold tracking-tight">
+                Scenario Engine V2 · ACTIVE
+              </div>
+              <div className="text-purple-100 text-xs">
+                Auto-derived Base Plan · Deterministic Monte Carlo · Advisor-grade risk + serviceability
+              </div>
+            </div>
+          </div>
+          <Badge className="bg-white/95 text-purple-700 font-semibold">
+            BUILD {(import.meta as any).env?.VITE_COMMIT_SHA?.slice(0, 7) ?? "v2"}
+          </Badge>
+        </div>
+      </div>
+
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex-1 min-w-0">
