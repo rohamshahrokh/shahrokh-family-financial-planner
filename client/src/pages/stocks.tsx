@@ -22,10 +22,11 @@ import {
   Plus, Trash2, Edit2, TrendingUp, CheckSquare, Square,
   ArrowUpRight, ArrowDownRight, X, Calendar, Filter,
   Upload, RefreshCw, Clock, ToggleLeft, ToggleRight, Download,
-  ShoppingCart,
+  ShoppingCart, LineChart,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx";
+import EmptyState from "@/components/EmptyState";
 
 // ─── Colour palette ──────────────────────────────────────────────────────────
 const COLORS = [
@@ -1470,22 +1471,34 @@ export default function StocksPage() {
           <div className="grid lg:grid-cols-2 gap-4">
             <div className="bg-card border border-border rounded-xl p-5">
               <h3 className="text-sm font-bold mb-4">Portfolio Growth (10Y)</h3>
-              <ResponsiveContainer width="100%" height={200}>
-                <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="stockGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
-                  <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
-                  <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#stockGrad)" strokeWidth={2} name="Portfolio Value" />
-                  <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
-                </AreaChart>
-              </ResponsiveContainer>
+              {/* Audit P1-9: render an explicit empty state when there are
+                  no holdings, rather than a flat zero-line chart that
+                  reads as broken. */}
+              {totalCurrentValue <= 0 ? (
+                <EmptyState
+                  icon={<LineChart className="w-5 h-5" />}
+                  title="No holdings yet"
+                  description="Add your first position to see growth projection."
+                  variant="inline"
+                />
+              ) : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="stockGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
+                    <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
+                    <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#stockGrad)" strokeWidth={2} name="Portfolio Value" />
+                    <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
             </div>
 
             <div className="bg-card border border-border rounded-xl p-5">
@@ -1535,10 +1548,13 @@ export default function StocksPage() {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm">
-                  <TrendingUp className="w-8 h-8 opacity-30 mb-2" />
-                  <p>Set holdings above zero to see allocation</p>
-                </div>
+                /* Audit P1-9: unified empty state instead of an ad-hoc inline block. */
+                <EmptyState
+                  icon={<TrendingUp className="w-5 h-5" />}
+                  title="No allocation data"
+                  description="Add a position with units > 0 to see the allocation donut."
+                  variant="inline"
+                />
               )}
             </div>
           </div>
