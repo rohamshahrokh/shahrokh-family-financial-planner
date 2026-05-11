@@ -3595,6 +3595,202 @@ td.db-act-rank { padding: 9px 0; }
   background-color: hsl(220 14% 86%) !important;
 }
 
+/* ════════════════════════════════════════════════════════════════════════════
+   #FixLightDarkModeContrastMobile — LIGHT MODE SEMANTIC-COLOR REMAPS
+   ──────────────────────────────────────────────────────────────────────────
+   Components like RiskRadarCard, MonteCarloDashboard, dashboard.tsx use
+   single-shade Tailwind semantic colors (text-emerald-400, bg-red-500/15,
+   text-amber-300, etc.) WITHOUT `dark:` companions. These read fine on the
+   dark surfaces of dark mode, but in light mode they sit on near-white
+   cards and become unreadable (text-red-300 on bg-red-500/8 is invisible).
+
+   Strategy: in `.light` only, remap each washed-out shade to a darker AA-
+   compliant shade of the same hue. JSX stays untouched — only the rendered
+   colour shifts when the user toggles to light. Works app-wide.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ── EMERALD / GREEN ──────────────────────────────────────────────────────── */
+.light .text-emerald-300,
+.light .text-emerald-400,
+.light .text-green-300,
+.light .text-green-400 {
+  color: hsl(145 65% 28%) !important;
+}
+.light .text-emerald-500,
+.light .text-green-500 {
+  color: hsl(145 65% 32%) !important;
+}
+.light .bg-emerald-500\/8,
+.light .bg-emerald-500\/10,
+.light .bg-emerald-500\/15,
+.light .bg-emerald-500\/20,
+.light .bg-green-500\/8,
+.light .bg-green-500\/10,
+.light .bg-green-500\/15 {
+  background-color: hsl(145 55% 92%) !important;
+}
+.light .border-emerald-500\/20,
+.light .border-emerald-500\/30,
+.light .border-emerald-500\/40,
+.light .border-green-500\/20,
+.light .border-green-500\/30 {
+  border-color: hsl(145 50% 70%) !important;
+}
+
+/* ── RED / ROSE ───────────────────────────────────────────────────────────── */
+.light .text-red-300,
+.light .text-red-400,
+.light .text-rose-300,
+.light .text-rose-400 {
+  color: hsl(0 70% 38%) !important;
+}
+.light .text-red-500,
+.light .text-rose-500 {
+  color: hsl(0 70% 42%) !important;
+}
+.light .bg-red-500\/8,
+.light .bg-red-500\/10,
+.light .bg-red-500\/15,
+.light .bg-red-500\/20,
+.light .bg-rose-500\/10,
+.light .bg-rose-500\/15 {
+  background-color: hsl(0 70% 95%) !important;
+}
+.light .border-red-500\/20,
+.light .border-red-500\/30,
+.light .border-red-500\/40,
+.light .border-rose-500\/20,
+.light .border-rose-500\/30 {
+  border-color: hsl(0 60% 75%) !important;
+}
+
+/* ── AMBER / YELLOW / ORANGE ──────────────────────────────────────────────── */
+.light .text-amber-300,
+.light .text-amber-400,
+.light .text-yellow-300,
+.light .text-yellow-400,
+.light .text-orange-300,
+.light .text-orange-400 {
+  color: hsl(35 95% 32%) !important;
+}
+.light .text-amber-500,
+.light .text-yellow-500,
+.light .text-orange-500 {
+  color: hsl(35 95% 36%) !important;
+}
+.light .bg-amber-500\/8,
+.light .bg-amber-500\/10,
+.light .bg-amber-500\/15,
+.light .bg-amber-500\/20,
+.light .bg-yellow-500\/10,
+.light .bg-yellow-500\/15,
+.light .bg-orange-400\/5,
+.light .bg-orange-500\/10,
+.light .bg-orange-500\/15 {
+  background-color: hsl(40 95% 93%) !important;
+}
+.light .border-amber-500\/20,
+.light .border-amber-500\/30,
+.light .border-amber-500\/40,
+.light .border-orange-400,
+.light .border-yellow-500\/30 {
+  border-color: hsl(35 80% 68%) !important;
+}
+
+/* ── BLUE / SKY / INDIGO ──────────────────────────────────────────────────── */
+.light .text-blue-300,
+.light .text-blue-400,
+.light .text-sky-300,
+.light .text-sky-400,
+.light .text-indigo-300,
+.light .text-indigo-400 {
+  color: hsl(215 80% 38%) !important;
+}
+.light .text-blue-500,
+.light .text-sky-500,
+.light .text-indigo-500 {
+  color: hsl(215 80% 42%) !important;
+}
+.light .bg-blue-500\/10,
+.light .bg-blue-500\/15,
+.light .bg-blue-500\/20,
+.light .bg-sky-500\/10,
+.light .bg-sky-500\/15,
+.light .bg-indigo-500\/10,
+.light .bg-indigo-500\/15 {
+  background-color: hsl(215 80% 94%) !important;
+}
+.light .border-blue-500\/20,
+.light .border-blue-500\/30,
+.light .border-sky-500\/30,
+.light .border-indigo-500\/30 {
+  border-color: hsl(215 65% 75%) !important;
+}
+
+/* ── PURPLE / VIOLET / FUCHSIA / PINK ─────────────────────────────────────── */
+.light .text-purple-300,
+.light .text-purple-400,
+.light .text-violet-300,
+.light .text-violet-400,
+.light .text-fuchsia-300,
+.light .text-fuchsia-400,
+.light .text-pink-300,
+.light .text-pink-400 {
+  color: hsl(265 60% 42%) !important;
+}
+.light .text-purple-500,
+.light .text-violet-500,
+.light .text-pink-500 {
+  color: hsl(265 60% 46%) !important;
+}
+.light .bg-purple-500\/10,
+.light .bg-purple-500\/15,
+.light .bg-violet-500\/10,
+.light .bg-violet-500\/15,
+.light .bg-pink-500\/10,
+.light .bg-pink-500\/15 {
+  background-color: hsl(265 60% 94%) !important;
+}
+.light .border-purple-500\/30,
+.light .border-violet-500\/30,
+.light .border-pink-500\/30 {
+  border-color: hsl(265 50% 78%) !important;
+}
+
+/* ── TEAL / CYAN ──────────────────────────────────────────────────────────── */
+.light .text-cyan-300,
+.light .text-cyan-400,
+.light .text-teal-300,
+.light .text-teal-400 {
+  color: hsl(188 70% 30%) !important;
+}
+.light .bg-cyan-500\/10,
+.light .bg-cyan-500\/15,
+.light .bg-teal-500\/10,
+.light .bg-teal-500\/15 {
+  background-color: hsl(188 65% 92%) !important;
+}
+
+/* ── Decision Engine: --surface-2 token needs a light value ───────────────── */
+.light {
+  --surface-2: 220 14% 96%;
+}
+
+/* ── Decision Engine: selected question/path tile in light mode ───────────── */
+.light .ring-indigo-200 {
+  --tw-ring-color: hsl(215 75% 65%) !important;
+}
+.light .ring-violet-200 {
+  --tw-ring-color: hsl(265 60% 65%) !important;
+}
+
+/* ── Mobile-specific safety: clamp very-low-contrast pairs on small screens ─ */
+@media (max-width: 768px) {
+  .light .text-muted-foreground {
+    color: hsl(220 14% 36%) !important;
+  }
+}
+
 
 /* ── Mobile form polish ──────────────────────────────────────────────────── */
 

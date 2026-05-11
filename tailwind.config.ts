@@ -1,7 +1,17 @@
 import type { Config } from "tailwindcss";
 
 export default {
-  darkMode: ["class"],
+  // ── #FixLightDarkModeContrastMobile ────────────────────────────────────────
+  // App convention: dark is DEFAULT (:root tokens), light mode is opt-in via
+  // `.light` on <html> (see client/src/lib/store.ts). Tailwind's stock
+  // `darkMode: "class"` would expect a `.dark` class that the app NEVER sets,
+  // so every `dark:*` utility authored across decision.tsx / decisionEngine/*
+  // / Wealth Decision Center was permanently dead — the user saw the LIGHT
+  // base classes even in dark mode (washed-out light cards on the dark page).
+  //
+  // The `selector` strategy with custom selector fires `dark:*` whenever
+  // <html> does NOT carry `.light`, which is exactly when the app renders dark.
+  darkMode: ["selector", "html:not(.light)"],
   content: ["./client/index.html", "./client/src/**/*.{js,jsx,ts,tsx}"],
   theme: {
     extend: {
