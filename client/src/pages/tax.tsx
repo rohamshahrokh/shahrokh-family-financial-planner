@@ -473,6 +473,7 @@ export default function Tax() {
         fara_has_private_health:   fara.hasPrivateHospitalCover,
         roham_has_help_debt:       roham.hasHelpDebt,
         fara_has_help_debt:        fara.hasHelpDebt,
+        override_active:           overrideActive,
         updated_at:                new Date().toISOString(),
       };
       return apiRequest("POST", "/api/tax-profile", payload).then(r => r.json());
@@ -567,18 +568,26 @@ export default function Tax() {
         </div>
       </div>
 
-      {/* ── Override badge + toggle (audit fix P1.2) ── */}
-      <div className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
-        overrideActive ? "border-amber-500/40 bg-amber-500/10 text-amber-700" : "border-border bg-muted/30 text-muted-foreground"
-      }`}>
-        {overrideActive ? (
-          <span className="font-semibold">[!] Taxable income override active — salaries below are manual, not derived from income ledger.</span>
-        ) : (
-          <span>Salaries pre-filled from canonical income ({canonicalIncome.source.replace("_", " ")}). To set bespoke taxable income, enable the override.</span>
+      {/* ── Salary source banner + override toggle (#FixTaxAlphaUsesSavedTaxProfile) ─ */}
+      <div
+        data-testid="tax-source-banner"
+        className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
+          overrideActive
+            ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+            : "border-border bg-muted/30 text-muted-foreground"
+        }`}
+      >
+        <span className="font-semibold">
+          {overrideActive ? "Using saved tax profile" : "Using income ledger"}
+        </span>
+        {!overrideActive && canonicalIncome.source !== "empty" && (
+          <span className="opacity-75">
+            · source: {canonicalIncome.source.replace(/_/g, " ")}
+          </span>
         )}
-        {canonicalIncome.taxProfileVariance && (
-          <span className="ml-2 px-2 py-0.5 rounded bg-rose-500/15 text-rose-700 font-semibold">
-            Variance vs income ledger: {(canonicalIncome.taxProfileVariance.pct * 100).toFixed(1)}%
+        {canonicalIncome.taxProfileVariance && !overrideActive && (
+          <span className="ml-2 px-2 py-0.5 rounded bg-rose-500/15 text-rose-700 dark:text-rose-300 font-semibold">
+            Advisory: tax profile differs by {(canonicalIncome.taxProfileVariance.pct * 100).toFixed(1)}% — enable override to apply
           </span>
         )}
         <Button
@@ -586,8 +595,9 @@ export default function Tax() {
           size="sm"
           className="ml-auto h-6 text-[11px]"
           onClick={() => toggleOverride.mutate(!overrideActive)}
+          disabled={toggleOverride.isPending}
         >
-          {overrideActive ? "Disable override" : "Override taxable income"}
+          {overrideActive ? "Use income ledger" : "Use saved tax profile"}
         </Button>
       </div>
 
