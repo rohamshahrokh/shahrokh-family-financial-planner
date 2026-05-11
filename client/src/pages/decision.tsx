@@ -61,6 +61,11 @@ import {
   DistributionHistogram,
   TailRiskCard,
 } from "@/components/decisionEngine/RiskVisualizations";
+import {
+  ScoreWaterfall,
+  WinnerVsRunnerUp,
+  InvalidationEngine,
+} from "@/components/decisionEngine/ScoreVisualizations";
 
 // Embedded power-user tab — re-uses every line of premium Scenario Lab UX.
 import ScenarioCompareV2Page from "./scenario-compare-v2";
@@ -579,6 +584,25 @@ function QuickDecisionTab() {
                 hidden={privacyMode}
               />
             </div>
+
+            {/* Phase 2.3: Score waterfall */}
+            <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+              <ScoreWaterfall candidate={winner} />
+            </div>
+
+            {/* Phase 2.3: Winner vs runner-up */}
+            {output && output.ranked.length >= 2 && (
+              <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+                <WinnerVsRunnerUp output={output} fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }} />
+              </div>
+            )}
+
+            {/* Phase 2.3: Invalidation engine */}
+            {output && (
+              <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+                <InvalidationEngine output={output} fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }} />
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -781,6 +805,11 @@ function CandidateRow({
 
           <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
             <TailRiskCard result={candidate.result} fmt={fmt} compact />
+          </div>
+
+          {/* Phase 2.3: Per-candidate score waterfall */}
+          <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+            <ScoreWaterfall candidate={candidate} compact />
           </div>
 
           <Separator />
