@@ -355,12 +355,13 @@ function QuickDecisionTab() {
                 <button
                   key={opt.value}
                   onClick={() => setQuestion(opt.value)}
-                  // Audit P1-8: nested tile uses --surface-2 so the
-                  // hierarchy reads card → tile without bumping border weight.
+                  // Premium fintech dark mode: selected = subtle blue tint +
+                  // 1px primary border. No bright ring. Hierarchy reads via
+                  // --surface-2 → --surface-3, not via accent borders.
                   className={`text-left rounded-lg border p-3 transition-all min-h-[64px]
                     ${question === opt.value
-                      ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 ring-2 ring-indigo-200 dark:ring-indigo-800"
-                      : "border-border bg-[hsl(var(--surface-2))] hover:bg-muted/50"}`}
+                      ? "border-primary/60 bg-[hsl(var(--intelligence-surface))] shadow-[var(--shadow-sm)]"
+                      : "border-border bg-[hsl(var(--surface-2))] hover:bg-[hsl(var(--surface-3))]"}`}
                   aria-pressed={question === opt.value}
                 >
                   <div className="text-xs font-semibold text-foreground">{opt.label}</div>
