@@ -19,9 +19,10 @@ const SCRIPTS = [
   "test-planned-not-current.ts",
   "test-assumptions-panel.ts",
   "test-pdf-no-broken-chars.ts",
-  // P0-1/P0-2 trust-UX additions
+  // P0-1/P0-2/P0-4 trust-UX additions
   "test-canonical-nw-consistency.ts",
   "test-canonical-cashflow.ts",
+  "test-no-unicode-escapes.ts",
 ];
 
 let totalFail = 0;

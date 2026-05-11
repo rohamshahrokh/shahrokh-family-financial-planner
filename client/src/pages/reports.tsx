@@ -439,7 +439,7 @@ export default function ReportsPage() {
       doc.setTextColor(139, 92, 246);
       doc.setFontSize(36);
       doc.setFont('helvetica', 'bold');
-      doc.text('DEMO DATA \u2014 NOT REAL FINANCIAL ADVICE', 105, 148, { align: 'center', angle: 45 });
+      doc.text('DEMO DATA — NOT REAL FINANCIAL ADVICE', 105, 148, { align: 'center', angle: 45 });
       doc.setTextColor(60, 60, 60);
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
