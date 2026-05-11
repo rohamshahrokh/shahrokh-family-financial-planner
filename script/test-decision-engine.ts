@@ -676,6 +676,268 @@ function inputFor(
     JSON.stringify(p24.conditionalRecommendations) === JSON.stringify(p24b.conditionalRecommendations),
   );
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 2.8 — Explainability + Risk Control Overhaul (~25 tests)
+  // ─────────────────────────────────────────────────────────────────────────
+  section("Phase 2.8 — Risk control modes & resolveRiskControls");
+
+  {
+    // 1-4. Mode defaults preserve their character
+    const { RISK_MODE_DEFAULTS, resolveRiskControls } = await import(
+      "../client/src/lib/scenarioV2/decisionEngine/candidateGenerator"
+    );
+    assert(
+      "conservative defaults: maxLvr 0.75, allowHighRisk false",
+      RISK_MODE_DEFAULTS.conservative.maxLvr === 0.75 &&
+        RISK_MODE_DEFAULTS.conservative.allowHighRiskPaths === false,
+    );
+    assert(
+      "balanced defaults: maxLvr 0.85, allowHighRisk false",
+      RISK_MODE_DEFAULTS.balanced.maxLvr === 0.85 &&
+        RISK_MODE_DEFAULTS.balanced.allowHighRiskPaths === false,
+    );
+    assert(
+      "aggressive defaults: maxCrypto 0.50, allowHighRisk true",
+      RISK_MODE_DEFAULTS.aggressive.maxCryptoSharePct === 0.50 &&
+        RISK_MODE_DEFAULTS.aggressive.allowHighRiskPaths === true,
+    );
+    assert(
+      "custom defaults: balanced-baseline with allowHighRisk true",
+      RISK_MODE_DEFAULTS.custom.maxLvr === 0.85 &&
+        RISK_MODE_DEFAULTS.custom.allowHighRiskPaths === true,
+    );
+
+    // 5-7. Custom hard-floor clamping
+    const clampedLvr = resolveRiskControls("custom", { maxLvr: 0.99 });
+    assert(
+      "Custom clamps maxLvr to ≤ 0.85 (hard floor)",
+      clampedLvr.maxLvr === 0.85,
+      `got ${clampedLvr.maxLvr}`,
+    );
+    const clampedDef = resolveRiskControls("custom", { maxDefaultProbability: 0.95 });
+    assert(
+      "Custom clamps maxDefaultProbability to ≤ 0.40 (hard floor)",
+      clampedDef.maxDefaultProbability === 0.40,
+      `got ${clampedDef.maxDefaultProbability}`,
+    );
+    const clampedNsr = resolveRiskControls("custom", { minNsrBuffered: 0.50 });
+    assert(
+      "Custom clamps minNsrBuffered to ≥ 0.70 (hard floor)",
+      clampedNsr.minNsrBuffered === 0.70,
+      `got ${clampedNsr.minNsrBuffered}`,
+    );
+
+    // 8. Non-custom modes ignore overrides entirely
+    const aggrIgnore = resolveRiskControls("aggressive", { maxLvr: 0.20 });
+    assert(
+      "Non-custom modes ignore user overrides (aggressive stays aggressive)",
+      aggrIgnore.maxLvr === RISK_MODE_DEFAULTS.aggressive.maxLvr,
+    );
+  }
+
+  section("Phase 2.8 — Output surface (riskControlsApplied, multiWinner, highRiskPaths)");
+
+  {
+    // 9-11. riskControlsApplied always present
+    const balancedOut = await generateQuickDecisionCandidates({
+      ...inputFor(healthySnapshot(), 100_000),
+      riskMode: "balanced",
+    });
+    assert(
+      "riskControlsApplied present on output",
+      balancedOut.riskControlsApplied != null &&
+        balancedOut.riskControlsApplied.mode === "balanced",
+    );
+    assert(
+      "riskControlsApplied.resolved has all required keys",
+      typeof balancedOut.riskControlsApplied.resolved.maxLvr === "number" &&
+        typeof balancedOut.riskControlsApplied.resolved.maxCryptoSharePct === "number" &&
+        typeof balancedOut.riskControlsApplied.resolved.minNsrBuffered === "number" &&
+        typeof balancedOut.riskControlsApplied.resolved.maxDefaultProbability === "number" &&
+        typeof balancedOut.riskControlsApplied.resolved.maxSingleAssetSharePct === "number" &&
+        typeof balancedOut.riskControlsApplied.resolved.allowHighRiskPaths === "boolean",
+    );
+
+    // 12. Balanced/Conservative: highRiskPaths must be empty
+    const conservativeOut = await generateQuickDecisionCandidates({
+      ...inputFor(healthySnapshot(), 100_000),
+      riskMode: "conservative",
+    });
+    assert(
+      "Conservative mode: highRiskPaths is empty (allowHighRisk=false)",
+      conservativeOut.highRiskPaths.length === 0,
+    );
+    assert(
+      "Balanced mode: highRiskPaths is empty by default (allowHighRisk=false)",
+      balancedOut.highRiskPaths.length === 0,
+    );
+
+    // 13. Aggressive: may surface high-risk paths (>= 0 — empty is acceptable if no soft-warn candidates exist)
+    const aggressiveOut = await generateQuickDecisionCandidates({
+      ...inputFor(healthySnapshot(), 100_000),
+      riskMode: "aggressive",
+    });
+    assert(
+      "Aggressive mode: highRiskPaths surface exists (array)",
+      Array.isArray(aggressiveOut.highRiskPaths),
+    );
+    assert(
+      "Aggressive mode: riskControlsApplied.mode is aggressive",
+      aggressiveOut.riskControlsApplied.mode === "aggressive",
+    );
+
+    // 14-17. multiWinner structure
+    assert(
+      "multiWinner.balanced is present (object or null)",
+      balancedOut.multiWinner !== undefined &&
+        (balancedOut.multiWinner.balanced === null ||
+          typeof balancedOut.multiWinner.balanced.id === "string"),
+    );
+    assert(
+      "multiWinner.wealthMax present",
+      balancedOut.multiWinner.wealthMax === null ||
+        typeof balancedOut.multiWinner.wealthMax.id === "string",
+    );
+    assert(
+      "multiWinner.cashflowSafe present",
+      balancedOut.multiWinner.cashflowSafe === null ||
+        typeof balancedOut.multiWinner.cashflowSafe.id === "string",
+    );
+    assert(
+      "multiWinner.highRisk present (null in balanced/conservative)",
+      balancedOut.multiWinner.highRisk === null,
+    );
+
+    // 18. multiWinner ids must be valid (must match an actual ranked or highRisk candidate)
+    if (balancedOut.multiWinner.balanced) {
+      const allIds = new Set([
+        ...balancedOut.ranked.map(c => c.id),
+        ...balancedOut.highRiskPaths.map(c => c.id),
+      ]);
+      assert(
+        "multiWinner.balanced.id refers to an actual candidate",
+        allIds.has(balancedOut.multiWinner.balanced.id),
+      );
+    } else {
+      assert("multiWinner.balanced is null when no candidates ranked", true);
+    }
+  }
+
+  section("Phase 2.8 — Discarded explainability (5-field explanation)");
+
+  {
+    // 19-21. Every discarded carries a full RejectionExplanation
+    const stressedOut = await generateQuickDecisionCandidates({
+      ...inputFor(stressedSnapshot(), 100_000),
+      riskMode: "balanced",
+    });
+    assert(
+      "Stressed household produces at least one discarded",
+      stressedOut.discarded.length > 0,
+      `discarded=${stressedOut.discarded.length}`,
+    );
+    assert(
+      "Every discarded entry has a RejectionExplanation with all 5 fields",
+      stressedOut.discarded.every(
+        d =>
+          d.explanation != null &&
+          typeof d.explanation.technical === "string" &&
+          d.explanation.technical.length > 0 &&
+          typeof d.explanation.plainEnglish === "string" &&
+          d.explanation.plainEnglish.length > 0 &&
+          typeof d.explanation.primaryDriver === "string" &&
+          d.explanation.primaryDriver.length > 0 &&
+          typeof d.explanation.stressPeriod === "string" &&
+          d.explanation.stressPeriod.length > 0 &&
+          Array.isArray(d.explanation.whatWouldFix) &&
+          d.explanation.whatWouldFix.length > 0,
+      ),
+    );
+    assert(
+      "Every discarded entry carries riskMode and horizonSensitive flag",
+      stressedOut.discarded.every(
+        d => typeof d.riskMode === "string" && typeof d.horizonSensitive === "boolean",
+      ),
+    );
+  }
+
+  section("Phase 2.8 — Hard blockers stay blocked in every mode");
+
+  {
+    // 22-24. Hard blockers (LVR>0.85, DSR critical, default-prob ceiling) stay discarded
+    //        regardless of mode — even Aggressive cannot bypass.
+    for (const mode of ["conservative", "balanced", "aggressive"] as const) {
+      const out = await generateQuickDecisionCandidates({
+        ...inputFor(stressedSnapshot(), 300_000), // big capital + stressed = LVR breaches
+        riskMode: mode,
+      });
+      const hardBlockers = out.discarded.filter(d => d.severity === "hard_blocker");
+      // Verify hard blockers did NOT bleed into highRiskPaths
+      const hardBlockerIdsInHighRisk = out.highRiskPaths.filter(
+        c => hardBlockers.some(d => d.id === c.id),
+      );
+      assert(
+        `Mode '${mode}': hard blockers never leak into highRiskPaths`,
+        hardBlockerIdsInHighRisk.length === 0,
+      );
+    }
+  }
+
+  section("Phase 2.8 — Ranked candidates carry softWarnings & isHighRisk fields");
+
+  {
+    // 25-26. Every ranked candidate has softWarnings array + isHighRisk boolean
+    const out = await generateQuickDecisionCandidates({
+      ...inputFor(healthySnapshot(), 100_000),
+      riskMode: "aggressive",
+    });
+    assert(
+      "Every ranked candidate has softWarnings (array)",
+      out.ranked.every(c => Array.isArray(c.softWarnings)),
+    );
+    assert(
+      "Every ranked candidate has isHighRisk boolean",
+      out.ranked.every(c => typeof c.isHighRisk === "boolean"),
+    );
+    assert(
+      "Ranked candidates classified as isHighRisk:false are NOT in highRiskPaths",
+      out.ranked
+        .filter(c => !c.isHighRisk)
+        .every(c => !out.highRiskPaths.some(h => h.id === c.id)),
+    );
+    assert(
+      "highRiskPaths candidates all have isHighRisk:true",
+      out.highRiskPaths.every(c => c.isHighRisk === true),
+    );
+  }
+
+  section("Phase 2.8 — Determinism across modes");
+
+  {
+    // Same input + same mode → identical riskControlsApplied + ranked ids
+    const a = await generateQuickDecisionCandidates({
+      ...inputFor(healthySnapshot(), 100_000),
+      riskMode: "aggressive",
+    });
+    const b = await generateQuickDecisionCandidates({
+      ...inputFor(healthySnapshot(), 100_000),
+      riskMode: "aggressive",
+    });
+    assert(
+      "Phase 2.8: deterministic riskControlsApplied across reruns",
+      JSON.stringify(a.riskControlsApplied) === JSON.stringify(b.riskControlsApplied),
+    );
+    assert(
+      "Phase 2.8: deterministic highRiskPaths ids across reruns",
+      a.highRiskPaths.length === b.highRiskPaths.length &&
+        a.highRiskPaths.every((c, i) => c.id === b.highRiskPaths[i].id),
+    );
+    assert(
+      "Phase 2.8: deterministic multiWinner across reruns",
+      JSON.stringify(a.multiWinner) === JSON.stringify(b.multiWinner),
+    );
+  }
+
   // ─── Summary ───────────────────────────────────────────────────────────────
 
   process.stdout.write(`\n${"━".repeat(60)}\n`);

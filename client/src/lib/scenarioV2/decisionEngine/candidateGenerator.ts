@@ -103,6 +103,98 @@ export interface QuickDecisionInput {
     hasHelpDebt: boolean;
     hasPrivateHospitalCover: boolean;
   };
+  /**
+   * Phase 2.8 — Risk-control mode. Controls which soft warnings still discard
+   * vs which are surfaced as ranked-with-warning. Hard blockers are unchanged
+   * regardless of mode. Defaults to "balanced".
+   */
+  riskMode?: RiskControlMode;
+  /**
+   * Phase 2.8 — Optional fine-grained risk controls (only honoured when
+   * riskMode === "custom"). Each field overrides the corresponding mode-default.
+   */
+  riskControls?: Partial<RiskControlOverrides>;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 2.8 — Risk control mode + explicit per-mode constraint deltas
+// ──────────────────────────────────────────────────────────────────────
+
+export type RiskControlMode = "conservative" | "balanced" | "aggressive" | "custom";
+
+export interface RiskControlOverrides {
+  /** Crypto: pct of portfolio. Default 0.10 balanced, 0.05 conservative, 0.50 aggressive. */
+  maxCryptoSharePct: number;
+  /** LVR ceiling. Default 0.85; conservative 0.75; aggressive 0.85 (never above by mode). */
+  maxLvr: number;
+  /** Minimum buffered NSR. Default 0.85; conservative 1.00; aggressive 0.75. */
+  minNsrBuffered: number;
+  /** Acceptable default-probability ceiling. Default 0.20; conservative 0.10; aggressive 0.30. */
+  maxDefaultProbability: number;
+  /** Maximum single-asset concentration (any class) as pct of portfolio. */
+  maxSingleAssetSharePct: number;
+  /** When true, paths breaching SOFT warnings are still ranked (with penalty)
+   *  and ALSO bucketed into highRiskPaths. When false, they discard. */
+  allowHighRiskPaths: boolean;
+  /** When true, the UI/PDF surfaces the full discarded list including soft warnings
+   *  that were upgraded into highRiskPaths. */
+  showFilteredHighRiskPaths: boolean;
+}
+
+export const RISK_MODE_DEFAULTS: Record<RiskControlMode, RiskControlOverrides> = {
+  conservative: {
+    maxCryptoSharePct: 0.05,
+    maxLvr: 0.75,
+    minNsrBuffered: 1.00,
+    maxDefaultProbability: 0.10,
+    maxSingleAssetSharePct: 0.40,
+    allowHighRiskPaths: false,
+    showFilteredHighRiskPaths: false,
+  },
+  balanced: {
+    maxCryptoSharePct: 0.10,
+    maxLvr: 0.85,
+    minNsrBuffered: 0.85,
+    maxDefaultProbability: 0.20,
+    maxSingleAssetSharePct: 0.60,
+    allowHighRiskPaths: false,
+    showFilteredHighRiskPaths: true,
+  },
+  aggressive: {
+    maxCryptoSharePct: 0.50,
+    maxLvr: 0.85,
+    minNsrBuffered: 0.75,
+    maxDefaultProbability: 0.30,
+    maxSingleAssetSharePct: 0.80,
+    allowHighRiskPaths: true,
+    showFilteredHighRiskPaths: true,
+  },
+  custom: {  // baseline = balanced; users override per-field via riskControls
+    maxCryptoSharePct: 0.10,
+    maxLvr: 0.85,
+    minNsrBuffered: 0.85,
+    maxDefaultProbability: 0.20,
+    maxSingleAssetSharePct: 0.60,
+    allowHighRiskPaths: true,
+    showFilteredHighRiskPaths: true,
+  },
+};
+
+export function resolveRiskControls(
+  mode: RiskControlMode,
+  overrides?: Partial<RiskControlOverrides>,
+): RiskControlOverrides {
+  const base = RISK_MODE_DEFAULTS[mode];
+  if (mode !== "custom" || !overrides) return { ...base };
+  // Custom mode allows per-field override, but hard floors stay enforced:
+  //  - maxLvr cannot exceed 0.85 (institutional ceiling)
+  //  - maxDefaultProbability cannot exceed 0.40 (mathematical floor)
+  //  - minNsrBuffered cannot drop below 0.70 (servicing collapse line)
+  const merged = { ...base, ...overrides };
+  merged.maxLvr = Math.min(merged.maxLvr, 0.85);
+  merged.maxDefaultProbability = Math.min(merged.maxDefaultProbability, 0.40);
+  merged.minNsrBuffered = Math.max(merged.minNsrBuffered, 0.70);
+  return merged;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -199,6 +291,53 @@ export interface DiscardedCandidate {
   };
   /** Investor profile under which this discard occurred (for audit). */
   profileContext: InvestorProfile;
+  /** Phase 2.8 — risk-control mode under which the discard ran. */
+  riskMode: RiskControlMode;
+  /** Phase 2.8 — human-readable rejection explanation. */
+  explanation: RejectionExplanation;
+  /**
+   * Phase 2.8 — horizon sensitivity. If the path was discarded under the
+   * user's chosen horizon but a +5y horizon rerun produced a passing safety
+   * check, this is true (and `viableHorizonYears` records the minimum-viable
+   * horizon). The math itself is unchanged; this is a diagnostic only.
+   */
+  horizonSensitive: boolean;
+  viableHorizonYears?: number;
+  /** Phase 2.8 — recovery diagnostics for leveraged-property paths. */
+  recovery?: RecoveryAnalysis;
+}
+
+/**
+ * Phase 2.8 — Human-readable rejection explanation. Generated deterministically
+ * from the failing rule + the candidate's blueprint + the engine result. Never
+ * AI-generated. Five required fields, all surfaced in UI + PDF.
+ */
+export interface RejectionExplanation {
+  /** The raw technical reason (e.g. "Buffered NSR falls below APRA threshold"). */
+  technical: string;
+  /** Plain-English explanation aimed at a non-finance user. */
+  plainEnglish: string;
+  /** Primary driver tag (e.g. "High leverage + short recovery horizon"). */
+  primaryDriver: string;
+  /** Time window where stress is concentrated (e.g. "Years 1–4 after purchase"). */
+  stressPeriod: string;
+  /** Concrete bullet list of what would make this path viable. */
+  whatWouldFix: string[];
+}
+
+/**
+ * Phase 2.8 — Recovery analysis for leveraged paths (mainly property).
+ * Computed from medianCashPath + serviceability bands + horizon rerun.
+ */
+export interface RecoveryAnalysis {
+  /** Year index where median cash hits its lowest point. */
+  liquidityTroughYear: number;
+  /** Year index where mortgage debt stops growing as a share of NW. */
+  debtStabilisationYear: number;
+  /** Window during which refinance pressure is highest (years). */
+  refinanceRiskWindow: { startYear: number; endYear: number };
+  /** Total years required for the path to recover into the "safe" band. */
+  recoveryYears: number;
 }
 
 export interface ExplainabilityTrace {
@@ -227,6 +366,35 @@ export interface RankedCandidate {
   headline: string;
   /** "Why this wins / why this lost" — short rationale (Layer-3-ready). */
   rationale: string[];
+  /**
+   * Phase 2.8 — soft-warning markers attached even when the path is ranked.
+   * Examples: "crypto-concentration", "refinance-pressure", "liquidity-thin".
+   * Score penalties already reflect these; this surface lets the UI render
+   * coloured warning chips on otherwise-ranked candidates.
+   */
+  softWarnings: SoftWarning[];
+  /**
+   * Phase 2.8 — true when this candidate would have been discarded by
+   * balanced-mode defaults but was allowed through by aggressive/custom mode.
+   * Used to bucket it into `highRiskPaths`.
+   */
+  isHighRisk: boolean;
+  /** Phase 2.8 — recovery diagnostics for leveraged-property paths. */
+  recovery?: RecoveryAnalysis;
+}
+
+/** Phase 2.8 — soft warning attached to a ranked candidate. */
+export interface SoftWarning {
+  /** Stable id. */
+  id: string;
+  /** Short headline, e.g. "Crypto concentration above 10%". */
+  label: string;
+  /** Plain-English explanation. */
+  detail: string;
+  /** "info" | "warn" | "critical" — colour band. */
+  severity: "info" | "warn" | "critical";
+  /** Which engine metric drove the warning (audit trail). */
+  driver: string;
 }
 
 export interface QuickDecisionOutput {
@@ -236,6 +404,28 @@ export interface QuickDecisionOutput {
   investorProfile: InvestorProfile;
   ranked: RankedCandidate[];
   discarded: DiscardedCandidate[];
+  /**
+   * Phase 2.8 — High-risk paths that breached soft warnings under default
+   * (balanced) settings but were preserved by aggressive/custom risk modes.
+   * Each is fully ranked (score + score breakdown) but flagged so the UI can
+   * render them in a dedicated section instead of mixing with safer paths.
+   * In conservative/balanced modes this is always an empty array.
+   */
+  highRiskPaths: RankedCandidate[];
+  /**
+   * Phase 2.8 — Multi-winner recommendations. The single "winner" is still
+   * ranked[0], but this surface lets the UI present "best balanced", "best
+   * wealth-max", "best cashflow-safe", and (if any survive) "best high-risk".
+   * Computed by re-scoring the same candidate set under each profile.
+   */
+  multiWinner: {
+    balanced: { id: string; score: number } | null;
+    wealthMax: { id: string; score: number } | null;
+    cashflowSafe: { id: string; score: number } | null;
+    highRisk: { id: string; score: number } | null;
+  };
+  /** Phase 2.8 — resolved risk controls actually applied to this run. */
+  riskControlsApplied: { mode: RiskControlMode; resolved: RiskControlOverrides };
   basePlanHash: string;
   baseScenarioResult: ExtendedScenarioResult;
   generatedAt: string;
@@ -302,6 +492,9 @@ const DEFAULT_CONSTRAINTS = {
   respectSuperCaps: true,
   maxCryptoSharePct: 0.10,
   maxRefinanceChainsIn24mo: 1,
+  // Phase 2.8 — explicit thresholds (previously inlined as literals)
+  maxDefaultProbability: 0.20,
+  maxSingleAssetSharePct: 0.60,
 };
 
 const QUICK_SIM_COUNT = 500;
@@ -838,14 +1031,14 @@ function checkSafetyCeilings(
       bands,
     };
   }
-  if (result.defaultProbability > 0.20) {
+  if (result.defaultProbability > constraints.maxDefaultProbability) {
     return {
       passed: false,
       reason: "High default probability",
-      detail: `P(default within horizon) = ${(result.defaultProbability * 100).toFixed(1)}% — exceeds 20% acceptability bar.`,
+      detail: `P(default within horizon) = ${(result.defaultProbability * 100).toFixed(1)}% — exceeds ${(constraints.maxDefaultProbability * 100).toFixed(0)}% acceptability bar.`,
       override: {
         possible: false,
-        mechanism: "Institutional floor — paths with >20% default probability are not overridable in Quick Decision.",
+        mechanism: `Institutional floor — paths with >${(constraints.maxDefaultProbability * 100).toFixed(0)}% default probability are not overridable in Quick Decision.`,
       },
       bands,
     };
@@ -1095,21 +1288,399 @@ function deriveCtx(input: QuickDecisionInput): DerivedContext {
 // MAIN — generateCandidates
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 2.8 — Human-readable rejection explanations (deterministic, no AI).
+// Maps every (reason, blueprint) pair to a 5-field RejectionExplanation.
+// ────────────────────────────────────────────────────────────────────────────
+
+function isLeveragedPropertyBlueprint(bp: CandidateBlueprint): boolean {
+  return bp.allocation === "property_deposit_100" || bp.id.includes("ip") || bp.id.includes("property");
+}
+
+function buildRejectionExplanation(
+  blueprint: CandidateBlueprint,
+  reason: string,
+  detail: string,
+  result: ExtendedScenarioResult | null,
+  ctx: DerivedContext,
+  horizonYears: number,
+): RejectionExplanation {
+  const isProperty = isLeveragedPropertyBlueprint(blueprint);
+  const isCrypto = blueprint.allocation === "crypto_100";
+  const lowerR = reason.toLowerCase();
+
+  // LVR breach — always a property path
+  if (lowerR.includes("lvr")) {
+    return {
+      technical: detail,
+      plainEnglish:
+        "This path borrows too aggressively against the property value. Lenders treat loan-to-value above 85% as a serviceability red flag, and APRA buffer rates would tip the household into negative equity under modest price falls.",
+      primaryDriver: "High leverage at acquisition",
+      stressPeriod: `Year 1–${Math.min(horizonYears, 5)} after purchase (loan-to-value highest before equity builds).`,
+      whatWouldFix: [
+        "Increase deposit (reduce loan amount)",
+        "Buy a less expensive property",
+        "Build offset buffer first, then purchase",
+        "Delay purchase 12–18 months to let savings grow the deposit",
+      ],
+    };
+  }
+
+  // DSR critical — servicing failure (typically property)
+  if (lowerR.includes("dsr")) {
+    return {
+      technical: detail,
+      plainEnglish:
+        "Required monthly debt repayments would consume more than 55% of household income after APRA buffer stress — lenders class this as unserviceable, and a single income shock could trigger default.",
+      primaryDriver: isProperty
+        ? "Mortgage repayment too large relative to income"
+        : "Total debt service too high",
+      stressPeriod: "Months 1–24 — servicing pressure peaks before income growth catches up.",
+      whatWouldFix: [
+        "Borrow less (smaller property / larger deposit)",
+        "Increase household income before purchase",
+        "Choose interest-only structure briefly (caveat: refinance risk)",
+        "Pay down higher-rate debt first",
+      ],
+    };
+  }
+
+  // NSR buffered < min — mostly leveraged-property
+  if (lowerR.includes("nsr")) {
+    return {
+      technical: detail,
+      plainEnglish: isProperty
+        ? "The property strategy creates too much refinance and serviceability pressure relative to your income and liquidity buffer during the early years. Even small rate rises would push the buffered net-servicing ratio below the safe band."
+        : "This path leaves too little income buffer after debt servicing under APRA stress rates.",
+      primaryDriver: isProperty
+        ? "High leverage + short recovery horizon"
+        : "Income buffer too thin under stress assessment",
+      stressPeriod: isProperty
+        ? `Years 1–4 after purchase (peak refinance and rate-shock exposure)`
+        : `Months 1–18 (servicing buffer thinnest before income growth)`,
+      whatWouldFix: isProperty
+        ? [
+            `Extend horizon to 15+ years (currently ${horizonYears}y)`,
+            "Increase cash buffer before purchasing",
+            "Reduce deposit deployment / smaller property",
+            "Delay purchase 12–18 months",
+            "Wait for higher household income before purchase",
+          ]
+        : [
+            "Build a larger cash buffer before deploying",
+            "Reduce deployed capital",
+            "Wait for income growth before strategy activation",
+          ],
+    };
+  }
+
+  // High default probability — hard floor
+  if (lowerR.includes("default")) {
+    return {
+      technical: detail,
+      plainEnglish:
+        "In Monte Carlo stress tests, this path runs out of cash and assets in more than 1-in-5 scenarios within the planning horizon. That probability is too high to recommend at any risk profile.",
+      primaryDriver: "Insufficient survivability under stress",
+      stressPeriod:
+        result?.medianDefaultMonth != null
+          ? `Median default fires around month ${result.medianDefaultMonth} (year ${Math.round(result.medianDefaultMonth / 12)}).`
+          : "Stress concentrated in the first third of the horizon.",
+      whatWouldFix: [
+        "Reduce deployed capital",
+        "Increase cash buffer",
+        "Choose a less aggressive allocation",
+        "Extend horizon to allow more recovery time",
+      ],
+    };
+  }
+
+  // Zero-cash plan
+  if (lowerR.includes("zero-cash") || lowerR.includes("cash")) {
+    return {
+      technical: detail,
+      plainEnglish:
+        "Deploying the requested capital all at once would leave less than one month of expenses in cash. Any income disruption would trigger forced selling at a loss.",
+      primaryDriver: "Liquidity exhaustion at T=0",
+      stressPeriod: "Month 0 — immediate.",
+      whatWouldFix: [
+        "Reduce deployed capital so ~3 months of expenses remain in cash",
+        "Stage the deployment with DCA over 12–24 months",
+        "Delay deployment until cash buffer is rebuilt",
+      ],
+    };
+  }
+
+  // Max-leverage at T=0 (property)
+  if (lowerR.includes("max-leverage") || lowerR.includes("leverage")) {
+    return {
+      technical: detail,
+      plainEnglish:
+        "Buying property immediately leaves under 12 months of cash buffer post-deposit. If anything goes wrong in the first year — rate hike, vacancy, income shock — there's no recovery cushion.",
+      primaryDriver: "Property deposit + transaction costs drain emergency fund",
+      stressPeriod: "Months 0–12 after purchase — cash trough.",
+      whatWouldFix: [
+        "Delay purchase 6–18 months (use IP @ 6mo or IP @ 18mo blueprints)",
+        "Save additional cash buffer before purchase",
+        "Reduce deposit size / smaller property",
+        "Build offset balance first (offset-then-IP composite path)",
+      ],
+    };
+  }
+
+  // Crypto concentration
+  if (lowerR.includes("crypto")) {
+    return {
+      technical: detail,
+      plainEnglish: isCrypto
+        ? "A 100% crypto allocation at this capital amount would push crypto above the safe portfolio share threshold. Crypto's 60%+ volatility means a single drawdown could exceed your total liquid net worth."
+        : "Crypto exposure exceeds the safe portfolio share at this capital level.",
+      primaryDriver: "Single-asset concentration in a high-volatility class",
+      stressPeriod: "Continuous — crypto drawdowns can fire in any month.",
+      whatWouldFix: [
+        "Switch to Aggressive risk mode (allows higher crypto share)",
+        "Or use Custom mode to set explicit maxCryptoSharePct",
+        "Reduce crypto allocation as % of capital",
+        "Pair with stable allocations (e.g. 40/40/20 ETF/Super/Crypto blueprint)",
+      ],
+    };
+  }
+
+  // Fallback
+  return {
+    technical: detail,
+    plainEnglish: `This path was filtered because: ${detail}`,
+    primaryDriver: reason,
+    stressPeriod: "Stress location not precisely identifiable from this rule.",
+    whatWouldFix: [
+      "Re-run with adjusted constraints in Custom risk mode",
+      "Reduce capital allocation",
+      "Extend planning horizon",
+    ],
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 2.8 — Recovery analysis (leveraged-property paths)
+// ────────────────────────────────────────────────────────────────────────────
+
+function buildRecoveryAnalysis(
+  result: ExtendedScenarioResult | null,
+  horizonYears: number,
+): RecoveryAnalysis | undefined {
+  if (!result || !result.medianCashPath || result.medianCashPath.length < 12) {
+    return undefined;
+  }
+  const cashPath = result.medianCashPath;
+  // Liquidity trough: month with minimum cash; map to year (1-based for UI).
+  let troughMonth = 0;
+  let troughVal = Infinity;
+  for (let i = 0; i < cashPath.length; i++) {
+    if (cashPath[i] < troughVal) {
+      troughVal = cashPath[i];
+      troughMonth = i;
+    }
+  }
+  const liquidityTroughYear = Math.max(1, Math.round(troughMonth / 12));
+
+  // Debt stabilisation: month where cash path stops declining (first month where
+  // 6-month forward median is positive vs trough).
+  let debtStabMonth = troughMonth;
+  for (let i = troughMonth + 6; i < cashPath.length - 6; i++) {
+    const fwd = cashPath[i + 6];
+    if (fwd > cashPath[i] * 1.05) {
+      debtStabMonth = i;
+      break;
+    }
+  }
+  const debtStabilisationYear = Math.max(liquidityTroughYear + 1, Math.round(debtStabMonth / 12));
+
+  // Refinance risk window: years 1–3 after activation by default; widen if refi probability is elevated.
+  const refiHigh = (result.refinancePressureProbability ?? 0) > 0.15;
+  const refinanceRiskWindow = refiHigh
+    ? { startYear: 1, endYear: Math.min(horizonYears, 5) }
+    : { startYear: 1, endYear: 3 };
+
+  // Recovery years: from trough to debt stabilisation, with min of 1.
+  const recoveryYears = Math.max(1, debtStabilisationYear - liquidityTroughYear);
+
+  return {
+    liquidityTroughYear,
+    debtStabilisationYear,
+    refinanceRiskWindow,
+    recoveryYears,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 2.8 — Soft warning extractor (attached to ranked candidates)
+// ────────────────────────────────────────────────────────────────────────────
+
+function extractSoftWarnings(
+  blueprint: CandidateBlueprint,
+  result: ExtendedScenarioResult,
+  bands: { dsr: DsrBand; worstLvr: number; worstNsr: number; refi: RefinancePressureBand; liquidityRatioMin: number; liquidityFloor: number },
+): SoftWarning[] {
+  const out: SoftWarning[] = [];
+
+  // Crypto concentration warning (when present but under hard ceiling)
+  if (blueprint.allocation === "crypto_100" || blueprint.allocation === "etf40_super40_crypto20") {
+    out.push({
+      id: "crypto-exposure",
+      label: "Crypto exposure",
+      detail:
+        blueprint.allocation === "crypto_100"
+          ? "100% crypto deployment. Classified as Speculative — High Volatility, High Downside."
+          : "20% crypto component. Adds left-tail risk.",
+      severity: blueprint.allocation === "crypto_100" ? "critical" : "warn",
+      driver: "allocation.crypto",
+    });
+  }
+
+  // Refinance pressure warning
+  if ((result.refinancePressureProbability ?? 0) > 0.10) {
+    out.push({
+      id: "refi-pressure",
+      label: "Refinance pressure elevated",
+      detail: `Refinance-stress probability ${(result.refinancePressureProbability * 100).toFixed(1)}% within horizon. Monitor at 12‑month rate review.`,
+      severity: result.refinancePressureProbability > 0.20 ? "critical" : "warn",
+      driver: "result.refinancePressureProbability",
+    });
+  }
+
+  // Liquidity-thin warning
+  if (bands.liquidityRatioMin < 3) {
+    out.push({
+      id: "liquidity-thin",
+      label: "Liquidity buffer thin",
+      detail: `Minimum liquidity ratio ${bands.liquidityRatioMin.toFixed(1)} months of expenses — a single income shock would force asset sales.`,
+      severity: bands.liquidityRatioMin < 1.5 ? "critical" : "warn",
+      driver: "bands.liquidityRatioMin",
+    });
+  }
+
+  // High DSR (but still serviceable)
+  if (bands.dsr === "stressed") {
+    out.push({
+      id: "dsr-stressed",
+      label: "DSR in stressed band",
+      detail: "Debt service ratio in the stressed band (45–55%). Still serviceable but no headroom for rate rises or income disruption.",
+      severity: "warn",
+      driver: "bands.dsr",
+    });
+  }
+
+  // High downside (left tail)
+  if ((result.defaultProbability ?? 0) > 0.10) {
+    out.push({
+      id: "downside-tail",
+      label: "High downside tail",
+      detail: `Default probability ${(result.defaultProbability * 100).toFixed(1)}% within horizon — elevated even though below the 20% acceptability bar.`,
+      severity: "warn",
+      driver: "result.defaultProbability",
+    });
+  }
+
+  return out;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 2.8 — Horizon-sensitivity probe (rerun rejected paths at +5y, +10y)
+// ────────────────────────────────────────────────────────────────────────────
+
+async function probeHorizonSensitivity(
+  input: QuickDecisionInput,
+  blueprint: CandidateBlueprint,
+  events: ScenarioDelta[],
+  ctx: DerivedContext,
+  household: { dependants: number; incomeVolatility: number },
+  constraints: typeof DEFAULT_CONSTRAINTS,
+  baseAssumptions: Partial<BasePlanAssumptions>,
+  simulationCount: number,
+  currentHorizonYears: number,
+): Promise<{ sensitive: boolean; viableHorizonYears?: number }> {
+  // Probe at +5y and +10y to see if the path becomes viable with longer horizon.
+  const probeYears = [currentHorizonYears + 5, currentHorizonYears + 10];
+  for (const ph of probeYears) {
+    const phMonths = ph * 12;
+    const rerun = runScenarioV2({
+      dashboardInputs: input.dashboardInputs,
+      name: blueprint.label,
+      scenarioId: blueprint.id + `_h${ph}`,
+      deltas: events,
+      horizonMonths: phMonths,
+      simulationCount,
+      assumptions: baseAssumptions,
+      hasHelpDebt: input.taxContext?.hasHelpDebt ?? false,
+      hasPrivateHospitalCover: input.taxContext?.hasPrivateHospitalCover ?? true,
+    });
+    const probe = checkSafetyCeilings(blueprint, rerun, ctx, household, constraints);
+    if (probe.passed) {
+      return { sensitive: true, viableHorizonYears: ph };
+    }
+  }
+  return { sensitive: false };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 2.8 — Multi-winner: best path under each profile lens.
+// ────────────────────────────────────────────────────────────────────────────
+
+function computeMultiWinner(
+  scoredCandidates: { id: string; scoreInputs: ScoreInputs }[],
+  highRiskIds: Set<string>,
+): QuickDecisionOutput["multiWinner"] {
+  if (scoredCandidates.length === 0) {
+    return { balanced: null, wealthMax: null, cashflowSafe: null, highRisk: null };
+  }
+  const pickBest = (profile: InvestorProfile, restrictToHighRisk = false) => {
+    const weights = getProfileWeights(profile);
+    let best: { id: string; score: number } | null = null;
+    for (const c of scoredCandidates) {
+      if (restrictToHighRisk && !highRiskIds.has(c.id)) continue;
+      const s = compositeScore(c.scoreInputs, weights).score;
+      if (!best || s > best.score) best = { id: c.id, score: s };
+    }
+    return best;
+  };
+  return {
+    balanced:     pickBest("balanced"),
+    wealthMax:    pickBest("wealth_max"),
+    cashflowSafe: pickBest("cashflow_safe"),
+    highRisk:     highRiskIds.size > 0 ? pickBest("aggressive", true) : null,
+  };
+}
+
 export async function generateQuickDecisionCandidates(
   input: QuickDecisionInput,
 ): Promise<QuickDecisionOutput> {
-  const constraints = { ...DEFAULT_CONSTRAINTS, ...(input.constraints ?? {}) };
-  const horizonMonths = (input.horizonYears ?? 25) * 12;
+  // Phase 2.8 — Resolve risk mode + overrides. Hard floors enforced inside
+  // resolveRiskControls (maxLvr ≤ 0.85, maxDefaultProbability ≤ 0.40, etc.).
+  const riskMode: RiskControlMode = input.riskMode ?? "balanced";
+  const resolvedControls = resolveRiskControls(riskMode, input.riskControls);
+
+  // Compose effective constraints. Order: defaults < explicit input.constraints <
+  // resolvedControls. The mode-derived values WIN over input.constraints because
+  // mode is the user-facing risk-profile choice. Hard floors already clamped.
+  const baseConstraints = { ...DEFAULT_CONSTRAINTS, ...(input.constraints ?? {}) };
+  const constraints: typeof DEFAULT_CONSTRAINTS = {
+    ...baseConstraints,
+    maxLvr: resolvedControls.maxLvr,
+    minNsrBuffered: resolvedControls.minNsrBuffered,
+    maxCryptoSharePct: resolvedControls.maxCryptoSharePct,
+    maxDefaultProbability: resolvedControls.maxDefaultProbability,
+    maxSingleAssetSharePct: resolvedControls.maxSingleAssetSharePct,
+  };
+
+  const horizonYears = input.horizonYears ?? 25;
+  const horizonMonths = horizonYears * 12;
   const simulationCount = input.simulationCount ?? QUICK_SIM_COUNT;
   const ctx = deriveCtx(input);
 
   // Resolve investor profile -> scoring weights
-  // Falls back to the question's preset profile when caller omits one
   const profileId: InvestorProfile = input.investorProfile
     ?? QUESTION_PRESETS[input.question.kind].defaults.investorProfile;
   const profileWeights: ScoreWeights = getProfileWeights(profileId);
 
-  // Build assumption set with registry defaults + overrides
   const baseAssumptions = (input.assumptions
     ? { ...input.assumptions }
     : {}) as Partial<BasePlanAssumptions>;
@@ -1130,12 +1701,33 @@ export async function generateQuickDecisionCandidates(
   const blueprints = blueprintsForQuestion(input.question.kind);
   const discarded: DiscardedCandidate[] = [];
   const ranked: RankedCandidate[] = [];
+  // Track which ranked ids came in via the soft-warning bypass (highRisk bucket).
+  const highRiskIds = new Set<string>();
+  // Collected for multi-winner re-scoring under different profile lenses.
+  const scoredCandidates: { id: string; scoreInputs: ScoreInputs }[] = [];
 
-  // Stage 1 — behavioural realism (cheap, runs before MC)
-  const passingStage1: { bp: CandidateBlueprint; events: ScenarioDelta[] }[] = [];
+  // Stage 1 — behavioural realism (cheap, runs before MC).
+  // In aggressive / custom mode (allowHighRiskPaths = true), behavioural failures
+  // that are softly overridable still proceed to MC + scoring, then bucketed as
+  // high-risk. Hard floors (e.g. mathematically impossible cashflow) still discard.
+  const passingStage1: { bp: CandidateBlueprint; events: ScenarioDelta[]; isHighRisk: boolean }[] = [];
   for (const blueprint of blueprints) {
     const beh = checkBehaviouralRealism(blueprint, ctx, constraints);
     if (!beh.passed) {
+      const overridable = beh.override?.possible === true;
+      const allowThrough = resolvedControls.allowHighRiskPaths && overridable;
+      if (allowThrough) {
+        const events = buildBlueprintEvents(blueprint, ctx);
+        if (events.length === 0) continue;
+        passingStage1.push({ bp: blueprint, events, isHighRisk: true });
+        continue;
+      }
+      const explanation = buildRejectionExplanation(
+        blueprint, beh.reason!, beh.detail!, null, ctx, horizonYears,
+      );
+      const recovery = isLeveragedPropertyBlueprint(blueprint)
+        ? buildRecoveryAnalysis(baseResult, horizonYears)
+        : undefined;
       discarded.push({
         id: blueprint.id, label: blueprint.label,
         stage: "behavioural",
@@ -1143,16 +1735,20 @@ export async function generateQuickDecisionCandidates(
         severity: "soft_warning",
         override: beh.override ?? { possible: false, mechanism: "Not overridable — behavioural-realism floor." },
         profileContext: profileId,
+        riskMode,
+        explanation,
+        horizonSensitive: false, // behavioural failures are not horizon-sensitive (T=0 issues)
+        recovery,
       });
       continue;
     }
     const events = buildBlueprintEvents(blueprint, ctx);
     if (events.length === 0) continue;
-    passingStage1.push({ bp: blueprint, events });
+    passingStage1.push({ bp: blueprint, events, isHighRisk: false });
   }
 
   // Stage 2 + scoring — run MC in parallel for performance
-  const runs = await Promise.all(passingStage1.map(async ({ bp, events }) => {
+  const runs = await Promise.all(passingStage1.map(async ({ bp, events, isHighRisk }) => {
     const result = runScenarioV2({
       dashboardInputs: input.dashboardInputs,
       name: bp.label,
@@ -1164,21 +1760,49 @@ export async function generateQuickDecisionCandidates(
       hasHelpDebt: input.taxContext?.hasHelpDebt ?? false,
       hasPrivateHospitalCover: input.taxContext?.hasPrivateHospitalCover ?? true,
     });
-    return { bp, events, result };
+    return { bp, events, result, isHighRisk };
   }));
 
-  for (const { bp: blueprint, events, result } of runs) {
+  for (const { bp: blueprint, events, result, isHighRisk: stage1HighRisk } of runs) {
     const safety = checkSafetyCeilings(blueprint, result, ctx, input.household, constraints);
+    let isHighRisk = stage1HighRisk;
+
     if (!safety.passed) {
-      discarded.push({
-        id: blueprint.id, label: blueprint.label,
-        stage: "safety_ceiling",
-        reason: safety.reason!, detail: safety.detail!,
-        severity: "hard_blocker",
-        override: safety.override ?? { possible: false, mechanism: "Hard institutional ceiling — not overridable in Quick Decision." },
-        profileContext: profileId,
-      });
-      continue;
+      const overridable = safety.override?.possible === true;
+      // Allow safety-soft failures through ONLY when:
+      //  - allowHighRiskPaths is on
+      //  - the failure is overridable (LVR > X, NSR < min)
+      //  - the constraint key isn't a hard institutional ceiling that resolveRiskControls already clamps
+      const allowThrough = resolvedControls.allowHighRiskPaths && overridable;
+      if (!allowThrough) {
+        // Probe horizon sensitivity (best-effort — keep tests deterministic).
+        const horizonProbe = await probeHorizonSensitivity(
+          input, blueprint, events, ctx, input.household, constraints,
+          baseAssumptions, simulationCount, horizonYears,
+        );
+        const explanation = buildRejectionExplanation(
+          blueprint, safety.reason!, safety.detail!, result, ctx, horizonYears,
+        );
+        const recovery = isLeveragedPropertyBlueprint(blueprint)
+          ? buildRecoveryAnalysis(result, horizonYears)
+          : undefined;
+        discarded.push({
+          id: blueprint.id, label: blueprint.label,
+          stage: "safety_ceiling",
+          reason: safety.reason!, detail: safety.detail!,
+          severity: "hard_blocker",
+          override: safety.override ?? { possible: false, mechanism: "Hard institutional ceiling — not overridable in Quick Decision." },
+          profileContext: profileId,
+          riskMode,
+          explanation,
+          horizonSensitive: horizonProbe.sensitive,
+          viableHorizonYears: horizonProbe.viableHorizonYears,
+          recovery,
+        });
+        continue;
+      }
+      // Soft-bypass: tag as high-risk and continue to scoring.
+      isHighRisk = true;
     }
 
     const scoreInputs = buildScoreInputs(result, safety.bands, baseResult, horizonMonths);
@@ -1192,6 +1816,11 @@ export async function generateQuickDecisionCandidates(
     } as BasePlanAssumptions;
     const trace = buildTrace(blueprint, events, result, safety.bands, scoreInputs, score, traceAssumptions);
 
+    const softWarnings = extractSoftWarnings(blueprint, result, safety.bands);
+    const recovery = isLeveragedPropertyBlueprint(blueprint)
+      ? buildRecoveryAnalysis(result, horizonYears)
+      : undefined;
+
     ranked.push({
       id: blueprint.id,
       label: blueprint.label,
@@ -1202,14 +1831,26 @@ export async function generateQuickDecisionCandidates(
       trace,
       headline: buildHeadline(scoreInputs, score),
       rationale: buildRationale(scoreInputs, score, safety.bands),
+      softWarnings,
+      isHighRisk,
+      recovery,
     });
+    scoredCandidates.push({ id: blueprint.id, scoreInputs });
+    if (isHighRisk) highRiskIds.add(blueprint.id);
   }
 
   ranked.sort((a, b) => b.score.score - a.score.score);
 
-  // Comparative narrative
-  const winner = ranked[0];
-  const runnerUp = ranked[1] ?? null;
+  // Split ranked into normal (isHighRisk=false) and high-risk paths
+  const normalRanked = ranked.filter((c) => !c.isHighRisk);
+  const highRiskPaths = ranked.filter((c) => c.isHighRisk);
+
+  // Phase 2.8 — multi-winner re-scoring lenses.
+  const multiWinner = computeMultiWinner(scoredCandidates, highRiskIds);
+
+  // Comparative narrative (uses normal ranked; high-risk is shown separately).
+  const winner = normalRanked[0] ?? null;
+  const runnerUp = normalRanked[1] ?? null;
   const comparativeNarrative = {
     winnerId: winner?.id ?? "",
     runnerUpId: runnerUp?.id ?? null,
@@ -1219,7 +1860,7 @@ export async function generateQuickDecisionCandidates(
     whatCouldInvalidate: winner
       ? buildInvalidationConditions(winner)
       : [],
-    secondPlaceAndWhy: runnerUp
+    secondPlaceAndWhy: runnerUp && winner
       ? `${runnerUp.shortLabel} placed second at ${runnerUp.score.score.toFixed(0)}/100 because ${
         runnerUp.score.score < winner.score.score - 5
           ? "it gave up significant ground on " + identifyGapAxis(winner, runnerUp)
@@ -1228,7 +1869,7 @@ export async function generateQuickDecisionCandidates(
       : "No runner-up — only one candidate cleared filters.",
   };
 
-  // Phase 2.4 — build execution plan + conditional recs for the winner.
+  // Phase 2.4 — execution plan + conditional recs for the winner.
   const executionPlan = winner ? buildExecutionPlan(winner) : [];
   const conditionalRecommendations = winner ? buildConditionalRecommendations(winner) : [];
 
@@ -1236,8 +1877,11 @@ export async function generateQuickDecisionCandidates(
     question: input.question.kind,
     capital: input.question.capital,
     investorProfile: profileId,
-    ranked,
+    ranked: normalRanked,
     discarded,
+    highRiskPaths,
+    multiWinner,
+    riskControlsApplied: { mode: riskMode, resolved: resolvedControls },
     basePlanHash: baseResult.snapshotHash,
     baseScenarioResult: baseResult,
     generatedAt: new Date().toISOString(),

@@ -37,6 +37,7 @@ import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
   Trophy, Shield, Droplet, TrendingDown, Target, Info, Eye, EyeOff, ShieldAlert,
   Beaker, ListChecks, XCircle, Activity, SlidersHorizontal, FileDown,
+  Gauge, Flame, Clock, Wrench, Lightbulb, Crown, Coins, Heart, Layers,
 } from "lucide-react";
 
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
@@ -48,9 +49,14 @@ import {
   getQuestionPreset,
   listQuestionPresets,
   QUESTION_PRESETS,
+  RISK_MODE_DEFAULTS,
+  resolveRiskControls,
   type QuickDecisionOutput,
   type RankedCandidate,
+  type DiscardedCandidate,
   type QuickDecisionQuestionKind,
+  type RiskControlMode,
+  type RiskControlOverrides,
 } from "@/lib/scenarioV2/decisionEngine/candidateGenerator";
 import {
   listInvestorProfiles,
@@ -174,6 +180,12 @@ function QuickDecisionTab() {
   const [hasHelpDebt, setHasHelpDebt] = useState<boolean>(false);
   const [hasPrivateHospitalCover, setHasPrivateHospitalCover] = useState<boolean>(true);
 
+  // ── Phase 2.8: Risk Control Mode ──────────────────────────────────────────
+  const [riskMode, setRiskMode] = useState<RiskControlMode>("balanced");
+  const [customControls, setCustomControls] = useState<Partial<RiskControlOverrides>>({});
+  const [expandedDiscardId, setExpandedDiscardId] = useState<string | null>(null);
+  const [showRiskControls, setShowRiskControls] = useState(false);
+
   // ── Output state ───────────────────────────────────────────────────────────
   const [output, setOutput] = useState<QuickDecisionOutput | null>(null);
   const [running, setRunning] = useState(false);
@@ -211,6 +223,13 @@ function QuickDecisionTab() {
     setOutput(null);
     setExpandedCandidateId(null);
   }, [investorProfile]);
+
+  // Phase 2.8 — changing risk mode invalidates the output (different filter set).
+  useEffect(() => {
+    setOutput(null);
+    setExpandedCandidateId(null);
+    setExpandedDiscardId(null);
+  }, [riskMode]);
 
   // ── Run-button validity ────────────────────────────────────────────────────
   // Button is disabled ONLY when inputs are invalid or a run is in flight.
@@ -253,6 +272,8 @@ function QuickDecisionTab() {
           hasHelpDebt,
           hasPrivateHospitalCover,
         },
+        riskMode,
+        riskControls: riskMode === "custom" ? customControls : undefined,
       });
       setOutput(out);
       if (out.ranked.length > 0) setExpandedCandidateId(out.ranked[0].id);
@@ -287,6 +308,7 @@ function QuickDecisionTab() {
 
   const ranked = output?.ranked ?? [];
   const discarded = output?.discarded ?? [];
+  const highRiskPaths = output?.highRiskPaths ?? [];
   const winner = ranked[0];
   const runnerUp = ranked[1];
 
@@ -444,6 +466,16 @@ function QuickDecisionTab() {
               ))}
             </div>
           </div>
+
+          {/* Phase 2.8 — Risk Control Mode panel */}
+          <RiskControlsPanel
+            mode={riskMode}
+            onModeChange={setRiskMode}
+            customControls={customControls}
+            onCustomControlsChange={setCustomControls}
+            expanded={showRiskControls}
+            onToggleExpanded={() => setShowRiskControls((v) => !v)}
+          />
 
           {liveReadouts && (
             <div className="rounded-lg border border-border bg-card/50 p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -697,6 +729,18 @@ function QuickDecisionTab() {
         </Card>
       )}
 
+      {/* ── Phase 2.8: Multi-winner lenses ──────────────────────────────── */}
+      {output && <MultiWinnerPanel output={output} />}
+
+      {/* ── Phase 2.8: High-risk-but-possible paths ─────────────────────── */}
+      {highRiskPaths.length > 0 && output && (
+        <HighRiskPathsPanel
+          paths={highRiskPaths}
+          fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
+          riskMode={output.riskControlsApplied.mode}
+        />
+      )}
+
       {/* ── Discarded paths (collapsed by default) ───────────────────────── */}
       {discarded.length > 0 && (
         <Card>
@@ -721,46 +765,13 @@ function QuickDecisionTab() {
             <CardContent>
               <div className="space-y-2">
                 {discarded.map((d) => (
-                  <div
+                  <WhyFilteredPanel
                     key={d.id}
-                    className="rounded-md border border-border bg-card/50 p-3"
-                    data-testid={`discarded-${d.id}`}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-semibold truncate">{d.label}</span>
-                        <Badge
-                          variant="outline"
-                          className={
-                            d.severity === "hard_blocker"
-                              ? "border-rose-400 text-rose-700 dark:text-rose-400 text-[10px] font-semibold"
-                              : "border-amber-400 text-amber-700 dark:text-amber-400 text-[10px] font-semibold"
-                          }
-                        >
-                          {d.severity === "hard_blocker" ? "HARD BLOCKER" : "SOFT WARNING"}
-                        </Badge>
-                        <Badge variant="outline" className="text-[10px] border-border text-muted-foreground">
-                          {d.stage === "behavioural" ? "behavioural" : "safety ceiling"}
-                        </Badge>
-                        <Badge variant="outline" className="text-[10px] border-indigo-300 text-indigo-700 dark:text-indigo-400">
-                          profile: {d.profileContext}
-                        </Badge>
-                      </div>
-                      <div className="text-[11px] text-muted-foreground mt-2 grid grid-cols-1 gap-1">
-                        <div>
-                          <span className="font-semibold text-foreground">Reason:</span> {d.reason} — {sentence(d.detail)}
-                        </div>
-                        <div>
-                          <span className="font-semibold text-foreground">Override:</span>{" "}
-                          {d.override.possible ? (
-                            <span className="text-amber-700 dark:text-amber-400">Possible — {sentence(d.override.mechanism)}</span>
-                          ) : (
-                            <span className="text-rose-700 dark:text-rose-400">Not overridable — {sentence(d.override.mechanism)}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                    discard={d}
+                    expanded={expandedDiscardId === d.id}
+                    onToggle={() => setExpandedDiscardId(expandedDiscardId === d.id ? null : d.id)}
+                    fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
+                  />
                 ))}
               </div>
             </CardContent>
@@ -787,6 +798,455 @@ function QuickDecisionTab() {
 }
 
 // ─── Subcomponents ───────────────────────────────────────────────────────────
+
+// Phase 2.8 — Risk Control Mode panel
+function RiskControlsPanel({
+  mode, onModeChange, customControls, onCustomControlsChange, expanded, onToggleExpanded,
+}: {
+  mode: RiskControlMode;
+  onModeChange: (m: RiskControlMode) => void;
+  customControls: Partial<RiskControlOverrides>;
+  onCustomControlsChange: (c: Partial<RiskControlOverrides>) => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+}) {
+  const modes: { id: RiskControlMode; label: string; tone: string; desc: string; icon: React.ReactNode }[] = [
+    { id: "conservative", label: "Conservative", tone: "emerald", icon: <Shield className="h-3 w-3" />, desc: "Tight LVR ≤ 75%, NSR ≥ 1.00, default ≤ 10%. No high-risk paths." },
+    { id: "balanced",     label: "Balanced",     tone: "sky",     icon: <Gauge className="h-3 w-3" />,  desc: "Engine default — LVR ≤ 85%, NSR ≥ 0.85, default ≤ 20%." },
+    { id: "aggressive",   label: "Aggressive",   tone: "amber",   icon: <Flame className="h-3 w-3" />,  desc: "NSR ≥ 0.75, default ≤ 30%, crypto up to 50%. Surfaces high-risk paths." },
+    { id: "custom",       label: "Custom",       tone: "violet",  icon: <SlidersHorizontal className="h-3 w-3" />, desc: "Set explicit thresholds. Hard floors still enforced." },
+  ];
+  const resolved = resolveRiskControls(mode, mode === "custom" ? customControls : undefined);
+
+  return (
+    <div className="space-y-2 rounded-lg border border-violet-200 dark:border-violet-900 bg-violet-50/30 dark:bg-violet-950/15 p-3">
+      <div className="flex items-center gap-2">
+        <Gauge className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
+        <Label className="text-xs font-medium">Risk control mode</Label>
+        <span className="text-[10px] text-muted-foreground">decides which soft warnings discard vs. show as high-risk</span>
+        <button
+          onClick={onToggleExpanded}
+          aria-expanded={expanded}
+          className="ml-auto text-[10px] text-violet-700 dark:text-violet-300 underline-offset-2 hover:underline"
+        >
+          {expanded ? "Hide details" : "Show details"}
+        </button>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" data-testid="risk-mode-grid">
+        {modes.map((m) => (
+          <button
+            key={m.id}
+            onClick={() => onModeChange(m.id)}
+            aria-pressed={mode === m.id}
+            data-testid={`risk-mode-${m.id}`}
+            className={`text-left rounded-md border p-2 transition-all min-h-[58px] ${
+              mode === m.id
+                ? "border-violet-500 bg-violet-100/60 dark:bg-violet-900/40 ring-2 ring-violet-200 dark:ring-violet-800"
+                : "border-border bg-card hover:bg-muted/50"
+            }`}
+          >
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold">
+              {m.icon}
+              <span className="truncate">{m.label}</span>
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">
+              {m.desc}
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {expanded && (
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-md border border-border bg-card/60 p-3 text-[11px]">
+          <ControlReadout label="Max LVR"           value={`${(resolved.maxLvr * 100).toFixed(0)}%`} hint="absolute ceiling ≤ 85%" />
+          <ControlReadout label="Min buffered NSR"  value={resolved.minNsrBuffered.toFixed(2)}     hint="institutional floor ≥ 0.70" />
+          <ControlReadout label="Max default prob"  value={`${(resolved.maxDefaultProbability * 100).toFixed(0)}%`} hint="institutional floor ≤ 40%" />
+          <ControlReadout label="Max crypto share"  value={`${(resolved.maxCryptoSharePct * 100).toFixed(0)}%`} hint="of portfolio" />
+          <ControlReadout label="Max single asset"  value={`${(resolved.maxSingleAssetSharePct * 100).toFixed(0)}%`} hint="of portfolio" />
+          <ControlReadout label="Allow high-risk"   value={resolved.allowHighRiskPaths ? "yes" : "no"} hint="soft warnings → high-risk bucket" />
+        </div>
+      )}
+
+      {mode === "custom" && expanded && (
+        <div className="mt-2 space-y-3 rounded-md border border-violet-300 dark:border-violet-800 bg-violet-50/40 dark:bg-violet-950/20 p-3">
+          <div className="text-[10px] uppercase tracking-wide font-semibold text-violet-700 dark:text-violet-300">Custom thresholds</div>
+          <CustomSlider
+            label="Max LVR"
+            value={customControls.maxLvr ?? RISK_MODE_DEFAULTS.custom.maxLvr}
+            min={0.50} max={0.85} step={0.01}
+            format={(v) => `${(v * 100).toFixed(0)}%`}
+            onChange={(v) => onCustomControlsChange({ ...customControls, maxLvr: v })}
+          />
+          <CustomSlider
+            label="Min buffered NSR"
+            value={customControls.minNsrBuffered ?? RISK_MODE_DEFAULTS.custom.minNsrBuffered}
+            min={0.70} max={1.20} step={0.01}
+            format={(v) => v.toFixed(2)}
+            onChange={(v) => onCustomControlsChange({ ...customControls, minNsrBuffered: v })}
+          />
+          <CustomSlider
+            label="Max default probability"
+            value={customControls.maxDefaultProbability ?? RISK_MODE_DEFAULTS.custom.maxDefaultProbability}
+            min={0.05} max={0.40} step={0.01}
+            format={(v) => `${(v * 100).toFixed(0)}%`}
+            onChange={(v) => onCustomControlsChange({ ...customControls, maxDefaultProbability: v })}
+          />
+          <CustomSlider
+            label="Max crypto share"
+            value={customControls.maxCryptoSharePct ?? RISK_MODE_DEFAULTS.custom.maxCryptoSharePct}
+            min={0.00} max={1.00} step={0.05}
+            format={(v) => `${(v * 100).toFixed(0)}%`}
+            onChange={(v) => onCustomControlsChange({ ...customControls, maxCryptoSharePct: v })}
+          />
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={customControls.allowHighRiskPaths ?? RISK_MODE_DEFAULTS.custom.allowHighRiskPaths}
+              onChange={(e) => onCustomControlsChange({ ...customControls, allowHighRiskPaths: e.target.checked })}
+              className="rounded border-border"
+            />
+            <span>Allow high-risk paths (soft warnings still surfaced, with penalty)</span>
+          </label>
+          <div className="text-[10px] text-muted-foreground">
+            Hard floors enforced regardless: LVR ≤ 85%, default-prob ≤ 40%, NSR ≥ 0.70.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ControlReadout({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <div>
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className="text-xs font-semibold tabular-nums">{value}</div>
+      </div>
+      <div className="text-[9px] text-muted-foreground italic">{hint}</div>
+    </div>
+  );
+}
+
+function CustomSlider({
+  label, value, min, max, step, format, onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  format: (v: number) => string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-[11px]">
+        <Label className="text-[11px]">{label}</Label>
+        <span className="font-semibold tabular-nums">{format(value)}</span>
+      </div>
+      <Slider
+        value={[value]} min={min} max={max} step={step}
+        onValueChange={([v]) => onChange(v)}
+      />
+    </div>
+  );
+}
+
+// Phase 2.8 — Multi-winner re-scoring lenses
+function MultiWinnerPanel({ output }: { output: QuickDecisionOutput }) {
+  const w = output.multiWinner;
+  const allRanked = [...output.ranked, ...output.highRiskPaths];
+  const findLabel = (id: string | undefined): string => {
+    if (!id) return "—";
+    return allRanked.find((c) => c.id === id)?.shortLabel ?? id;
+  };
+  const lenses: { key: keyof typeof w; label: string; icon: React.ReactNode; tone: string; desc: string }[] = [
+    { key: "balanced",     label: "Best balanced",      icon: <Gauge className="h-3.5 w-3.5" />,   tone: "sky",     desc: "Best under engine defaults" },
+    { key: "wealthMax",    label: "Best wealth-max",    icon: <Crown className="h-3.5 w-3.5" />,   tone: "amber",   desc: "Best for terminal net worth" },
+    { key: "cashflowSafe", label: "Best cashflow-safe", icon: <Heart className="h-3.5 w-3.5" />,   tone: "emerald", desc: "Best for serviceability + liquidity" },
+    { key: "highRisk",     label: "Best high-risk",     icon: <Flame className="h-3.5 w-3.5" />,   tone: "rose",    desc: "Best under aggressive lens" },
+  ];
+  const tones: Record<string, string> = {
+    sky:     "border-sky-300 bg-sky-50 dark:bg-sky-950/30 dark:border-sky-900 text-sky-800 dark:text-sky-300",
+    amber:   "border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 text-amber-800 dark:text-amber-300",
+    emerald: "border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-900 text-emerald-800 dark:text-emerald-300",
+    rose:    "border-rose-300 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-900 text-rose-800 dark:text-rose-300",
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Layers className="h-5 w-5" />
+          Multi-winner lenses
+        </CardTitle>
+        <CardDescription>
+          Same candidate set, re-scored under four different priorities. The engine doesn’t force one universal winner.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2" data-testid="multi-winner-grid">
+          {lenses.map((lens) => {
+            const v = w[lens.key];
+            return (
+              <div
+                key={lens.key}
+                className={`rounded-md border p-3 ${tones[lens.tone]}`}
+                data-testid={`multi-winner-${lens.key}`}
+              >
+                <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold opacity-80">
+                  {lens.icon}
+                  <span className="truncate">{lens.label}</span>
+                </div>
+                <div className="text-sm font-semibold mt-1 truncate">{findLabel(v?.id)}</div>
+                <div className="text-[10px] mt-0.5 opacity-80">
+                  {v ? `${v.score.toFixed(0)}/100` : "no candidate"}
+                </div>
+                <div className="text-[9px] italic mt-1 opacity-70">{lens.desc}</div>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Phase 2.8 — High-risk-but-possible paths section
+function HighRiskPathsPanel({
+  paths, fmt, riskMode,
+}: {
+  paths: RankedCandidate[];
+  fmt: ReturnType<typeof useMaskFmt>;
+  riskMode: RiskControlMode;
+}) {
+  return (
+    <Card className="border-amber-300 dark:border-amber-900 bg-amber-50/30 dark:bg-amber-950/15">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Flame className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              High-risk but possible paths ({paths.length})
+            </CardTitle>
+            <CardDescription>
+              These breach balanced-mode soft warnings but are surfaced under <span className="font-semibold">{riskMode}</span> mode
+              with explicit penalties. The engine guides, it does not censor.
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {paths.map((c) => (
+          <div
+            key={c.id}
+            className="rounded-md border border-amber-300 dark:border-amber-800 bg-card/60 p-3"
+            data-testid={`highrisk-${c.id}`}
+          >
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-semibold truncate">{c.label}</span>
+                  <Badge className="bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-300 text-[10px] font-semibold">
+                    HIGH RISK
+                  </Badge>
+                  {c.softWarnings.map((sw) => (
+                    <Badge
+                      key={sw.id}
+                      variant="outline"
+                      className={`text-[10px] font-medium ${
+                        sw.severity === "critical"
+                          ? "border-rose-400 text-rose-700 dark:text-rose-400"
+                          : sw.severity === "warn"
+                            ? "border-amber-400 text-amber-700 dark:text-amber-400"
+                            : "border-sky-400 text-sky-700 dark:text-sky-400"
+                      }`}
+                    >
+                      {sw.label}
+                    </Badge>
+                  ))}
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">{fmt.sentence(c.headline)}</div>
+              </div>
+              <Badge className="tabular-nums font-bold text-base bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+                {c.score.score.toFixed(0)}
+              </Badge>
+            </div>
+            <ul className="mt-2 text-[10px] text-muted-foreground space-y-0.5">
+              {c.softWarnings.slice(0, 3).map((sw) => (
+                <li key={sw.id} className="flex items-start gap-1.5">
+                  <AlertTriangle className="h-3 w-3 text-amber-500 mt-0.5 shrink-0" />
+                  <span>{fmt.sentence(sw.detail)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Phase 2.8 — Per-discard collapsible "Why filtered?" panel
+function WhyFilteredPanel({
+  discard, expanded, onToggle, fmt,
+}: {
+  discard: DiscardedCandidate;
+  expanded: boolean;
+  onToggle: () => void;
+  fmt: ReturnType<typeof useMaskFmt>;
+}) {
+  const d = discard;
+  const ex = d.explanation;
+  return (
+    <div
+      className="rounded-md border border-border bg-card/50 overflow-hidden"
+      data-testid={`discarded-${d.id}`}
+    >
+      <button
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="w-full text-left p-3 hover:bg-muted/30 transition-colors"
+      >
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold truncate">{d.label}</span>
+          <Badge
+            variant="outline"
+            className={
+              d.severity === "hard_blocker"
+                ? "border-rose-400 text-rose-700 dark:text-rose-400 text-[10px] font-semibold"
+                : "border-amber-400 text-amber-700 dark:text-amber-400 text-[10px] font-semibold"
+            }
+          >
+            {d.severity === "hard_blocker" ? "HARD BLOCKER" : "SOFT WARNING"}
+          </Badge>
+          <Badge variant="outline" className="text-[10px] border-border text-muted-foreground">
+            {d.stage === "behavioural" ? "behavioural" : "safety ceiling"}
+          </Badge>
+          {d.horizonSensitive && (
+            <Badge
+              variant="outline"
+              className="text-[10px] font-semibold border-violet-400 text-violet-700 dark:text-violet-400 gap-1"
+              data-testid={`horizon-badge-${d.id}`}
+              title={
+                d.viableHorizonYears
+                  ? `Viable at ${d.viableHorizonYears}y horizon`
+                  : "Becomes viable with a longer horizon"
+              }
+            >
+              <Clock className="h-2.5 w-2.5" />
+              Horizon-sensitive
+              {d.viableHorizonYears ? ` (≥${d.viableHorizonYears}y)` : ""}
+            </Badge>
+          )}
+          <Badge variant="outline" className="text-[10px] border-indigo-300 text-indigo-700 dark:text-indigo-400">
+            mode: {d.riskMode}
+          </Badge>
+          <span className="ml-auto text-muted-foreground">
+            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </span>
+        </div>
+        {!expanded && (
+          <div className="text-[11px] text-muted-foreground mt-1">
+            <span className="font-medium text-foreground">{d.reason}.</span> {fmt.sentence(ex.plainEnglish)}
+          </div>
+        )}
+      </button>
+      {expanded && (
+        <div className="border-t border-border p-3 space-y-3 bg-muted/10">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Plain English</div>
+              <div className="text-xs mt-1">{fmt.sentence(ex.plainEnglish)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Primary driver</div>
+              <div className="text-xs mt-1 font-semibold">{ex.primaryDriver}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Technical</div>
+              <div className="text-xs mt-1 font-mono text-muted-foreground">{fmt.sentence(ex.technical)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground flex items-center gap-1">
+                <Clock className="h-3 w-3" /> Stress period
+              </div>
+              <div className="text-xs mt-1">{fmt.sentence(ex.stressPeriod)}</div>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[10px] uppercase tracking-wide font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+              <Wrench className="h-3 w-3" /> What would make this viable
+            </div>
+            <ul className="text-xs mt-1 space-y-0.5">
+              {ex.whatWouldFix.map((line, i) => (
+                <li key={i} className="flex items-start gap-1.5">
+                  <Lightbulb className="h-3 w-3 text-emerald-500 mt-0.5 shrink-0" />
+                  <span>{fmt.sentence(line)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {d.recovery && <RecoveryMiniTimeline recovery={d.recovery} />}
+
+          <div className="text-[10px] text-muted-foreground border-t border-border pt-2">
+            <span className="font-semibold text-foreground">Override:</span>{" "}
+            {d.override.possible ? (
+              <span className="text-amber-700 dark:text-amber-400">Possible — {fmt.sentence(d.override.mechanism)}</span>
+            ) : (
+              <span className="text-rose-700 dark:text-rose-400">Not overridable — {fmt.sentence(d.override.mechanism)}</span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Phase 2.8 — Recovery mini-timeline for leveraged-property paths
+function RecoveryMiniTimeline({ recovery }: { recovery: NonNullable<DiscardedCandidate["recovery"]> }) {
+  const maxYear = Math.max(
+    recovery.liquidityTroughYear,
+    recovery.debtStabilisationYear,
+    recovery.refinanceRiskWindow.endYear,
+  ) + 1;
+  const xFor = (y: number) => Math.min(100, Math.max(0, (y / maxYear) * 100));
+  return (
+    <div className="rounded-md border border-violet-300 dark:border-violet-800 bg-violet-50/50 dark:bg-violet-950/20 p-3">
+      <div className="text-[10px] uppercase tracking-wide font-semibold text-violet-700 dark:text-violet-300 flex items-center gap-1">
+        <Coins className="h-3 w-3" /> Recovery analysis (leveraged path)
+      </div>
+      <div className="relative h-6 mt-2 bg-violet-100 dark:bg-violet-900/40 rounded-sm">
+        <div
+          className="absolute top-0 bottom-0 bg-amber-200/70 dark:bg-amber-800/40"
+          style={{
+            left: `${xFor(recovery.refinanceRiskWindow.startYear)}%`,
+            width: `${xFor(recovery.refinanceRiskWindow.endYear) - xFor(recovery.refinanceRiskWindow.startYear)}%`,
+          }}
+          title={`Refinance risk window: Years ${recovery.refinanceRiskWindow.startYear}–${recovery.refinanceRiskWindow.endYear}`}
+        />
+        <div
+          className="absolute top-0 bottom-0 w-0.5 bg-rose-600"
+          style={{ left: `${xFor(recovery.liquidityTroughYear)}%` }}
+          title={`Liquidity trough at year ${recovery.liquidityTroughYear}`}
+        />
+        <div
+          className="absolute top-0 bottom-0 w-0.5 bg-emerald-600"
+          style={{ left: `${xFor(recovery.debtStabilisationYear)}%` }}
+          title={`Debt stabilises at year ${recovery.debtStabilisationYear}`}
+        />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] mt-2">
+        <div><span className="text-rose-700 dark:text-rose-400 font-semibold">Trough:</span> Year {recovery.liquidityTroughYear}</div>
+        <div><span className="text-emerald-700 dark:text-emerald-400 font-semibold">Stabilises:</span> Year {recovery.debtStabilisationYear}</div>
+        <div><span className="text-amber-700 dark:text-amber-400 font-semibold">Refi window:</span> Y{recovery.refinanceRiskWindow.startYear}–{recovery.refinanceRiskWindow.endYear}</div>
+        <div><span className="text-violet-700 dark:text-violet-300 font-semibold">Recovery:</span> {recovery.recoveryYears}y</div>
+      </div>
+    </div>
+  );
+}
 
 function ReadoutTile({ label, value }: { label: string; value: string }) {
   return (

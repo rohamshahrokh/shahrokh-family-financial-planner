@@ -31,9 +31,9 @@ import html2canvas from "html2canvas";
 
 import type {
   QuickDecisionOutput,
-  RankedCandidate,
   ExecutionPlanPhase,
   ConditionalRecommendation,
+  RiskControlMode,
 } from "./decisionEngine/candidateGenerator";
 import type { InvestorProfileSpec } from "./registry";
 
@@ -740,51 +740,278 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
     yr = dy + 12;
   }
 
-  // ── Discarded alternatives ───────────────────────────────────────────────
+  // ── High-risk but possible paths (Phase 2.8) ─────────────────────────────
+  if (out.highRiskPaths && out.highRiskPaths.length > 0) {
+    doc.addPage();
+    let yh = MARGIN + 12;
+    yh = sectionHeader(doc, yh, "High-risk but possible paths", COLORS.amber);
+    yh = paragraph(
+      doc,
+      "These candidates would normally be filtered out under balanced defaults, but were preserved by the " +
+      "active risk-control mode. Each carries soft warnings (concentration, leverage, liquidity, refi pressure). " +
+      "Score penalties already reflect these risks. Treat as exploratory — not as the engine's recommendation.",
+      yh,
+      { color: COLORS.muted, fontSize: 9.5 },
+    );
+
+    for (const hr of out.highRiskPaths) {
+      yh = ensureSpace(doc, yh, 110);
+      setFill(doc, COLORS.amber);
+      doc.rect(MARGIN, yh, 3, 92, "F");
+
+      setText(doc, COLORS.text);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(hr.label, MARGIN + 10, yh + 12);
+
+      setText(doc, COLORS.amber);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.text(`SCORE ${hr.score.score.toFixed(1)} · HIGH RISK`, PAGE_W - MARGIN - 10, yh + 12, { align: "right" });
+
+      setText(doc, COLORS.slate);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      const headlineLines = doc.splitTextToSize(F.sentence(hr.headline ?? ""), CONTENT_W - 16) as string[];
+      headlineLines.slice(0, 2).forEach((l, i) => doc.text(l, MARGIN + 10, yh + 26 + i * 11));
+      let dy = yh + 26 + Math.min(headlineLines.length, 2) * 11 + 4;
+
+      // Soft warnings
+      for (const w of hr.softWarnings.slice(0, 4)) {
+        const tone: [number, number, number] =
+          w.severity === "critical" ? COLORS.rose : w.severity === "warn" ? COLORS.amber : COLORS.sky;
+        setFill(doc, tone);
+        doc.rect(MARGIN + 10, dy + 2, 2, 8, "F");
+        setText(doc, COLORS.text);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.text(w.label, MARGIN + 18, dy + 9);
+        setText(doc, COLORS.muted);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        const detail = doc.splitTextToSize(F.sentence(w.detail), CONTENT_W - 30) as string[];
+        detail.slice(0, 1).forEach(l => doc.text(l, MARGIN + 100, dy + 9));
+        dy += 12;
+      }
+      yh = dy + 10;
+    }
+  }
+
+  // ── Discarded alternatives (Phase 2.8 extended) ───────────────────────────
   if (out.discarded.length > 0) {
     doc.addPage();
     let yd = MARGIN + 12;
-    yd = sectionHeader(doc, yd, "Discarded alternatives", COLORS.slate);
+    yd = sectionHeader(doc, yd, "Discarded alternatives — full diagnostics", COLORS.slate);
     yd = paragraph(
       doc,
-      "Candidates the engine evaluated but rejected. Each row shows severity " +
-      "(HARD BLOCKER = institutional ceiling breach; SOFT WARNING = behavioural-realism rule), " +
-      "the reason, override availability, and the investor profile under which the discard occurred. " +
-      "This makes the decision trail fully auditable.",
+      "Candidates the engine evaluated but rejected. Each entry shows the 5-field rejection explanation " +
+      "(technical reason, plain-English meaning, primary driver, stress window, what would fix it), the " +
+      "override path (if any), horizon-sensitivity diagnostics, and recovery analysis for leveraged-property " +
+      "paths. This makes the decision trail fully auditable.",
       yd,
       { color: COLORS.muted, fontSize: 9.5 },
     );
-    autoTable(doc, {
-      startY: yd,
-      head: [["Candidate", "Severity", "Reason / Detail", "Override", "Profile"]],
-      body: out.discarded.map(d => [
-        d.label,
-        d.severity === "hard_blocker" ? "HARD BLOCKER" : "SOFT WARNING",
-        `${d.reason} — ${F.sentence(d.detail)}`,
-        d.override.possible
-          ? `Possible: ${F.sentence(d.override.mechanism)}`
-          : `Not overridable: ${F.sentence(d.override.mechanism)}`,
-        String(d.profileContext),
-      ]),
-      styles: { fontSize: 8.5, cellPadding: 4, textColor: COLORS.text, valign: "top" },
-      headStyles: { fillColor: COLORS.slate, textColor: [255, 255, 255], fontStyle: "bold" },
-      alternateRowStyles: { fillColor: COLORS.bgSoft },
-      margin: { left: MARGIN, right: MARGIN },
-      columnStyles: {
-        0: { fontStyle: "bold", cellWidth: 95 },
-        1: { cellWidth: 70, fontStyle: "bold" },
-        2: { cellWidth: "auto" },
-        3: { cellWidth: 130 },
-        4: { cellWidth: 60 },
-      },
-      didParseCell: (data) => {
-        if (data.section === "body" && data.column.index === 1) {
-          const isHard = String(data.cell.raw) === "HARD BLOCKER";
-          data.cell.styles.textColor = isHard ? [190, 18, 60] : [180, 83, 9];
+
+    for (const d of out.discarded) {
+      yd = ensureSpace(doc, yd, 180);
+      const tone: [number, number, number] = d.severity === "hard_blocker" ? COLORS.rose : COLORS.amber;
+
+      // Header strip
+      setFill(doc, tone);
+      doc.rect(MARGIN, yd, CONTENT_W, 18, "F");
+      setText(doc, [255, 255, 255]);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.text(d.label, MARGIN + 8, yd + 12);
+      const sevLabel = d.severity === "hard_blocker" ? "HARD BLOCKER" : "SOFT WARNING";
+      doc.text(sevLabel, PAGE_W - MARGIN - 8, yd + 12, { align: "right" });
+      yd += 22;
+
+      // Horizon-sensitivity badge
+      if (d.horizonSensitive && d.viableHorizonYears != null) {
+        setFill(doc, COLORS.sky);
+        doc.roundedRect(MARGIN, yd, 220, 14, 3, 3, "F");
+        setText(doc, [255, 255, 255]);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text(`HORIZON-SENSITIVE · viable at ${d.viableHorizonYears}y+`, MARGIN + 6, yd + 10);
+        yd += 20;
+      }
+
+      // 5-field explanation table
+      const expRows: Array<[string, string]> = [
+        ["Technical", F.sentence(d.explanation.technical)],
+        ["In plain English", F.sentence(d.explanation.plainEnglish)],
+        ["Primary driver", F.sentence(d.explanation.primaryDriver)],
+        ["Stress window", F.sentence(d.explanation.stressPeriod)],
+      ];
+      autoTable(doc, {
+        startY: yd,
+        body: expRows,
+        styles: { fontSize: 8.5, cellPadding: 4, textColor: COLORS.text, valign: "top" },
+        margin: { left: MARGIN, right: MARGIN },
+        columnStyles: {
+          0: { fontStyle: "bold", cellWidth: 110, textColor: COLORS.muted },
+          1: { cellWidth: "auto" },
+        },
+        theme: "plain",
+      });
+      yd = (doc as any).lastAutoTable.finalY + 4;
+
+      // What would fix it
+      if (d.explanation.whatWouldFix.length > 0) {
+        yd = ensureSpace(doc, yd, 14 + d.explanation.whatWouldFix.length * 11);
+        setText(doc, COLORS.emerald);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.text("What would fix it", MARGIN, yd);
+        yd += 10;
+        for (const fix of d.explanation.whatWouldFix) {
+          yd = ensureSpace(doc, yd, 12);
+          setText(doc, COLORS.emerald);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8.5);
+          doc.text("→", MARGIN, yd + 8);
+          setText(doc, COLORS.text);
+          const fixLines = doc.splitTextToSize(F.sentence(fix), CONTENT_W - 12) as string[];
+          fixLines.forEach((l, i) => doc.text(l, MARGIN + 10, yd + 8 + i * 10));
+          yd += Math.max(11, fixLines.length * 10 + 2);
         }
-      },
-    });
+        yd += 4;
+      }
+
+      // Recovery analysis (leveraged property)
+      if (d.recovery) {
+        yd = ensureSpace(doc, yd, 60);
+        setFill(doc, COLORS.bgSoft);
+        doc.roundedRect(MARGIN, yd, CONTENT_W, 50, 4, 4, "F");
+        setText(doc, COLORS.muted);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text("RECOVERY DIAGNOSTICS", MARGIN + 8, yd + 12);
+
+        const cellW = (CONTENT_W - 16) / 4;
+        const recCells: Array<[string, string]> = [
+          ["Liquidity trough", `Year ${d.recovery.liquidityTroughYear}`],
+          ["Debt stabilises", `Year ${d.recovery.debtStabilisationYear}`],
+          ["Refi-risk window", `Y${d.recovery.refinanceRiskWindow.startYear}–Y${d.recovery.refinanceRiskWindow.endYear}`],
+          ["Recovery period", `${d.recovery.recoveryYears} years`],
+        ];
+        recCells.forEach(([label, value], i) => {
+          const cx = MARGIN + 8 + i * cellW;
+          setText(doc, COLORS.muted);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(7);
+          doc.text(label.toUpperCase(), cx, yd + 26);
+          setText(doc, COLORS.text);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.text(value, cx, yd + 42);
+        });
+        yd += 58;
+      }
+
+      // Override row
+      yd = ensureSpace(doc, yd, 24);
+      setText(doc, COLORS.muted);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text("OVERRIDE", MARGIN, yd + 8);
+      setText(doc, d.override.possible ? COLORS.amber : COLORS.rose);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      const ovText = (d.override.possible ? "Possible: " : "Not overridable: ") + F.sentence(d.override.mechanism);
+      const ovLines = doc.splitTextToSize(ovText, CONTENT_W - 60) as string[];
+      ovLines.forEach((l, i) => doc.text(l, MARGIN + 60, yd + 8 + i * 10));
+      yd += Math.max(14, ovLines.length * 10 + 4);
+
+      // Footer row: profile + mode
+      setText(doc, COLORS.muted);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.text(`Profile: ${d.profileContext} · Risk mode: ${d.riskMode} · Stage: ${d.stage}`, MARGIN, yd + 8);
+      yd += 18;
+
+      // Separator
+      setDraw(doc, COLORS.border);
+      doc.setLineWidth(0.4);
+      doc.line(MARGIN, yd, PAGE_W - MARGIN, yd);
+      yd += 10;
+    }
   }
+
+  // ── Risk Controls audit page (Phase 2.8) ─────────────────────────────────
+  doc.addPage();
+  let yrc = MARGIN + 12;
+  yrc = sectionHeader(doc, yrc, "Risk Controls applied", COLORS.primary);
+  yrc = paragraph(
+    doc,
+    "The risk-control mode and resolved thresholds active during this run. Hard floors are enforced even " +
+    "under Custom mode (maxLvr ≤ 0.85, maxDefaultProbability ≤ 0.40, minNsrBuffered ≥ 0.70) — the engine " +
+    "never bypasses APRA realism, liquidity floors, or survival-first constraints. Risk modes change which " +
+    "paths are visible, not the underlying math.",
+    yrc,
+    { color: COLORS.muted, fontSize: 9.5 },
+  );
+
+  const rc = out.riskControlsApplied;
+  const modeColor: Record<RiskControlMode, [number, number, number]> = {
+    conservative: COLORS.sky,
+    balanced: COLORS.emerald,
+    aggressive: COLORS.amber,
+    custom: COLORS.accent,
+  };
+  const modeBg = modeColor[rc.mode] ?? COLORS.primary;
+  setFill(doc, modeBg);
+  doc.roundedRect(MARGIN, yrc, CONTENT_W, 36, 6, 6, "F");
+  setText(doc, [255, 255, 255]);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("ACTIVE RISK MODE", MARGIN + 14, yrc + 14);
+  doc.setFontSize(18);
+  doc.text(rc.mode.toUpperCase(), MARGIN + 14, yrc + 30);
+  yrc += 48;
+
+  const ctrlRows: Array<[string, string, string]> = [
+    ["Max crypto share", `${(rc.resolved.maxCryptoSharePct * 100).toFixed(0)}%`, "Hard cap on crypto allocation"],
+    ["Max LVR", `${(rc.resolved.maxLvr * 100).toFixed(0)}%`, "Loan-to-value ceiling (hard floor 85%)"],
+    ["Min NSR (buffered)", rc.resolved.minNsrBuffered.toFixed(2), "Net surplus ratio with APRA buffer (hard floor 0.70)"],
+    ["Max single-asset share", `${(rc.resolved.maxSingleAssetSharePct * 100).toFixed(0)}%`, "Concentration cap on any one asset"],
+    ["Max default probability", `${(rc.resolved.maxDefaultProbability * 100).toFixed(0)}%`, "Insolvency-probability ceiling (hard floor 40%)"],
+    ["Allow high-risk paths", rc.resolved.allowHighRiskPaths ? "Yes" : "No", "Surface soft-warning candidates under their own section"],
+    ["Show filtered paths", rc.resolved.showFilteredHighRiskPaths ? "Yes" : "No", "Show high-risk paths in UI alongside ranked list"],
+  ];
+  autoTable(doc, {
+    startY: yrc,
+    head: [["Control", "Resolved value", "Meaning"]],
+    body: ctrlRows,
+    styles: { fontSize: 9, cellPadding: 5, textColor: COLORS.text },
+    headStyles: { fillColor: COLORS.primary, textColor: [255, 255, 255], fontStyle: "bold" },
+    alternateRowStyles: { fillColor: COLORS.bgSoft },
+    margin: { left: MARGIN, right: MARGIN },
+    columnStyles: {
+      0: { fontStyle: "bold", cellWidth: 160 },
+      1: { halign: "right", cellWidth: 100 },
+      2: { cellWidth: "auto" },
+    },
+  });
+  yrc = (doc as any).lastAutoTable.finalY + 14;
+
+  // Hard floors callout
+  yrc = ensureSpace(doc, yrc, 80);
+  setFill(doc, COLORS.bgSoft);
+  doc.roundedRect(MARGIN, yrc, CONTENT_W, 64, 6, 6, "F");
+  setText(doc, COLORS.rose);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("HARD FLOORS — ENFORCED IN EVERY MODE", MARGIN + 12, yrc + 14);
+  setText(doc, COLORS.text);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text("• maxLvr is clamped to ≤ 0.85 (APRA absolute ceiling)", MARGIN + 12, yrc + 30);
+  doc.text("• maxDefaultProbability is clamped to ≤ 0.40 (survival-first)", MARGIN + 12, yrc + 42);
+  doc.text("• minNsrBuffered is clamped to ≥ 0.70 (APRA serviceability buffer)", MARGIN + 12, yrc + 54);
+  yrc += 72;
 
   // ── Audit trail + disclaimer ─────────────────────────────────────────────
   doc.addPage();
