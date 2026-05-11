@@ -190,8 +190,8 @@ export interface ScenarioResult {
   risk: Record<string, number> | null;
   /** Populated by Phase 13. Sum minus residual = NW delta. */
   attribution: Record<string, number> | null;
-  /** Populated by Phase 9. */
-  serviceability: Record<string, number> | null;
+  /** Populated by Phase 9. Shape evolves per phase; widened to `unknown` here. */
+  serviceability: unknown | null;
 }
 
 // ─── Minimal sanity: types compile in isolation ──────────────────────────────

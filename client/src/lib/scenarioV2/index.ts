@@ -1,13 +1,25 @@
 /**
  * Scenario Engine V2 — Public Entry Point
  *
- * Phase 1: only types and the feature flag are exported.
- * Subsequent phases will add: event store, tick, deltas, monte carlo, etc.
- *
- * V1 code may import { SCENARIO_ENGINE_V2 } from here. Anything else
- * imported by V1 is a bug — V1 must not depend on V2 logic.
+ * The only file V1 code may import from. Anything not exported here is
+ * internal to V2.
  */
+
+// Flag
 export { SCENARIO_ENGINE_V2, assertV2Enabled } from "./flag";
+
+// Determinism foundation
+export {
+  canonicalJson,
+  stableHash,
+  snapshotHash,
+  SNAPSHOT_HASH_KEYS,
+  makeRng,
+  deriveSeed,
+  type SeededRng,
+} from "./determinism";
+
+// Types
 export type {
   MonthKey,
   SnapshotHash,
@@ -24,3 +36,43 @@ export type {
   FanPoint,
   ConfidenceBand,
 } from "./types";
+
+// Base plan
+export {
+  deriveBasePlan,
+  DEFAULT_ASSUMPTIONS,
+  monthKey,
+  addMonths,
+  rangeKeys,
+  type DerivedBasePlan,
+} from "./basePlan";
+
+// Events
+export { buildEventStore, sortEvents, groupByMonth, monthsBetween } from "./events";
+
+// Deltas
+export { translateDelta } from "./deltas";
+
+// Tick + helpers
+export { tick, netWorth, monthlySurplusOf, type TickContext } from "./tick";
+
+// Borrowing
+export {
+  computeServiceability,
+  type ServiceabilityInput,
+  type ServiceabilityResult,
+} from "./borrowing";
+
+// Monte Carlo
+export {
+  runMonteCarlo,
+  type MonteCarloInput,
+  type MonteCarloOutput,
+} from "./monteCarlo";
+
+// Orchestrator
+export {
+  runScenarioV2,
+  type RunScenarioInput,
+  type ExtendedScenarioResult,
+} from "./runScenario";
