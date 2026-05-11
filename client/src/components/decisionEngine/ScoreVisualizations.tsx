@@ -32,9 +32,11 @@ export interface ScoreWaterfallProps {
   title?: string;
   /** When true, render a more compact version without the running-total column. */
   compact?: boolean;
+  /** Privacy-aware formatter (currency + pct). Required for masked terminalNW raw values. */
+  fmt?: MaskFmt;
 }
 
-export function ScoreWaterfall({ candidate, title = "Score waterfall", compact = false }: ScoreWaterfallProps) {
+export function ScoreWaterfall({ candidate, title = "Score waterfall", compact = false, fmt }: ScoreWaterfallProps) {
   const breakdown = candidate.score.breakdown;
   const penalties = candidate.score.penalties.filter(p => p.magnitude > 0);
   const baseScore = candidate.score.baseScore;
@@ -70,7 +72,7 @@ export function ScoreWaterfall({ candidate, title = "Score waterfall", compact =
             value={b.contribution}
             maxAbs={maxRow}
             tone="positive"
-            sub={`weight ${(b.weight * 100).toFixed(0)}% · raw ${formatRaw(String(b.axis), b.rawValue)}`}
+            sub={`weight ${(b.weight * 100).toFixed(0)}% · raw ${formatRaw(String(b.axis), b.rawValue, fmt)}`}
             compact={compact}
           />
         ))}
@@ -153,12 +155,15 @@ function prettifyAxis(axis: string): string {
     .trim();
 }
 
-function formatRaw(axis: string, raw: number): string {
+function formatRaw(axis: string, raw: number, fmt?: MaskFmt): string {
   // Heuristic formatting per known axis name so user sees, e.g. "72%" not "0.72".
   if (/probability|factor|return|drag|stress|risk/i.test(axis)) {
-    return `${(raw * 100).toFixed(1)}%`;
+    // Percentages — not financially sensitive; route through fmt.pct if available
+    return fmt ? fmt.pct(raw, 1) : `${(raw * 100).toFixed(1)}%`;
   }
   if (/terminalNetWorth/i.test(axis)) {
+    // Privacy-sensitive: route through fmt.fmt$M when available
+    if (fmt) return fmt.fmt$M(raw);
     if (Math.abs(raw) >= 1_000_000) return `$${(raw / 1_000_000).toFixed(2)}M`;
     return `$${Math.round(raw / 1000)}k`;
   }

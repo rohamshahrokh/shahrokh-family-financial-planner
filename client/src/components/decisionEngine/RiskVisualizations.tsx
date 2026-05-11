@@ -121,11 +121,11 @@ export function FanChart({
           aria-label={`Net worth fan chart from month 0 to month ${fan.length - 1}, median terminal ${fmt.fmt$M(last.p50)}.`}
         >
           {/* P5–P95 outermost band */}
-          <path d={geom.band5_95} fill={FAN_BAND_5_95} stroke="none" />
+          <path d={geom.band5_95} fill={FAN_BAND_5_95} stroke="none" className="dark:[fill:rgb(129_140_248/0.22)]" />
           {/* P10–P90 inner band */}
-          <path d={geom.band10_90} fill={FAN_BAND_10_90} stroke="none" />
+          <path d={geom.band10_90} fill={FAN_BAND_10_90} stroke="none" className="dark:[fill:rgb(129_140_248/0.32)]" />
           {/* P25–P75 core band */}
-          <path d={geom.band25_75} fill={FAN_BAND_25_75} stroke="none" />
+          <path d={geom.band25_75} fill={FAN_BAND_25_75} stroke="none" className="dark:[fill:rgb(129_140_248/0.48)]" />
 
           {/* Y-axis baseline (zero line) */}
           {geom.zeroY != null && (

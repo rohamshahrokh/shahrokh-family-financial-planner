@@ -591,7 +591,7 @@ function QuickDecisionTab() {
 
             {/* Phase 2.3: Score waterfall */}
             <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
-              <ScoreWaterfall candidate={winner} />
+              <ScoreWaterfall candidate={winner} fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }} />
             </div>
 
             {/* Phase 2.3: Winner vs runner-up */}
@@ -833,7 +833,7 @@ function CandidateRow({
 
           {/* Phase 2.3: Per-candidate score waterfall */}
           <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
-            <ScoreWaterfall candidate={candidate} compact />
+            <ScoreWaterfall candidate={candidate} compact fmt={fmt} />
           </div>
 
           <Separator />
