@@ -14,6 +14,7 @@ import { runCashEngine } from "@/lib/cashEngine";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import { useAppStore } from "@/lib/store";
 import { computeCanonicalNetWorth } from "@/lib/canonicalNetWorth";
+import { computeCanonicalCashflow } from "@/lib/canonicalCashflow";
 import { Button } from "@/components/ui/button";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { useToast } from "@/hooks/use-toast";
@@ -176,10 +177,20 @@ export default function ReportsPage() {
   const totalAssets   = canonicalNw.raw.totalAssets;
   const totalLiab     = canonicalNw.raw.totalLiabilities;
   const netWorth      = canonicalNw.netWorth;
-  const monthlyInc    = safeNum(snap.monthly_income);
-  const monthlyExp    = safeNum(snap.monthly_expenses);
-  const surplus       = monthlyInc - monthlyExp;
-  const savingsRate   = calcSavingsRate(monthlyInc, monthlyExp);
+  // SOURCE-OF-TRUTH: canonicalCashflow — surplus identity is asserted to
+  // hold (income - expenses == surplus) and savingsRate is `null` when
+  // income is 0, so we never render 100.0% / 0.0% / NaN%.
+  const canonicalCf = computeCanonicalCashflow({
+    snapshot, properties, stocks, cryptos,
+    holdingsRaw: [], incomeRecords, expenses,
+  });
+  const monthlyInc    = canonicalCf.monthlyIncome;
+  const monthlyExp    = canonicalCf.monthlyExpenses;
+  const surplus       = canonicalCf.monthlySurplus;
+  /** Number (decimal 0..1) when income > 0, else null — UI renders "—". */
+  const savingsRateRaw = canonicalCf.savingsRate;
+  /** Display % (0..100) for legacy callers expecting a number. Default 0 when null. */
+  const savingsRate   = savingsRateRaw == null ? 0 : Math.round(savingsRateRaw * 100);
   const accessibleWlt = cash + safeNum(snap.stocks) + safeNum(snap.crypto);
   const lockedWlt     = safeNum(snap.super_balance) + safeNum(snap.ppor)
                       + safeNum(snap.iran_property) + safeNum(snap.cars);
@@ -720,7 +731,12 @@ export default function ReportsPage() {
         <KpiChip label="Accessible"     value={mv(fmt(accessibleWlt, true))}   sub="Cash + Stocks + Crypto" />
         <KpiChip label="Debt Balance"   value={mv(fmt(totalLiab, true))}       up={totalLiab === 0} />
         <KpiChip label="Monthly Surplus" value={mv(fmt(surplus))}              sub={surplus >= 0 ? 'Positive cashflow' : 'Deficit'} up={surplus > 0} />
-        <KpiChip label="Savings Rate"   value={pct(savingsRate)}               sub={savingsRate >= 20 ? 'Strong' : 'Moderate'} up={savingsRate >= 20} />
+        <KpiChip
+          label="Savings Rate"
+          value={savingsRateRaw == null ? "—" : pct(savingsRate)}
+          sub={savingsRateRaw == null ? "Set income to compute" : (savingsRate >= 20 ? "Strong" : "Moderate")}
+          up={savingsRateRaw != null && savingsRate >= 20}
+        />
         <KpiChip label="FIRE Estimate"  value={yearsToFire > 0 ? `${yearsToFire.toFixed(1)}y` : '—'} sub={yearsToFire > 0 ? fmt(fireNumber, true) : 'Set cashflow'} />
         <KpiChip label="Risk Score"     value={`${riskScore}/10`}              sub={riskScore >= 7 ? 'Healthy' : riskScore >= 5 ? 'Moderate' : 'Needs review'} up={riskScore >= 7} />
       </div>
