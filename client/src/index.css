@@ -23,10 +23,10 @@
     --secondary-foreground: 215 18% 72%;
 
     --muted:         222 15% 13%;      /* #181f2a — muted surface */
-    --muted-foreground: 215 12% 48%;   /* #6d7d92 — muted text */
+    --muted-foreground: 215 16% 70%;   /* #9eaabf — WCAG AA ≥4.5:1 on card bg */
 
     /* === BORDERS === */
-    --border:        222 15% 18%;      /* #232d3d — subtle border */
+    --border:        222 15% 24%;      /* #2e3a4f — visible border with AA contrast */
     --input:         222 15% 16%;      /* #1e2838 */
     --ring:          42 80% 52%;       /* gold focus ring */
 

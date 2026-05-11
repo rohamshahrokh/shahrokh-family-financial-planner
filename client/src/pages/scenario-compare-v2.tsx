@@ -16,6 +16,8 @@ import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/finance";
+import { useAppStore } from "@/lib/store";
+import { maskValue } from "@/components/PrivacyMask";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +37,8 @@ import {
   Beaker, CheckCircle2, AlertTriangle, Play, RefreshCw, Download,
   Trophy, Droplet, Shield, TrendingDown, Settings,
   Award, ChevronUp, ChevronDown, Save, FolderOpen, Copy, Trash2,
-  Sparkles, ArrowRight, Star, Info,
+  Sparkles, ArrowRight, Star, Info, Eye, EyeOff, Clock, Target, ShieldAlert,
+  XCircle,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area,
@@ -115,13 +118,27 @@ const SCENARIO_GRADIENT: Record<string, string> = {
   cash_50k: "from-emerald-500 to-teal-600",
 };
 
-const pct = (n: number, d = 1) => `${(n * 100).toFixed(d)}%`;
-const fmt$ = (n: number) => formatCurrency(Math.round(n));
-const fmt$k = (n: number) => `$${(Math.round(n) / 1000).toFixed(0)}k`;
-const fmt$M = (n: number) =>
+const pctRaw = (n: number, d = 1) => `${(n * 100).toFixed(d)}%`;
+const fmt$Raw = (n: number) => formatCurrency(Math.round(n));
+const fmt$kRaw = (n: number) => `$${(Math.round(n) / 1000).toFixed(0)}k`;
+const fmt$MRaw = (n: number) =>
   Math.abs(n) >= 1_000_000
     ? `$${(n / 1_000_000).toFixed(2)}M`
     : `$${(Math.round(n / 1000))}k`;
+
+/** Build mask-aware formatters bound to the privacyMode toggle. */
+function useMaskFmt(hidden: boolean) {
+  return useMemo(() => ({
+    pct: (n: number, d = 1) => maskValue(pctRaw(n, d), hidden, "pct"),
+    fmt$: (n: number) => maskValue(fmt$Raw(n), hidden, "currency"),
+    fmt$k: (n: number) => maskValue(fmt$kRaw(n), hidden, "currency"),
+    fmt$M: (n: number) => maskValue(fmt$MRaw(n), hidden, "currency"),
+    /** Strip dollar/percent occurrences from a free-form sentence when hidden. */
+    sentence: (s: string) => hidden
+      ? s.replace(/\$[\d,.\-]+[kKmM]?/g, "$••••••").replace(/[\d,.]+%/g, "•••%")
+      : s,
+  }), [hidden]);
+}
 
 const bandClass = (band?: string) =>
   band === "comfortable" ? "bg-emerald-100 text-emerald-800 border-emerald-200" :
@@ -145,14 +162,18 @@ function buildSliceScenarios(activationMonth: string, u: UserAssumptions): Array
   name: string;
   deltas: ScenarioDelta[];
 }> {
-  const purchasePrice = u.capital * 5;
+  // Deposit-to-purchase ratio: $50k extra deposit on a 20% down purchase
+  // implies a purchase price of ~$250k, but to keep the scenario realistic
+  // against a typical AU income, we cap at 4× capital and require the
+  // assumed rent yield to clear holding costs comfortably.
+  const purchasePrice = u.capital * 4;
   const weeklyRent = Math.round((purchasePrice * (u.rentYieldPct / 100)) / 52);
 
   return [
     { scenarioId: "base", name: "Base Case", deltas: [] },
     {
       scenarioId: "property_50k",
-      name: `+${fmt$k(u.capital)} Property Deposit`,
+      name: `+${fmt$kRaw(u.capital)} Property Deposit`,
       deltas: [{
         id: "delta-property",
         scenarioId: "property_50k",
@@ -173,7 +194,7 @@ function buildSliceScenarios(activationMonth: string, u: UserAssumptions): Array
     },
     {
       scenarioId: "crypto_50k",
-      name: `+${fmt$k(u.capital)} Crypto`,
+      name: `+${fmt$kRaw(u.capital)} Crypto`,
       deltas: [{
         id: "delta-crypto",
         scenarioId: "crypto_50k",
@@ -186,7 +207,7 @@ function buildSliceScenarios(activationMonth: string, u: UserAssumptions): Array
     },
     {
       scenarioId: "cash_50k",
-      name: `Hold ${fmt$k(u.capital)} as Cash`,
+      name: `Hold ${fmt$kRaw(u.capital)} as Cash`,
       deltas: [{
         id: "delta-cash",
         scenarioId: "cash_50k",
@@ -304,9 +325,16 @@ function StatTile({
 
 // ─── Scenario narrative card (premium, mobile-swipeable) ──────────────────────
 
+const VERDICT_CLASS: Record<"FAILS" | "AT RISK" | "VIABLE" | "STRONG", string> = {
+  FAILS: "bg-rose-600 text-white border-rose-700",
+  "AT RISK": "bg-amber-500 text-white border-amber-600",
+  VIABLE: "bg-sky-600 text-white border-sky-700",
+  STRONG: "bg-emerald-600 text-white border-emerald-700",
+};
+
 function NarrativeCard({
   scenarioId, name, headline, story, keyMoves, whyItWorks, whatCouldGoWrong, confidence,
-  result, isWinner,
+  result, isWinner, attribution, hidden,
 }: {
   scenarioId: string;
   name: string;
@@ -318,10 +346,19 @@ function NarrativeCard({
   confidence: number;
   result: ExtendedScenarioResult;
   isWinner: boolean;
+  attribution: import("@/lib/scenarioV2/narrative").ScenarioAttribution;
+  hidden: boolean;
 }) {
   const fanEnd = result.netWorthFan[result.netWorthFan.length - 1];
   const cashEnd = result.cashFan[result.cashFan.length - 1];
   const gradient = SCENARIO_GRADIENT[scenarioId] ?? "from-slate-500 to-slate-600";
+
+  const m$M = (n: number) => maskValue(fmt$MRaw(n), hidden, "currency");
+  const mPct = (n: number, d = 0) => maskValue(pctRaw(n, d), hidden, "pct");
+  const mSentence = (s: string) =>
+    hidden
+      ? s.replace(/\$[\d,.\-]+[kKmM]?/g, "$••••••").replace(/[\d,.]+%/g, "•••%")
+      : s;
 
   return (
     <Card className={`overflow-hidden ${isWinner ? "ring-2 ring-purple-400 shadow-lg" : ""}`}>
@@ -337,8 +374,13 @@ function NarrativeCard({
           <Sparkles className="h-3.5 w-3.5" />
           {scenarioId === "base" ? "Stay the course" : "Allocation path"}
         </div>
-        <h3 className="text-lg sm:text-xl font-bold leading-tight">{name}</h3>
-        <p className="text-white/90 text-sm mt-2 leading-snug">{headline}</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <h3 className="text-lg sm:text-xl font-bold leading-tight">{name}</h3>
+          <Badge className={`${VERDICT_CLASS[attribution.verdict]} font-bold tracking-wide text-[10px]`}>
+            {attribution.verdict}
+          </Badge>
+        </div>
+        <p className="text-white/95 text-sm mt-2 leading-snug">{mSentence(headline)}</p>
       </div>
 
       <CardContent className="pt-4 space-y-4">
@@ -346,16 +388,16 @@ function NarrativeCard({
         <div className="grid grid-cols-3 gap-2">
           <div>
             <div className="text-[10px] uppercase text-muted-foreground font-semibold">P50 NW</div>
-            <div className="text-base font-bold tabular-nums">{fmt$M(fanEnd.p50)}</div>
+            <div className="text-base font-bold tabular-nums">{m$M(fanEnd.p50)}</div>
           </div>
           <div>
             <div className="text-[10px] uppercase text-muted-foreground font-semibold">P10 / P90</div>
-            <div className="text-xs font-semibold tabular-nums text-rose-700">{fmt$M(fanEnd.p10)}</div>
-            <div className="text-xs font-semibold tabular-nums text-emerald-700">{fmt$M(fanEnd.p90)}</div>
+            <div className="text-xs font-semibold tabular-nums text-rose-600 dark:text-rose-300">{m$M(fanEnd.p10)}</div>
+            <div className="text-xs font-semibold tabular-nums text-emerald-600 dark:text-emerald-300">{m$M(fanEnd.p90)}</div>
           </div>
           <div>
             <div className="text-[10px] uppercase text-muted-foreground font-semibold">Cash</div>
-            <div className="text-base font-bold tabular-nums text-sky-700">{fmt$M(cashEnd.p50)}</div>
+            <div className="text-base font-bold tabular-nums text-sky-600 dark:text-sky-300">{m$M(cashEnd.p50)}</div>
           </div>
         </div>
 
@@ -363,7 +405,7 @@ function NarrativeCard({
         <ConfidenceRibbon value={confidence} label="Path confidence" />
 
         {/* Story */}
-        <p className="text-sm leading-relaxed text-foreground/90">{story}</p>
+        <p className="text-sm leading-relaxed text-foreground/90">{mSentence(story)}</p>
 
         {/* Key moves */}
         {keyMoves.length > 0 && (
@@ -372,10 +414,10 @@ function NarrativeCard({
               What happens
             </div>
             <ul className="space-y-1">
-              {keyMoves.map((m, i) => (
+              {keyMoves.map((mv, i) => (
                 <li key={i} className="text-xs flex gap-2 items-start">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                  <span className="text-foreground/85">{m}</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  <span className="text-foreground/90">{mSentence(mv)}</span>
                 </li>
               ))}
             </ul>
@@ -384,28 +426,91 @@ function NarrativeCard({
 
         {/* Why / risk two-up */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 p-2.5">
-            <div className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-400 tracking-wide mb-1">
+          <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40 p-2.5">
+            <div className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-300 tracking-wide mb-1">
               Why it works
             </div>
-            <p className="text-xs text-foreground/80 leading-snug">{whyItWorks}</p>
+            <p className="text-xs text-foreground/85 leading-snug">{mSentence(whyItWorks)}</p>
           </div>
-          <div className="rounded-lg bg-rose-50 dark:bg-rose-950/20 p-2.5">
-            <div className="text-[10px] uppercase font-bold text-rose-700 dark:text-rose-400 tracking-wide mb-1">
+          <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-200/60 dark:border-rose-800/40 p-2.5">
+            <div className="text-[10px] uppercase font-bold text-rose-700 dark:text-rose-300 tracking-wide mb-1">
               What could go wrong
             </div>
-            <p className="text-xs text-foreground/80 leading-snug">{whatCouldGoWrong}</p>
+            <p className="text-xs text-foreground/85 leading-snug">{mSentence(whatCouldGoWrong)}</p>
           </div>
         </div>
 
+        {/* ── NEW: Failure attribution / drivers (Session 4) ────────────── */}
+        {attribution.failureDrivers.length > 0 && (
+          <div className="space-y-2.5 rounded-lg border border-amber-300/60 dark:border-amber-700/40 bg-amber-50/70 dark:bg-amber-950/25 p-3">
+            <div className="flex items-center gap-1.5 text-[11px] uppercase font-bold tracking-wide text-amber-800 dark:text-amber-200">
+              <ShieldAlert className="h-3.5 w-3.5" />
+              Top risk drivers
+            </div>
+            <ul className="space-y-2">
+              {attribution.failureDrivers.map((d, i) => (
+                <li key={i} className="flex gap-2.5 items-start">
+                  <div className="flex flex-col items-center pt-0.5 shrink-0 w-5">
+                    <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300">{i + 1}</span>
+                    <div className="w-1 h-6 rounded bg-amber-500" style={{ opacity: 0.25 + d.severity * 0.75 }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-semibold text-foreground">{d.label}</div>
+                    <div className="text-[11px] text-foreground/80 leading-snug">{mSentence(d.detail)}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Timing / break-even / safe-range */}
+        {(attribution.timing || attribution.breakEven || attribution.safeRange) && (
+          <div className="grid grid-cols-1 gap-2">
+            {attribution.timing && (
+              <div className="flex gap-2 items-start text-[11px] rounded-md bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/60 dark:border-sky-800/40 p-2.5">
+                <Clock className="h-3.5 w-3.5 text-sky-700 dark:text-sky-300 mt-0.5 shrink-0" />
+                <div>
+                  <span className="font-semibold text-sky-800 dark:text-sky-200">Stress timing: </span>
+                  <span className="text-foreground/85">{mSentence(attribution.timing)}</span>
+                </div>
+              </div>
+            )}
+            {attribution.breakEven && (
+              <div className="flex gap-2 items-start text-[11px] rounded-md bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/60 dark:border-indigo-800/40 p-2.5">
+                <Target className="h-3.5 w-3.5 text-indigo-700 dark:text-indigo-300 mt-0.5 shrink-0" />
+                <div>
+                  <span className="font-semibold text-indigo-800 dark:text-indigo-200">Break-even: </span>
+                  <span className="text-foreground/85">{mSentence(attribution.breakEven)}</span>
+                </div>
+              </div>
+            )}
+            {attribution.safeRange && (
+              <div className="flex gap-2 items-start text-[11px] rounded-md bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40 p-2.5">
+                <Shield className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300 mt-0.5 shrink-0" />
+                <div>
+                  <span className="font-semibold text-emerald-800 dark:text-emerald-200">Safe range: </span>
+                  <span className="text-foreground/85">{mSentence(attribution.safeRange)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Stress chips */}
         <div className="flex flex-wrap gap-1.5">
-          <Badge variant="outline" className={result.negativeEquityProbability > 0.1 ? "border-rose-300 text-rose-700" : ""}>
-            Neg-Eq {pct(result.negativeEquityProbability, 0)}
+          <Badge variant="outline" className={result.negativeEquityProbability > 0.1 ? "border-rose-400 text-rose-700 dark:text-rose-300" : ""}>
+            Neg-Eq {mPct(result.negativeEquityProbability, 0)}
           </Badge>
-          <Badge variant="outline" className={result.liquidityStressProbability > 0.1 ? "border-rose-300 text-rose-700" : ""}>
-            Liq stress {pct(result.liquidityStressProbability, 0)}
+          <Badge variant="outline" className={result.liquidityStressProbability > 0.1 ? "border-rose-400 text-rose-700 dark:text-rose-300" : ""}>
+            Liq stress {mPct(result.liquidityStressProbability, 0)}
           </Badge>
+          {result.defaultProbability > 0.05 && (
+            <Badge variant="outline" className="border-rose-500 text-rose-700 dark:text-rose-300">
+              <XCircle className="h-3 w-3 mr-1" />
+              Default {mPct(result.defaultProbability, 0)}
+            </Badge>
+          )}
           <Badge variant="outline" className={bandClass(result.serviceability?.band)}>
             {result.serviceability?.band ?? "—"}
           </Badge>
@@ -467,6 +572,10 @@ export default function ScenarioCompareV2Page() {
   const currentSnapshotHash = useMemo(() => {
     return snapshot ? snapshotHash(snapshot) : null;
   }, [snapshot]);
+
+  // ── Privacy / mask-aware formatters ───────────────────────────────────────
+  const { privacyMode, togglePrivacy } = useAppStore();
+  const { fmt$, fmt$k, fmt$M, pct, sentence } = useMaskFmt(privacyMode);
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [assumptions, setAssumptions] = useState<UserAssumptions>(DEFAULT_USER_ASSUMPTIONS);
@@ -800,6 +909,7 @@ export default function ScenarioCompareV2Page() {
           liquidityChart: liquidityChartRef.current,
           bandsChart: bandsChartRef.current,
         },
+        hideValues: privacyMode,
       });
       doc.save(`family-wealth-lab-${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (err: any) {
@@ -874,7 +984,7 @@ export default function ScenarioCompareV2Page() {
                 {winner.name}
               </h2>
               <p className="text-sm sm:text-base text-foreground/80 mt-2 leading-relaxed">
-                {narrative.tldr}
+                {sentence(narrative.tldr)}
               </p>
               <div className="mt-4">
                 <ConfidenceRibbon value={narrative.confidenceOverall} label="Overall confidence" />
@@ -947,6 +1057,19 @@ export default function ScenarioCompareV2Page() {
             <Settings className="h-4 w-4 mr-2" />
             Assumptions
             {showAssumptions ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={togglePrivacy}
+            aria-pressed={privacyMode}
+            aria-label={privacyMode ? "Show values" : "Hide values"}
+            title={privacyMode ? "Show values" : "Hide values"}
+            className="min-w-[44px] min-h-[44px]"
+          >
+            {privacyMode
+              ? <Eye className="h-4 w-4 mr-2" />
+              : <EyeOff className="h-4 w-4 mr-2" />}
+            {privacyMode ? "Show" : "Hide"}
           </Button>
 
           {results.length > 0 && (
@@ -1166,6 +1289,14 @@ export default function ScenarioCompareV2Page() {
             confidence={narrative.scenarios[activeScenarioIdx]?.confidence ?? 50}
             result={results[activeScenarioIdx]}
             isWinner={results[activeScenarioIdx].scenarioId === narrative.winnerScenarioId}
+            attribution={narrative.scenarios[activeScenarioIdx]?.attribution ?? {
+              failureDrivers: [],
+              breakEven: null,
+              timing: null,
+              safeRange: null,
+              verdict: "VIABLE" as const,
+            }}
+            hidden={privacyMode}
           />
         )}
 
@@ -1403,7 +1534,7 @@ export default function ScenarioCompareV2Page() {
             </CardHeader>
             <CardContent>
               <div className="text-sm leading-relaxed whitespace-pre-line text-foreground/85">
-                {narrative.recommendation}
+                {sentence(narrative.recommendation)}
               </div>
               <p className="text-[10px] text-muted-foreground mt-4 italic">
                 Not personal financial advice. Generated from your live ledger + your input assumptions.
@@ -1414,7 +1545,7 @@ export default function ScenarioCompareV2Page() {
       </div>
 
       {/* ─── MOBILE STICKY BOTTOM ACTION BAR ──────────────────────────── */}
-      <div className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-t shadow-lg">
+      <div className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-t shadow-lg pb-[env(safe-area-inset-bottom)]">
         <div className="px-3 py-2.5 flex items-center gap-1.5">
           <Button
             onClick={handleRun}
@@ -1429,9 +1560,20 @@ export default function ScenarioCompareV2Page() {
             variant="outline"
             size="sm"
             onClick={() => setShowAssumptions(s => !s)}
-            className="text-xs"
+            className="text-xs min-h-[44px] min-w-[44px]"
+            aria-label="Assumptions"
           >
             <Settings className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={togglePrivacy}
+            aria-pressed={privacyMode}
+            aria-label={privacyMode ? "Show values" : "Hide values"}
+            className="text-xs min-h-[44px] min-w-[44px]"
+          >
+            {privacyMode ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
           </Button>
           {results.length > 0 && (
             <>

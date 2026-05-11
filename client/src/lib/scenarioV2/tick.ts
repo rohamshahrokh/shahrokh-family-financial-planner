@@ -211,20 +211,40 @@ export function tick(
     }
 
     // Mortgage P&I — split interest vs principal
+    // CRITICAL: when the property's repayment is already represented in the
+    // household ledger (baseMonthlyExpenses), DO NOT deduct cash here — we
+    // would be double-counting. Still accrue principal/interest for the
+    // amortisation + tax deduction tracking.
     if (p.loanBalance > 0 && p.monthlyRepayment > 0) {
+      // Mortgage rate floats vs short rate when stochastic rate is supplied.
+      // Smooth gravitation toward (shortRate + 1.5% spread) to avoid step
+      // changes. Disabled when draws are null (deterministic path).
+      if (draws && typeof draws.shortRate === "number" && draws.shortRate >= 0) {
+        const targetRate = Math.max(0.03, draws.shortRate + 0.015);
+        const adj = 0.05; // 5% gravitation per month
+        p.rate = p.rate * (1 - adj) + targetRate * adj;
+      }
       const monthlyRate = p.rate / 12;
-      const interest = p.loanBalance * monthlyRate;
+      // Interest accrues on (loan - offset) net balance
+      const netLoanForInterest = Math.max(0, p.loanBalance - (p.offsetBalance ?? 0));
+      const interest = netLoanForInterest * monthlyRate;
       let principal = Math.max(0, p.monthlyRepayment - interest);
       if (principal > p.loanBalance) principal = p.loanBalance;
-      const totalPay = interest + principal;
-      next.cash -= totalPay;
-      p.loanBalance = Math.max(0, p.loanBalance - principal);
-      // Track interest by property type
+      // Track interest by property type (always — needed for tax)
       if (isInvestment) {
         acc.fyIpInterestPaid += interest;
       } else {
         acc.fyPporInterestPaid += interest;
       }
+      // Only deduct from cash when NOT already in the household ledger.
+      if (!p.inLedger) {
+        const totalPay = interest + principal;
+        next.cash -= totalPay;
+      }
+      // Principal still amortises regardless of inLedger — the loan balance
+      // tracks the amortisation schedule whether or not cash moves through
+      // this branch.
+      p.loanBalance = Math.max(0, p.loanBalance - principal);
     }
 
     // Property market value growth (with stochastic shock)
@@ -235,10 +255,31 @@ export function tick(
     p.marketValue = Math.max(0, p.marketValue);
   }
 
-  // ─── 5. Other asset growth ────────────────────────────────────────────────
-  // Cash earns the short rate (variable) or rails.cashApr fallback
-  const effCashApr = draws?.shortRate ?? rails.cashApr;
-  next.cash *= 1 + (Math.pow(1 + effCashApr, 1 / 12) - 1);
+  // ─── 5. Insolvency / liquidation cascade ─────────────────────────────────
+  // If cash has gone negative this month, draw on liquid reserves in a
+  // realistic order: ETF → crypto → forced property sale. If everything
+  // is exhausted, mark the household as DEFAULTED and freeze further
+  // compounding (no recursive negative-debt explosion).
+  if (next.cash < 0) {
+    applyLiquidationCascade(next);
+  }
+
+  // ─── 6. Other asset growth ───────────────────────────────────────────────
+  // Cash earns the short rate (or rails.cashApr fallback) when POSITIVE.
+  // When negative, accrue overdraft/margin interest at a penalty spread
+  // (cashApr + 6%) — this is realistic for unsecured overdrafts and
+  // prevents the previous bug where negative cash was getting multiplied
+  // by a positive (1+r) factor, making it more negative each month.
+  if (next.cash >= 0) {
+    const effCashApr = draws?.shortRate ?? rails.cashApr;
+    next.cash *= 1 + (Math.pow(1 + effCashApr, 1 / 12) - 1);
+  } else {
+    const overdraftApr = (draws?.shortRate ?? rails.cashApr) + 0.06;
+    const monthlyOverdraft = Math.pow(1 + overdraftApr, 1 / 12) - 1;
+    const accrued = -next.cash * monthlyOverdraft; // positive number
+    next.cash -= accrued;
+    next.marginInterestAccrued = (next.marginInterestAccrued ?? 0) + accrued;
+  }
 
   next.etfBalance *= 1 + growthMonth(
     rails.stockReturn,
@@ -268,12 +309,14 @@ export function tick(
     draws?.superShock ?? null,
   );
 
-  // ─── 6. FY tax true-up at end of June ─────────────────────────────────────
+  // ─── 7. FY tax true-up at end of June ────────────────────────────────────
   if (ctx.calendarMonth === 6) {
     applyFyTax(next, acc, rails, ctx);
+    // Tax true-up can push cash negative — re-run cascade if needed.
+    if (next.cash < 0) applyLiquidationCascade(next);
   }
 
-  // ─── 7. Roll month ─────────────────────────────────────────────────────────
+  // ─── 8. Roll month ───────────────────────────────────────────────────────
   next.month = addMonths(state.month, 1);
 
   return next;
@@ -384,6 +427,8 @@ function applyEvent(
         monthlyCosts: n("annualHoldingCosts", 0) / 12,
         offsetBalance: 0,
       };
+      // New IPs from buy_property events are NOT in the household ledger.
+      newProp.inLedger = false;
       state.properties = [...state.properties, newProp];
       acc.ipMeta[newProp.id] = {
         purchasePrice,
@@ -535,6 +580,86 @@ function applyFyTax(
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// ─── Insolvency / Liquidation cascade ───────────────────────────────────────
+
+/**
+ * Realistic distressed-deleveraging cascade. When monthly cash goes
+ * negative the household draws on assets in this order:
+ *   1. Offset balances (PPOR offset is essentially redraw cash)
+ *   2. Liquid investments: ETF, then crypto (with slippage costs)
+ *   3. Forced property sale (with 5% distressed-sale haircut + 2.5% costs)
+ *   4. Super CANNOT be touched pre-preservation age — left alone
+ *   5. If still negative, mark DEFAULTED and floor the overdraft.
+ */
+function applyLiquidationCascade(state: ExtendedPortfolioState): void {
+  if (state.cash >= 0) return;
+  if (state.defaulted) {
+    const floor = -Math.max(50_000, state.ttmIncome * 5);
+    if (state.cash < floor) state.cash = floor;
+    return;
+  }
+
+  for (const p of state.properties) {
+    if (state.cash >= 0) break;
+    if (p.monthlyRent > 0) continue;
+    const offset = p.offsetBalance ?? 0;
+    if (offset <= 0) continue;
+    const take = Math.min(-state.cash, offset);
+    p.offsetBalance = offset - take;
+    state.cash += take;
+  }
+
+  if (state.cash < 0 && state.etfBalance > 0) {
+    const grossNeeded = Math.min(state.etfBalance, -state.cash / 0.95);
+    state.etfBalance -= grossNeeded;
+    state.cash += grossNeeded * 0.95;
+  }
+
+  if (state.cash < 0 && state.cryptoBalance > 0) {
+    const grossNeeded = Math.min(state.cryptoBalance, -state.cash / 0.93);
+    state.cryptoBalance -= grossNeeded;
+    state.cash += grossNeeded * 0.93;
+  }
+
+  if (state.cash < 0 && state.properties.length > 0) {
+    const ranked = state.properties
+      .map((p, idx) => ({
+        p,
+        idx,
+        equity: p.marketValue - p.loanBalance,
+        isIp: p.monthlyRent > 0,
+      }))
+      .sort((a, b) => {
+        if (a.isIp !== b.isIp) return a.isIp ? -1 : 1;
+        return a.equity - b.equity;
+      });
+    const toRemove = new Set<number>();
+    for (const r of ranked) {
+      if (state.cash >= 0) break;
+      const distressedPrice = r.p.marketValue * 0.95;
+      const sellingCosts = distressedPrice * 0.025;
+      const netSale = distressedPrice - sellingCosts;
+      const debtPaid = Math.min(r.p.loanBalance, netSale);
+      const proceeds = netSale - debtPaid;
+      if (proceeds > 0) {
+        state.cash += proceeds;
+        state.forcedSales = (state.forcedSales ?? 0) + proceeds;
+      }
+      toRemove.add(r.idx);
+    }
+    if (toRemove.size > 0) {
+      state.properties = state.properties.filter((_, i) => !toRemove.has(i));
+    }
+  }
+
+  if (state.cash < 0) {
+    state.defaulted = true;
+    state.defaultMonth = state.month;
+    const floor = -Math.max(50_000, state.ttmIncome * 5);
+    if (state.cash < floor) state.cash = floor;
+  }
+}
 
 function growthMonth(
   annualMean: number,

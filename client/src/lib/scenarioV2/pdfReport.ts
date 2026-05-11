@@ -23,12 +23,33 @@ import html2canvas from "html2canvas";
 import type { ExtendedScenarioResult } from "./runScenario";
 import type { ComparisonNarrative } from "./narrative";
 
-const fmt$ = (n: number) => "$" + Math.round(n).toLocaleString("en-AU");
-const fmt$M = (n: number) =>
+/** Raw formatters (used when not hidden). */
+const raw$ = (n: number) => "$" + Math.round(n).toLocaleString("en-AU");
+const raw$M = (n: number) =>
   Math.abs(n) >= 1_000_000
     ? `$${(n / 1_000_000).toFixed(2)}M`
     : `$${Math.round(n / 1000)}k`;
-const pct = (n: number, d = 1) => `${(n * 100).toFixed(d)}%`;
+const rawPct = (n: number, d = 1) => `${(n * 100).toFixed(d)}%`;
+
+/** Build mask-aware formatters bound to the hideValues flag. */
+function buildFmts(hidden: boolean) {
+  if (!hidden) {
+    return {
+      fmt$: raw$,
+      fmt$M: raw$M,
+      pct: rawPct,
+      sentence: (s: string) => s,
+    };
+  }
+  return {
+    fmt$: (_n: number) => "$******",
+    fmt$M: (_n: number) => "$****",
+    pct: (_n: number, _d = 1) => "***%",
+    /** Mask currency + percent occurrences inside narrative strings. */
+    sentence: (s: string) =>
+      s.replace(/\$[\d,.\-]+[kKmM]?/g, "$******").replace(/[\d,.]+%/g, "***%"),
+  };
+}
 
 // Premium palette — matches app
 const COLORS = {
@@ -134,6 +155,7 @@ function paragraph(doc: jsPDF, text: string, y: number, opts?: {
 function renderCover(
   doc: jsPDF,
   data: PdfData,
+  F: ReturnType<typeof buildFmts>,
 ): void {
   // Gradient-ish header band (jsPDF doesn't gradient natively — emulate with two rects)
   setFill(doc, COLORS.accent);
@@ -156,7 +178,7 @@ function renderCover(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(13);
   doc.text(
-    `Deciding where to deploy ${fmt$(data.capital)} of marginal capital`,
+    `Deciding where to deploy ${F.fmt$(data.capital)} of marginal capital`,
     MARGIN,
     180,
   );
@@ -197,7 +219,7 @@ function renderCover(
   setText(doc, COLORS.slate);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  const tldrLines = doc.splitTextToSize(data.narrative.tldr, CONTENT_W - 36) as string[];
+  const tldrLines = doc.splitTextToSize(F.sentence(data.narrative.tldr), CONTENT_W - 36) as string[];
   tldrLines.forEach(l => {
     doc.text(l, MARGIN + 18, y);
     y += 13;
@@ -275,6 +297,7 @@ function renderScenarioDetail(
   capital: number,
   horizonYears: number,
   startY: number,
+  F: ReturnType<typeof buildFmts>,
 ): number {
   let y = startY;
   const tone = SCENARIO_TONE[result.scenarioId] ?? COLORS.primary;
@@ -299,7 +322,7 @@ function renderScenarioDetail(
   setText(doc, COLORS.text);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
-  const headlineLines = doc.splitTextToSize(narrative.headline, CONTENT_W) as string[];
+  const headlineLines = doc.splitTextToSize(F.sentence(narrative.headline), CONTENT_W) as string[];
   headlineLines.forEach(l => {
     doc.text(l, MARGIN, y);
     y += 18;
@@ -310,10 +333,10 @@ function renderScenarioDetail(
   const fanEnd = result.netWorthFan[result.netWorthFan.length - 1];
   const cashEnd = result.cashFan[result.cashFan.length - 1];
   const kpis: Array<{ label: string; value: string; tone?: [number, number, number] }> = [
-    { label: "P50 Net Worth", value: fmt$M(fanEnd.p50), tone: COLORS.text },
-    { label: "P10 (downside)", value: fmt$M(fanEnd.p10), tone: COLORS.rose },
-    { label: "P90 (upside)", value: fmt$M(fanEnd.p90), tone: COLORS.emerald },
-    { label: "Terminal Cash", value: fmt$M(cashEnd.p50), tone: COLORS.sky },
+    { label: "P50 Net Worth", value: F.fmt$M(fanEnd.p50), tone: COLORS.text },
+    { label: "P10 (downside)", value: F.fmt$M(fanEnd.p10), tone: COLORS.rose },
+    { label: "P90 (upside)", value: F.fmt$M(fanEnd.p90), tone: COLORS.emerald },
+    { label: "Terminal Cash", value: F.fmt$M(cashEnd.p50), tone: COLORS.sky },
   ];
   const kpiW = (CONTENT_W - 12) / kpis.length;
   kpis.forEach((k, i) => {
@@ -332,7 +355,7 @@ function renderScenarioDetail(
   y += 64;
 
   // Story
-  y = paragraph(doc, narrative.story, y, { fontSize: 10, color: COLORS.text });
+  y = paragraph(doc, F.sentence(narrative.story), y, { fontSize: 10, color: COLORS.text });
   y += 4;
 
   // Key moves
@@ -346,7 +369,7 @@ function renderScenarioDetail(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9.5);
   narrative.keyMoves.forEach(m => {
-    const bulletLines = doc.splitTextToSize(`•  ${m}`, CONTENT_W - 8) as string[];
+    const bulletLines = doc.splitTextToSize(`•  ${F.sentence(m)}`, CONTENT_W - 8) as string[];
     bulletLines.forEach(l => {
       y = ensureSpace(doc, y, 14);
       doc.text(l, MARGIN + 4, y);
@@ -368,7 +391,7 @@ function renderScenarioDetail(
   setText(doc, COLORS.text);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  const whyLines = doc.splitTextToSize(narrative.whyItWorks, colW - 20) as string[];
+  const whyLines = doc.splitTextToSize(F.sentence(narrative.whyItWorks), colW - 20) as string[];
   whyLines.forEach((l, i) => doc.text(l, MARGIN + 10, y + 32 + i * 12));
   // Right: what could go wrong
   setFill(doc, [254, 242, 242]);
@@ -380,9 +403,84 @@ function renderScenarioDetail(
   setText(doc, COLORS.text);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  const riskLines = doc.splitTextToSize(narrative.whatCouldGoWrong, colW - 20) as string[];
+  const riskLines = doc.splitTextToSize(F.sentence(narrative.whatCouldGoWrong), colW - 20) as string[];
   riskLines.forEach((l, i) => doc.text(l, MARGIN + colW + 22, y + 32 + i * 12));
   y += 112;
+
+  // ── Verdict + top risk drivers + timing / break-even / safe-range ─────────
+  const att = narrative.attribution;
+  if (att) {
+    y = ensureSpace(doc, y, 130);
+    const verdictTone: [number, number, number] =
+      att.verdict === "STRONG" ? COLORS.emerald :
+      att.verdict === "VIABLE" ? COLORS.sky :
+      att.verdict === "AT RISK" ? COLORS.amber : COLORS.rose;
+    // Verdict badge
+    setFill(doc, verdictTone);
+    doc.roundedRect(MARGIN, y, 90, 22, 4, 4, "F");
+    setText(doc, [255, 255, 255]);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text(att.verdict, MARGIN + 45, y + 15, { align: "center" });
+    setText(doc, COLORS.muted);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("VERDICT", MARGIN + 100, y + 9);
+    setText(doc, COLORS.text);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(
+      att.verdict === "FAILS" ? "Scenario collapses under the engine's stress assumptions." :
+      att.verdict === "AT RISK" ? "Significant risk of insolvency or stress in tail paths." :
+      att.verdict === "VIABLE" ? "Survives baseline + most tail paths." :
+      "Robust across baseline and stress paths.",
+      MARGIN + 100, y + 21,
+    );
+    y += 32;
+
+    if (att.failureDrivers.length > 0) {
+      setText(doc, COLORS.muted);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text("TOP RISK DRIVERS", MARGIN, y);
+      y += 12;
+      att.failureDrivers.forEach((d, i) => {
+        y = ensureSpace(doc, y, 30);
+        setText(doc, COLORS.rose);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.text(`${i + 1}. ${d.label}`, MARGIN, y);
+        y += 11;
+        setText(doc, COLORS.text);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        const lines = doc.splitTextToSize(F.sentence(d.detail), CONTENT_W - 16) as string[];
+        lines.forEach(l => { doc.text(l, MARGIN + 12, y); y += 11; });
+        y += 2;
+      });
+    }
+
+    const factoids: Array<{ k: string; v: string; tone: [number, number, number] }> = [];
+    if (att.timing) factoids.push({ k: "Stress timing", v: att.timing, tone: COLORS.sky });
+    if (att.breakEven) factoids.push({ k: "Break-even", v: att.breakEven, tone: COLORS.primary });
+    if (att.safeRange) factoids.push({ k: "Safe range", v: att.safeRange, tone: COLORS.emerald });
+    factoids.forEach(f => {
+      y = ensureSpace(doc, y, 24);
+      setFill(doc, [...f.tone, 0.08] as any);
+      // jsPDF doesn't support rgba — emulate with light tinted rectangle (white wash)
+      setFill(doc, [248, 250, 252]);
+      doc.roundedRect(MARGIN, y, CONTENT_W, 20, 4, 4, "F");
+      setText(doc, f.tone);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.text(f.k.toUpperCase(), MARGIN + 8, y + 13);
+      setText(doc, COLORS.text);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(F.sentence(f.v), MARGIN + 76, y + 13);
+      y += 24;
+    });
+  }
 
   return y;
 }
@@ -414,13 +512,19 @@ export interface PdfData {
     liquidityChart?: HTMLElement | null;
     bandsChart?: HTMLElement | null;
   };
+  /**
+   * When true the PDF replaces every dollar value and percentage with bullets,
+   * mirroring the in-app Hide/Mask toggle. Default false.
+   */
+  hideValues?: boolean;
 }
 
 export async function generatePremiumPdf(data: PdfData): Promise<jsPDF> {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const F = buildFmts(data.hideValues ?? false);
 
   // ── Cover ──────────────────────────────────────────────────────────────────
-  renderCover(doc, data);
+  renderCover(doc, data, F);
 
   // ── Executive Summary ──────────────────────────────────────────────────────
   doc.addPage();
@@ -437,7 +541,7 @@ export async function generatePremiumPdf(data: PdfData): Promise<jsPDF> {
   setText(doc, COLORS.text);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  const tldrLines = doc.splitTextToSize(data.narrative.tldr, CONTENT_W - 28) as string[];
+  const tldrLines = doc.splitTextToSize(F.sentence(data.narrative.tldr), CONTENT_W - 28) as string[];
   tldrLines.forEach((l, i) => doc.text(l, MARGIN + 14, y + 34 + i * 14));
   y += 84;
 
@@ -471,18 +575,18 @@ export async function generatePremiumPdf(data: PdfData): Promise<jsPDF> {
     },
     {
       label: "Median NW (winner)",
-      value: winnerFan ? fmt$M(winnerFan.p50) : "—",
-      sub: `P10–P90: ${winnerFan ? fmt$M(winnerFan.p10) + " → " + fmt$M(winnerFan.p90) : "—"}`,
+      value: winnerFan ? F.fmt$M(winnerFan.p50) : "—",
+      sub: `P10–P90: ${winnerFan ? F.fmt$M(winnerFan.p10) + " → " + F.fmt$M(winnerFan.p90) : "—"}`,
     },
     {
       label: "Delta vs base",
-      value: winnerFan && baseFan ? fmt$M(winnerFan.p50 - baseFan.p50) : "—",
-      sub: baseFan ? `Base: ${fmt$M(baseFan.p50)}` : "",
+      value: winnerFan && baseFan ? F.fmt$M(winnerFan.p50 - baseFan.p50) : "—",
+      sub: baseFan ? `Base: ${F.fmt$M(baseFan.p50)}` : "",
     },
     {
       label: "Downside (P10 vs P50)",
-      value: winner ? pct(winner.riskMetrics.downsideRisk) : "—",
-      sub: `Sequence CV ${winner ? pct(winner.sequenceDispersion.cv) : "—"}`,
+      value: winner ? F.pct(winner.riskMetrics.downsideRisk) : "—",
+      sub: `Sequence CV ${winner ? F.pct(winner.sequenceDispersion.cv) : "—"}`,
     },
   ];
   const kpiW = (CONTENT_W - 12) / 2;
@@ -520,13 +624,13 @@ export async function generatePremiumPdf(data: PdfData): Promise<jsPDF> {
       const narr = data.narrative.scenarios.find(s => s.scenarioId === r.scenarioId);
       return [
         r.name,
-        fmt$M(fan.p10),
-        fmt$M(fan.p50),
-        fmt$M(fan.p90),
-        fmt$M(cashEnd.p50),
-        pct(r.serviceability?.dsr ?? 0),
-        pct(r.serviceability?.lvr ?? 0),
-        pct(r.riskMetrics.downsideRisk),
+        F.fmt$M(fan.p10),
+        F.fmt$M(fan.p50),
+        F.fmt$M(fan.p90),
+        F.fmt$M(cashEnd.p50),
+        F.pct(r.serviceability?.dsr ?? 0),
+        F.pct(r.serviceability?.lvr ?? 0),
+        F.pct(r.riskMetrics.downsideRisk),
         `${narr?.confidence ?? 0}%`,
       ];
     }),
@@ -577,8 +681,104 @@ export async function generatePremiumPdf(data: PdfData): Promise<jsPDF> {
     let ys = MARGIN + 12;
     const narr = data.narrative.scenarios.find(s => s.scenarioId === r.scenarioId);
     if (!narr) continue;
-    renderScenarioDetail(doc, r, narr, data.capital, data.horizonYears, ys);
+    renderScenarioDetail(doc, r, narr, data.capital, data.horizonYears, ys, F);
   }
+
+  // Attribution-by-driver overview page
+  doc.addPage();
+  let ya0 = MARGIN + 12;
+  ya0 = sectionHeader(doc, ya0, "Attribution by Driver", COLORS.accent);
+  ya0 = paragraph(
+    doc,
+    "For each path the engine ranks the dominant risk contributors detected during simulation " +
+    "(insolvency cascade, liquidity exhaustion, debt-service stress, valuation drawdown, vol drag).",
+    ya0,
+    { color: COLORS.muted, fontSize: 9.5 },
+  );
+  ya0 += 4;
+  autoTable(doc, {
+    startY: ya0,
+    head: [["Scenario", "Verdict", "Top driver", "Severity", "Detail"]],
+    body: data.narrative.scenarios.flatMap(s => {
+      if (s.attribution.failureDrivers.length === 0) {
+        return [[s.name, s.attribution.verdict, "—", "—", "No material risk drivers detected."]];
+      }
+      return s.attribution.failureDrivers.map((d, i) => [
+        i === 0 ? s.name : "",
+        i === 0 ? s.attribution.verdict : "",
+        d.label,
+        `${Math.round(d.severity * 100)}%`,
+        F.sentence(d.detail),
+      ]);
+    }),
+    styles: { fontSize: 8.5, cellPadding: 5, textColor: COLORS.text, valign: "top" },
+    headStyles: { fillColor: COLORS.accent, textColor: [255, 255, 255], fontStyle: "bold" },
+    alternateRowStyles: { fillColor: COLORS.bgSoft },
+    margin: { left: MARGIN, right: MARGIN },
+    columnStyles: {
+      0: { fontStyle: "bold", cellWidth: 110 },
+      1: { cellWidth: 60 },
+      2: { cellWidth: 110 },
+      3: { cellWidth: 50, halign: "right" },
+      4: { cellWidth: "auto" },
+    },
+    didParseCell: (raw) => {
+      if (raw.section === "body" && raw.column.index === 1 && raw.cell.raw) {
+        const v = String(raw.cell.raw);
+        if (v === "FAILS") raw.cell.styles.textColor = COLORS.rose;
+        else if (v === "AT RISK") raw.cell.styles.textColor = COLORS.amber;
+        else if (v === "VIABLE") raw.cell.styles.textColor = COLORS.sky;
+        else if (v === "STRONG") raw.cell.styles.textColor = COLORS.emerald;
+        raw.cell.styles.fontStyle = "bold";
+      }
+    },
+  });
+
+  // Sensitivity & Timing table page
+  doc.addPage();
+  let ysens = MARGIN + 12;
+  ysens = sectionHeader(doc, ysens, "Sensitivity & Timing", COLORS.sky);
+  ysens = paragraph(
+    doc,
+    "Break-even thresholds, stress-event timing, and the safe parameter range for each path. " +
+    "Use these to decide which assumption shifts would flip a recommendation.",
+    ysens,
+    { color: COLORS.muted, fontSize: 9.5 },
+  );
+  ysens += 4;
+  autoTable(doc, {
+    startY: ysens,
+    head: [["Scenario", "Break-even", "Stress timing", "Safe range", "Default P", "Liquidity P"]],
+    body: data.narrative.scenarios.map((s, i) => {
+      const r = data.results[i];
+      return [
+        s.name,
+        s.attribution.breakEven ? F.sentence(s.attribution.breakEven) : "—",
+        s.attribution.timing ? F.sentence(s.attribution.timing) : "—",
+        s.attribution.safeRange ? F.sentence(s.attribution.safeRange) : "—",
+        r ? F.pct(r.defaultProbability ?? 0, 0) : "—",
+        r ? F.pct(r.liquidityStressProbability, 0) : "—",
+      ];
+    }),
+    styles: { fontSize: 8.5, cellPadding: 5, textColor: COLORS.text, valign: "top" },
+    headStyles: { fillColor: COLORS.sky, textColor: [255, 255, 255], fontStyle: "bold" },
+    alternateRowStyles: { fillColor: COLORS.bgSoft },
+    margin: { left: MARGIN, right: MARGIN },
+    columnStyles: {
+      0: { fontStyle: "bold", cellWidth: 95 },
+      4: { halign: "right", cellWidth: 55 },
+      5: { halign: "right", cellWidth: 60 },
+    },
+    didParseCell: (raw) => {
+      if (raw.section === "body" && (raw.column.index === 4 || raw.column.index === 5)) {
+        const v = parseFloat(String(raw.cell.raw).replace(/[^\d.]/g, ""));
+        if (Number.isFinite(v) && v >= 10) {
+          raw.cell.styles.textColor = COLORS.rose;
+          raw.cell.styles.fontStyle = "bold";
+        }
+      }
+    },
+  });
 
   // ── Stress paths ───────────────────────────────────────────────────────────
   doc.addPage();
@@ -598,10 +798,10 @@ export async function generatePremiumPdf(data: PdfData): Promise<jsPDF> {
     head: [["Scenario", "Neg-Equity P", "Liquidity Stress", "Refi Pressure", "Terminal NW CV"]],
     body: data.results.map(r => [
       r.name,
-      pct(r.negativeEquityProbability),
-      pct(r.liquidityStressProbability),
-      pct(r.refinancePressureProbability),
-      pct(r.sequenceDispersion.cv),
+      F.pct(r.negativeEquityProbability),
+      F.pct(r.liquidityStressProbability),
+      F.pct(r.refinancePressureProbability),
+      F.pct(r.sequenceDispersion.cv),
     ]),
     styles: { fontSize: 9, cellPadding: 6, textColor: COLORS.text },
     headStyles: { fillColor: COLORS.rose, textColor: [255, 255, 255], fontStyle: "bold" },
@@ -649,7 +849,7 @@ export async function generatePremiumPdf(data: PdfData): Promise<jsPDF> {
   yr += 64;
 
   // Long-form recommendation
-  yr = paragraph(doc, data.narrative.recommendation, yr, { fontSize: 10.5 });
+  yr = paragraph(doc, F.sentence(data.narrative.recommendation), yr, { fontSize: 10.5 });
 
   // ── Assumptions appendix ───────────────────────────────────────────────────
   doc.addPage();
@@ -660,7 +860,7 @@ export async function generatePremiumPdf(data: PdfData): Promise<jsPDF> {
     startY: ya,
     head: [["Assumption", "Value"]],
     body: [
-      ["Capital under decision", fmt$(data.capital)],
+      ["Capital under decision", F.fmt$(data.capital)],
       ["Forecast horizon", `${data.horizonYears} years`],
       ["Monte Carlo simulations", data.simulationCount.toLocaleString()],
       ["Property capital growth", `${data.assumptions.propertyGrowthPct.toFixed(2)}% / year`],

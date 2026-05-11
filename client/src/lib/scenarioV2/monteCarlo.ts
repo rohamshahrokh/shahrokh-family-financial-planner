@@ -92,10 +92,18 @@ export interface MonteCarloOutput {
   terminalRates: number[];
   /** Probability of any negative-equity event during the horizon. */
   negativeEquityProbability: number;
-  /** Probability cash dips below 3-month buffer in any month. */
+  /** Probability cash dips below 3-month buffer for ≥2 consecutive months. */
   liquidityStressProbability: number;
   /** Probability a refinance event happens (rate spike + serviceability fail). */
   refinancePressureProbability: number;
+  /** Probability the household goes insolvent (cash exhausted, assets exhausted). */
+  defaultProbability: number;
+  /** Median month-index at which default fires (null if no path defaults). */
+  medianDefaultMonth: number | null;
+  /** Median month-index at which liquidity stress first fires. */
+  medianLiquidityFirstMonth: number | null;
+  /** Median month-index at which negative equity first fires. */
+  medianNegEquityFirstMonth: number | null;
 }
 
 export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
@@ -130,6 +138,15 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
   const [, startMonthNumStr] = (input.startMonth as string).split("-");
   const startMonthNum = parseInt(startMonthNumStr, 10);
 
+  // Per-sim aggregates for richer narrative
+  const defaultEvents: number[] = []; // per-sim default month index (-1 if solvent)
+  const liquidityFirstMonth: number[] = []; // first month liquidity stress fired (-1 if none)
+  const negativeEquityFirstMonth: number[] = [];
+
+  // Liquidity-stress threshold: 3 months expenses OR ≤ 0, whichever is
+  // STRICTER. We also REQUIRE the stress to PERSIST for ≥ 2 consecutive
+  // months to avoid one-off tax-quarter dips registering as stress. This
+  // produces a differentiated, calibrated probability across scenarios.
   for (let s = 0; s < N; s++) {
     const rng = makeRng(deriveSeed(input.parentSeed, `sim:${s}`));
     let state = cloneState(input.initialState) as ExtendedPortfolioState;
@@ -141,6 +158,10 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
     let monthRefStress = false;
     let liquidityStress = false;
     let negativeEquity = false;
+    let liquidityStressRun = 0; // consecutive months below threshold
+    let liquidityFirstHit = -1;
+    let negEqFirstHit = -1;
+    let defaultMonthIdx = -1;
 
     for (let i = 0; i < M; i++) {
       const m = months[i];
@@ -204,19 +225,36 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
 
       state = tick(state, monthEvents, input.plan.assumptions, ctx, draws) as ExtendedPortfolioState;
 
-      // Per-month stress checks (skip month 0 to avoid false positives on
-      // starting balance — we only care about the path going stressed)
-      if (!liquidityStress && i > 0) {
+      // Per-month stress checks (skip first 3 months to avoid false
+      // positives on starting balance — we only care about the path
+      // going stressed, and we require ≥ 2 consecutive months below
+      // the threshold for stress to register).
+      if (i > 3) {
         const monthlyExpenses = state.ttmExpenses / 12;
-        if (state.cash < monthlyExpenses * 3) liquidityStress = true;
+        // 3-month buffer OR cash below zero — stricter (more dangerous)
+        const threshold = monthlyExpenses * 3;
+        const inStress = state.cash < threshold || state.defaulted === true;
+        if (inStress) {
+          liquidityStressRun++;
+          if (liquidityStressRun >= 2 && !liquidityStress) {
+            liquidityStress = true;
+            liquidityFirstHit = i;
+          }
+        } else {
+          liquidityStressRun = 0;
+        }
       }
       if (!negativeEquity) {
         for (const p of state.properties) {
           if (p.marketValue < p.loanBalance) {
             negativeEquity = true;
+            negEqFirstHit = i;
             break;
           }
         }
+      }
+      if (defaultMonthIdx < 0 && state.defaulted === true) {
+        defaultMonthIdx = i;
       }
       if (!monthRefStress && shortRate > rateProcess.theta * 1.5) {
         // Rate ≥ 1.5× long-run mean for ≥1 month
@@ -236,6 +274,9 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
     if (negativeEquity) negativeEquityEvents++;
     if (liquidityStress) liquidityStressEvents++;
     if (monthRefStress) refinancePressureEvents++;
+    defaultEvents.push(defaultMonthIdx);
+    liquidityFirstMonth.push(liquidityFirstHit);
+    negativeEquityFirstMonth.push(negEqFirstHit);
   }
 
   // Build P10/P50/P90 fan
@@ -294,7 +335,17 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
     negativeEquityProbability: negativeEquityEvents / N,
     liquidityStressProbability: liquidityStressEvents / N,
     refinancePressureProbability: refinancePressureEvents / N,
+    defaultProbability: defaultEvents.filter((x) => x >= 0).length / N,
+    medianDefaultMonth: medianOrNull(defaultEvents.filter((x) => x >= 0)),
+    medianLiquidityFirstMonth: medianOrNull(liquidityFirstMonth.filter((x) => x >= 0)),
+    medianNegEquityFirstMonth: medianOrNull(negativeEquityFirstMonth.filter((x) => x >= 0)),
   };
+}
+
+function medianOrNull(arr: number[]): number | null {
+  if (arr.length === 0) return null;
+  const sorted = [...arr].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
