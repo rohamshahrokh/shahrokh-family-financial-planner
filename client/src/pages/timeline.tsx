@@ -625,7 +625,9 @@ export default function TimelinePage() {
             </div>
           </div>
         </div>
-        <div className="overflow-x-auto">
+        {/* Audit P1-7: edge-to-edge horizontal scroll on tablet so the
+            right-side columns are obviously reachable. */}
+        <div className="overflow-x-auto -mx-4 px-4">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border">

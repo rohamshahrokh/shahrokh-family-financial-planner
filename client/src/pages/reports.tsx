@@ -726,7 +726,9 @@ export default function ReportsPage() {
       </div>
 
       {/* ── Top KPI summary strip ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5">
+      {/* Audit P1-7: narrower phones get 2 columns, larger phones get 3,
+          tablets get 4, desktop fans out to all 7 chips. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2.5">
         <KpiChip label="Net Worth"      value={mv(fmt(netWorth, true))}        accent up={netWorth > 0} />
         <KpiChip label="Accessible"     value={mv(fmt(accessibleWlt, true))}   sub="Cash + Stocks + Crypto" />
         <KpiChip label="Debt Balance"   value={mv(fmt(totalLiab, true))}       up={totalLiab === 0} />
