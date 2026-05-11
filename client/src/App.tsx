@@ -213,10 +213,13 @@ function AppRouter() {
           <ProtectedRoute component={CGTSimulatorPage} title="CGT Simulator" />
         </Route>
         <Route path="/scenario-compare">
-          <ProtectedRoute component={ScenarioComparePage} title="Scenario Compare Lab" />
+          <ProtectedRoute component={ScenarioCompareV2Page} title="Scenario Lab" />
         </Route>
         <Route path="/scenario-compare-v2">
-          <ProtectedRoute component={ScenarioCompareV2Page} title="Scenario Compare V2" />
+          <ProtectedRoute component={ScenarioCompareV2Page} title="Scenario Lab" />
+        </Route>
+        <Route path="/scenario-compare-legacy">
+          <ProtectedRoute component={ScenarioComparePage} title="Scenario Compare (Legacy)" />
         </Route>
         <Route path="/what-if-scenarios">
           <ProtectedRoute component={WhatIfScenariosPage} title="What-If Scenarios" />

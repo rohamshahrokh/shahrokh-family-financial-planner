@@ -1,24 +1,21 @@
 /**
- * scenario-compare-v2.tsx
- * Scenario Compare V2 — Real product feature
+ * scenario-compare-v2.tsx — Premium Family Wealth Lab
  *
- * The $50k marginal capital allocation decision tool.
- *
- *   ┌─ Live ledger banner (auto-derived Base Plan)
- *   ├─ Editable assumptions panel (property growth, crypto return, cash APR,
- *   │   interest rate, rent yield, horizon years, MC sims)
- *   ├─ Run/Re-run + Download PDF
- *   ├─ Winner cards (NW / liquidity / risk-adj / best median / worst downside)
- *   ├─ Comparison table (NW P10/P50/P90, terminal cash, DSR, LVR, NSR,
- *   │   risk metrics, band)
- *   ├─ Tabs: Net Worth Projection │ Liquidity │ Delta vs Base │ MC bands
- *   └─ Risk + serviceability rationale per scenario
+ * Sessions 2+3 redesign:
+ *   • Premium fintech UX (hero, decision summary, confidence ribbon, narrative cards)
+ *   • Mobile-first iPhone-grade layout (sticky picker, swipeable cards, bottom action bar,
+ *     table→cards on mobile, touch-friendly sliders)
+ *   • Real ledger only (live Supabase). No demo fallback.
+ *   • Save/Load/Clone/Re-run scenarios + assumption presets (persisted to Supabase)
+ *   • Narrative engine: plain-English stories, why-this-wins, what-could-go-wrong
+ *   • Executive-grade PDF with branded cover, charts, scenario details, recommendation
+ *   • Determinism + audit trail: seed, snapshot_hash, assumptions_hash stored per save
  */
 
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { formatCurrency, safeNum } from "@/lib/finance";
+import { formatCurrency } from "@/lib/finance";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -28,25 +25,38 @@ import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Progress } from "@/components/ui/progress";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger,
+} from "@/components/ui/sheet";
 import {
   Beaker, CheckCircle2, AlertTriangle, Play, RefreshCw, Download,
-  Trophy, Droplet, Shield, TrendingUp, TrendingDown, Settings,
-  Building2, Bitcoin, Wallet, Award, ChevronDown, ChevronUp,
+  Trophy, Droplet, Shield, TrendingDown, Settings,
+  Award, ChevronUp, ChevronDown, Save, FolderOpen, Copy, Trash2,
+  Sparkles, ArrowRight, Star, Info,
 } from "lucide-react";
 import {
-  ResponsiveContainer, LineChart, Line, AreaChart, Area, BarChart, Bar,
+  ResponsiveContainer, LineChart, Line, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend, ReferenceLine,
 } from "recharts";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 
 import {
   runScenarioV2,
   type ExtendedScenarioResult,
   type ScenarioDelta,
   type BasePlanAssumptions,
-  DEFAULT_ASSUMPTIONS,
+  snapshotHash,
+  deriveAssumptionsHash,
+  buildComparisonNarrative,
+  generatePremiumPdf,
+  v2Persistence,
+  v2Presets,
+  v2LastAssumptions,
+  type SavedScenario,
+  type AssumptionPreset,
+  type ComparisonNarrative,
 } from "@/lib/scenarioV2";
 import {
   selectMonthlySurplus,
@@ -59,16 +69,16 @@ import {
 // ─── Types / helpers ─────────────────────────────────────────────────────────
 
 interface UserAssumptions {
-  propertyGrowthPct: number;   // %/yr
-  propertyVolPct: number;      // %/yr σ
-  cryptoReturnPct: number;     // %/yr
-  cryptoVolPct: number;        // %/yr σ
-  cashAprPct: number;          // %/yr
-  mortgageRatePct: number;     // %/yr
-  rentYieldPct: number;        // %/yr gross
+  propertyGrowthPct: number;
+  propertyVolPct: number;
+  cryptoReturnPct: number;
+  cryptoVolPct: number;
+  cashAprPct: number;
+  mortgageRatePct: number;
+  rentYieldPct: number;
   horizonYears: number;
   simulationCount: number;
-  capital: number;             // AUD — the marginal capital being allocated
+  capital: number;
 }
 
 const DEFAULT_USER_ASSUMPTIONS: UserAssumptions = {
@@ -85,10 +95,10 @@ const DEFAULT_USER_ASSUMPTIONS: UserAssumptions = {
 };
 
 const SCENARIO_COLORS = {
-  base: "#64748b",       // slate
-  property: "#0ea5e9",   // sky
-  crypto: "#f59e0b",     // amber
-  cash: "#10b981",       // emerald
+  base: "#64748b",
+  property: "#0ea5e9",
+  crypto: "#f59e0b",
+  cash: "#10b981",
 };
 
 const SCENARIO_KEY_MAP: Record<string, keyof typeof SCENARIO_COLORS> = {
@@ -98,11 +108,22 @@ const SCENARIO_KEY_MAP: Record<string, keyof typeof SCENARIO_COLORS> = {
   "cash_50k": "cash",
 };
 
+const SCENARIO_GRADIENT: Record<string, string> = {
+  base: "from-slate-500 to-slate-600",
+  property_50k: "from-sky-500 to-blue-600",
+  crypto_50k: "from-amber-500 to-orange-600",
+  cash_50k: "from-emerald-500 to-teal-600",
+};
+
 const pct = (n: number, d = 1) => `${(n * 100).toFixed(d)}%`;
 const fmt$ = (n: number) => formatCurrency(Math.round(n));
 const fmt$k = (n: number) => `$${(Math.round(n) / 1000).toFixed(0)}k`;
-const fmt$M = (n: number) => `$${(n / 1_000_000).toFixed(2)}M`;
-const bandClass = (band: string) =>
+const fmt$M = (n: number) =>
+  Math.abs(n) >= 1_000_000
+    ? `$${(n / 1_000_000).toFixed(2)}M`
+    : `$${(Math.round(n / 1000))}k`;
+
+const bandClass = (band?: string) =>
   band === "comfortable" ? "bg-emerald-100 text-emerald-800 border-emerald-200" :
   band === "manageable" ? "bg-blue-100 text-blue-800 border-blue-200" :
   band === "stressed" ? "bg-amber-100 text-amber-800 border-amber-200" :
@@ -124,16 +145,14 @@ function buildSliceScenarios(activationMonth: string, u: UserAssumptions): Array
   name: string;
   deltas: ScenarioDelta[];
 }> {
-  // Property delta — derive purchasePrice from capital using a standard 20% deposit
-  // (so the capital acts as the FULL deposit). Then auto-derive rent from rent-yield knob.
-  const purchasePrice = u.capital * 5; // 20% deposit → 5× capital
+  const purchasePrice = u.capital * 5;
   const weeklyRent = Math.round((purchasePrice * (u.rentYieldPct / 100)) / 52);
 
   return [
     { scenarioId: "base", name: "Base Case", deltas: [] },
     {
       scenarioId: "property_50k",
-      name: `+$${(u.capital / 1000).toFixed(0)}k Property Deposit`,
+      name: `+${fmt$k(u.capital)} Property Deposit`,
       deltas: [{
         id: "delta-property",
         scenarioId: "property_50k",
@@ -154,7 +173,7 @@ function buildSliceScenarios(activationMonth: string, u: UserAssumptions): Array
     },
     {
       scenarioId: "crypto_50k",
-      name: `+$${(u.capital / 1000).toFixed(0)}k Crypto`,
+      name: `+${fmt$k(u.capital)} Crypto`,
       deltas: [{
         id: "delta-crypto",
         scenarioId: "crypto_50k",
@@ -167,7 +186,7 @@ function buildSliceScenarios(activationMonth: string, u: UserAssumptions): Array
     },
     {
       scenarioId: "cash_50k",
-      name: `Hold $${(u.capital / 1000).toFixed(0)}k as Cash`,
+      name: `Hold ${fmt$k(u.capital)} as Cash`,
       deltas: [{
         id: "delta-cash",
         scenarioId: "cash_50k",
@@ -181,57 +200,225 @@ function buildSliceScenarios(activationMonth: string, u: UserAssumptions): Array
   ];
 }
 
-// ─── Slider row ──────────────────────────────────────────────────────────────
+// ─── Premium slider row (touch-friendly) ─────────────────────────────────────
 
 function SliderRow({
   label, value, min, max, step, suffix, onChange, hint,
 }: {
   label: string;
   value: number;
-  min: number;
-  max: number;
-  step: number;
+  min: number; max: number; step: number;
   suffix?: string;
   onChange: (n: number) => void;
   hint?: string;
 }) {
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <Label className="text-xs font-medium">{label}</Label>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-xs font-medium text-foreground">{label}</Label>
         <div className="flex items-center gap-1">
           <Input
             type="number"
+            inputMode="decimal"
             value={value}
             onChange={(e) => {
               const n = parseFloat(e.target.value);
               if (Number.isFinite(n)) onChange(n);
             }}
-            min={min}
-            max={max}
-            step={step}
-            className="h-7 w-20 text-right text-xs tabular-nums"
+            min={min} max={max} step={step}
+            className="h-8 w-24 text-right text-xs tabular-nums"
           />
-          {suffix && <span className="text-xs text-muted-foreground w-6">{suffix}</span>}
+          {suffix && <span className="text-xs text-muted-foreground w-8 shrink-0">{suffix}</span>}
         </div>
       </div>
       <Slider
-        value={[value]}
-        min={min}
-        max={max}
-        step={step}
+        value={[value]} min={min} max={max} step={step}
         onValueChange={([v]) => onChange(v)}
-        className="py-1"
+        className="py-2"
       />
-      {hint && <p className="text-[10px] text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-[11px] text-muted-foreground leading-snug">{hint}</p>}
     </div>
+  );
+}
+
+// ─── Confidence ribbon ────────────────────────────────────────────────────────
+
+function ConfidenceRibbon({ value, label }: { value: number; label?: string }) {
+  const tone =
+    value >= 70 ? "bg-emerald-500" :
+    value >= 50 ? "bg-amber-500" : "bg-rose-500";
+  const textTone =
+    value >= 70 ? "text-emerald-700 dark:text-emerald-400" :
+    value >= 50 ? "text-amber-700 dark:text-amber-400" : "text-rose-700 dark:text-rose-400";
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-muted-foreground">{label ?? "Confidence"}</span>
+        <span className={`font-semibold tabular-nums ${textTone}`}>{value}%</span>
+      </div>
+      <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
+        <div className={`h-full ${tone} transition-all duration-500`} style={{ width: `${value}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Stat tile (premium, mobile-friendly) ─────────────────────────────────────
+
+function StatTile({
+  label, value, sub, tone = "default", icon,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "default" | "emerald" | "rose" | "sky" | "amber" | "indigo";
+  icon?: React.ReactNode;
+}) {
+  const tones = {
+    default: "border-border bg-card",
+    emerald: "border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20",
+    rose: "border-rose-200 bg-rose-50/50 dark:bg-rose-950/20",
+    sky: "border-sky-200 bg-sky-50/50 dark:bg-sky-950/20",
+    amber: "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20",
+    indigo: "border-indigo-200 bg-indigo-50/50 dark:bg-indigo-950/20",
+  };
+  const valueTones = {
+    default: "text-foreground",
+    emerald: "text-emerald-700 dark:text-emerald-400",
+    rose: "text-rose-700 dark:text-rose-400",
+    sky: "text-sky-700 dark:text-sky-400",
+    amber: "text-amber-700 dark:text-amber-400",
+    indigo: "text-indigo-700 dark:text-indigo-400",
+  };
+  return (
+    <div className={`rounded-xl border ${tones[tone]} p-4 space-y-1.5 min-w-0`}>
+      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+        {icon}
+        <span className="truncate">{label}</span>
+      </div>
+      <div className={`text-xl sm:text-2xl font-bold tabular-nums ${valueTones[tone]} truncate`}>{value}</div>
+      {sub && <div className="text-[11px] text-muted-foreground truncate">{sub}</div>}
+    </div>
+  );
+}
+
+// ─── Scenario narrative card (premium, mobile-swipeable) ──────────────────────
+
+function NarrativeCard({
+  scenarioId, name, headline, story, keyMoves, whyItWorks, whatCouldGoWrong, confidence,
+  result, isWinner,
+}: {
+  scenarioId: string;
+  name: string;
+  headline: string;
+  story: string;
+  keyMoves: string[];
+  whyItWorks: string;
+  whatCouldGoWrong: string;
+  confidence: number;
+  result: ExtendedScenarioResult;
+  isWinner: boolean;
+}) {
+  const fanEnd = result.netWorthFan[result.netWorthFan.length - 1];
+  const cashEnd = result.cashFan[result.cashFan.length - 1];
+  const gradient = SCENARIO_GRADIENT[scenarioId] ?? "from-slate-500 to-slate-600";
+
+  return (
+    <Card className={`overflow-hidden ${isWinner ? "ring-2 ring-purple-400 shadow-lg" : ""}`}>
+      {/* Gradient header */}
+      <div className={`bg-gradient-to-r ${gradient} p-4 text-white relative`}>
+        {isWinner && (
+          <Badge className="absolute top-3 right-3 bg-white/95 text-purple-700 font-semibold shadow">
+            <Star className="h-3 w-3 mr-1 fill-current" />
+            Recommended
+          </Badge>
+        )}
+        <div className="flex items-center gap-2 text-white/85 text-xs font-semibold uppercase tracking-wide mb-1">
+          <Sparkles className="h-3.5 w-3.5" />
+          {scenarioId === "base" ? "Stay the course" : "Allocation path"}
+        </div>
+        <h3 className="text-lg sm:text-xl font-bold leading-tight">{name}</h3>
+        <p className="text-white/90 text-sm mt-2 leading-snug">{headline}</p>
+      </div>
+
+      <CardContent className="pt-4 space-y-4">
+        {/* KPI row */}
+        <div className="grid grid-cols-3 gap-2">
+          <div>
+            <div className="text-[10px] uppercase text-muted-foreground font-semibold">P50 NW</div>
+            <div className="text-base font-bold tabular-nums">{fmt$M(fanEnd.p50)}</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase text-muted-foreground font-semibold">P10 / P90</div>
+            <div className="text-xs font-semibold tabular-nums text-rose-700">{fmt$M(fanEnd.p10)}</div>
+            <div className="text-xs font-semibold tabular-nums text-emerald-700">{fmt$M(fanEnd.p90)}</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase text-muted-foreground font-semibold">Cash</div>
+            <div className="text-base font-bold tabular-nums text-sky-700">{fmt$M(cashEnd.p50)}</div>
+          </div>
+        </div>
+
+        {/* Confidence */}
+        <ConfidenceRibbon value={confidence} label="Path confidence" />
+
+        {/* Story */}
+        <p className="text-sm leading-relaxed text-foreground/90">{story}</p>
+
+        {/* Key moves */}
+        {keyMoves.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-[11px] uppercase font-semibold text-muted-foreground tracking-wide">
+              What happens
+            </div>
+            <ul className="space-y-1">
+              {keyMoves.map((m, i) => (
+                <li key={i} className="text-xs flex gap-2 items-start">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                  <span className="text-foreground/85">{m}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Why / risk two-up */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 p-2.5">
+            <div className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-400 tracking-wide mb-1">
+              Why it works
+            </div>
+            <p className="text-xs text-foreground/80 leading-snug">{whyItWorks}</p>
+          </div>
+          <div className="rounded-lg bg-rose-50 dark:bg-rose-950/20 p-2.5">
+            <div className="text-[10px] uppercase font-bold text-rose-700 dark:text-rose-400 tracking-wide mb-1">
+              What could go wrong
+            </div>
+            <p className="text-xs text-foreground/80 leading-snug">{whatCouldGoWrong}</p>
+          </div>
+        </div>
+
+        {/* Stress chips */}
+        <div className="flex flex-wrap gap-1.5">
+          <Badge variant="outline" className={result.negativeEquityProbability > 0.1 ? "border-rose-300 text-rose-700" : ""}>
+            Neg-Eq {pct(result.negativeEquityProbability, 0)}
+          </Badge>
+          <Badge variant="outline" className={result.liquidityStressProbability > 0.1 ? "border-rose-300 text-rose-700" : ""}>
+            Liq stress {pct(result.liquidityStressProbability, 0)}
+          </Badge>
+          <Badge variant="outline" className={bandClass(result.serviceability?.band)}>
+            {result.serviceability?.band ?? "—"}
+          </Badge>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function ScenarioCompareV2Page() {
-  // Live ledger — same shape dashboard uses.
+  // ── Live ledger queries ────────────────────────────────────────────────────
   const { data: snapshot } = useQuery<any>({
     queryKey: ["/api/snapshot"],
     queryFn: () => apiRequest("GET", "/api/snapshot").then(r => r.json()),
@@ -276,14 +463,64 @@ export default function ScenarioCompareV2Page() {
     };
   }, [dashboardInputs]);
 
+  // Compute snapshot hash for audit + staleness
+  const currentSnapshotHash = useMemo(() => {
+    return snapshot ? snapshotHash(snapshot) : null;
+  }, [snapshot]);
+
+  // ── State ──────────────────────────────────────────────────────────────────
   const [assumptions, setAssumptions] = useState<UserAssumptions>(DEFAULT_USER_ASSUMPTIONS);
-  const [showAssumptions, setShowAssumptions] = useState(true);
+  const [showAssumptions, setShowAssumptions] = useState(false);
   const [results, setResults] = useState<ExtendedScenarioResult[]>([]);
   const [lastAssumptions, setLastAssumptions] = useState<UserAssumptions>(DEFAULT_USER_ASSUMPTIONS);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const reportRef = useRef<HTMLDivElement>(null);
+  const [activeScenarioIdx, setActiveScenarioIdx] = useState(0);
 
+  // Persistence state
+  const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
+  const [presets, setPresets] = useState<AssumptionPreset[]>([]);
+  const [loadedScenarioId, setLoadedScenarioId] = useState<string | null>(null);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [loadSheetOpen, setLoadSheetOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saveDescription, setSaveDescription] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
+
+  const reportRef = useRef<HTMLDivElement>(null);
+  const nwChartRef = useRef<HTMLDivElement>(null);
+  const liquidityChartRef = useRef<HTMLDivElement>(null);
+  const bandsChartRef = useRef<HTMLDivElement>(null);
+
+  // ── Restore last-used assumptions on mount ────────────────────────────────
+  useEffect(() => {
+    const last = v2LastAssumptions.load<UserAssumptions>();
+    if (last && typeof last === "object") {
+      setAssumptions(prev => ({ ...prev, ...last }));
+    }
+  }, []);
+
+  // Save last assumptions whenever they change
+  useEffect(() => {
+    v2LastAssumptions.save(assumptions);
+  }, [assumptions]);
+
+  // Load saved scenarios + presets
+  const refreshSaved = useCallback(async () => {
+    try {
+      const [s, p] = await Promise.all([v2Persistence.list(), v2Presets.list()]);
+      setSavedScenarios(s);
+      setPresets(p);
+    } catch (err) {
+      console.warn("[v2] failed to load saved:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshSaved();
+  }, [refreshSaved]);
+
+  // ── Run engine ────────────────────────────────────────────────────────────
   const handleRun = useCallback(() => {
     if (!dashboardInputs) return;
     setRunning(true);
@@ -295,6 +532,7 @@ export default function ScenarioCompareV2Page() {
         const activationMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
         const scenarios = buildSliceScenarios(activationMonth, assumptions);
         const overrides = buildAssumptionsOverride(assumptions);
+        const t0 = performance.now();
 
         const out: ExtendedScenarioResult[] = scenarios.map(s =>
           runScenarioV2({
@@ -308,9 +546,17 @@ export default function ScenarioCompareV2Page() {
             assumptions: overrides,
           }),
         );
+        const elapsedMs = Math.round(performance.now() - t0);
 
         setResults(out);
         setLastAssumptions(assumptions);
+        setActiveScenarioIdx(0);
+
+        // If a scenario is loaded, update its last_run on Supabase
+        if (loadedScenarioId && !loadedScenarioId.startsWith("local-")) {
+          v2Persistence.updateLastRun(loadedScenarioId, { results: out } as any, elapsedMs)
+            .catch(err => console.warn("[v2] updateLastRun failed:", err));
+        }
       } catch (e: any) {
         console.error("[scenario-v2] run failed:", e);
         setError(e?.message ?? String(e));
@@ -318,18 +564,123 @@ export default function ScenarioCompareV2Page() {
         setRunning(false);
       }
     }, 50);
-  }, [dashboardInputs, assumptions]);
+  }, [dashboardInputs, assumptions, loadedScenarioId]);
 
-  const base = results.find(r => r.scenarioId === "base");
-  const property = results.find(r => r.scenarioId === "property_50k");
-  const crypto = results.find(r => r.scenarioId === "crypto_50k");
-  const cash = results.find(r => r.scenarioId === "cash_50k");
+  // ── Save scenario ─────────────────────────────────────────────────────────
+  const handleSave = useCallback(async () => {
+    if (results.length === 0) return;
+    if (!saveName.trim()) return;
+    try {
+      const now = new Date();
+      const startMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const deltas: ScenarioDelta[] = buildSliceScenarios(startMonth, assumptions).flatMap(s => s.deltas);
 
-  // ─── Winners ──────────────────────────────────────────────────────────────
+      const payload = {
+        name: saveName.trim(),
+        description: saveDescription.trim() || null,
+        assumptions: assumptions as unknown as Record<string, unknown>,
+        deltas,
+        horizonMonths: assumptions.horizonYears * 12,
+        simulationCount: assumptions.simulationCount,
+        startMonth,
+        snapshotHash: currentSnapshotHash ?? undefined,
+        lastResult: { results } as unknown as Record<string, unknown>,
+        lastRunAt: new Date().toISOString(),
+        lastRunMs: 0,
+      };
+
+      if (loadedScenarioId && !loadedScenarioId.startsWith("local-")) {
+        await v2Persistence.update(loadedScenarioId, payload);
+      } else {
+        const saved = await v2Persistence.create(payload);
+        setLoadedScenarioId(saved.id);
+      }
+      await refreshSaved();
+      setSaveDialogOpen(false);
+      setSaveName("");
+      setSaveDescription("");
+    } catch (err: any) {
+      console.error("[v2] save failed:", err);
+      setError(`Save failed: ${err?.message ?? err}`);
+    }
+  }, [results, saveName, saveDescription, assumptions, currentSnapshotHash, loadedScenarioId, refreshSaved]);
+
+  // ── Load saved scenario ───────────────────────────────────────────────────
+  const handleLoad = useCallback(async (id: string) => {
+    try {
+      const s = await v2Persistence.getById(id);
+      if (!s) return;
+      const a = s.assumptions as unknown as UserAssumptions;
+      if (a && typeof a === "object") {
+        setAssumptions(prev => ({ ...prev, ...a }));
+        setLastAssumptions(prev => ({ ...prev, ...a }));
+      }
+      const lr = (s.last_result as any)?.results as ExtendedScenarioResult[] | undefined;
+      if (Array.isArray(lr) && lr.length > 0) {
+        setResults(lr);
+      } else {
+        // No cached result — clear so user can re-run
+        setResults([]);
+      }
+      setLoadedScenarioId(s.id);
+      setLoadSheetOpen(false);
+    } catch (err: any) {
+      console.error("[v2] load failed:", err);
+      setError(`Load failed: ${err?.message ?? err}`);
+    }
+  }, []);
+
+  // ── Clone scenario ────────────────────────────────────────────────────────
+  const handleClone = useCallback(async (id: string, srcName: string) => {
+    try {
+      const cloned = await v2Persistence.clone(id, `${srcName} (copy)`);
+      setLoadedScenarioId(cloned.id);
+      await refreshSaved();
+    } catch (err: any) {
+      console.error("[v2] clone failed:", err);
+      setError(`Clone failed: ${err?.message ?? err}`);
+    }
+  }, [refreshSaved]);
+
+  // ── Delete scenario ───────────────────────────────────────────────────────
+  const handleDelete = useCallback(async (id: string) => {
+    if (!confirm("Delete this scenario?")) return;
+    try {
+      await v2Persistence.delete(id);
+      if (loadedScenarioId === id) setLoadedScenarioId(null);
+      await refreshSaved();
+    } catch (err: any) {
+      console.error("[v2] delete failed:", err);
+      setError(`Delete failed: ${err?.message ?? err}`);
+    }
+  }, [loadedScenarioId, refreshSaved]);
+
+  // ── Reset to new scenario ─────────────────────────────────────────────────
+  const handleNewScenario = useCallback(() => {
+    setLoadedScenarioId(null);
+    setResults([]);
+    setError(null);
+  }, []);
+
+  // ── Narrative ─────────────────────────────────────────────────────────────
+  const narrative: ComparisonNarrative | null = useMemo(() => {
+    if (results.length === 0) return null;
+    return buildComparisonNarrative({
+      results,
+      horizonYears: lastAssumptions.horizonYears,
+      simulationCount: lastAssumptions.simulationCount,
+      capital: lastAssumptions.capital,
+      propertyGrowthPct: lastAssumptions.propertyGrowthPct,
+      cryptoVolPct: lastAssumptions.cryptoVolPct,
+      cashAprPct: lastAssumptions.cashAprPct,
+      mortgageRatePct: lastAssumptions.mortgageRatePct,
+    });
+  }, [results, lastAssumptions]);
+
+  // ── Winners (for compact strip) ───────────────────────────────────────────
   const winners = useMemo(() => {
     if (results.length === 0) return null;
     const fanEnd = (r: ExtendedScenarioResult) => r.netWorthFan[r.netWorthFan.length - 1];
-
     const byNw = [...results].sort((a, b) => fanEnd(b).p50 - fanEnd(a).p50)[0];
     const byLiquidity = [...results].sort((a, b) => {
       const aCash = a.cashFan[a.cashFan.length - 1]?.p50 ?? 0;
@@ -339,23 +690,20 @@ export default function ScenarioCompareV2Page() {
     const byRiskAdj = [...results].sort(
       (a, b) => b.riskMetrics.riskAdjustedNw - a.riskMetrics.riskAdjustedNw,
     )[0];
-    const bestMedian = byNw; // alias for clarity in cards
     const worstDownside = [...results].sort(
       (a, b) => b.riskMetrics.downsideRisk - a.riskMetrics.downsideRisk,
     )[0];
-
-    return { byNw, byLiquidity, byRiskAdj, bestMedian, worstDownside };
+    return { byNw, byLiquidity, byRiskAdj, worstDownside };
   }, [results]);
 
-  // ─── Chart data ───────────────────────────────────────────────────────────
+  // ── Chart data ────────────────────────────────────────────────────────────
   const nwChartData = useMemo(() => {
     if (results.length === 0) return [];
     const M = results[0].netWorthFan.length;
     const rows: any[] = [];
     for (let i = 0; i < M; i++) {
-      const month = results[0].netWorthFan[i].month;
       const yr = (i + 1) / 12;
-      const row: any = { month, year: yr.toFixed(1) };
+      const row: any = { year: yr.toFixed(1) };
       results.forEach(r => {
         const key = SCENARIO_KEY_MAP[r.scenarioId] ?? "base";
         row[key] = r.netWorthFan[i].p50;
@@ -382,6 +730,7 @@ export default function ScenarioCompareV2Page() {
   }, [results]);
 
   const deltaChartData = useMemo(() => {
+    const base = results.find(r => r.scenarioId === "base");
     if (!base || results.length === 0) return [];
     const M = base.netWorthFan.length;
     const rows: any[] = [];
@@ -397,7 +746,7 @@ export default function ScenarioCompareV2Page() {
       rows.push(row);
     }
     return rows;
-  }, [results, base]);
+  }, [results]);
 
   const [bandsScenarioIdx, setBandsScenarioIdx] = useState(1);
   const bandsChartData = useMemo(() => {
@@ -406,820 +755,844 @@ export default function ScenarioCompareV2Page() {
     return r.netWorthFan.map((f, i) => ({
       year: ((i + 1) / 12).toFixed(1),
       p10: f.p10,
-      p50: f.p50,
-      p90: f.p90,
-      p90Minus50: f.p90 - f.p50,
       p50Minus10: f.p50 - f.p10,
+      p90Minus50: f.p90 - f.p50,
     }));
   }, [results, bandsScenarioIdx]);
 
-  // ─── PDF export ───────────────────────────────────────────────────────────
-  const handleDownloadPdf = useCallback(() => {
-    if (results.length === 0 || !base) return;
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
-    const pageW = doc.internal.pageSize.getWidth();
-    const margin = 40;
-    let y = margin;
-
-    // Header
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("Scenario Compare V2 — Capital Allocation Decision", margin, y);
-    y += 22;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(
-      `Generated ${new Date().toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" })} · ` +
-      `Horizon ${lastAssumptions.horizonYears}yr · ${lastAssumptions.simulationCount} Monte Carlo sims`,
-      margin, y,
-    );
-    y += 24;
-    doc.setTextColor(0);
-
-    // Exec summary
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
-    doc.text("Executive Summary", margin, y);
-    y += 16;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-
-    const baseFanEnd = base.netWorthFan[base.netWorthFan.length - 1];
-    const summaryLines: string[] = [];
-    summaryLines.push(
-      `Capital under decision: ${fmt$(lastAssumptions.capital)}. Compared 4 paths (Base, Property, Crypto, Cash) ` +
-      `against your live ledger.`,
-    );
-    if (winners) {
-      summaryLines.push(
-        `Highest median net worth: ${winners.byNw.name} ($${Math.round(winners.byNw.netWorthFan[winners.byNw.netWorthFan.length - 1].p50).toLocaleString()}).`,
-      );
-      summaryLines.push(
-        `Best risk-adjusted outcome: ${winners.byRiskAdj.name} ($${Math.round(winners.byRiskAdj.riskMetrics.riskAdjustedNw).toLocaleString()}).`,
-      );
-      summaryLines.push(
-        `Highest terminal liquidity: ${winners.byLiquidity.name} ($${Math.round(winners.byLiquidity.cashFan[winners.byLiquidity.cashFan.length - 1].p50).toLocaleString()} P50 cash).`,
-      );
-      summaryLines.push(
-        `Worst downside risk: ${winners.worstDownside.name} (${(winners.worstDownside.riskMetrics.downsideRisk * 100).toFixed(1)}% P10-vs-P50 drawdown).`,
-      );
-    }
-    summaryLines.forEach(line => {
-      const wrapped = doc.splitTextToSize(line, pageW - margin * 2);
-      doc.text(wrapped, margin, y);
-      y += wrapped.length * 12 + 2;
-    });
-    y += 8;
-
-    // Assumptions
-    autoTable(doc, {
-      startY: y,
-      head: [["Assumption", "Value"]],
-      body: [
-        ["Capital allocated", fmt$(lastAssumptions.capital)],
-        ["Horizon", `${lastAssumptions.horizonYears} years`],
-        ["Monte Carlo sims", `${lastAssumptions.simulationCount}`],
-        ["Property growth", `${lastAssumptions.propertyGrowthPct.toFixed(1)}% / yr`],
-        ["Property volatility", `${lastAssumptions.propertyVolPct.toFixed(1)}% σ`],
-        ["Crypto return", `${lastAssumptions.cryptoReturnPct.toFixed(1)}% / yr`],
-        ["Crypto volatility", `${lastAssumptions.cryptoVolPct.toFixed(1)}% σ`],
-        ["Cash APR", `${lastAssumptions.cashAprPct.toFixed(2)}% / yr`],
-        ["Mortgage rate", `${lastAssumptions.mortgageRatePct.toFixed(2)}% / yr`],
-        ["Gross rent yield", `${lastAssumptions.rentYieldPct.toFixed(2)}% / yr`],
-      ],
-      styles: { fontSize: 9 },
-      headStyles: { fillColor: [99, 102, 241] },
-      margin: { left: margin, right: margin },
-    });
-    y = (doc as any).lastAutoTable.finalY + 20;
-
-    // Comparison table
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
-    doc.text("Scenario Comparison", margin, y);
-    y += 14;
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Scenario", "Initial NW", "P10 NW", "P50 NW", "P90 NW", "P50 Cash", "DSR", "LVR", "Downside", "Vol (CV)", "Risk-Adj NW"]],
-      body: results.map(r => {
-        const fanEnd = r.netWorthFan[r.netWorthFan.length - 1];
-        const cashEnd = r.cashFan[r.cashFan.length - 1];
-        return [
-          r.name,
-          fmt$(r.initialNetWorth),
-          fmt$(fanEnd.p10),
-          fmt$(fanEnd.p50),
-          fmt$(fanEnd.p90),
-          fmt$(cashEnd.p50),
-          `${(r.serviceability.dsr * 100).toFixed(1)}%`,
-          `${(r.serviceability.lvr * 100).toFixed(1)}%`,
-          `${(r.riskMetrics.downsideRisk * 100).toFixed(1)}%`,
-          `${(r.riskMetrics.volatility * 100).toFixed(1)}%`,
-          fmt$(r.riskMetrics.riskAdjustedNw),
-        ];
-      }),
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [99, 102, 241] },
-      margin: { left: margin, right: margin },
-    });
-    y = (doc as any).lastAutoTable.finalY + 20;
-
-    // Risk Analysis
-    if (y > 680) { doc.addPage(); y = margin; }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
-    doc.text("Risk Analysis", margin, y);
-    y += 14;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-
-    results.forEach(r => {
-      if (y > 740) { doc.addPage(); y = margin; }
-      doc.setFont("helvetica", "bold");
-      doc.text(r.name, margin, y);
-      y += 12;
-      doc.setFont("helvetica", "normal");
-      r.riskMetrics.rationale.forEach(line => {
-        const w = doc.splitTextToSize(`• ${line}`, pageW - margin * 2 - 10);
-        doc.text(w, margin + 10, y);
-        y += w.length * 11;
+  // ── PDF download ──────────────────────────────────────────────────────────
+  const handleDownloadPdf = useCallback(async () => {
+    if (results.length === 0 || !narrative) return;
+    setPdfBusy(true);
+    try {
+      const now = new Date();
+      const startMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const deltas = buildSliceScenarios(startMonth, lastAssumptions).flatMap(s => s.deltas);
+      const aHash = deriveAssumptionsHash({
+        assumptions: lastAssumptions as unknown as Record<string, unknown>,
+        deltas,
+        horizonMonths: lastAssumptions.horizonYears * 12,
+        simulationCount: lastAssumptions.simulationCount,
+        startMonth,
       });
-      r.serviceability.rationale.forEach(line => {
-        const w = doc.splitTextToSize(`• ${line}`, pageW - margin * 2 - 10);
-        doc.text(w, margin + 10, y);
-        y += w.length * 11;
+
+      const doc = await generatePremiumPdf({
+        householdName: "Shahrokh Family",
+        capital: lastAssumptions.capital,
+        horizonYears: lastAssumptions.horizonYears,
+        simulationCount: lastAssumptions.simulationCount,
+        generatedAt: new Date().toISOString(),
+        results,
+        narrative,
+        assumptions: {
+          propertyGrowthPct: lastAssumptions.propertyGrowthPct,
+          propertyVolPct: lastAssumptions.propertyVolPct,
+          cryptoReturnPct: lastAssumptions.cryptoReturnPct,
+          cryptoVolPct: lastAssumptions.cryptoVolPct,
+          cashAprPct: lastAssumptions.cashAprPct,
+          mortgageRatePct: lastAssumptions.mortgageRatePct,
+          rentYieldPct: lastAssumptions.rentYieldPct,
+        },
+        snapshotHash: currentSnapshotHash ?? undefined,
+        assumptionsHash: aHash,
+        chartEls: {
+          nwChart: nwChartRef.current,
+          liquidityChart: liquidityChartRef.current,
+          bandsChart: bandsChartRef.current,
+        },
       });
-      y += 6;
-    });
-
-    // Recommendation
-    if (y > 680) { doc.addPage(); y = margin; }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
-    doc.text("Recommendation", margin, y);
-    y += 16;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-
-    if (winners) {
-      const rec = buildRecommendation(winners, lastAssumptions);
-      const wrapped = doc.splitTextToSize(rec, pageW - margin * 2);
-      doc.text(wrapped, margin, y);
-      y += wrapped.length * 13;
+      doc.save(`family-wealth-lab-${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (err: any) {
+      console.error("[v2] pdf failed:", err);
+      setError(`PDF generation failed: ${err?.message ?? err}`);
+    } finally {
+      setPdfBusy(false);
     }
+  }, [results, narrative, lastAssumptions, currentSnapshotHash]);
 
-    // Disclaimer
-    if (y > 720) { doc.addPage(); y = margin; }
-    y += 16;
-    doc.setFontSize(8);
-    doc.setTextColor(120);
-    const disc = doc.splitTextToSize(
-      "Disclaimer: This report is generated by an automated financial planning tool using your own ledger data and the assumptions you specified. " +
-      "It is not personal financial advice. Monte Carlo projections illustrate a range of possible outcomes given the input assumptions; actual results " +
-      "will differ. Property and crypto markets carry significant risk including loss of capital. Consider consulting a licensed financial adviser before acting.",
-      pageW - margin * 2,
-    );
-    doc.text(disc, margin, y);
+  // ─────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────
 
-    doc.save(`scenario-compare-v2-${new Date().toISOString().slice(0, 10)}.pdf`);
-  }, [results, base, winners, lastAssumptions]);
+  const winner = narrative && results.find(r => r.scenarioId === narrative.winnerScenarioId);
+  const base = results.find(r => r.scenarioId === "base");
+  const baseFanEnd = base?.netWorthFan[base.netWorthFan.length - 1];
+  const winnerFanEnd = winner?.netWorthFan[winner.netWorthFan.length - 1];
 
-  // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="p-4 md:p-6 space-y-4 md:space-y-6 max-w-7xl mx-auto" ref={reportRef}>
-      {/* Active banner — proves the new UI is what you're looking at */}
-      <div
-        data-testid="scenario-engine-v2-active-banner"
-        className="relative overflow-hidden rounded-lg border-2 border-purple-300 bg-gradient-to-r from-purple-600 via-fuchsia-600 to-indigo-600 p-4 shadow-lg"
-      >
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 ring-2 ring-white/40">
-              <Beaker className="h-5 w-5 text-white" />
-            </div>
-            <div>
-              <div className="text-white text-base font-bold tracking-tight">
-                Scenario Engine V2 · ACTIVE
-              </div>
-              <div className="text-purple-100 text-xs">
-                Auto-derived Base Plan · Deterministic Monte Carlo · Advisor-grade risk + serviceability
-              </div>
-            </div>
+    <div className="pb-24 md:pb-6" ref={reportRef}>
+      {/* ─── HERO HEADER (gradient) ────────────────────────────────────── */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-indigo-600 via-purple-600 to-fuchsia-600 text-white">
+        <div className="absolute inset-0 opacity-20"
+             style={{ backgroundImage: "radial-gradient(circle at 20% 50%, white 0%, transparent 50%)" }} />
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-6 pb-8 sm:pt-10 sm:pb-12">
+          <div className="flex items-center gap-2 text-white/80 text-xs font-semibold uppercase tracking-wider mb-2">
+            <Beaker className="h-4 w-4" />
+            <span>Family Wealth Lab · Scenario Engine V2</span>
           </div>
-          <Badge className="bg-white/95 text-purple-700 font-semibold">
-            BUILD {(import.meta as any).env?.VITE_COMMIT_SHA?.slice(0, 7) ?? "v2"}
-          </Badge>
-        </div>
-      </div>
-
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-2">
-            <Beaker className="h-6 w-6 text-purple-600" />
-            <h1 className="text-2xl font-bold">Scenario Compare V2</h1>
-            <Badge variant="outline" className="text-xs">capital allocation engine</Badge>
-          </div>
-          <p className="text-sm text-muted-foreground max-w-3xl">
-            Decide where to deploy ${(assumptions.capital / 1000).toFixed(0)}k of marginal capital.
-            Engine auto-derives your Base Plan from your live ledger and runs a deterministic Monte Carlo
-            across Property, Crypto, and Cash — with real volatility, leverage, and liquidity scoring.
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight leading-tight">
+            Where should your{" "}
+            <span className="bg-gradient-to-r from-amber-300 to-yellow-200 bg-clip-text text-transparent">
+              {fmt$k(assumptions.capital)}
+            </span>{" "}
+            go?
+          </h1>
+          <p className="text-white/85 text-sm sm:text-base mt-3 max-w-3xl leading-relaxed">
+            Deterministic Monte Carlo across Property, Crypto, and Cash — measured against your live ledger.
+            Real volatility, real leverage, real serviceability scoring.
           </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
-          {results.length > 0 && (
-            <Button variant="outline" onClick={handleDownloadPdf} className="flex-1 sm:flex-none">
-              <Download className="h-4 w-4 mr-2" /> Download PDF
-            </Button>
-          )}
-          <Button onClick={handleRun} disabled={!dashboardInputs || running} size="lg" className="flex-1 sm:flex-none">
-            {running ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
-            {running ? "Running…" : results.length ? "Re-run with current assumptions" : "Run engine"}
-          </Button>
-        </div>
-      </div>
 
-      {/* Live ledger readout */}
-      {liveReadouts && (
-        <Card>
-          <CardHeader className="pb-3 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Live ledger — Base Plan auto-derived from this
-            </CardTitle>
-            {base && (
-              <Badge variant="outline" className={base.reconcilesToDashboard
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                : "border-red-200 bg-red-50 text-red-800"}>
-                {base.reconcilesToDashboard
-                  ? <><CheckCircle2 className="h-3 w-3 mr-1 inline" /> Reconciles to dashboard</>
-                  : <><AlertTriangle className="h-3 w-3 mr-1 inline" /> Reconciliation drift</>}
+          {/* Header action chips */}
+          <div className="flex items-center gap-2 mt-4 sm:mt-6 flex-wrap">
+            {loadedScenarioId && (
+              <Badge className="bg-white/95 text-purple-700 font-semibold px-3 py-1">
+                <FolderOpen className="h-3 w-3 mr-1.5 inline" />
+                Loaded: {savedScenarios.find(s => s.id === loadedScenarioId)?.name ?? "(unsaved)"}
               </Badge>
             )}
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div>
-              <div className="text-xs text-muted-foreground">Monthly income</div>
-              <div className="text-lg font-semibold tabular-nums">{fmt$(liveReadouts.income)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Monthly expenses</div>
-              <div className="text-lg font-semibold tabular-nums">{fmt$(liveReadouts.expenses)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Monthly surplus</div>
-              <div className="text-lg font-semibold text-emerald-700 tabular-nums">{fmt$(liveReadouts.surplus)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Cash today</div>
-              <div className="text-lg font-semibold tabular-nums">{fmt$(liveReadouts.cash)}</div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Editable assumptions */}
-      <Card>
-        <CardHeader className="pb-2 cursor-pointer" onClick={() => setShowAssumptions(s => !s)}>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Settings className="h-4 w-4" /> Assumptions
-            </CardTitle>
-            {showAssumptions
-              ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
-              : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+            {base?.reconcilesToDashboard && (
+              <Badge className="bg-emerald-500/95 text-white font-semibold px-3 py-1">
+                <CheckCircle2 className="h-3 w-3 mr-1.5 inline" />
+                Reconciles to your dashboard
+              </Badge>
+            )}
           </div>
-          <CardDescription className="text-xs">
-            Tune market assumptions to match your view. Re-run after changing.
-          </CardDescription>
-        </CardHeader>
-        {showAssumptions && (
-          <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-4">
-            <SliderRow
-              label="Capital to allocate" value={assumptions.capital}
-              min={10_000} max={500_000} step={5_000} suffix="$"
-              onChange={n => setAssumptions(a => ({ ...a, capital: n }))}
-              hint="The marginal cash you're deciding how to deploy"
-            />
-            <SliderRow
-              label="Property growth (capital)" value={assumptions.propertyGrowthPct}
-              min={0} max={12} step={0.25} suffix="%/yr"
-              onChange={n => setAssumptions(a => ({ ...a, propertyGrowthPct: n }))}
-              hint="Long-run capital growth assumption for residential property"
-            />
-            <SliderRow
-              label="Property volatility (σ)" value={assumptions.propertyVolPct}
-              min={2} max={15} step={0.5} suffix="%/yr"
-              onChange={n => setAssumptions(a => ({ ...a, propertyVolPct: n }))}
-              hint="Annual std-dev of property returns — drives MC dispersion"
-            />
-            <SliderRow
-              label="Crypto return" value={assumptions.cryptoReturnPct}
-              min={-10} max={50} step={1} suffix="%/yr"
-              onChange={n => setAssumptions(a => ({ ...a, cryptoReturnPct: n }))}
-              hint="Expected long-run crypto return"
-            />
-            <SliderRow
-              label="Crypto volatility (σ)" value={assumptions.cryptoVolPct}
-              min={20} max={120} step={5} suffix="%/yr"
-              onChange={n => setAssumptions(a => ({ ...a, cryptoVolPct: n }))}
-              hint="Annual std-dev — high vol = wide MC fan"
-            />
-            <SliderRow
-              label="Cash / offset APR" value={assumptions.cashAprPct}
-              min={0} max={8} step={0.1} suffix="%/yr"
-              onChange={n => setAssumptions(a => ({ ...a, cashAprPct: n }))}
-              hint="After-tax cash/savings rate"
-            />
-            <SliderRow
-              label="Mortgage rate" value={assumptions.mortgageRatePct}
-              min={2} max={12} step={0.05} suffix="%/yr"
-              onChange={n => setAssumptions(a => ({ ...a, mortgageRatePct: n }))}
-              hint="Interest rate applied to any new investment property loan"
-            />
-            <SliderRow
-              label="Gross rent yield" value={assumptions.rentYieldPct}
-              min={2} max={8} step={0.1} suffix="%/yr"
-              onChange={n => setAssumptions(a => ({ ...a, rentYieldPct: n }))}
-              hint="Annual rent / purchase price (before vacancy + mgmt)"
-            />
-            <SliderRow
-              label="Forecast horizon" value={assumptions.horizonYears}
-              min={3} max={30} step={1} suffix="yr"
-              onChange={n => setAssumptions(a => ({ ...a, horizonYears: n }))}
-              hint="How many years to project"
-            />
-            <SliderRow
-              label="Monte Carlo sims" value={assumptions.simulationCount}
-              min={100} max={2000} step={100} suffix=""
-              onChange={n => setAssumptions(a => ({ ...a, simulationCount: n }))}
-              hint="More sims = smoother percentile estimates"
-            />
-          </CardContent>
+        </div>
+      </div>
+
+      {/* ─── MAIN CONTENT ───────────────────────────────────────────────── */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 -mt-6 space-y-4 sm:space-y-6">
+        {/* ── DECISION SUMMARY CARD (premium) ───────────────────────────── */}
+        {narrative && winner && winnerFanEnd && (
+          <Card className="overflow-hidden shadow-xl border-purple-200">
+            <div className="bg-gradient-to-r from-purple-50 via-fuchsia-50 to-indigo-50 dark:from-purple-950/30 dark:via-fuchsia-950/30 dark:to-indigo-950/30 p-5 sm:p-6">
+              <div className="flex items-center gap-2 text-purple-700 dark:text-purple-300 text-xs font-bold uppercase tracking-wider mb-2">
+                <Award className="h-4 w-4" />
+                The recommendation
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-foreground leading-tight">
+                {winner.name}
+              </h2>
+              <p className="text-sm sm:text-base text-foreground/80 mt-2 leading-relaxed">
+                {narrative.tldr}
+              </p>
+              <div className="mt-4">
+                <ConfidenceRibbon value={narrative.confidenceOverall} label="Overall confidence" />
+              </div>
+            </div>
+            <CardContent className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-5">
+              <StatTile
+                label="Median NW"
+                value={fmt$M(winnerFanEnd.p50)}
+                sub={`${lastAssumptions.horizonYears}-year horizon`}
+                tone="indigo"
+              />
+              <StatTile
+                label="vs Base"
+                value={baseFanEnd ? fmt$M(winnerFanEnd.p50 - baseFanEnd.p50) : "—"}
+                sub={baseFanEnd ? `Base: ${fmt$M(baseFanEnd.p50)}` : ""}
+                tone={baseFanEnd && winnerFanEnd.p50 >= baseFanEnd.p50 ? "emerald" : "rose"}
+              />
+              <StatTile
+                label="Downside"
+                value={pct(winner.riskMetrics.downsideRisk, 1)}
+                sub="P10 vs P50"
+                tone="amber"
+              />
+              <StatTile
+                label="Terminal Cash"
+                value={fmt$M(winner.cashFan[winner.cashFan.length - 1].p50)}
+                sub="P50 liquidity"
+                tone="sky"
+              />
+            </CardContent>
+          </Card>
         )}
-      </Card>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Engine error</AlertTitle>
-          <AlertDescription className="font-mono text-xs">{error}</AlertDescription>
-        </Alert>
-      )}
+        {/* ── LIVE LEDGER STRIP ────────────────────────────────────────── */}
+        {liveReadouts && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center justify-between flex-wrap gap-2">
+                <span className="text-muted-foreground">Live ledger — your starting point</span>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  hash:{currentSnapshotHash?.slice(0, 8) ?? "—"}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <StatTile label="Monthly income" value={fmt$(liveReadouts.income)} icon={null} />
+              <StatTile label="Monthly expenses" value={fmt$(liveReadouts.expenses)} />
+              <StatTile label="Monthly surplus" value={fmt$(liveReadouts.surplus)} tone="emerald" />
+              <StatTile label="Cash today" value={fmt$(liveReadouts.cash)} tone="sky" />
+            </CardContent>
+          </Card>
+        )}
 
-      {/* Empty state */}
-      {!running && results.length === 0 && !error && (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            <Beaker className="h-12 w-12 mx-auto mb-4 opacity-30" />
-            <div className="text-sm">
-              Tune assumptions above, then click <span className="font-semibold">Run engine</span>.
-            </div>
-          </CardContent>
-        </Card>
-      )}
+        {/* ── ACTION BAR (desktop only — mobile has sticky bottom bar) ──── */}
+        <div className="hidden md:flex items-center gap-2 flex-wrap">
+          <Button
+            onClick={handleRun}
+            disabled={!dashboardInputs || running}
+            size="lg"
+            className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md"
+          >
+            {running ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+            {running ? "Running…" : results.length ? "Re-run engine" : "Run engine"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setShowAssumptions(s => !s)}
+          >
+            <Settings className="h-4 w-4 mr-2" />
+            Assumptions
+            {showAssumptions ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
+          </Button>
 
-      {/* WINNERS CARDS */}
-      {winners && (
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
-          <WinnerCard
-            icon={<Trophy className="h-5 w-5" />}
-            label="Highest net worth"
-            scenario={winners.byNw}
-            metric={fmt$(winners.byNw.netWorthFan[winners.byNw.netWorthFan.length - 1].p50)}
-            sub="P50 terminal NW"
-            tone="emerald"
-          />
-          <WinnerCard
-            icon={<Droplet className="h-5 w-5" />}
-            label="Most liquid"
-            scenario={winners.byLiquidity}
-            metric={fmt$(winners.byLiquidity.cashFan[winners.byLiquidity.cashFan.length - 1].p50)}
-            sub="P50 terminal cash"
-            tone="sky"
-          />
-          <WinnerCard
-            icon={<Shield className="h-5 w-5" />}
-            label="Best risk-adjusted"
-            scenario={winners.byRiskAdj}
-            metric={fmt$(winners.byRiskAdj.riskMetrics.riskAdjustedNw)}
-            sub="P50 × (1 − downside)"
-            tone="indigo"
-          />
-          <WinnerCard
-            icon={<Award className="h-5 w-5" />}
-            label="Best median outcome"
-            scenario={winners.bestMedian}
-            metric={fmt$(winners.bestMedian.netWorthFan[winners.bestMedian.netWorthFan.length - 1].p50)}
-            sub="Same as NW leader"
-            tone="purple"
-          />
-          <WinnerCard
-            icon={<TrendingDown className="h-5 w-5" />}
-            label="Worst downside"
-            scenario={winners.worstDownside}
-            metric={`${(winners.worstDownside.riskMetrics.downsideRisk * 100).toFixed(1)}%`}
-            sub="P10 vs P50 drawdown"
-            tone="red"
-          />
+          {results.length > 0 && (
+            <>
+              <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" onClick={() => {
+                    setSaveName(loadedScenarioId
+                      ? savedScenarios.find(s => s.id === loadedScenarioId)?.name ?? ""
+                      : `Scenario ${new Date().toLocaleDateString("en-AU")}`);
+                  }}>
+                    <Save className="h-4 w-4 mr-2" />
+                    {loadedScenarioId ? "Update" : "Save"}
+                  </Button>
+                </DialogTrigger>
+                <SaveDialog
+                  saveName={saveName} setSaveName={setSaveName}
+                  saveDescription={saveDescription} setSaveDescription={setSaveDescription}
+                  isUpdate={!!loadedScenarioId}
+                  onSubmit={handleSave}
+                />
+              </Dialog>
+
+              <Button variant="outline" onClick={handleDownloadPdf} disabled={pdfBusy}>
+                {pdfBusy ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+                {pdfBusy ? "Building PDF…" : "Download PDF"}
+              </Button>
+            </>
+          )}
+
+          <Sheet open={loadSheetOpen} onOpenChange={setLoadSheetOpen}>
+            <SheetTrigger asChild>
+              <Button variant="outline">
+                <FolderOpen className="h-4 w-4 mr-2" />
+                Saved ({savedScenarios.length})
+              </Button>
+            </SheetTrigger>
+            <LoadSheet
+              savedScenarios={savedScenarios}
+              loadedScenarioId={loadedScenarioId}
+              onLoad={handleLoad}
+              onClone={handleClone}
+              onDelete={handleDelete}
+            />
+          </Sheet>
+
+          {loadedScenarioId && (
+            <Button variant="ghost" size="sm" onClick={handleNewScenario}>
+              + New scenario
+            </Button>
+          )}
         </div>
-      )}
 
-      {/* COMPARISON TABLE */}
-      {results.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Scenario comparison · {lastAssumptions.horizonYears}-year horizon · {lastAssumptions.simulationCount} sims</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b text-left">
-                  <tr>
-                    <th className="py-2 pr-4">Scenario</th>
-                    <th className="py-2 pr-4 text-right">Initial NW</th>
-                    <th className="py-2 pr-4 text-right">P10 NW</th>
-                    <th className="py-2 pr-4 text-right">P50 NW</th>
-                    <th className="py-2 pr-4 text-right">P90 NW</th>
-                    <th className="py-2 pr-4 text-right">P50 Cash</th>
-                    <th className="py-2 pr-4 text-right">DSR</th>
-                    <th className="py-2 pr-4 text-right">LVR</th>
-                    <th className="py-2 pr-4 text-right">Downside</th>
-                    <th className="py-2 pr-4 text-right">Vol (CV)</th>
-                    <th className="py-2 pr-4 text-right" title="Probability that property equity goes negative at any point">Neg-Eq P</th>
-                    <th className="py-2 pr-4 text-right" title="Probability of cash buffer running below safety threshold">Liq Stress</th>
-                    <th className="py-2 pr-4 text-right" title="Probability of breaching APRA serviceability buffer">Refi P</th>
-                    <th className="py-2 pr-4 text-right" title="Coefficient of variation across terminal net-worth samples — captures sequence-of-returns dispersion">Seq σ</th>
-                    <th className="py-2 pr-4 text-right">Risk-Adj NW</th>
-                    <th className="py-2 pr-4">Band</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.map(r => {
-                    const fanEnd = r.netWorthFan[r.netWorthFan.length - 1];
-                    const cashEnd = r.cashFan[r.cashFan.length - 1];
-                    const colorKey = SCENARIO_KEY_MAP[r.scenarioId] ?? "base";
-                    return (
-                      <tr key={r.scenarioId} className="border-b last:border-0 hover:bg-muted/30">
-                        <td className="py-2 pr-4 font-medium">
-                          <span className="inline-block w-2 h-2 rounded-full mr-2 align-middle"
-                                style={{ backgroundColor: SCENARIO_COLORS[colorKey] }} />
-                          {r.name}
-                        </td>
-                        <td className="py-2 pr-4 text-right tabular-nums">{fmt$(r.initialNetWorth)}</td>
-                        <td className="py-2 pr-4 text-right tabular-nums text-red-700">{fmt$(fanEnd.p10)}</td>
-                        <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt$(fanEnd.p50)}</td>
-                        <td className="py-2 pr-4 text-right tabular-nums text-emerald-700">{fmt$(fanEnd.p90)}</td>
-                        <td className="py-2 pr-4 text-right tabular-nums">{fmt$(cashEnd.p50)}</td>
-                        <td className="py-2 pr-4 text-right tabular-nums">{pct(safeNum(r.serviceability?.dsr))}</td>
-                        <td className="py-2 pr-4 text-right tabular-nums">{pct(safeNum(r.serviceability?.lvr))}</td>
-                        <td className="py-2 pr-4 text-right tabular-nums">{pct(r.riskMetrics.downsideRisk)}</td>
-                        <td className="py-2 pr-4 text-right tabular-nums">{pct(r.riskMetrics.volatility)}</td>
-                        <td className={`py-2 pr-4 text-right tabular-nums ${r.negativeEquityProbability > 0.10 ? "text-red-700 font-semibold" : ""}`}>{pct(r.negativeEquityProbability)}</td>
-                        <td className={`py-2 pr-4 text-right tabular-nums ${r.liquidityStressProbability > 0.10 ? "text-red-700 font-semibold" : ""}`}>{pct(r.liquidityStressProbability)}</td>
-                        <td className={`py-2 pr-4 text-right tabular-nums ${r.refinancePressureProbability > 0.10 ? "text-red-700 font-semibold" : ""}`}>{pct(r.refinancePressureProbability)}</td>
-                        <td className="py-2 pr-4 text-right tabular-nums">{pct(r.sequenceDispersion.cv)}</td>
-                        <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt$(r.riskMetrics.riskAdjustedNw)}</td>
-                        <td className="py-2 pr-4">
-                          <Badge variant="outline" className={bandClass(r.serviceability?.band ?? "")}>
-                            {r.serviceability?.band ?? "—"}
-                          </Badge>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+        {/* ── ASSUMPTIONS PANEL ─────────────────────────────────────────── */}
+        {showAssumptions && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Settings className="h-4 w-4" />
+                Assumptions
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Tune market assumptions to match your view. Re-run after changing.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-5">
+              <SliderRow label="Capital to allocate" value={assumptions.capital}
+                min={10_000} max={500_000} step={5_000} suffix="$"
+                onChange={n => setAssumptions(a => ({ ...a, capital: n }))}
+                hint="The marginal cash you're deciding how to deploy" />
+              <SliderRow label="Property growth (capital)" value={assumptions.propertyGrowthPct}
+                min={0} max={12} step={0.25} suffix="%/yr"
+                onChange={n => setAssumptions(a => ({ ...a, propertyGrowthPct: n }))}
+                hint="Long-run capital growth for residential property" />
+              <SliderRow label="Property volatility (σ)" value={assumptions.propertyVolPct}
+                min={2} max={15} step={0.5} suffix="%/yr"
+                onChange={n => setAssumptions(a => ({ ...a, propertyVolPct: n }))}
+                hint="Annual std-dev of property returns — drives MC dispersion" />
+              <SliderRow label="Crypto return" value={assumptions.cryptoReturnPct}
+                min={-10} max={50} step={1} suffix="%/yr"
+                onChange={n => setAssumptions(a => ({ ...a, cryptoReturnPct: n }))}
+                hint="Expected long-run crypto return" />
+              <SliderRow label="Crypto volatility (σ)" value={assumptions.cryptoVolPct}
+                min={20} max={120} step={5} suffix="%/yr"
+                onChange={n => setAssumptions(a => ({ ...a, cryptoVolPct: n }))}
+                hint="High vol = wide MC fan" />
+              <SliderRow label="Cash / offset APR" value={assumptions.cashAprPct}
+                min={0} max={8} step={0.1} suffix="%/yr"
+                onChange={n => setAssumptions(a => ({ ...a, cashAprPct: n }))}
+                hint="After-tax cash/savings rate" />
+              <SliderRow label="Mortgage rate" value={assumptions.mortgageRatePct}
+                min={2} max={12} step={0.05} suffix="%/yr"
+                onChange={n => setAssumptions(a => ({ ...a, mortgageRatePct: n }))}
+                hint="Applied to any new investment property loan" />
+              <SliderRow label="Gross rent yield" value={assumptions.rentYieldPct}
+                min={2} max={8} step={0.1} suffix="%/yr"
+                onChange={n => setAssumptions(a => ({ ...a, rentYieldPct: n }))}
+                hint="Annual rent / purchase price (before vacancy + mgmt)" />
+              <SliderRow label="Forecast horizon" value={assumptions.horizonYears}
+                min={3} max={30} step={1} suffix="yr"
+                onChange={n => setAssumptions(a => ({ ...a, horizonYears: n }))}
+                hint="How many years to project" />
+              <SliderRow label="Monte Carlo sims" value={assumptions.simulationCount}
+                min={100} max={2000} step={100} suffix=""
+                onChange={n => setAssumptions(a => ({ ...a, simulationCount: n }))}
+                hint="More sims = smoother percentile estimates" />
+            </CardContent>
+          </Card>
+        )}
 
-      {/* STRESS PATHS */}
-      {results.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              Stress paths · downside probabilities
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Probability of hitting each stress condition at any point over the horizon, plus dispersion of terminal outcomes (sequence-of-returns surrogate). Values above 10% are highlighted.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              {results.map(r => {
-                const colorKey = SCENARIO_KEY_MAP[r.scenarioId] ?? "base";
-                return (
-                  <div key={r.scenarioId} className="rounded-lg border bg-card p-3 space-y-2">
-                    <div className="flex items-center gap-2 text-sm font-semibold truncate">
-                      <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-                            style={{ backgroundColor: SCENARIO_COLORS[colorKey] }} />
-                      <span className="truncate">{r.name}</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-[11px]">
-                      <div className="text-muted-foreground">Neg-Equity P</div>
-                      <div className={`text-right tabular-nums font-semibold ${r.negativeEquityProbability > 0.10 ? "text-red-700" : ""}`}>
-                        {pct(r.negativeEquityProbability)}
-                      </div>
-                      <div className="text-muted-foreground">Liquidity stress</div>
-                      <div className={`text-right tabular-nums font-semibold ${r.liquidityStressProbability > 0.10 ? "text-red-700" : ""}`}>
-                        {pct(r.liquidityStressProbability)}
-                      </div>
-                      <div className="text-muted-foreground">Refi pressure</div>
-                      <div className={`text-right tabular-nums font-semibold ${r.refinancePressureProbability > 0.10 ? "text-red-700" : ""}`}>
-                        {pct(r.refinancePressureProbability)}
-                      </div>
-                      <div className="text-muted-foreground">Terminal NW CV</div>
-                      <div className="text-right tabular-nums font-semibold">
-                        {pct(r.sequenceDispersion.cv)}
-                      </div>
-                      <div className="text-muted-foreground">Terminal rate (P50)</div>
-                      <div className="text-right tabular-nums">
-                        {(() => {
-                          const sorted = [...r.terminalRates].sort((a, b) => a - b);
-                          const p50 = sorted[Math.floor(sorted.length * 0.5)] ?? 0;
-                          return `${(p50 * 100).toFixed(2)}%`;
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
-              <strong>Neg-Equity P</strong>: probability that property loan balance ever exceeds property value. {" "}
-              <strong>Liquidity stress</strong>: probability that cash buffer drops below 1× monthly expenses. {" "}
-              <strong>Refi pressure</strong>: probability of LVR exceeding 90% (APRA refinance friction). {" "}
-              <strong>Terminal NW CV</strong>: stddev / mean of terminal net worth across all sims — sequence-of-returns dispersion. {" "}
-              <strong>Terminal rate</strong>: median short-rate at horizon end from the Vasicek process.
-            </p>
-          </CardContent>
-        </Card>
-      )}
+        {error && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Engine error</AlertTitle>
+            <AlertDescription className="font-mono text-xs">{error}</AlertDescription>
+          </Alert>
+        )}
 
-      {/* CHARTS */}
-      {results.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Projections</CardTitle>
-            <CardDescription>P50 (median) trajectories for net worth, liquidity, and delta vs Base</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="nw">
-              <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full max-w-2xl h-auto">
-                <TabsTrigger value="nw">Net Worth</TabsTrigger>
-                <TabsTrigger value="liq">Liquidity</TabsTrigger>
-                <TabsTrigger value="delta">Δ vs Base</TabsTrigger>
-                <TabsTrigger value="bands">MC Bands</TabsTrigger>
-              </TabsList>
+        {/* ── EMPTY STATE ───────────────────────────────────────────────── */}
+        {!running && results.length === 0 && !error && (
+          <Card className="border-dashed">
+            <CardContent className="py-12 text-center">
+              <div className="mx-auto w-16 h-16 rounded-full bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center mb-4">
+                <Beaker className="h-8 w-8 text-purple-600" />
+              </div>
+              <h3 className="text-base font-semibold mb-1">Ready to run</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                We'll compare {fmt$k(assumptions.capital)} across 4 paths using your live ledger.
+              </p>
+              <Button onClick={handleRun} disabled={!dashboardInputs}
+                      className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
+                <Play className="h-4 w-4 mr-2" />
+                Run engine
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
-              <TabsContent value="nw" className="pt-4">
-                <ResponsiveContainer width="100%" height={360}>
-                  <LineChart data={nwChartData}>
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                    <XAxis dataKey="year" label={{ value: "Years", position: "insideBottom", offset: -2 }} />
-                    <YAxis tickFormatter={(v) => fmt$k(v)} width={70} />
-                    <RTooltip formatter={(v: any) => fmt$(v)} labelFormatter={(l) => `Year ${l}`} />
-                    <Legend />
-                    <Line type="monotone" dataKey="base" stroke={SCENARIO_COLORS.base} name="Base" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="property" stroke={SCENARIO_COLORS.property} name="Property" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="crypto" stroke={SCENARIO_COLORS.crypto} name="Crypto" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="cash" stroke={SCENARIO_COLORS.cash} name="Cash" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </TabsContent>
+        {/* ── WINNER STRIP ─────────────────────────────────────────────── */}
+        {winners && narrative && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatTile
+              icon={<Trophy className="h-3.5 w-3.5" />}
+              label="Highest NW"
+              value={fmt$M(winners.byNw.netWorthFan[winners.byNw.netWorthFan.length - 1].p50)}
+              sub={winners.byNw.name}
+              tone="indigo"
+            />
+            <StatTile
+              icon={<Droplet className="h-3.5 w-3.5" />}
+              label="Most liquid"
+              value={fmt$M(winners.byLiquidity.cashFan[winners.byLiquidity.cashFan.length - 1].p50)}
+              sub={winners.byLiquidity.name}
+              tone="sky"
+            />
+            <StatTile
+              icon={<Shield className="h-3.5 w-3.5" />}
+              label="Risk-adjusted"
+              value={fmt$M(winners.byRiskAdj.riskMetrics.riskAdjustedNw)}
+              sub={winners.byRiskAdj.name}
+              tone="emerald"
+            />
+            <StatTile
+              icon={<TrendingDown className="h-3.5 w-3.5" />}
+              label="Worst downside"
+              value={pct(winners.worstDownside.riskMetrics.downsideRisk, 1)}
+              sub={winners.worstDownside.name}
+              tone="rose"
+            />
+          </div>
+        )}
 
-              <TabsContent value="liq" className="pt-4">
-                <ResponsiveContainer width="100%" height={360}>
-                  <LineChart data={liquidityChartData}>
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                    <XAxis dataKey="year" label={{ value: "Years", position: "insideBottom", offset: -2 }} />
-                    <YAxis tickFormatter={(v) => fmt$k(v)} width={70} />
-                    <RTooltip formatter={(v: any) => fmt$(v)} labelFormatter={(l) => `Year ${l}`} />
-                    <Legend />
-                    <Line type="monotone" dataKey="base" stroke={SCENARIO_COLORS.base} name="Base" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="property" stroke={SCENARIO_COLORS.property} name="Property" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="crypto" stroke={SCENARIO_COLORS.crypto} name="Crypto" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="cash" stroke={SCENARIO_COLORS.cash} name="Cash" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Median (P50) cash balance across all sims — a proxy for liquidity / runway under each strategy.
-                </p>
-              </TabsContent>
-
-              <TabsContent value="delta" className="pt-4">
-                <ResponsiveContainer width="100%" height={360}>
-                  <LineChart data={deltaChartData}>
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                    <XAxis dataKey="year" label={{ value: "Years", position: "insideBottom", offset: -2 }} />
-                    <YAxis tickFormatter={(v) => fmt$k(v)} width={70} />
-                    <RTooltip formatter={(v: any) => fmt$(v)} labelFormatter={(l) => `Year ${l}`} />
-                    <Legend />
-                    <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
-                    <Line type="monotone" dataKey="property" stroke={SCENARIO_COLORS.property} name="Property − Base" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="crypto" stroke={SCENARIO_COLORS.crypto} name="Crypto − Base" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="cash" stroke={SCENARIO_COLORS.cash} name="Cash − Base" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Net worth delta vs the Base Case — shows the cumulative value created or destroyed by each allocation.
-                </p>
-              </TabsContent>
-
-              <TabsContent value="bands" className="pt-4">
-                <div className="flex items-center gap-2 mb-3 flex-wrap">
-                  {results.map((r, i) => (
-                    <Button
+        {/* ── SCENARIO PICKER (mobile-first, sticky on mobile) ─────────── */}
+        {results.length > 0 && narrative && (
+          <div className="sticky top-0 z-20 -mx-4 sm:mx-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/70 border-b sm:border sm:rounded-xl sm:bg-card sm:backdrop-blur-none">
+            <div className="px-4 sm:px-3 py-2 sm:py-2.5">
+              <div className="text-[11px] uppercase font-bold text-muted-foreground tracking-wider mb-1.5 sm:hidden">
+                Scenarios
+              </div>
+              <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 scrollbar-thin">
+                {results.map((r, idx) => {
+                  const isActive = idx === activeScenarioIdx;
+                  const isWinner = r.scenarioId === narrative.winnerScenarioId;
+                  const key = SCENARIO_KEY_MAP[r.scenarioId] ?? "base";
+                  return (
+                    <button
                       key={r.scenarioId}
-                      variant={i === bandsScenarioIdx ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setBandsScenarioIdx(i)}
+                      onClick={() => setActiveScenarioIdx(idx)}
+                      className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                        isActive
+                          ? "bg-foreground text-background shadow-sm"
+                          : "bg-muted hover:bg-muted/80 text-foreground/70"
+                      }`}
                     >
-                      {r.name}
-                    </Button>
-                  ))}
-                </div>
-                <ResponsiveContainer width="100%" height={360}>
-                  <AreaChart data={bandsChartData} stackOffset="none">
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                    <XAxis dataKey="year" label={{ value: "Years", position: "insideBottom", offset: -2 }} />
-                    <YAxis tickFormatter={(v) => fmt$k(v)} width={70} />
-                    <RTooltip formatter={(v: any) => fmt$(v)} labelFormatter={(l) => `Year ${l}`} />
-                    <Legend />
-                    <Area type="monotone" dataKey="p10" stackId="1" stroke="#cbd5e1" fill="#e2e8f0" name="P10" />
-                    <Area type="monotone" dataKey="p50Minus10" stackId="1" stroke="#7dd3fc" fill="#bae6fd" name="P10→P50" />
-                    <Area type="monotone" dataKey="p90Minus50" stackId="1" stroke="#0ea5e9" fill="#7dd3fc" name="P50→P90" />
-                  </AreaChart>
-                </ResponsiveContainer>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Monte Carlo P10/P50/P90 bands for the selected scenario — the spread shows uncertainty under your volatility assumptions.
-                </p>
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
-      )}
+                      <span className="inline-block w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: SCENARIO_COLORS[key] }} />
+                      <span className="truncate max-w-[140px]">{r.name}</span>
+                      {isWinner && <Star className="h-3 w-3 fill-amber-400 text-amber-400" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
 
-      {/* Risk + Serviceability rationale */}
-      {results.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {results.map(r => (
-            <Card key={r.scenarioId}>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <span className="inline-block w-3 h-3 rounded-full"
-                        style={{ backgroundColor: SCENARIO_COLORS[SCENARIO_KEY_MAP[r.scenarioId] ?? "base"] }} />
-                  {r.name}
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Risk + serviceability on median final state (year {lastAssumptions.horizonYears})
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <RiskBars metrics={r.riskMetrics} />
-                <Separator />
-                <ul className="text-xs text-muted-foreground space-y-1">
-                  {r.riskMetrics.rationale.map((line, i) => (
-                    <li key={`risk-${i}`} className="font-mono leading-snug">{line}</li>
-                  ))}
-                </ul>
-                <Separator />
-                <ul className="text-xs text-muted-foreground space-y-1">
-                  {r.serviceability.rationale.map((line, i) => (
-                    <li key={`serv-${i}`} className="font-mono leading-snug">{line}</li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          ))}
+        {/* ── ACTIVE SCENARIO NARRATIVE CARD ─────────────────────────────── */}
+        {results.length > 0 && narrative && results[activeScenarioIdx] && (
+          <NarrativeCard
+            scenarioId={results[activeScenarioIdx].scenarioId}
+            name={results[activeScenarioIdx].name}
+            headline={narrative.scenarios[activeScenarioIdx]?.headline ?? ""}
+            story={narrative.scenarios[activeScenarioIdx]?.story ?? ""}
+            keyMoves={narrative.scenarios[activeScenarioIdx]?.keyMoves ?? []}
+            whyItWorks={narrative.scenarios[activeScenarioIdx]?.whyItWorks ?? ""}
+            whatCouldGoWrong={narrative.scenarios[activeScenarioIdx]?.whatCouldGoWrong ?? ""}
+            confidence={narrative.scenarios[activeScenarioIdx]?.confidence ?? 50}
+            result={results[activeScenarioIdx]}
+            isWinner={results[activeScenarioIdx].scenarioId === narrative.winnerScenarioId}
+          />
+        )}
+
+        {/* ── CHARTS ───────────────────────────────────────────────────── */}
+        {results.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Projections</CardTitle>
+              <CardDescription>P50 (median) trajectories — net worth, liquidity, and delta vs Base</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue="nw">
+                <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full max-w-2xl h-auto">
+                  <TabsTrigger value="nw">Net Worth</TabsTrigger>
+                  <TabsTrigger value="liq">Liquidity</TabsTrigger>
+                  <TabsTrigger value="delta">Δ vs Base</TabsTrigger>
+                  <TabsTrigger value="bands">MC Bands</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="nw" className="pt-4">
+                  <div ref={nwChartRef} className="bg-white rounded">
+                    <ResponsiveContainer width="100%" height={320}>
+                      <LineChart data={nwChartData} margin={{ top: 10, right: 10, left: 0, bottom: 16 }}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                        <XAxis dataKey="year" label={{ value: "Years", position: "insideBottom", offset: -4, fontSize: 11 }} fontSize={11} />
+                        <YAxis tickFormatter={(v) => fmt$k(v)} width={62} fontSize={11} />
+                        <RTooltip formatter={(v: any) => fmt$(v)} labelFormatter={(l) => `Year ${l}`} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Line type="monotone" dataKey="base" stroke={SCENARIO_COLORS.base} name="Base" strokeWidth={2.5} dot={false} />
+                        <Line type="monotone" dataKey="property" stroke={SCENARIO_COLORS.property} name="Property" strokeWidth={2.5} dot={false} />
+                        <Line type="monotone" dataKey="crypto" stroke={SCENARIO_COLORS.crypto} name="Crypto" strokeWidth={2.5} dot={false} />
+                        <Line type="monotone" dataKey="cash" stroke={SCENARIO_COLORS.cash} name="Cash" strokeWidth={2.5} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="liq" className="pt-4">
+                  <div ref={liquidityChartRef} className="bg-white rounded">
+                    <ResponsiveContainer width="100%" height={320}>
+                      <LineChart data={liquidityChartData} margin={{ top: 10, right: 10, left: 0, bottom: 16 }}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                        <XAxis dataKey="year" label={{ value: "Years", position: "insideBottom", offset: -4, fontSize: 11 }} fontSize={11} />
+                        <YAxis tickFormatter={(v) => fmt$k(v)} width={62} fontSize={11} />
+                        <RTooltip formatter={(v: any) => fmt$(v)} labelFormatter={(l) => `Year ${l}`} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Line type="monotone" dataKey="base" stroke={SCENARIO_COLORS.base} name="Base" strokeWidth={2.5} dot={false} />
+                        <Line type="monotone" dataKey="property" stroke={SCENARIO_COLORS.property} name="Property" strokeWidth={2.5} dot={false} />
+                        <Line type="monotone" dataKey="crypto" stroke={SCENARIO_COLORS.crypto} name="Crypto" strokeWidth={2.5} dot={false} />
+                        <Line type="monotone" dataKey="cash" stroke={SCENARIO_COLORS.cash} name="Cash" strokeWidth={2.5} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="delta" className="pt-4">
+                  <ResponsiveContainer width="100%" height={320}>
+                    <LineChart data={deltaChartData} margin={{ top: 10, right: 10, left: 0, bottom: 16 }}>
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                      <XAxis dataKey="year" label={{ value: "Years", position: "insideBottom", offset: -4, fontSize: 11 }} fontSize={11} />
+                      <YAxis tickFormatter={(v) => fmt$k(v)} width={62} fontSize={11} />
+                      <RTooltip formatter={(v: any) => fmt$(v)} labelFormatter={(l) => `Year ${l}`} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
+                      <Line type="monotone" dataKey="property" stroke={SCENARIO_COLORS.property} name="Property − Base" strokeWidth={2.5} dot={false} />
+                      <Line type="monotone" dataKey="crypto" stroke={SCENARIO_COLORS.crypto} name="Crypto − Base" strokeWidth={2.5} dot={false} />
+                      <Line type="monotone" dataKey="cash" stroke={SCENARIO_COLORS.cash} name="Cash − Base" strokeWidth={2.5} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </TabsContent>
+
+                <TabsContent value="bands" className="pt-4">
+                  <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                    {results.map((r, i) => (
+                      <Button
+                        key={r.scenarioId}
+                        variant={i === bandsScenarioIdx ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setBandsScenarioIdx(i)}
+                      >
+                        {r.name}
+                      </Button>
+                    ))}
+                  </div>
+                  <div ref={bandsChartRef} className="bg-white rounded">
+                    <ResponsiveContainer width="100%" height={320}>
+                      <AreaChart data={bandsChartData} stackOffset="none" margin={{ top: 10, right: 10, left: 0, bottom: 16 }}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                        <XAxis dataKey="year" fontSize={11} />
+                        <YAxis tickFormatter={(v) => fmt$k(v)} width={62} fontSize={11} />
+                        <RTooltip formatter={(v: any) => fmt$(v)} labelFormatter={(l) => `Year ${l}`} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Area type="monotone" dataKey="p10" stackId="1" stroke="#cbd5e1" fill="#e2e8f0" name="P10" />
+                        <Area type="monotone" dataKey="p50Minus10" stackId="1" stroke="#7dd3fc" fill="#bae6fd" name="P10→P50" />
+                        <Area type="monotone" dataKey="p90Minus50" stackId="1" stroke="#0ea5e9" fill="#7dd3fc" name="P50→P90" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── DESKTOP COMPARISON TABLE / MOBILE CARDS ──────────────────── */}
+        {results.length > 0 && narrative && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Scenario comparison</CardTitle>
+              <CardDescription className="text-xs">
+                {lastAssumptions.horizonYears}-year horizon · {lastAssumptions.simulationCount.toLocaleString()} sims
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {/* Desktop table */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="border-b text-left text-xs uppercase text-muted-foreground tracking-wide">
+                    <tr>
+                      <th className="py-2.5 pr-3">Scenario</th>
+                      <th className="py-2.5 pr-3 text-right">P10</th>
+                      <th className="py-2.5 pr-3 text-right">P50</th>
+                      <th className="py-2.5 pr-3 text-right">P90</th>
+                      <th className="py-2.5 pr-3 text-right">Cash</th>
+                      <th className="py-2.5 pr-3 text-right">DSR</th>
+                      <th className="py-2.5 pr-3 text-right">LVR</th>
+                      <th className="py-2.5 pr-3 text-right">Downside</th>
+                      <th className="py-2.5 pr-3 text-right" title="Probability of property negative-equity">Neg-Eq</th>
+                      <th className="py-2.5 pr-3 text-right" title="Probability of cash buffer below 1× expenses">Liq</th>
+                      <th className="py-2.5 pr-3 text-right">Conf</th>
+                      <th className="py-2.5">Band</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {results.map((r, idx) => {
+                      const fanEnd = r.netWorthFan[r.netWorthFan.length - 1];
+                      const cashEnd = r.cashFan[r.cashFan.length - 1];
+                      const colorKey = SCENARIO_KEY_MAP[r.scenarioId] ?? "base";
+                      const conf = narrative.scenarios[idx]?.confidence ?? 50;
+                      const isWinner = r.scenarioId === narrative.winnerScenarioId;
+                      return (
+                        <tr key={r.scenarioId} className={`border-b last:border-0 hover:bg-muted/30 ${isWinner ? "bg-purple-50/40 dark:bg-purple-950/10" : ""}`}>
+                          <td className="py-2.5 pr-3 font-medium">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-block w-2 h-2 rounded-full shrink-0"
+                                    style={{ backgroundColor: SCENARIO_COLORS[colorKey] }} />
+                              <span>{r.name}</span>
+                              {isWinner && <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />}
+                            </div>
+                          </td>
+                          <td className="py-2.5 pr-3 text-right tabular-nums text-rose-700">{fmt$M(fanEnd.p10)}</td>
+                          <td className="py-2.5 pr-3 text-right tabular-nums font-semibold">{fmt$M(fanEnd.p50)}</td>
+                          <td className="py-2.5 pr-3 text-right tabular-nums text-emerald-700">{fmt$M(fanEnd.p90)}</td>
+                          <td className="py-2.5 pr-3 text-right tabular-nums">{fmt$M(cashEnd.p50)}</td>
+                          <td className="py-2.5 pr-3 text-right tabular-nums">{pct(r.serviceability?.dsr ?? 0)}</td>
+                          <td className="py-2.5 pr-3 text-right tabular-nums">{pct(r.serviceability?.lvr ?? 0)}</td>
+                          <td className="py-2.5 pr-3 text-right tabular-nums">{pct(r.riskMetrics.downsideRisk)}</td>
+                          <td className={`py-2.5 pr-3 text-right tabular-nums ${r.negativeEquityProbability > 0.1 ? "text-rose-700 font-semibold" : ""}`}>{pct(r.negativeEquityProbability, 0)}</td>
+                          <td className={`py-2.5 pr-3 text-right tabular-nums ${r.liquidityStressProbability > 0.1 ? "text-rose-700 font-semibold" : ""}`}>{pct(r.liquidityStressProbability, 0)}</td>
+                          <td className="py-2.5 pr-3 text-right tabular-nums">{conf}%</td>
+                          <td className="py-2.5">
+                            <Badge variant="outline" className={bandClass(r.serviceability?.band)}>
+                              {r.serviceability?.band ?? "—"}
+                            </Badge>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile card list */}
+              <div className="md:hidden space-y-2">
+                {results.map((r, idx) => {
+                  const fanEnd = r.netWorthFan[r.netWorthFan.length - 1];
+                  const cashEnd = r.cashFan[r.cashFan.length - 1];
+                  const colorKey = SCENARIO_KEY_MAP[r.scenarioId] ?? "base";
+                  const conf = narrative.scenarios[idx]?.confidence ?? 50;
+                  const isWinner = r.scenarioId === narrative.winnerScenarioId;
+                  return (
+                    <div key={r.scenarioId}
+                         className={`rounded-lg border p-3 ${isWinner ? "border-purple-300 bg-purple-50/40 dark:bg-purple-950/10" : ""}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: SCENARIO_COLORS[colorKey] }} />
+                          <span className="font-semibold text-sm">{r.name}</span>
+                          {isWinner && <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />}
+                        </div>
+                        <Badge variant="outline" className={`text-[10px] ${bandClass(r.serviceability?.band)}`}>
+                          {r.serviceability?.band ?? "—"}
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <div className="text-[10px] uppercase text-muted-foreground font-semibold">P50</div>
+                          <div className="font-semibold tabular-nums">{fmt$M(fanEnd.p50)}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] uppercase text-muted-foreground font-semibold">Cash</div>
+                          <div className="font-semibold tabular-nums">{fmt$M(cashEnd.p50)}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] uppercase text-muted-foreground font-semibold">Downside</div>
+                          <div className="font-semibold tabular-nums">{pct(r.riskMetrics.downsideRisk, 0)}</div>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[11px] mt-2 pt-2 border-t">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">DSR / LVR</span>
+                          <span className="tabular-nums font-medium">{pct(r.serviceability?.dsr ?? 0, 0)} / {pct(r.serviceability?.lvr ?? 0, 0)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Confidence</span>
+                          <span className="tabular-nums font-medium">{conf}%</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── RECOMMENDATION ───────────────────────────────────────────── */}
+        {narrative && narrative.recommendation && (
+          <Card className="border-purple-200 bg-gradient-to-br from-purple-50/60 via-fuchsia-50/40 to-indigo-50/60 dark:from-purple-950/20 dark:via-fuchsia-950/20 dark:to-indigo-950/20">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Award className="h-4 w-4 text-purple-600" />
+                Long-form recommendation
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm leading-relaxed whitespace-pre-line text-foreground/85">
+                {narrative.recommendation}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-4 italic">
+                Not personal financial advice. Generated from your live ledger + your input assumptions.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* ─── MOBILE STICKY BOTTOM ACTION BAR ──────────────────────────── */}
+      <div className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-t shadow-lg">
+        <div className="px-3 py-2.5 flex items-center gap-1.5">
+          <Button
+            onClick={handleRun}
+            disabled={!dashboardInputs || running}
+            size="sm"
+            className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs"
+          >
+            {running ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Play className="h-3.5 w-3.5 mr-1" />}
+            {running ? "Running…" : results.length ? "Re-run" : "Run"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowAssumptions(s => !s)}
+            className="text-xs"
+          >
+            <Settings className="h-3.5 w-3.5" />
+          </Button>
+          {results.length > 0 && (
+            <>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => {
+                    setSaveName(loadedScenarioId
+                      ? savedScenarios.find(s => s.id === loadedScenarioId)?.name ?? ""
+                      : `Scenario ${new Date().toLocaleDateString("en-AU")}`);
+                  }}>
+                    <Save className="h-3.5 w-3.5" />
+                  </Button>
+                </DialogTrigger>
+                <SaveDialog
+                  saveName={saveName} setSaveName={setSaveName}
+                  saveDescription={saveDescription} setSaveDescription={setSaveDescription}
+                  isUpdate={!!loadedScenarioId}
+                  onSubmit={handleSave}
+                />
+              </Dialog>
+              <Button variant="outline" size="sm" className="text-xs" onClick={handleDownloadPdf} disabled={pdfBusy}>
+                {pdfBusy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              </Button>
+            </>
+          )}
+          <Sheet open={loadSheetOpen} onOpenChange={setLoadSheetOpen}>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="sm" className="text-xs">
+                <FolderOpen className="h-3.5 w-3.5" />
+                {savedScenarios.length > 0 && <span className="ml-1 tabular-nums">{savedScenarios.length}</span>}
+              </Button>
+            </SheetTrigger>
+            <LoadSheet
+              savedScenarios={savedScenarios}
+              loadedScenarioId={loadedScenarioId}
+              onLoad={handleLoad}
+              onClone={handleClone}
+              onDelete={handleDelete}
+            />
+          </Sheet>
         </div>
-      )}
-
-      {/* Recommendation */}
-      {winners && (
-        <Card className="border-purple-200 bg-purple-50/40">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Award className="h-4 w-4 text-purple-600" />
-              Recommendation
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm leading-relaxed">{buildRecommendation(winners, lastAssumptions)}</p>
-            <p className="text-[10px] text-muted-foreground mt-3 italic">
-              Not personal financial advice. Generated from your ledger + your input assumptions. See the PDF report
-              for the full disclaimer.
-            </p>
-          </CardContent>
-        </Card>
-      )}
+      </div>
     </div>
   );
 }
 
-// ─── Subcomponents ───────────────────────────────────────────────────────────
+// ─── SaveDialog component ────────────────────────────────────────────────────
 
-function WinnerCard({
-  icon, label, scenario, metric, sub, tone,
+function SaveDialog({
+  saveName, setSaveName, saveDescription, setSaveDescription, isUpdate, onSubmit,
 }: {
-  icon: React.ReactNode;
-  label: string;
-  scenario: ExtendedScenarioResult;
-  metric: string;
-  sub: string;
-  tone: "emerald" | "sky" | "indigo" | "purple" | "red";
+  saveName: string;
+  setSaveName: (v: string) => void;
+  saveDescription: string;
+  setSaveDescription: (v: string) => void;
+  isUpdate: boolean;
+  onSubmit: () => Promise<void> | void;
 }) {
-  const tones = {
-    emerald: "border-emerald-200 bg-emerald-50",
-    sky: "border-sky-200 bg-sky-50",
-    indigo: "border-indigo-200 bg-indigo-50",
-    purple: "border-purple-200 bg-purple-50",
-    red: "border-red-200 bg-red-50",
-  };
   return (
-    <Card className={tones[tone]}>
-      <CardContent className="pt-4 pb-4">
-        <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
-          {icon}
-          <span>{label}</span>
+    <DialogContent className="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle>{isUpdate ? "Update scenario" : "Save scenario"}</DialogTitle>
+        <DialogDescription>
+          Saves assumptions, deltas, results, and audit hashes to your ledger.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="scenario-name" className="text-xs">Name</Label>
+          <Input
+            id="scenario-name"
+            value={saveName}
+            onChange={e => setSaveName(e.target.value)}
+            placeholder="e.g. Lev into rental property"
+          />
         </div>
-        <div className="text-sm font-semibold mb-1 truncate" title={scenario.name}>{scenario.name}</div>
-        <div className="text-xl font-bold tabular-nums">{metric}</div>
-        <div className="text-[10px] text-muted-foreground">{sub}</div>
-      </CardContent>
-    </Card>
+        <div className="space-y-1.5">
+          <Label htmlFor="scenario-desc" className="text-xs">Description (optional)</Label>
+          <Input
+            id="scenario-desc"
+            value={saveDescription}
+            onChange={e => setSaveDescription(e.target.value)}
+            placeholder="Why am I considering this?"
+          />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button onClick={onSubmit} disabled={!saveName.trim()}>
+          <Save className="h-4 w-4 mr-2" />
+          {isUpdate ? "Update" : "Save scenario"}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
   );
 }
 
-function RiskBars({ metrics }: { metrics: ExtendedScenarioResult["riskMetrics"] }) {
-  const items: Array<{ label: string; value: number; tone: string }> = [
-    { label: "Volatility (CV)", value: Math.min(1, metrics.volatility / 0.6), tone: "bg-amber-500" },
-    { label: "Downside (P10 vs P50)", value: Math.min(1, metrics.downsideRisk / 0.6), tone: "bg-red-500" },
-    { label: "Leverage (LVR)", value: Math.min(1, metrics.leverageRisk / 1.0), tone: "bg-indigo-500" },
-    { label: "Liquidity shortfall", value: Math.min(1, metrics.liquidityRisk), tone: "bg-sky-500" },
-    { label: "Concentration", value: Math.min(1, metrics.concentrationRisk), tone: "bg-purple-500" },
-  ];
+// ─── LoadSheet (mobile-first scenario picker) ────────────────────────────────
+
+function LoadSheet({
+  savedScenarios, loadedScenarioId, onLoad, onClone, onDelete,
+}: {
+  savedScenarios: SavedScenario[];
+  loadedScenarioId: string | null;
+  onLoad: (id: string) => Promise<void> | void;
+  onClone: (id: string, name: string) => Promise<void> | void;
+  onDelete: (id: string) => Promise<void> | void;
+}) {
   return (
-    <div className="space-y-1.5">
-      {items.map(it => (
-        <div key={it.label}>
-          <div className="flex justify-between text-[11px] text-muted-foreground">
-            <span>{it.label}</span>
-            <span className="tabular-nums">{(it.value * 100).toFixed(0)}%</span>
+    <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+      <SheetHeader>
+        <SheetTitle className="flex items-center gap-2">
+          <FolderOpen className="h-4 w-4" />
+          Saved scenarios
+        </SheetTitle>
+      </SheetHeader>
+      <div className="mt-4 space-y-2">
+        {savedScenarios.length === 0 ? (
+          <div className="text-sm text-muted-foreground text-center py-8">
+            No saved scenarios yet. Run the engine and click Save.
           </div>
-          <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-            <div className={`h-full ${it.tone}`} style={{ width: `${it.value * 100}%` }} />
-          </div>
-        </div>
-      ))}
-    </div>
+        ) : (
+          savedScenarios.map(s => {
+            const isLoaded = s.id === loadedScenarioId;
+            return (
+              <div key={s.id}
+                   className={`rounded-lg border p-3 ${isLoaded ? "border-purple-300 bg-purple-50/40" : ""}`}>
+                <div className="flex items-start justify-between gap-2 mb-1">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-sm truncate">{s.name}</div>
+                    {s.description && (
+                      <div className="text-xs text-muted-foreground truncate">{s.description}</div>
+                    )}
+                  </div>
+                  {isLoaded && <Badge variant="outline" className="text-[10px]">Loaded</Badge>}
+                </div>
+                <div className="text-[11px] text-muted-foreground space-y-0.5">
+                  <div>Updated {new Date(s.updated_at).toLocaleString("en-AU", { dateStyle: "short", timeStyle: "short" })}</div>
+                  <div className="font-mono">
+                    snap:{s.snapshot_hash?.slice(0, 6) ?? "—"} · asm:{s.assumptions_hash?.slice(0, 6) ?? "—"}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 mt-2.5">
+                  <Button size="sm" variant="default" className="flex-1 h-8 text-xs"
+                          onClick={() => onLoad(s.id)} disabled={isLoaded}>
+                    <ArrowRight className="h-3.5 w-3.5 mr-1" />
+                    Load
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-8 text-xs"
+                          onClick={() => onClone(s.id, s.name)}>
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-8 text-xs text-rose-600"
+                          onClick={() => onDelete(s.id)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </SheetContent>
   );
-}
-
-// ─── Recommendation text generator ───────────────────────────────────────────
-
-function buildRecommendation(
-  winners: NonNullable<ReturnType<typeof useMemo>> & {
-    byNw: ExtendedScenarioResult;
-    byLiquidity: ExtendedScenarioResult;
-    byRiskAdj: ExtendedScenarioResult;
-    bestMedian: ExtendedScenarioResult;
-    worstDownside: ExtendedScenarioResult;
-  },
-  u: UserAssumptions,
-): string {
-  const lead = winners.byRiskAdj;
-  const nwEnd = lead.netWorthFan[lead.netWorthFan.length - 1];
-  const cashEnd = lead.cashFan[lead.cashFan.length - 1];
-
-  let body = `Based on a ${u.horizonYears}-year horizon and ${u.simulationCount} Monte Carlo sims, ` +
-    `the best risk-adjusted outcome for your ${fmt$(u.capital)} is the "${lead.name}" path: ` +
-    `${fmt$(nwEnd.p50)} median net worth with ${fmt$(cashEnd.p50)} median terminal cash, ` +
-    `a ${(lead.riskMetrics.downsideRisk * 100).toFixed(1)}% downside (P10 vs P50), and a ` +
-    `serviceability band of "${lead.serviceability.band}". `;
-
-  if (winners.byNw.scenarioId !== winners.byRiskAdj.scenarioId) {
-    body += `Note that "${winners.byNw.name}" has a higher raw P50 net worth (` +
-      `${fmt$(winners.byNw.netWorthFan[winners.byNw.netWorthFan.length - 1].p50)}) but its downside ` +
-      `(${(winners.byNw.riskMetrics.downsideRisk * 100).toFixed(1)}%) means risk-adjusted returns favour the option above. `;
-  }
-
-  if (winners.worstDownside.scenarioId === "crypto_50k") {
-    body += `Crypto shows the widest dispersion under your ${u.cryptoVolPct}% σ assumption — ` +
-      `treat it as a barbell allocation, not a core holding. `;
-  } else if (winners.worstDownside.scenarioId === "property_50k") {
-    body += `Property carries leverage and illiquidity risk — confirm serviceability holds under a ` +
-      `rate shock before committing. `;
-  }
-
-  if (winners.byLiquidity.scenarioId === "cash_50k") {
-    body += `Cash preserves the most optionality (highest terminal liquidity) but at the cost of ` +
-      `long-run net worth under a ${u.cashAprPct}% APR vs ${u.propertyGrowthPct}% property growth assumption.`;
-  }
-
-  return body;
 }

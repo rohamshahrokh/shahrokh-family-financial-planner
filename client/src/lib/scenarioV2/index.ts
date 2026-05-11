@@ -122,3 +122,27 @@ export {
   type RunScenarioInput,
   type ExtendedScenarioResult,
 } from "./runScenario";
+
+// Persistence
+export {
+  v2Persistence,
+  v2Presets,
+  v2LastAssumptions,
+  deriveAssumptionsHash,
+  type SavedScenario,
+  type ScenarioSavePayload,
+  type AssumptionPreset,
+} from "./persistence";
+
+// Narrative + recommendation engine
+export {
+  buildComparisonNarrative,
+  type ScenarioNarrative,
+  type ComparisonNarrative,
+} from "./narrative";
+
+// Premium PDF
+export {
+  generatePremiumPdf,
+  type PdfData,
+} from "./pdfReport";
