@@ -56,6 +56,11 @@ import {
   listInvestorProfiles,
   type InvestorProfile,
 } from "@/lib/scenarioV2/registry";
+import {
+  FanChart,
+  DistributionHistogram,
+  TailRiskCard,
+} from "@/components/decisionEngine/RiskVisualizations";
 
 // Embedded power-user tab — re-uses every line of premium Scenario Lab UX.
 import ScenarioCompareV2Page from "./scenario-compare-v2";
@@ -544,6 +549,36 @@ function QuickDecisionTab() {
                 )}
               </div>
             )}
+
+            {/* Phase 2.2: Wealth-path fan chart */}
+            <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+              <FanChart
+                fan={winner.result.netWorthFan}
+                fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
+                initialNetWorth={winner.result.initialNetWorth}
+                hidden={privacyMode}
+              />
+            </div>
+
+            {/* Phase 2.2: Tail-risk profile */}
+            <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+              <TailRiskCard
+                result={winner.result}
+                fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
+              />
+            </div>
+
+            {/* Phase 2.2: Terminal NW distribution + VaR/CVaR markers */}
+            <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+              <DistributionHistogram
+                terminalNwSorted={winner.result.terminalNwSorted}
+                initialNetWorth={winner.result.initialNetWorth}
+                varDollars95={winner.result.riskMetrics.varDollars95}
+                cvarDollars95={winner.result.riskMetrics.cvarDollars95}
+                fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
+                hidden={privacyMode}
+              />
+            </div>
           </CardContent>
         </Card>
       )}
@@ -569,6 +604,7 @@ function QuickDecisionTab() {
                 expanded={expandedCandidateId === c.id}
                 onToggle={() => setExpandedCandidateId(expandedCandidateId === c.id ? null : c.id)}
                 fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
+                privacyMode={privacyMode}
               />
             ))}
           </CardContent>
@@ -686,13 +722,14 @@ function MetricTile({
 }
 
 function CandidateRow({
-  rank, candidate, expanded, onToggle, fmt,
+  rank, candidate, expanded, onToggle, fmt, privacyMode,
 }: {
   rank: number;
   candidate: RankedCandidate;
   expanded: boolean;
   onToggle: () => void;
   fmt: ReturnType<typeof useMaskFmt>;
+  privacyMode: boolean;
 }) {
   const { pct, fmt$M, sentence } = fmt;
   const scoreToneClass =
@@ -729,6 +766,25 @@ function CandidateRow({
 
       {expanded && (
         <div className="border-t border-border bg-muted/20 p-3 space-y-4">
+          {/* Phase 2.2: Compact fan + tail risk for this candidate */}
+          <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+            <FanChart
+              fan={candidate.result.netWorthFan}
+              fmt={fmt}
+              initialNetWorth={candidate.result.initialNetWorth}
+              hidden={privacyMode}
+              height={180}
+              title="Path fan"
+              subtitle="P5–P95 dispersion · this candidate"
+            />
+          </div>
+
+          <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+            <TailRiskCard result={candidate.result} fmt={fmt} compact />
+          </div>
+
+          <Separator />
+
           {/* Rationale */}
           <div>
             <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1.5">
