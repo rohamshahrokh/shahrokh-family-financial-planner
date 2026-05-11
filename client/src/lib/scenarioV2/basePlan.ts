@@ -152,6 +152,9 @@ export function deriveBasePlan(
       monthlyRent: 0, // PPOR doesn't produce rent
       monthlyCosts: 0,
       offsetBalance: num(s.offset_balance),
+      // PPOR repayment is captured in the household ledger (rent.expenses
+      // or mortgage line); the engine must NOT double-deduct it.
+      inLedger: debtIncluded,
     });
   }
 
@@ -179,6 +182,9 @@ export function deriveBasePlan(
       monthlyRent,
       monthlyCosts,
       offsetBalance: 0,
+      // IPs: repayment is NOT in the household ledger — engine pays it from
+      // rent + cash. Keep inLedger=false.
+      inLedger: false,
     });
   }
 

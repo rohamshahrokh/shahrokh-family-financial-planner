@@ -70,24 +70,36 @@ function endCash(r: ExtendedScenarioResult) {
   return r.cashFan[r.cashFan.length - 1];
 }
 
-/** Confidence drops with high CV, high downside, low sim count, weak band. */
+/** Confidence drops with high CV, high downside, low sim count, weak band,
+ *  HARDER for insolvency / negative-NW outcomes. Coherent with outputs. */
 function scenarioConfidence(r: ExtendedScenarioResult, sims: number): number {
   const cv = r.sequenceDispersion?.cv ?? 0.2;
   const downside = r.riskMetrics?.downsideRisk ?? 0.2;
   const lvr = r.serviceability?.lvr ?? 0;
   const negEq = r.negativeEquityProbability ?? 0;
   const liq = r.liquidityStressProbability ?? 0;
+  const def = r.defaultProbability ?? 0;
+  const fan = r.netWorthFan[r.netWorthFan.length - 1];
+  const terminalP50 = fan.p50;
+  const terminalP10 = fan.p10;
+  const initial = r.initialNetWorth;
 
   // Base 100, subtract penalties
   let c = 100;
-  c -= Math.min(35, cv * 100);          // up to -35 for high dispersion
-  c -= Math.min(25, downside * 50);     // up to -25 for downside
-  c -= Math.min(15, lvr * 20);          // up to -15 for high LVR
+  c -= Math.min(30, cv * 100);          // up to -30 for high dispersion
+  c -= Math.min(20, downside * 40);     // up to -20 for downside
+  c -= Math.min(10, lvr * 14);          // up to -10 for high LVR
   c -= Math.min(15, negEq * 50);        // up to -15 for neg-equity P
-  c -= Math.min(10, liq * 30);          // up to -10 for liquidity stress
+  c -= Math.min(15, liq * 45);          // up to -15 for liquidity stress
+  // HARD penalty for default risk — confidence must reflect insolvency
+  c -= Math.min(40, def * 80);          // up to -40 for default probability
+  // HARD penalty when median outcome destroys capital
+  if (terminalP50 < initial * 0.5) c -= 25; // outright wealth destruction
+  if (terminalP50 < 0) c -= 25;         // negative median NW — catastrophic
+  if (terminalP10 < 0) c -= 10;         // tail risk of negative NW
   // Bonus / penalty from sims count (relative to 500 baseline)
   c -= Math.max(0, (500 - sims) / 25);  // small penalty if <500 sims
-  return Math.max(15, Math.min(99, Math.round(c)));
+  return Math.max(5, Math.min(99, Math.round(c)));
 }
 
 function scenarioTypeFromId(id: string): "base" | "property" | "crypto" | "cash" | "custom" {

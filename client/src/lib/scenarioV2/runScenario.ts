@@ -76,6 +76,14 @@ export interface ExtendedScenarioResult extends ScenarioResult {
   negativeEquityProbability: number;
   liquidityStressProbability: number;
   refinancePressureProbability: number;
+  /** Probability the household becomes insolvent within the horizon. */
+  defaultProbability: number;
+  /** Median month-index (0-based) when default fires across defaulting sims (null if 0%). */
+  medianDefaultMonth: number | null;
+  /** Median month-index when liquidity stress first fires. */
+  medianLiquidityFirstMonth: number | null;
+  /** Median month-index when negative equity first fires. */
+  medianNegEquityFirstMonth: number | null;
   /** Dispersion metrics (sequence-of-returns risk surrogate). */
   sequenceDispersion: ReturnType<typeof sequenceRiskMetric>;
   /** Terminal short-rate samples (for narrative). */
@@ -179,6 +187,10 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     negativeEquityProbability: mc.negativeEquityProbability,
     liquidityStressProbability: mc.liquidityStressProbability,
     refinancePressureProbability: mc.refinancePressureProbability,
+    defaultProbability: mc.defaultProbability,
+    medianDefaultMonth: mc.medianDefaultMonth,
+    medianLiquidityFirstMonth: mc.medianLiquidityFirstMonth,
+    medianNegEquityFirstMonth: mc.medianNegEquityFirstMonth,
     sequenceDispersion: dispersion,
     terminalRates: mc.terminalRates,
   };

@@ -144,6 +144,14 @@ export interface PropertyState {
   monthlyRent: number;
   monthlyCosts: number;
   offsetBalance: number;
+  /**
+   * True when this property's monthly P&I is already represented in
+   * baseMonthlyExpenses (the dashboard ledger). The engine MUST NOT
+   * deduct the mortgage payment a second time when this is true.
+   * Default for snapshot-derived PPOR is true; for new acquisitions
+   * it is false.
+   */
+  inLedger?: boolean;
 }
 
 export interface PortfolioState {
@@ -160,6 +168,14 @@ export interface PortfolioState {
   ttmIncome: number;
   /** Trailing 12-month expenses incl. debt service. */
   ttmExpenses: number;
+  /** Household has triggered insolvency (cash exhausted, asset sales exhausted). */
+  defaulted?: boolean;
+  /** Month in which insolvency first occurred (null if solvent). */
+  defaultMonth?: MonthKey | null;
+  /** Cumulative forced asset sales taken to cover deficits ($). */
+  forcedSales?: number;
+  /** Cumulative interest accrued on a margin/overdraft when cash went negative. */
+  marginInterestAccrued?: number;
 }
 
 // ─── Result (output of a full projection) ────────────────────────────────────

@@ -145,7 +145,11 @@ function buildSliceScenarios(activationMonth: string, u: UserAssumptions): Array
   name: string;
   deltas: ScenarioDelta[];
 }> {
-  const purchasePrice = u.capital * 5;
+  // Deposit-to-purchase ratio: $50k extra deposit on a 20% down purchase
+  // implies a purchase price of ~$250k, but to keep the scenario realistic
+  // against a typical AU income, we cap at 4× capital and require the
+  // assumed rent yield to clear holding costs comfortably.
+  const purchasePrice = u.capital * 4;
   const weeklyRent = Math.round((purchasePrice * (u.rentYieldPct / 100)) / 52);
 
   return [
