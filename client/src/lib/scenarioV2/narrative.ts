@@ -21,6 +21,28 @@
 
 import type { ExtendedScenarioResult } from "./runScenario";
 
+export interface FailureDriver {
+  /** Human-readable label, e.g. "Default probability" */
+  label: string;
+  /** Severity 0..1 (used for ranking) */
+  severity: number;
+  /** One-line plain-English explanation incl. numbers */
+  detail: string;
+}
+
+export interface ScenarioAttribution {
+  /** Top 3 risk drivers ranked by severity */
+  failureDrivers: FailureDriver[];
+  /** Break-even line: what would need to change for this scenario to beat base */
+  breakEven: string | null;
+  /** When liquidity stress / default / negative-equity events first fire (median month, human-readable) */
+  timing: string | null;
+  /** Safe leverage / yield range string (property scenarios only) */
+  safeRange: string | null;
+  /** Headline verdict: "FAILS" / "AT RISK" / "VIABLE" / "STRONG" */
+  verdict: "FAILS" | "AT RISK" | "VIABLE" | "STRONG";
+}
+
 export interface ScenarioNarrative {
   scenarioId: string;
   name: string;
@@ -30,6 +52,8 @@ export interface ScenarioNarrative {
   whyItWorks: string;
   whatCouldGoWrong: string;
   confidence: number; // 0..100
+  /** Deep failure-attribution layer (Session 4) */
+  attribution: ScenarioAttribution;
 }
 
 export interface ComparisonNarrative {
@@ -110,6 +134,206 @@ function scenarioTypeFromId(id: string): "base" | "property" | "crypto" | "cash"
   return "custom";
 }
 
+// ─── Failure attribution layer ───────────────────────────────────────────────
+
+/** Convert month index → "around year X month Y" or "in year X" human text. */
+function monthToHuman(m: number | null): string | null {
+  if (m == null) return null;
+  const year = Math.floor(m / 12);
+  const month = m % 12;
+  if (year === 0) return `month ${month + 1}`;
+  if (month <= 1) return `year ${year + 1}`;
+  return `year ${year + 1}, month ${month + 1}`;
+}
+
+function verdictFor(r: ExtendedScenarioResult, base?: ExtendedScenarioResult): ScenarioAttribution["verdict"] {
+  const def = r.defaultProbability ?? 0;
+  const negEq = r.negativeEquityProbability ?? 0;
+  const liq = r.liquidityStressProbability ?? 0;
+  const fan = endFan(r);
+  const init = r.initialNetWorth;
+  // Catastrophic: default ≥30% or median NW destruction below half of starting
+  if (def >= 0.3 || fan.p50 < 0 || fan.p50 < init * 0.4) return "FAILS";
+  // At risk: meaningful default/neg-eq/liq probability
+  if (def >= 0.1 || negEq >= 0.25 || liq >= 0.5) return "AT RISK";
+  // Strong: beats base by 20%+ AND low risk
+  if (base && fan.p50 > endFan(base).p50 * 1.2 && def < 0.05 && liq < 0.25) return "STRONG";
+  return "VIABLE";
+}
+
+function failureDriversFor(
+  r: ExtendedScenarioResult,
+  inputs: NarrativeInputs,
+  base?: ExtendedScenarioResult,
+): FailureDriver[] {
+  const drivers: FailureDriver[] = [];
+  const def = r.defaultProbability ?? 0;
+  const negEq = r.negativeEquityProbability ?? 0;
+  const liq = r.liquidityStressProbability ?? 0;
+  const refi = r.refinancePressureProbability ?? 0;
+  const downside = r.riskMetrics?.downsideRisk ?? 0;
+  const cv = r.sequenceDispersion?.cv ?? 0;
+  const lvr = r.serviceability?.lvr ?? 0;
+  const dsr = r.serviceability?.dsr ?? 0;
+  const fan = endFan(r);
+  const init = r.initialNetWorth;
+
+  if (def > 0.05) {
+    const when = monthToHuman(r.medianDefaultMonth);
+    drivers.push({
+      label: "Insolvency risk",
+      severity: Math.min(1, def * 2),
+      detail: when
+        ? `${(def * 100).toFixed(0)}% of paths hit default — typically around ${when}, after cash and offset reserves run out and forced asset sales fail to cover repayments.`
+        : `${(def * 100).toFixed(0)}% of simulated paths exhaust cash reserves and trigger forced liquidation before horizon.`,
+    });
+  }
+  if (liq > 0.25) {
+    const when = monthToHuman(r.medianLiquidityFirstMonth);
+    drivers.push({
+      label: "Liquidity exhaustion",
+      severity: Math.min(1, liq),
+      detail: when
+        ? `${(liq * 100).toFixed(0)}% of paths drop below a 3-month expense buffer for at least 2 months — first fires ${when}.`
+        : `${(liq * 100).toFixed(0)}% of paths drop below a 3-month expense buffer, forcing offset draw-downs or asset sales at potentially bad prices.`,
+    });
+  }
+  if (negEq > 0.15) {
+    const when = monthToHuman(r.medianNegEquityFirstMonth);
+    drivers.push({
+      label: "Negative equity",
+      severity: Math.min(1, negEq * 1.5),
+      detail: when
+        ? `${(negEq * 100).toFixed(0)}% of paths fall into negative equity — first appears ${when} under property-price stress.`
+        : `${(negEq * 100).toFixed(0)}% of paths see total property loans exceed market values at some point, blocking refinance and forced-sale options.`,
+    });
+  }
+  if (refi > 0.25) {
+    drivers.push({
+      label: "Refinance pressure",
+      severity: Math.min(1, refi),
+      detail: `${(refi * 100).toFixed(0)}% of paths see DSR push above lender tolerance, raising the risk that fixed-rate roll-overs or top-ups get declined.`,
+    });
+  }
+  if (downside > 0.4) {
+    drivers.push({
+      label: "Tail risk",
+      severity: Math.min(1, downside),
+      detail: `P10 outcome is ${(downside * 100).toFixed(0)}% below P50 (${fmt$M(fan.p10)} vs ${fmt$M(fan.p50)}) — a bad sequence of returns destroys most of the upside.`,
+    });
+  }
+  if (cv > 0.6) {
+    drivers.push({
+      label: "Sequence dispersion",
+      severity: Math.min(1, cv),
+      detail: `Terminal NW coefficient of variation is ${(cv * 100).toFixed(0)}% — outcomes are heavily path-dependent, so timing of returns matters more than long-run averages.`,
+    });
+  }
+  if (lvr > 0.75 && r.scenarioId.includes("property")) {
+    drivers.push({
+      label: "High leverage",
+      severity: Math.min(1, (lvr - 0.6) * 2),
+      detail: `Loan-to-value lands at ${(lvr * 100).toFixed(0)}% under median outcomes — limited equity buffer to absorb a price correction.`,
+    });
+  }
+  if (dsr > 0.4) {
+    drivers.push({
+      label: "Debt-service stress",
+      severity: Math.min(1, dsr),
+      detail: `Debt-to-income ratio reaches ${(dsr * 100).toFixed(0)}% — well above the 30-35% APRA comfort band; sustained at this level for years is fragile.`,
+    });
+  }
+  // Wealth destruction relative to base
+  if (base && fan.p50 < endFan(base).p50 * 0.7) {
+    const lostPct = ((endFan(base).p50 - fan.p50) / endFan(base).p50) * 100;
+    drivers.push({
+      label: "Opportunity cost vs base",
+      severity: Math.min(1, lostPct / 100),
+      detail: `Median NW lands ${lostPct.toFixed(0)}% below the do-nothing baseline — the allocation actively destroys value vs holding course.`,
+    });
+  }
+  // Capital destruction in absolute terms
+  if (fan.p50 < init * 0.6) {
+    drivers.push({
+      label: "Capital destruction",
+      severity: 1,
+      detail: `Median terminal NW (${fmt$M(fan.p50)}) is below 60% of starting NW (${fmt$M(init)}). The path destroys wealth, not creates it.`,
+    });
+  }
+
+  // Return top 3 by severity
+  drivers.sort((a, b) => b.severity - a.severity);
+  return drivers.slice(0, 3);
+}
+
+function breakEvenFor(
+  r: ExtendedScenarioResult,
+  inputs: NarrativeInputs,
+  base?: ExtendedScenarioResult,
+): string | null {
+  if (!base) return null;
+  const fan = endFan(r);
+  const baseFan = endFan(base);
+  const t = scenarioTypeFromId(r.scenarioId);
+  // If scenario already beats base by 5%+ → no break-even needed
+  if (fan.p50 >= baseFan.p50 * 1.05) return null;
+
+  const gapPct = ((baseFan.p50 - fan.p50) / Math.abs(baseFan.p50 || 1)) * 100;
+
+  if (t === "property") {
+    // Required additional yearly capital growth to close gap over horizon
+    const years = inputs.horizonYears;
+    const propValue = inputs.capital * 4;
+    const extraGrowthAnnual = Math.pow(1 + Math.max(0, (baseFan.p50 - fan.p50)) / propValue, 1 / years) - 1;
+    return `To match the base path you would need property capital growth around ${(inputs.propertyGrowthPct + extraGrowthAnnual * 100).toFixed(1)}%/yr (vs ${inputs.propertyGrowthPct.toFixed(1)}% assumed) or net rent yield about ${Math.max(3, 4 + extraGrowthAnnual * 100 * 0.5).toFixed(1)}% gross — current closing gap is ${gapPct.toFixed(0)}%.`;
+  }
+  if (t === "crypto") {
+    const years = inputs.horizonYears;
+    const requiredCagr = Math.pow(Math.max(1, baseFan.p50 / Math.max(1, fan.p50)), 1 / years) - 1;
+    return `Crypto would need to deliver roughly ${(requiredCagr * 100 + 8).toFixed(0)}%/yr CAGR (currently modelled near 8-12% mean) to close the ${gapPct.toFixed(0)}% gap to base.`;
+  }
+  if (t === "cash") {
+    return `Cash APR would need to rise to roughly ${(inputs.cashAprPct + 3).toFixed(1)}%+ to match the do-nothing path — implausible under current rate regime.`;
+  }
+  return `This path trails the base by ${gapPct.toFixed(0)}% on median NW — adjust assumptions or pick a different allocation.`;
+}
+
+function timingFor(r: ExtendedScenarioResult): string | null {
+  const parts: string[] = [];
+  const liq = monthToHuman(r.medianLiquidityFirstMonth);
+  const neg = monthToHuman(r.medianNegEquityFirstMonth);
+  const def = monthToHuman(r.medianDefaultMonth);
+  if (liq && (r.liquidityStressProbability ?? 0) > 0.1) parts.push(`liquidity strain first appears ${liq}`);
+  if (neg && (r.negativeEquityProbability ?? 0) > 0.1) parts.push(`negative equity first appears ${neg}`);
+  if (def && (r.defaultProbability ?? 0) > 0.05) parts.push(`default fires around ${def}`);
+  if (parts.length === 0) return null;
+  return `Median timing: ${parts.join("; ")}.`;
+}
+
+function safeRangeFor(r: ExtendedScenarioResult, inputs: NarrativeInputs): string | null {
+  const t = scenarioTypeFromId(r.scenarioId);
+  if (t !== "property") return null;
+  const lvr = r.serviceability?.lvr ?? 0;
+  const dsr = r.serviceability?.dsr ?? 0;
+  // Safe leverage = LVR ≤ 0.70, DSR ≤ 0.35; convert into deposit guidance
+  const safeMaxLoan = inputs.capital * 4 * 0.7;
+  return `Safe range under your serviceability: LVR ≤ 70% (currently ${(lvr * 100).toFixed(0)}%), DSR ≤ 35% (currently ${(dsr * 100).toFixed(0)}%). At ${inputs.mortgageRatePct.toFixed(2)}% mortgage, the safe maximum loan is around ${fmt$M(safeMaxLoan)}; a higher deposit or smaller purchase price brings the path inside the safe envelope.`;
+}
+
+function buildAttribution(
+  r: ExtendedScenarioResult,
+  inputs: NarrativeInputs,
+  base?: ExtendedScenarioResult,
+): ScenarioAttribution {
+  return {
+    failureDrivers: failureDriversFor(r, inputs, base),
+    breakEven: breakEvenFor(r, inputs, base),
+    timing: timingFor(r),
+    safeRange: safeRangeFor(r, inputs),
+    verdict: verdictFor(r, base),
+  };
+}
+
 // ─── Per-scenario narrative ───────────────────────────────────────────────────
 
 function buildScenarioNarrative(
@@ -156,7 +380,7 @@ function buildScenarioNarrative(
 
   // ── Property ────────────────────────────────────────────────────────────────
   else if (t === "property") {
-    const leveragedPurchase = inputs.capital * 5;
+    const leveragedPurchase = inputs.capital * 4;
     headline = base && deltaVsBase > 0
       ? `Leverage the ${fmt$k(inputs.capital)} into a ${fmt$M(leveragedPurchase)} property → +${fmt$M(deltaVsBase)} net worth.`
       : `Leverage the ${fmt$k(inputs.capital)} into property → ${fmt$M(fan.p50)} median net worth.`;
@@ -253,6 +477,7 @@ function buildScenarioNarrative(
     whyItWorks,
     whatCouldGoWrong,
     confidence: scenarioConfidence(r, inputs.simulationCount),
+    attribution: buildAttribution(r, inputs, base),
   };
 }
 
@@ -331,6 +556,16 @@ export function buildComparisonNarrative(inputs: NarrativeInputs): ComparisonNar
       `Cash preserves the most optionality (highest terminal liquidity at ${fmt$M(endCash(liqWinner).p50)}) ` +
       `but at the cost of long-run net worth. Consider splitting: deploy a portion via "${winner.name}" ` +
       `and keep a portion as cash for the next opportunity.\n\n`;
+  }
+
+  // ── Failure attribution at comparison level ─────────────────────────────────
+  const failing = results.filter(r => {
+    const v = verdictFor(r, base);
+    return v === "FAILS" || v === "AT RISK";
+  });
+  if (failing.length > 0) {
+    const names = failing.map(r => `"${r.name}"`).join(", ");
+    rec += `\nRisk attribution: ${names} ${failing.length === 1 ? "shows" : "show"} elevated stress markers — see the per-scenario breakdown for the top 3 drivers (insolvency, liquidity, negative equity, or refinance pressure) and the median month each one first fires.\n\n`;
   }
 
   rec +=
