@@ -43,7 +43,7 @@ import SaveButton from "@/components/SaveButton";
 import { Input } from "@/components/ui/input";
 import { useAppStore } from "@/lib/store";
 import { maskValue } from "@/components/PrivacyMask";
-import { selectCanonicalIncome, type DashboardInputs } from "@/lib/dashboardDataContract";
+import { getHouseholdTaxInputs } from "@/lib/householdTaxInputs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -386,48 +386,37 @@ export default function Tax() {
     queryFn: () => apiRequest("GET", "/api/tax-profile").then(r => r.json()).catch(() => null),
   });
 
-  // Audit fix P1.2: derive grossSalary from the canonical income selector
-  // (ledger -> snapshot sub-fields -> snapshot master). The tax page no
-  // longer reads sf_tax_profile.{roham,fara}_salary directly unless the user
-  // explicitly enables the "override taxable income" toggle.
-  const incomeDashInputs: DashboardInputs = useMemo(() => ({
-    snapshot: snap,
-    properties: undefined,
-    stocks: undefined,
-    cryptos: undefined,
-    holdingsRaw: undefined,
-    incomeRecords: undefined,
-    expenses: undefined,
-  }), [snap]);
-  const canonicalIncome = useMemo(
-    () => selectCanonicalIncome(incomeDashInputs, taxProfile),
-    [incomeDashInputs, taxProfile],
+  // Audit fix P1.2 + #FixTaxAlphaWrongIncomeSourceStillBroken:
+  // Both Tax Calculator and Tax Alpha now flow through getHouseholdTaxInputs
+  // so they share a single source of truth for salary precedence.
+  const householdInputs = useMemo(
+    () => getHouseholdTaxInputs(snap, taxProfile, undefined),
+    [snap, taxProfile],
   );
-  const overrideActive = canonicalIncome.taxableOverrideActive;
+  const canonicalIncome = householdInputs.canonicalIncome;
+  const overrideActive  = householdInputs.overrideActive;
 
   const [roham, setRoham] = useState<PersonState>(
-    DEFAULT_PERSON("Roham", canonicalIncome.perPerson.roham.annual || 185_680)
+    DEFAULT_PERSON("Roham", householdInputs.rohamAnnual || 185_680)
   );
   const [fara, setFara] = useState<PersonState>(
-    DEFAULT_PERSON("Fara", canonicalIncome.perPerson.fara.annual)
+    DEFAULT_PERSON("Fara", householdInputs.faraAnnual)
   );
 
-  // When canonical income changes (snapshot or ledger refresh), re-seed unless
-  // the user has the override toggle on.
+  // When the shared selector resolves a new salary (snapshot/ledger refresh,
+  // or override toggle), re-seed local state. We use householdInputs.{roham,fara}Annual
+  // which already encodes the priority order, so we don't need to branch on
+  // overrideActive here.
   useEffect(() => {
-    if (overrideActive) return;
-    setRoham(prev => ({ ...prev, grossSalary: canonicalIncome.perPerson.roham.annual || prev.grossSalary }));
-    setFara (prev => ({ ...prev, grossSalary: canonicalIncome.perPerson.fara.annual  || prev.grossSalary }));
-  }, [canonicalIncome, overrideActive]);
+    setRoham(prev => ({ ...prev, grossSalary: householdInputs.rohamAnnual || prev.grossSalary }));
+    setFara (prev => ({ ...prev, grossSalary: householdInputs.faraAnnual  || prev.grossSalary }));
+  }, [householdInputs.rohamAnnual, householdInputs.faraAnnual]);
 
-  // Pre-fill from saved tax profile when it loads. Only apply salaries when
-  // override is active so canonical income remains the default.
+  // Pre-fill non-salary fields from saved tax profile. Salaries are owned
+  // by the shared selector above, so we don't touch grossSalary here —
+  // doing so would race with the household effect.
   useEffect(() => {
     if (!taxProfile) return;
-    if (overrideActive) {
-      if (taxProfile.roham_salary) setRoham(prev => ({ ...prev, grossSalary: taxProfile.roham_salary }));
-      if (taxProfile.fara_salary)  setFara (prev => ({ ...prev, grossSalary: taxProfile.fara_salary  }));
-    }
     if (taxProfile.roham_tax_year)      setRoham(prev => ({ ...prev, taxYear: taxProfile.roham_tax_year }));
     if (taxProfile.roham_super_rate)    setRoham(prev => ({ ...prev, superRate: taxProfile.roham_super_rate }));
     if (taxProfile.roham_has_private_health !== undefined)
@@ -438,7 +427,7 @@ export default function Tax() {
       setRoham(prev => ({ ...prev, hasHelpDebt: taxProfile.roham_has_help_debt }));
     if (taxProfile.fara_has_help_debt !== undefined)
       setFara(prev => ({ ...prev, hasHelpDebt: taxProfile.fara_has_help_debt }));
-  }, [taxProfile, overrideActive]);
+  }, [taxProfile]);
 
   // Override toggle handler — flips sf_tax_profile.override_active so future
   // reads of canonical income know to trust the manual salary fields.
