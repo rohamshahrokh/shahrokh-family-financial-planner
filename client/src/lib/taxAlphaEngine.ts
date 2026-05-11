@@ -572,34 +572,55 @@ export interface CanonicalIncomeLike {
   };
 }
 
+/**
+ * Minimal shape required from the shared household-tax selector. Kept as
+ * a structural interface so `taxAlphaEngine.ts` does not import
+ * `householdTaxInputs.ts` (avoids a hard cycle and lets tests pass a
+ * literal object). See `householdTaxInputs.ts` for the canonical type.
+ */
+export interface HouseholdTaxInputsLike {
+  rohamAnnual:    number;
+  faraAnnual:     number;
+  overrideActive: boolean;
+}
+
 export function buildTaxAlphaInput(
   snap: any,
   properties: any[],
   taxProfile?: any,
   canonicalIncome?: CanonicalIncomeLike,
+  household?: HouseholdTaxInputsLike,
 ): TaxAlphaInput {
   const n = (v: any) => safeNum(v);
 
-  // ── Salary source (override > canonical > snapshot) ──────────────────
+  // ── Salary source ───────────────────────────────────────────────────
+  // Priority (fix #FixTaxAlphaWrongIncomeSourceStillBroken):
+  //   1. `household` from the shared selector — single source of truth.
+  //      The Tax Calculator and Tax Alpha now both flow through
+  //      `getHouseholdTaxInputs`, so passing it here means the engine
+  //      cannot diverge from the Calculator's totals.
+  //   2. (Legacy callers only) Re-derive locally: profile override >
+  //      canonical > zero. We DO NOT fall back to snap.monthly_income
+  //      directly — that field is the COMBINED household figure and
+  //      using it as Roham's salary double-counts Fara.
   const overrideActive    = Boolean(taxProfile && taxProfile.override_active === true);
   const profileRohamAnnual = n(taxProfile?.roham_salary);
   const profileFaraAnnual  = n(taxProfile?.fara_salary);
-  const snapRohamAnnual    = n(snap.monthly_income) * 12;
-  const snapFaraAnnual     = n(snap.fara_monthly_income) * 12;
   const canonRohamAnnual   = n(canonicalIncome?.perPerson?.roham?.annual);
   const canonFaraAnnual    = n(canonicalIncome?.perPerson?.fara?.annual);
 
   let rohamAnnual: number;
   let faraAnnual:  number;
-  if (overrideActive && (profileRohamAnnual > 0 || profileFaraAnnual > 0)) {
-    rohamAnnual = profileRohamAnnual > 0 ? profileRohamAnnual : (canonRohamAnnual || snapRohamAnnual);
-    faraAnnual  = profileFaraAnnual  > 0 ? profileFaraAnnual  : (canonFaraAnnual  || snapFaraAnnual);
-  } else if (canonRohamAnnual > 0 || canonFaraAnnual > 0) {
+  if (household) {
+    // Shared selector path — preferred.
+    rohamAnnual = n(household.rohamAnnual);
+    faraAnnual  = n(household.faraAnnual);
+  } else if (overrideActive && (profileRohamAnnual > 0 || profileFaraAnnual > 0)) {
+    rohamAnnual = profileRohamAnnual > 0 ? profileRohamAnnual : canonRohamAnnual;
+    faraAnnual  = profileFaraAnnual  > 0 ? profileFaraAnnual  : canonFaraAnnual;
+  } else {
     rohamAnnual = canonRohamAnnual;
     faraAnnual  = canonFaraAnnual;
-  } else {
-    rohamAnnual = snapRohamAnnual;
-    faraAnnual  = snapFaraAnnual;
   }
 
   // ── Tax flags: prefer tax profile when explicitly set ─────────────────

@@ -14,7 +14,10 @@ import {
   type TaxAlphaResult,
 } from '@/lib/taxAlphaEngine';
 import { apiRequest } from '@/lib/queryClient';
-import { selectCanonicalIncome } from '@/lib/dashboardDataContract';
+import {
+  getHouseholdTaxInputs,
+  describeHouseholdTaxSource,
+} from '@/lib/householdTaxInputs';
 import { useAppStore } from '@/lib/store';
 import { maskValue } from '@/components/PrivacyMask';
 import { formatCurrency } from '@/lib/finance';
@@ -192,6 +195,10 @@ export default function TaxAlphaPage() {
 
   const { data: snap } = useQuery<any>({ queryKey: ['/api/snapshot'] });
   const { data: properties = [] } = useQuery<any[]>({ queryKey: ['/api/properties'] });
+  const { data: incomeRecords = [] } = useQuery<any[]>({
+    queryKey: ['/api/income'],
+    queryFn: () => apiRequest('GET', '/api/income').then(r => r.json()).catch(() => []),
+  });
   // Read the saved tax profile so Tax Alpha uses the same salary source the
   // user saved on the Tax Calculator. When override_active is on, profile
   // salaries win; otherwise we surface canonical income.
@@ -210,26 +217,24 @@ export default function TaxAlphaPage() {
     );
   }
 
-  const canonicalIncome = selectCanonicalIncome(
-    {
-      snapshot: snap,
-      properties: undefined,
-      stocks: undefined,
-      cryptos: undefined,
-      holdingsRaw: undefined,
-      incomeRecords: undefined,
-      expenses: undefined,
-    },
-    taxProfile ?? undefined,
+  // Shared selector — same one the Tax Calculator now flows through. This
+  // is what fixes the Tax Alpha / Calculator divergence (req #3).
+  const household = getHouseholdTaxInputs(
+    snap,
+    taxProfile,
+    incomeRecords,
   );
+  const canonicalIncome = household.canonicalIncome;
 
-  const input  = buildTaxAlphaInput(snap, properties, taxProfile, canonicalIncome);
+  const input  = buildTaxAlphaInput(snap, properties, taxProfile, canonicalIncome, household);
   const result = computeTaxAlpha(input);
 
-  const overrideActive = Boolean(taxProfile?.override_active === true);
+  const overrideActive = household.overrideActive;
   const sourceLabel = overrideActive
     ? 'Using saved tax profile'
-    : 'Using income ledger';
+    : (household.rohamSource === 'missing' && household.faraSource === 'missing'
+        ? 'No income configured'
+        : 'Using income ledger');
   const variancePct = canonicalIncome.taxProfileVariance?.pct ?? 0;
   const { strategies, top3, total_annual_saving, total_saving_label,
     roham_tax_now, fara_tax_now, household_tax_now, data_coverage, fy } = result;
@@ -274,15 +279,37 @@ export default function TaxAlphaPage() {
         ))}
       </div>
 
-      {/* Data coverage warning */}
-      {data_coverage !== 'full' && (
+      {/* Data coverage warning — only when actually missing.
+          Fix req #5: don't claim "Fara income missing" when it exists
+          in sf_tax_profile. */}
+      {(!household.rohamReliable || (!household.faraReliable && household.faraAnnual === 0 && !household.overrideActive)) && (
         <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/25 rounded-xl">
           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <p className="text-xs text-amber-300">
-            {data_coverage === 'partial'
-              ? 'Some data is missing (Fara income, portfolio values). Savings estimates are conservative. Add data in Settings and Property page for full analysis.'
-              : 'Income data is not set up. Strategies cannot be reliably calculated. Go to Settings → Income to add income details.'}
+            {!household.rohamReliable
+              ? 'Income data is not set up. Strategies cannot be reliably calculated. Go to Settings → Income or save a profile on the Tax Calculator.'
+              : 'Portfolio values are not set — some strategies (CGT, MLS) will be conservative. Add holdings on Stocks/Crypto pages for full analysis.'}
           </p>
+        </div>
+      )}
+
+      {/* Debug panel — temporary, controlled by ?debug=tax-alpha (req #6).
+          Lets us verify on the deployed app exactly what source Tax Alpha
+          is reading from. Will be removed once the user signs off. */}
+      {typeof window !== 'undefined' && window.location.search.includes('debug=tax-alpha') && (
+        <div
+          data-testid="tax-alpha-debug-panel"
+          className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-3 text-[11px] font-mono leading-relaxed text-cyan-200"
+        >
+          <div className="font-bold text-cyan-300 mb-1">[debug] Tax Alpha inputs</div>
+          <div>override_active: <b>{String(household.overrideActive)}</b></div>
+          <div>roham: <b>${input.roham_annual_income.toLocaleString('en-AU')}</b> from <b>{describeHouseholdTaxSource(household.rohamSource)}</b></div>
+          <div>fara: <b>${input.fara_annual_income.toLocaleString('en-AU')}</b> from <b>{describeHouseholdTaxSource(household.faraSource)}</b></div>
+          <div>combined: <b>${household.combinedAnnual.toLocaleString('en-AU')}</b></div>
+          <div>tax_profile.roham_salary: {taxProfile?.roham_salary ?? '(null)'}</div>
+          <div>tax_profile.fara_salary: {taxProfile?.fara_salary ?? '(null)'}</div>
+          <div>tax_profile.override_active: {String(taxProfile?.override_active ?? null)}</div>
+          <div>canonical.source: {canonicalIncome.source}</div>
         </div>
       )}
 
