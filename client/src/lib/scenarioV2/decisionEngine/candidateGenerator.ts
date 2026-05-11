@@ -230,6 +230,48 @@ export interface QuickDecisionOutput {
     whatCouldInvalidate: string[];
     secondPlaceAndWhy: string;
   };
+  /**
+   * Phase 2.4 — phased execution plan for the WINNER, built deterministically
+   * from the candidate's events (activationMonth ↦ phase bucket). One row per
+   * phase, each with start/end month, a label, and the engine-generated
+   * effects of every event in that phase. No AI; no placeholders.
+   */
+  executionPlan: ExecutionPlanPhase[];
+  /**
+   * Phase 2.4 — conditional / event-driven recommendations, derived from the
+   * winner's serviceability bands, MC stress probabilities and registry
+   * constraints. Each rec carries an explicit trigger condition so the user
+   * sees exactly when to act, not just what to do.
+   */
+  conditionalRecommendations: ConditionalRecommendation[];
+}
+
+export interface ExecutionPlanPhase {
+  /** 0-indexed phase number — "Phase 1", "Phase 2", … */
+  index: number;
+  /** Human label, e.g. "Months 0-3 · Setup". */
+  label: string;
+  /** Inclusive start month (MonthKey from first event in phase). */
+  startMonth: string;
+  /** Inclusive end month (MonthKey from last event in phase, or start if single event). */
+  endMonth: string;
+  /** Lines describing each action in this phase (engine-generated effects). */
+  actions: { event: string; effect: string }[];
+  /** One-line summary of why this phase is grouped together. */
+  rationale: string;
+}
+
+export interface ConditionalRecommendation {
+  /** Stable id so the UI can key + the PDF can cite. */
+  id: string;
+  /** Plain-language trigger condition. */
+  trigger: string;
+  /** Concrete action to take when the trigger fires. */
+  action: string;
+  /** Why this rec exists — links to the engine field that drove it. */
+  rationale: string;
+  /** Severity for UI tone — "info" doesn't alarm; "warn" amber; "critical" rose. */
+  severity: "info" | "warn" | "critical";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1121,6 +1163,10 @@ export async function generateQuickDecisionCandidates(
       : "No runner-up — only one candidate cleared filters.",
   };
 
+  // Phase 2.4 — build execution plan + conditional recs for the winner.
+  const executionPlan = winner ? buildExecutionPlan(winner) : [];
+  const conditionalRecommendations = winner ? buildConditionalRecommendations(winner) : [];
+
   return {
     question: input.question.kind,
     capital: input.question.capital,
@@ -1131,7 +1177,148 @@ export async function generateQuickDecisionCandidates(
     baseScenarioResult: baseResult,
     generatedAt: new Date().toISOString(),
     comparativeNarrative,
+    executionPlan,
+    conditionalRecommendations,
   };
+}
+
+// ----------------------------------------------------------------------------
+// Phase 2.4 — phased execution plan + conditional recs (deterministic)
+// ----------------------------------------------------------------------------
+
+function buildExecutionPlan(c: RankedCandidate): ExecutionPlanPhase[] {
+  if (!c.events || c.events.length === 0) return [];
+
+  // Sort by activationMonth (MonthKey "YYYY-MM" sorts lexicographically).
+  const sorted = [...c.events].sort((a, b) =>
+    a.activationMonth.localeCompare(b.activationMonth)
+  );
+
+  // Bucket events into phases by month-gap. Events within the same calendar
+  // quarter (≤3 month gap) form one phase; bigger gaps split phases.
+  type Bucket = { events: typeof sorted; startKey: string; endKey: string };
+  const buckets: Bucket[] = [];
+  for (const e of sorted) {
+    const last = buckets[buckets.length - 1];
+    if (!last) {
+      buckets.push({ events: [e], startKey: e.activationMonth, endKey: e.activationMonth });
+      continue;
+    }
+    if (monthDiff(last.endKey, e.activationMonth) <= 3) {
+      last.events.push(e);
+      last.endKey = e.activationMonth;
+    } else {
+      buckets.push({ events: [e], startKey: e.activationMonth, endKey: e.activationMonth });
+    }
+  }
+
+  return buckets.map((b, idx) => {
+    const actions = b.events.map(e => ({
+      event: e.deltaType,
+      effect: summariseDelta(e),
+    }));
+    const monthsLabel = b.startKey === b.endKey
+      ? `Month ${b.startKey}`
+      : `${b.startKey} → ${b.endKey}`;
+    const phaseLabel = idx === 0 ? "Setup"
+      : idx === buckets.length - 1 ? "Steady state"
+      : `Phase ${idx + 1}`;
+    return {
+      index: idx,
+      label: `${monthsLabel} · ${phaseLabel}`,
+      startMonth: b.startKey,
+      endMonth: b.endKey,
+      actions,
+      rationale: actions.length === 1
+        ? `Single action: ${actions[0].event}.`
+        : `${actions.length} actions grouped within a 3-month window for execution coherence.`,
+    };
+  });
+}
+
+function monthDiff(a: string, b: string): number {
+  // "YYYY-MM" — deterministic numeric diff. Returns months from a to b.
+  const [ay, am] = a.split("-").map(Number);
+  const [by, bm] = b.split("-").map(Number);
+  if (!isFinite(ay) || !isFinite(am) || !isFinite(by) || !isFinite(bm)) return 0;
+  return (by - ay) * 12 + (bm - am);
+}
+
+function buildConditionalRecommendations(c: RankedCandidate): ConditionalRecommendation[] {
+  const recs: ConditionalRecommendation[] = [];
+  const r = c.result;
+  const nsr = r.serviceability.nsr;
+  const finalFan = r.netWorthFan[r.netWorthFan.length - 1];
+
+  // Rate-rise trigger — NSR within 30bps of 1.0 buffered.
+  if (nsr < 1.30) {
+    const headroomBps = Math.max(0, (nsr - 1.0) * 300);
+    recs.push({
+      id: "refi-pressure-watch",
+      trigger: `RBA cash rate rises by ≥ ${headroomBps.toFixed(0)} bps (NSR floor breach)`,
+      action: "Lock in a fixed-rate split on the next refinance window, or accelerate offset balance to restore NSR ≥ 1.0.",
+      rationale: `Current NSR @ buffered rate = ${nsr.toFixed(2)}. Headroom equals ${headroomBps.toFixed(0)} bps before refinance stress band fires.`,
+      severity: nsr < 1.10 ? "critical" : "warn",
+    });
+  }
+
+  // Liquidity exhaustion — the engine measures cash ≤ 0 in any month.
+  if (r.liquidityExhaustionProbability > 0.05) {
+    recs.push({
+      id: "liquidity-floor-rebuild",
+      trigger: `Two consecutive months where cash buffer falls below the required liquidity floor`,
+      action: "Pause discretionary contributions to growth assets, redirect surplus into offset/HISA until buffer rebuilds to floor + 1 month.",
+      rationale: `Liquidity-exhaustion probability ${(r.liquidityExhaustionProbability * 100).toFixed(1)}% in MC — above the 5% comfort threshold.`,
+      severity: r.liquidityExhaustionProbability > 0.15 ? "critical" : "warn",
+    });
+  }
+
+  // Default-probability trigger.
+  if (r.defaultProbability > 0.05) {
+    recs.push({
+      id: "income-shock-protocol",
+      trigger: "Household income drops by ≥ 20% for 3+ months (illness, redundancy, business disruption)",
+      action: "Activate the documented income-shock protocol: defer offset surplus, draw 1-month buffer to cover P&I, contact lender re: hardship variation.",
+      rationale: `Base-case insolvency probability ${(r.defaultProbability * 100).toFixed(1)}% — income shocks compound this beyond the 20% rejection bar.`,
+      severity: r.defaultProbability > 0.10 ? "critical" : "warn",
+    });
+  }
+
+  // Negative-equity trigger.
+  if (finalFan && finalFan.p10 < 0) {
+    recs.push({
+      id: "market-correction-watch",
+      trigger: "Property market correction > 15% within 24 months, OR equity market drawdown > 30% within 12 months",
+      action: "Hold steady on rebalancing; suspend new leveraged property purchases; review investment thesis at next quarter-end.",
+      rationale: `P10 terminal NW = ${(finalFan.p10 / 1_000_000).toFixed(2)}M (negative). Path is correction-sensitive in the bottom decile.`,
+      severity: "warn",
+    });
+  }
+
+  // FIRE checkpoint — only if MC suggests retirement is on the table.
+  if (r.scenarioId && r.netWorthFan.length > 0) {
+    const lastP50 = finalFan?.p50 ?? 0;
+    if (lastP50 > 0) {
+      recs.push({
+        id: "fire-checkpoint",
+        trigger: "Annual NW review shows median trajectory > 10% ahead of projection",
+        action: "Consider rebalancing one stage earlier than planned (e.g. shift +5% from growth to defensive at age-55 milestone).",
+        rationale: `Median terminal NW = ${(lastP50 / 1_000_000).toFixed(2)}M. Outperformance creates the option to de-risk sooner without sacrificing FIRE.`,
+        severity: "info",
+      });
+    }
+  }
+
+  // Always include a residual review reminder.
+  recs.push({
+    id: "quarterly-review",
+    trigger: "Every 90 days, regardless of conditions",
+    action: "Re-run this Decision Engine against the latest ledger snapshot. Flag any axis whose score moved by > 5 points.",
+    rationale: "Plan drift is the dominant failure mode for multi-year recommendations. Quarterly re-runs are the floor of disciplined execution.",
+    severity: "info",
+  });
+
+  return recs;
 }
 
 function buildInvalidationConditions(c: RankedCandidate): string[] {

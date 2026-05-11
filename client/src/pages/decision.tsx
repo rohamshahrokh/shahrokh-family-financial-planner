@@ -66,6 +66,10 @@ import {
   WinnerVsRunnerUp,
   InvalidationEngine,
 } from "@/components/decisionEngine/ScoreVisualizations";
+import {
+  ExecutionPlanTimeline,
+  ConditionalRecsList,
+} from "@/components/decisionEngine/RecommendationLayer";
 
 // Embedded power-user tab — re-uses every line of premium Scenario Lab UX.
 import ScenarioCompareV2Page from "./scenario-compare-v2";
@@ -601,6 +605,26 @@ function QuickDecisionTab() {
             {output && (
               <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
                 <InvalidationEngine output={output} fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }} />
+              </div>
+            )}
+
+            {/* Phase 2.4: Phased execution plan */}
+            {output && output.executionPlan.length > 0 && (
+              <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+                <ExecutionPlanTimeline
+                  phases={output.executionPlan}
+                  fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
+                />
+              </div>
+            )}
+
+            {/* Phase 2.4: Conditional / event-driven recommendations */}
+            {output && output.conditionalRecommendations.length > 0 && (
+              <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+                <ConditionalRecsList
+                  recommendations={output.conditionalRecommendations}
+                  fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
+                />
               </div>
             )}
           </CardContent>

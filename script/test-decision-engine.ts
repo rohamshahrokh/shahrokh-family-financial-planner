@@ -552,6 +552,80 @@ function inputFor(
   assert("Different profiles share same candidate ID set (filtering unchanged)",
     sameIds);
 
+  section("12. Phase 2.4 — execution plan + conditional recommendations");
+
+  const p24 = await generateQuickDecisionCandidates(inputFor(healthySnapshot(), 100_000));
+
+  assert(
+    "executionPlan is an array",
+    Array.isArray(p24.executionPlan),
+  );
+  if (p24.ranked.length > 0) {
+    assert(
+      "executionPlan has at least one phase when winner has events",
+      p24.executionPlan.length > 0 || p24.ranked[0].events.length === 0,
+    );
+    for (const phase of p24.executionPlan) {
+      assert(
+        `phase ${phase.index} has start ≤ end month`,
+        phase.startMonth.localeCompare(phase.endMonth) <= 0,
+      );
+      assert(
+        `phase ${phase.index} has at least one action`,
+        phase.actions.length >= 1,
+      );
+      assert(
+        `phase ${phase.index} label contains the phase month range`,
+        phase.label.includes(phase.startMonth) || phase.label.includes("Month"),
+      );
+    }
+    // Phases must be temporally ordered.
+    for (let i = 1; i < p24.executionPlan.length; i++) {
+      assert(
+        `phase ${i} starts after phase ${i - 1}`,
+        p24.executionPlan[i].startMonth.localeCompare(p24.executionPlan[i - 1].endMonth) >= 0,
+      );
+    }
+  }
+
+  assert(
+    "conditionalRecommendations is an array",
+    Array.isArray(p24.conditionalRecommendations),
+  );
+  if (p24.ranked.length > 0) {
+    assert(
+      "conditionalRecommendations includes at least the quarterly-review fallback",
+      p24.conditionalRecommendations.some(r => r.id === "quarterly-review"),
+    );
+    for (const rec of p24.conditionalRecommendations) {
+      assert(
+        `rec ${rec.id} has non-empty trigger / action / rationale`,
+        rec.trigger.length > 0 && rec.action.length > 0 && rec.rationale.length > 0,
+      );
+      assert(
+        `rec ${rec.id} has valid severity`,
+        rec.severity === "info" || rec.severity === "warn" || rec.severity === "critical",
+      );
+    }
+    // ids must be unique.
+    const recIds = p24.conditionalRecommendations.map(r => r.id);
+    assert(
+      "conditionalRecommendation ids are unique",
+      new Set(recIds).size === recIds.length,
+    );
+  }
+
+  // Determinism — same input must produce identical execution plan + recs.
+  const p24b = await generateQuickDecisionCandidates(inputFor(healthySnapshot(), 100_000));
+  assert(
+    "executionPlan deterministic across reruns",
+    JSON.stringify(p24.executionPlan) === JSON.stringify(p24b.executionPlan),
+  );
+  assert(
+    "conditionalRecommendations deterministic across reruns",
+    JSON.stringify(p24.conditionalRecommendations) === JSON.stringify(p24b.conditionalRecommendations),
+  );
+
   // ─── Summary ───────────────────────────────────────────────────────────────
 
   process.stdout.write(`\n${"━".repeat(60)}\n`);
