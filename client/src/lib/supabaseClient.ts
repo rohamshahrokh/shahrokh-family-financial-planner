@@ -744,28 +744,112 @@ export const sbMCFirePresets = {
 
 // ─── Tax Profile ──────────────────────────────────────────────────────────────
 // Persists tax calculator inputs to sf_tax_profile
+//
+// Schema (see migration): one row per owner_id (UNIQUE constraint
+// sf_tax_profile_owner_id_key). All tax inputs for Roham + Fara live in a
+// single flat row (`roham_*` and `fara_*` columns). Tax year is a column on
+// that single row, NOT a row dimension — so the intended model is exactly
+// one profile per owner, and the conflict target is `owner_id` alone.
+//
+// Save strategy (defensive, two-layer):
+//   1. Query existing row by owner_id.
+//      - If found: PATCH update by id   → matches PK, can never violate
+//                                          the owner_id UNIQUE constraint.
+//      - If not:   POST insert with explicit `on_conflict=owner_id` and
+//                  `resolution=merge-duplicates` as a belt-and-braces guard
+//                  against the race where another tab inserted first.
+//
+// Why the old POST-only path failed:
+//   The previous implementation POSTed with
+//     Prefer: resolution=merge-duplicates,return=representation
+//   but DID NOT pass `?on_conflict=owner_id` on the URL. PostgREST then
+//   falls back to the primary key (`id`) — which is not in the payload —
+//   so it executed a plain INSERT and hit the owner_id UNIQUE constraint
+//   the second time the user saved → error 23505 ("duplicate key value
+//   violates unique constraint sf_tax_profile_owner_id_key").
+
+const TAX_PROFILE_OWNER_ID = 'shahrokh-family-main';
+
+function friendlyTaxProfileError(stage: string, status: number, body: string): Error {
+  // Surface a user-readable hint while preserving full server response for logs.
+  let hint = 'Could not save tax profile. Please try again.';
+  if (status === 401 || status === 403) {
+    hint = 'Save blocked by permissions. Please refresh and sign in again.';
+  } else if (status === 409 || body.includes('23505')) {
+    hint = 'Tax profile already exists — updating existing record. Please retry once.';
+  } else if (status >= 500) {
+    hint = 'Supabase is temporarily unavailable. Please try again in a moment.';
+  }
+  const err = new Error(`${hint} [${stage} ${status}] ${body}`);
+  (err as any).status = status;
+  (err as any).stage = stage;
+  return err;
+}
 
 export const sbTaxProfile = {
   async get(): Promise<any | null> {
     try {
-      const rows = await sbGet('sf_tax_profile', 'owner_id=eq.shahrokh-family-main&limit=1');
+      const rows = await sbGet(
+        'sf_tax_profile',
+        `owner_id=eq.${TAX_PROFILE_OWNER_ID}&limit=1`,
+      );
       return rows[0] ?? null;
     } catch { return null; }
   },
 
   async upsert(data: any): Promise<any> {
-    const payload = { ...data, owner_id: 'shahrokh-family-main' };
-    const res = await fetch(`${BASE}/sf_tax_profile`, {
-      method: 'POST',
-      headers: {
-        ...HEADERS,
-        Prefer: 'resolution=merge-duplicates,return=representation',
+    // Always force owner_id — never trust caller to set it.
+    const payload = { ...data, owner_id: TAX_PROFILE_OWNER_ID };
+
+    // Strip client-managed fields if present; DB columns own their defaults.
+    delete (payload as any).id;
+    delete (payload as any).created_at;
+    delete (payload as any).updated_at;
+
+    // ── Step 1: look up existing row by owner_id ──────────────────────────
+    let existing: any | null = null;
+    try {
+      const rows = await sbGet(
+        'sf_tax_profile',
+        `owner_id=eq.${TAX_PROFILE_OWNER_ID}&select=id&limit=1`,
+      );
+      existing = rows[0] ?? null;
+    } catch {
+      // Read failure should not block a save attempt — fall through to insert path.
+      existing = null;
+    }
+
+    // ── Step 2a: UPDATE existing row by primary key (safe; cannot duplicate) ─
+    if (existing?.id != null) {
+      const res = await fetch(
+        `${BASE}/sf_tax_profile?id=eq.${encodeURIComponent(String(existing.id))}`,
+        {
+          method: 'PATCH',
+          headers: { ...HEADERS, Prefer: 'return=representation' },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!res.ok) {
+        throw friendlyTaxProfileError('update', res.status, await res.text());
+      }
+      const rows = await res.json();
+      return rows[0];
+    }
+
+    // ── Step 2b: INSERT new row, with on_conflict guard for race conditions ─
+    const res = await fetch(
+      `${BASE}/sf_tax_profile?on_conflict=owner_id`,
+      {
+        method: 'POST',
+        headers: {
+          ...HEADERS,
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    });
+    );
     if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`sbTaxProfile.upsert failed: ${err}`);
+      throw friendlyTaxProfileError('insert', res.status, await res.text());
     }
     const rows = await res.json();
     return rows[0];
