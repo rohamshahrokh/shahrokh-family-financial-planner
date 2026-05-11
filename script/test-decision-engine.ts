@@ -299,6 +299,56 @@ function inputFor(
     healthyOut.ranked.every(c => c.result.defaultProbability <= 0.20),
   );
 
+  section("4b. Phase 2.7 — discard transparency contract");
+
+  // Every discarded entry MUST carry the new transparency fields. No silent drops.
+  assert(
+    "Every discarded entry has severity field (hard_blocker | soft_warning)",
+    healthyOut.discarded.every(d => d.severity === "hard_blocker" || d.severity === "soft_warning"),
+  );
+  assert(
+    "Every discarded entry has override.{possible, mechanism}",
+    healthyOut.discarded.every(
+      d => typeof d.override?.possible === "boolean" && typeof d.override?.mechanism === "string" && d.override.mechanism.length > 0,
+    ),
+  );
+  assert(
+    "Every discarded entry has profileContext field",
+    healthyOut.discarded.every(d => typeof d.profileContext === "string" && d.profileContext.length > 0),
+  );
+
+  // Severity/stage mapping invariant: behavioural ⇒ soft_warning, safety_ceiling ⇒ hard_blocker
+  assert(
+    "behavioural stage always maps to soft_warning severity",
+    healthyOut.discarded.every(d => d.stage !== "behavioural" || d.severity === "soft_warning"),
+  );
+  assert(
+    "safety_ceiling stage always maps to hard_blocker severity",
+    healthyOut.discarded.every(d => d.stage !== "safety_ceiling" || d.severity === "hard_blocker"),
+  );
+
+  // profileContext must match the run's investorProfile (audit trail integrity)
+  assert(
+    "discarded.profileContext === output.investorProfile for all rows",
+    healthyOut.discarded.every(d => d.profileContext === healthyOut.investorProfile),
+  );
+
+  // Crypto concentration kill is overridable (constraintKey: maxCryptoSharePct)
+  if (cryptoKill) {
+    assert(
+      "Crypto concentration kill is overridable with constraintKey=maxCryptoSharePct",
+      cryptoKill.override.possible === true && cryptoKill.override.constraintKey === "maxCryptoSharePct",
+      `possible=${cryptoKill.override.possible}, key=${cryptoKill.override.constraintKey}`,
+    );
+  }
+
+  // No path may silently disappear — ranked + discarded must equal blueprint count
+  assert(
+    "No silent drops: ranked + discarded === blueprints for stressed run too",
+    stressedOut.ranked.length + stressedOut.discarded.length === 16,
+    `${stressedOut.ranked.length} + ${stressedOut.discarded.length} != 16`,
+  );
+
   section("5. Scoring sanity");
 
   if (healthyOut.ranked.length >= 2) {

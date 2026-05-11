@@ -182,6 +182,23 @@ export interface DiscardedCandidate {
   stage: "behavioural" | "safety_ceiling";
   reason: string;
   detail: string;
+  /**
+   * Phase 2.7 — explicit transparency layer.
+   *  - "hard_blocker": ceiling breach (LVR, DSR-critical, NSR floor, default-prob).
+   *    Cannot be silently ignored; only overridable via input.constraints.
+   *  - "soft_warning": behavioural realism rule (zero-cash, leverage at T=0,
+   *    crypto concentration). Engine still discards, but user CAN override
+   *    by re-running with a relaxed constraint or smaller capital.
+   */
+  severity: "hard_blocker" | "soft_warning";
+  /** Whether the user can override this filter (and how). Null = not overridable. */
+  override: {
+    possible: boolean;
+    mechanism: string;       // e.g. "Relax maxLvr in constraints" or "Reduce capital allocation"
+    constraintKey?: string;  // matching key in QuickDecisionInput.constraints
+  };
+  /** Investor profile under which this discard occurred (for audit). */
+  profileContext: InvestorProfile;
 }
 
 export interface ExplainabilityTrace {
@@ -657,7 +674,12 @@ function checkBehaviouralRealism(
   blueprint: CandidateBlueprint,
   ctx: DerivedContext,
   constraints: typeof DEFAULT_CONSTRAINTS,
-): { passed: boolean; reason?: string; detail?: string } {
+): {
+  passed: boolean;
+  reason?: string;
+  detail?: string;
+  override?: { possible: boolean; mechanism: string; constraintKey?: string };
+} {
   // Zero-cash plan check: if 100% of capital is deployed and ctx.cashToday is
   // tight relative to monthly expenses, this would leave zero buffer.
   if (
@@ -671,6 +693,10 @@ function checkBehaviouralRealism(
       passed: false,
       reason: "Zero-cash plan",
       detail: `Deploying ${ctx.capital.toFixed(0)} now leaves less than 1 month of expenses in cash. Required ≥1mo buffer remaining.`,
+      override: {
+        possible: true,
+        mechanism: `Reduce deployed capital so cash ≥ ${ctx.monthlyExpenses.toFixed(0)} post-deployment, or stage with DCA/timing.`,
+      },
     };
   }
 
@@ -682,6 +708,10 @@ function checkBehaviouralRealism(
         passed: false,
         reason: "Max-leverage at T=0",
         detail: `IP at T=0 leaves <12mo cash buffer. Need ≥${(12 * ctx.monthlyExpenses).toFixed(0)} post-deposit, have ${buffer.toFixed(0)}.`,
+        override: {
+          possible: true,
+          mechanism: "Delay property purchase (e.g. IP @ 6mo or 18mo blueprint) to build buffer, or reduce deposit.",
+        },
       };
     }
   }
@@ -695,6 +725,11 @@ function checkBehaviouralRealism(
         passed: false,
         reason: "Crypto concentration",
         detail: `Pure-crypto allocation would exceed ${(constraints.maxCryptoSharePct * 100).toFixed(0)}% of total portfolio.`,
+        override: {
+          possible: true,
+          mechanism: `Raise maxCryptoSharePct in constraints (current ${(constraints.maxCryptoSharePct * 100).toFixed(0)}%) or pick a mixed-allocation path.`,
+          constraintKey: "maxCryptoSharePct",
+        },
       };
     }
   }
@@ -712,14 +747,20 @@ function checkSafetyCeilings(
   ctx: DerivedContext,
   household: { dependants: number; incomeVolatility: number },
   constraints: typeof DEFAULT_CONSTRAINTS,
-): { passed: boolean; reason?: string; detail?: string; bands: {
-  dsr: DsrBand;
-  worstLvr: number;
-  worstNsr: number;
-  refi: RefinancePressureBand;
-  liquidityRatioMin: number;
-  liquidityFloor: number;
-} } {
+): {
+  passed: boolean;
+  reason?: string;
+  detail?: string;
+  override?: { possible: boolean; mechanism: string; constraintKey?: string };
+  bands: {
+    dsr: DsrBand;
+    worstLvr: number;
+    worstNsr: number;
+    refi: RefinancePressureBand;
+    liquidityRatioMin: number;
+    liquidityFloor: number;
+  };
+} {
   const sv = result.serviceability as { dsr: number; lvr: number; nsr: number };
   const dsrB = dsrBand(sv.dsr);
   const lvr = sv.lvr;
@@ -764,6 +805,11 @@ function checkSafetyCeilings(
       passed: false,
       reason: `LVR > ${(constraints.maxLvr * 100).toFixed(0)}%`,
       detail: `Median LVR ${(lvr * 100).toFixed(1)}% breaches absolute ceiling.`,
+      override: {
+        possible: true,
+        mechanism: `Raise maxLvr in constraints (current ${(constraints.maxLvr * 100).toFixed(0)}%) — NOT recommended above 0.85 under APRA buffer.`,
+        constraintKey: "maxLvr",
+      },
       bands,
     };
   }
@@ -772,6 +818,10 @@ function checkSafetyCeilings(
       passed: false,
       reason: "DSR critical",
       detail: `Median DSR ${(sv.dsr * 100).toFixed(1)}% sits in critical band (≥55%).`,
+      override: {
+        possible: false,
+        mechanism: "Hard institutional ceiling — DSR ≥55% is unserviceable under APRA buffer; not overridable.",
+      },
       bands,
     };
   }
@@ -780,6 +830,11 @@ function checkSafetyCeilings(
       passed: false,
       reason: "NSR buffered < min",
       detail: `Buffered NSR ${nsr.toFixed(2)} below ${constraints.minNsrBuffered}.`,
+      override: {
+        possible: true,
+        mechanism: `Lower minNsrBuffered in constraints (current ${constraints.minNsrBuffered}) — NOT recommended below 0.80.`,
+        constraintKey: "minNsrBuffered",
+      },
       bands,
     };
   }
@@ -788,6 +843,10 @@ function checkSafetyCeilings(
       passed: false,
       reason: "High default probability",
       detail: `P(default within horizon) = ${(result.defaultProbability * 100).toFixed(1)}% — exceeds 20% acceptability bar.`,
+      override: {
+        possible: false,
+        mechanism: "Institutional floor — paths with >20% default probability are not overridable in Quick Decision.",
+      },
       bands,
     };
   }
@@ -1081,6 +1140,9 @@ export async function generateQuickDecisionCandidates(
         id: blueprint.id, label: blueprint.label,
         stage: "behavioural",
         reason: beh.reason!, detail: beh.detail!,
+        severity: "soft_warning",
+        override: beh.override ?? { possible: false, mechanism: "Not overridable — behavioural-realism floor." },
+        profileContext: profileId,
       });
       continue;
     }
@@ -1112,6 +1174,9 @@ export async function generateQuickDecisionCandidates(
         id: blueprint.id, label: blueprint.label,
         stage: "safety_ceiling",
         reason: safety.reason!, detail: safety.detail!,
+        severity: "hard_blocker",
+        override: safety.override ?? { possible: false, mechanism: "Hard institutional ceiling — not overridable in Quick Decision." },
+        profileContext: profileId,
       });
       continue;
     }

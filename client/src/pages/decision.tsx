@@ -36,7 +36,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
   Trophy, Shield, Droplet, TrendingDown, Target, Info, Eye, EyeOff, ShieldAlert,
-  Beaker, ListChecks, XCircle, Activity, SlidersHorizontal,
+  Beaker, ListChecks, XCircle, Activity, SlidersHorizontal, FileDown,
 } from "lucide-react";
 
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
@@ -54,8 +54,10 @@ import {
 } from "@/lib/scenarioV2/decisionEngine/candidateGenerator";
 import {
   listInvestorProfiles,
+  PROFILE_REGISTRY,
   type InvestorProfile,
 } from "@/lib/scenarioV2/registry";
+import { generateQuickDecisionPdf } from "@/lib/scenarioV2/quickDecisionPdf";
 import {
   FanChart,
   DistributionHistogram,
@@ -177,6 +179,7 @@ function QuickDecisionTab() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [showDiscarded, setShowDiscarded] = useState(false);
 
   // ── Question-switching reset (Session 6 bug fix) ──────────────────────────
@@ -257,6 +260,28 @@ function QuickDecisionTab() {
       setError(err?.message ?? String(err));
     } finally {
       setRunning(false);
+    }
+  }
+
+  // ── PDF export (Phase 2.7) ─────────────────────────────────────────────────
+  async function handleDownloadPdf() {
+    if (!output) return;
+    setPdfBusy(true);
+    try {
+      const profileSpec = PROFILE_REGISTRY[output.investorProfile];
+      const doc = await generateQuickDecisionPdf({
+        householdName: "Family Wealth Lab",
+        output,
+        profile: profileSpec,
+        generatedAt: new Date().toISOString(),
+        hideValues: privacyMode,
+      });
+      const ts = new Date().toISOString().slice(0, 10);
+      doc.save(`quick-decision-${output.question}-${ts}.pdf`);
+    } catch (err: any) {
+      setError(`PDF export failed: ${err?.message ?? String(err)}`);
+    } finally {
+      setPdfBusy(false);
     }
   }
 
@@ -477,11 +502,24 @@ function QuickDecisionTab() {
                   </div>
                 )}
               </div>
-              <div className="text-right">
-                <div className="text-2xl sm:text-3xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
-                  {winner.score.score.toFixed(0)}
+              <div className="flex flex-col items-end gap-2">
+                <div className="text-right">
+                  <div className="text-2xl sm:text-3xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                    {winner.score.score.toFixed(0)}
+                  </div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">/100</div>
                 </div>
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">/100</div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs gap-1.5"
+                  onClick={handleDownloadPdf}
+                  disabled={pdfBusy}
+                  data-testid="button-download-decision-pdf"
+                >
+                  <FileDown className="h-3.5 w-3.5" />
+                  {pdfBusy ? "Generating…" : "Download report"}
+                </Button>
               </div>
             </div>
           </CardHeader>
@@ -686,24 +724,39 @@ function QuickDecisionTab() {
                   <div
                     key={d.id}
                     className="rounded-md border border-border bg-card/50 p-3"
+                    data-testid={`discarded-${d.id}`}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-semibold truncate">{d.label}</span>
-                          <Badge
-                            variant="outline"
-                            className={
-                              d.stage === "behavioural"
-                                ? "border-amber-300 text-amber-700 dark:text-amber-400 text-[10px]"
-                                : "border-rose-300 text-rose-700 dark:text-rose-400 text-[10px]"
-                            }
-                          >
-                            {d.stage === "behavioural" ? "behavioural" : "safety ceiling"}
-                          </Badge>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-semibold truncate">{d.label}</span>
+                        <Badge
+                          variant="outline"
+                          className={
+                            d.severity === "hard_blocker"
+                              ? "border-rose-400 text-rose-700 dark:text-rose-400 text-[10px] font-semibold"
+                              : "border-amber-400 text-amber-700 dark:text-amber-400 text-[10px] font-semibold"
+                          }
+                        >
+                          {d.severity === "hard_blocker" ? "HARD BLOCKER" : "SOFT WARNING"}
+                        </Badge>
+                        <Badge variant="outline" className="text-[10px] border-border text-muted-foreground">
+                          {d.stage === "behavioural" ? "behavioural" : "safety ceiling"}
+                        </Badge>
+                        <Badge variant="outline" className="text-[10px] border-indigo-300 text-indigo-700 dark:text-indigo-400">
+                          profile: {d.profileContext}
+                        </Badge>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-2 grid grid-cols-1 gap-1">
+                        <div>
+                          <span className="font-semibold text-foreground">Reason:</span> {d.reason} — {sentence(d.detail)}
                         </div>
-                        <div className="text-[11px] text-muted-foreground mt-1">
-                          <span className="font-medium">{d.reason}</span> — {sentence(d.detail)}
+                        <div>
+                          <span className="font-semibold text-foreground">Override:</span>{" "}
+                          {d.override.possible ? (
+                            <span className="text-amber-700 dark:text-amber-400">Possible — {sentence(d.override.mechanism)}</span>
+                          ) : (
+                            <span className="text-rose-700 dark:text-rose-400">Not overridable — {sentence(d.override.mechanism)}</span>
+                          )}
                         </div>
                       </div>
                     </div>
