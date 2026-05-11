@@ -78,6 +78,8 @@ export interface ExtendedScenarioResult extends ScenarioResult {
   refinancePressureProbability: number;
   /** Probability the household becomes insolvent within the horizon. */
   defaultProbability: number;
+  /** Probability cash drops to ≤0 in any month (true exhaustion, distinct from buffer warning). */
+  liquidityExhaustionProbability: number;
   /** Median month-index (0-based) when default fires across defaulting sims (null if 0%). */
   medianDefaultMonth: number | null;
   /** Median month-index when liquidity stress first fires. */
@@ -88,6 +90,10 @@ export interface ExtendedScenarioResult extends ScenarioResult {
   sequenceDispersion: ReturnType<typeof sequenceRiskMetric>;
   /** Terminal short-rate samples (for narrative). */
   terminalRates: number[];
+  /** Per-sim max drawdown samples (0..1) — peak-to-trough on NW path. */
+  maxDrawdownSamples: number[];
+  /** Terminal NW samples sorted ascending (so charts/tail metrics don't re-sort). */
+  terminalNwSorted: number[];
 }
 
 export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
@@ -145,14 +151,17 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     mortgageRate: derived.plan.assumptions.mortgageRate,
   });
 
-  const sortedTerminal = [...mc.terminalNw].sort((a, b) => a - b);
+  const sortedTerminal = mc.terminalNwSorted;
   const medianTerminalNw = sortedTerminal[Math.floor(sortedTerminal.length / 2)];
+  const initialNetWorth = netWorthOf(derived.initialState);
   const risk = computeRiskMetrics({
     terminalNw: mc.terminalNw,
     terminalCash: mc.terminalCash,
     medianFinalState: mc.medianFinalState,
     medianTerminalNw,
     monthlyExpenses: mc.medianFinalState.ttmExpenses / 12,
+    initialNetWorth,
+    maxDrawdownSamples: mc.maxDrawdownSamples,
   });
 
   const dashboardSurplus = selectMonthlySurplus(input.dashboardInputs);
@@ -178,7 +187,7 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     reconciledMonthlySurplus: reconciledSurplus,
     dashboardMonthlySurplus: dashboardSurplus,
     reconcilesToDashboard: Math.abs(reconciledSurplus - dashboardSurplus) <= 1,
-    initialNetWorth: netWorthOf(derived.initialState),
+    initialNetWorth,
     terminalNwSamples: mc.terminalNw,
     terminalCashSamples: mc.terminalCash,
     runtimeMs: mc.runtimeMs,
@@ -188,11 +197,14 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     liquidityStressProbability: mc.liquidityStressProbability,
     refinancePressureProbability: mc.refinancePressureProbability,
     defaultProbability: mc.defaultProbability,
+    liquidityExhaustionProbability: mc.liquidityExhaustionProbability,
     medianDefaultMonth: mc.medianDefaultMonth,
     medianLiquidityFirstMonth: mc.medianLiquidityFirstMonth,
     medianNegEquityFirstMonth: mc.medianNegEquityFirstMonth,
     sequenceDispersion: dispersion,
     terminalRates: mc.terminalRates,
+    maxDrawdownSamples: mc.maxDrawdownSamples,
+    terminalNwSorted: mc.terminalNwSorted,
   };
 }
 

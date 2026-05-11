@@ -180,12 +180,28 @@ export interface PortfolioState {
 
 // ─── Result (output of a full projection) ────────────────────────────────────
 
-/** P10/P50/P90 fan-chart point. */
+/**
+ * Seven-percentile fan-chart point: P5/P10/P25/P50/P75/P90/P95.
+ *
+ * Why all seven:
+ *   • P5/P95   — institutional-grade left/right tail (VaR-aligned)
+ *   • P10/P90  — outer band, preserved for backward compatibility
+ *   • P25/P75  — interquartile (likely range that anchors planning)
+ *   • P50      — median
+ *
+ * Every percentile is computed from the SAME sorted sample array per month,
+ * using linear interpolation (see `pct7` in monteCarlo.ts) — i.e. no
+ * approximation, no separate bootstrap.
+ */
 export interface FanPoint {
   month: MonthKey;
+  p5:  number;
   p10: number;
+  p25: number;
   p50: number;
+  p75: number;
   p90: number;
+  p95: number;
 }
 
 export interface ConfidenceBand {

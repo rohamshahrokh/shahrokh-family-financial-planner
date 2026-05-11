@@ -809,6 +809,121 @@ section("10. End-to-end 4-way 50k comparison");
 })();
 
 // ─── Final summary ────────────────────────────────────────────────────────────
+// ─── Phase 2.2 — fan percentiles + tail-risk metrics ────────────────────────
+section("Phase 2.2 — fan percentiles + tail-risk metrics");
+(() => {
+  const inputs: DashboardInputs = {
+    snapshot: {
+      stocks_cash_aud: 60_000, etf_balance: 80_000, crypto_balance: 25_000,
+      super_roham: 110_000, super_fara: 70_000,
+      monthly_income: 15_000,
+      monthly_expenses: 9_000,
+    },
+    properties: [
+      {
+        id: "ppor",
+        property_type: "PPOR",
+        market_value: 900_000,
+        loan_balance: 540_000,
+        rate_pct: 6.5,
+        monthly_repayment: 3_400,
+        monthly_rent: 0,
+        monthly_costs: 700,
+      },
+    ],
+    stocks: [], crypto: [], income: [], expenses: [], recurring_bills: [],
+  } as any;
+
+  const start = monthKey(new Date());
+  const r = runScenarioV2({
+    dashboardInputs: inputs,
+    name: "Phase 2.2 fan + tail risk",
+    scenarioId: "fan_tail_check",
+    deltas: [],
+    horizonMonths: 180,
+    simulationCount: 400,
+    startMonth: start,
+  });
+
+  // (a) every fan point has all seven percentiles
+  const fpt = r.netWorthFan[r.netWorthFan.length - 1];
+  assert("netWorthFan: p5 present",  Number.isFinite(fpt.p5));
+  assert("netWorthFan: p10 present", Number.isFinite(fpt.p10));
+  assert("netWorthFan: p25 present", Number.isFinite(fpt.p25));
+  assert("netWorthFan: p50 present", Number.isFinite(fpt.p50));
+  assert("netWorthFan: p75 present", Number.isFinite(fpt.p75));
+  assert("netWorthFan: p90 present", Number.isFinite(fpt.p90));
+  assert("netWorthFan: p95 present", Number.isFinite(fpt.p95));
+
+  // (b) monotonicity at every month
+  let monotonicCount = 0;
+  for (const f of r.netWorthFan) {
+    if (f.p5 <= f.p10 && f.p10 <= f.p25 && f.p25 <= f.p50 &&
+        f.p50 <= f.p75 && f.p75 <= f.p90 && f.p90 <= f.p95) {
+      monotonicCount++;
+    }
+  }
+  assert(
+    "netWorthFan: percentiles monotonically non-decreasing at every month",
+    monotonicCount === r.netWorthFan.length,
+    `${monotonicCount}/${r.netWorthFan.length} months monotonic`,
+  );
+
+  let cashMonotonic = 0;
+  for (const f of r.cashFan) {
+    if (f.p5 <= f.p10 && f.p10 <= f.p25 && f.p25 <= f.p50 &&
+        f.p50 <= f.p75 && f.p75 <= f.p90 && f.p90 <= f.p95) {
+      cashMonotonic++;
+    }
+  }
+  assert("cashFan: percentiles monotonically non-decreasing at every month", cashMonotonic === r.cashFan.length);
+
+  // (c) tail-risk shape
+  assert("riskMetrics.varDollars95 >= 0",  r.riskMetrics.varDollars95 >= 0);
+  assert("riskMetrics.cvarDollars95 >= 0", r.riskMetrics.cvarDollars95 >= 0);
+  assert("riskMetrics.cvarDollars95 >= varDollars95", r.riskMetrics.cvarDollars95 >= r.riskMetrics.varDollars95);
+  assert("riskMetrics.maxDrawdownMedian in [0,1]", r.riskMetrics.maxDrawdownMedian >= 0 && r.riskMetrics.maxDrawdownMedian <= 1);
+  assert("riskMetrics.maxDrawdownP90 in [0,1]",    r.riskMetrics.maxDrawdownP90 >= 0    && r.riskMetrics.maxDrawdownP90 <= 1);
+  assert("riskMetrics.maxDrawdownP90 >= median",   r.riskMetrics.maxDrawdownP90 >= r.riskMetrics.maxDrawdownMedian);
+
+  // (d) MC arrays exposed for downstream consumption
+  assert("result.maxDrawdownSamples length == simCount", r.maxDrawdownSamples.length === r.simulationCount);
+  assert("result.terminalNwSorted length == simCount",   r.terminalNwSorted.length === r.simulationCount);
+  let nwSortedAsc = true;
+  for (let i = 1; i < r.terminalNwSorted.length; i++) {
+    if (r.terminalNwSorted[i] < r.terminalNwSorted[i - 1]) { nwSortedAsc = false; break; }
+  }
+  assert("result.terminalNwSorted is ascending", nwSortedAsc);
+
+  // (e) liquidity exhaustion probability shape
+  assert(
+    "result.liquidityExhaustionProbability in [0,1]",
+    r.liquidityExhaustionProbability >= 0 && r.liquidityExhaustionProbability <= 1,
+  );
+  assert(
+    "Comfortable household: liquidityExhaustionProbability < 0.20",
+    r.liquidityExhaustionProbability < 0.20,
+    `got ${(r.liquidityExhaustionProbability * 100).toFixed(1)}%`,
+  );
+
+  // (f) determinism on tail metrics + drawdown samples
+  const r2 = runScenarioV2({
+    dashboardInputs: inputs,
+    name: "Phase 2.2 fan + tail risk",
+    scenarioId: "fan_tail_check",
+    deltas: [],
+    horizonMonths: 180,
+    simulationCount: 400,
+    startMonth: start,
+  });
+  assert("determinism: VaR identical across reruns",  r.riskMetrics.varDollars95  === r2.riskMetrics.varDollars95);
+  assert("determinism: CVaR identical across reruns", r.riskMetrics.cvarDollars95 === r2.riskMetrics.cvarDollars95);
+  assert(
+    "determinism: maxDrawdownSamples identical across reruns",
+    JSON.stringify(r.maxDrawdownSamples) === JSON.stringify(r2.maxDrawdownSamples),
+  );
+})();
+
 await new Promise((r) => setTimeout(r, 200)); // let async sections flush
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
