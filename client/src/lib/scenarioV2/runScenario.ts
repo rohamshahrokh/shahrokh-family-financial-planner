@@ -26,6 +26,7 @@ import { deriveBasePlan, addMonths, monthKey } from "./basePlan";
 import { buildEventStore } from "./events";
 import { runMonteCarlo } from "./monteCarlo";
 import { computeServiceability } from "./borrowing";
+import { computeRiskMetrics } from "./riskMetrics";
 import { snapshotHash, stableHash } from "./determinism";
 import type {
   BasePlanAssumptions,
@@ -66,10 +67,20 @@ export interface ExtendedScenarioResult extends ScenarioResult {
   reconcilesToDashboard: boolean;
   /** Serviceability metrics on the median final state. */
   serviceability: ReturnType<typeof computeServiceability>;
+  /** Real risk metrics derived from MC dispersion + median state. */
+  riskMetrics: import("./riskMetrics").RiskMetrics;
+  /** Cash-balance fan chart (liquidity over time). */
+  cashFan: import("./monteCarlo").MonteCarloOutput["cashFan"];
+  /** Median path NW trajectory (one number per month). */
+  medianNwPath: number[];
+  /** Median path cash trajectory. */
+  medianCashPath: number[];
   /** Initial state for diagnostics. */
   initialNetWorth: number;
   /** Terminal NW samples (length = simulationCount). */
   terminalNwSamples: number[];
+  /** Terminal cash samples. */
+  terminalCashSamples: number[];
   /** Wall-clock runtime in ms. */
   runtimeMs: number;
   /** Sim count actually executed. */
@@ -134,6 +145,17 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     mortgageRate: derived.plan.assumptions.mortgageRate,
   });
 
+  // Sort terminal samples for risk metrics + compute median expenses for runway.
+  const sortedTerminal = [...mc.terminalNw].sort((a, b) => a - b);
+  const medianTerminalNw = sortedTerminal[Math.floor(sortedTerminal.length / 2)];
+  const risk = computeRiskMetrics({
+    terminalNw: mc.terminalNw,
+    terminalCash: mc.terminalCash,
+    medianFinalState: mc.medianFinalState,
+    medianTerminalNw,
+    monthlyExpenses: mc.medianFinalState.ttmExpenses / 12,
+  });
+
   const dashboardSurplus = selectMonthlySurplus(input.dashboardInputs);
   const reconciledSurplus = derived.reconciledMonthlySurplus;
 
@@ -145,14 +167,19 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     runTimestamp: "1970-01-01T00:00:00Z", // deterministic; UI assigns real timestamp
     netWorthFan: mc.fan,
     confidence: [], // Phase 12
-    risk: null,    // Phase 10
+    risk: null,    // Phase 10 (legacy field — real metrics live on riskMetrics)
     attribution: null, // Phase 13
     serviceability: service,
+    riskMetrics: risk,
+    cashFan: mc.cashFan,
+    medianNwPath: mc.medianNwPath,
+    medianCashPath: mc.medianCashPath,
     reconciledMonthlySurplus: reconciledSurplus,
     dashboardMonthlySurplus: dashboardSurplus,
     reconcilesToDashboard: Math.abs(reconciledSurplus - dashboardSurplus) <= 1,
     initialNetWorth: netWorthOf(derived.initialState),
     terminalNwSamples: mc.terminalNw,
+    terminalCashSamples: mc.terminalCash,
     runtimeMs: mc.runtimeMs,
     simulationCount: mc.simulationCount,
     horizonMonths,

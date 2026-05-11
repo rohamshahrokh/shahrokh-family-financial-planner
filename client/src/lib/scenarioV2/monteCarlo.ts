@@ -42,11 +42,26 @@ export interface MonteCarloInput {
   parentSeed: number;
 }
 
+export interface CashFanPoint {
+  month: MonthKey;
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
 export interface MonteCarloOutput {
   fan: FanPoint[];
+  /** Cash-balance percentile bands (used for liquidity chart). */
+  cashFan: CashFanPoint[];
   /** Terminal NW samples (length = simulationCount). */
   terminalNw: number[];
-  /** Final state of the median path (closest to terminal P50). */
+  /** Terminal cash samples (length = simulationCount). */
+  terminalCash: number[];
+  /** NW trajectory of the median path (closest to terminal P50). */
+  medianNwPath: number[];
+  /** Cash trajectory of the median path. */
+  medianCashPath: number[];
+  /** Final state of the median path. */
   medianFinalState: PortfolioState;
   /** Sim count actually executed. */
   simulationCount: number;
@@ -63,12 +78,14 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
   const N = input.simulationCount;
   const M = months.length;
   const paths: number[][] = new Array(N);
+  const cashPaths: number[][] = new Array(N);
   const finalStates: PortfolioState[] = new Array(N);
 
   for (let s = 0; s < N; s++) {
     const rng = makeRng(deriveSeed(input.parentSeed, `sim:${s}`));
     let state = cloneState(input.initialState);
     const path = new Array<number>(M);
+    const cashPath = new Array<number>(M);
 
     for (let i = 0; i < M; i++) {
       const m = months[i];
@@ -81,27 +98,42 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
       };
       state = tick(state, monthEvents, input.plan.assumptions, ctx, rng);
       path[i] = netWorth(state);
+      cashPath[i] = state.cash;
     }
     paths[s] = path;
+    cashPaths[s] = cashPath;
     finalStates[s] = state;
   }
 
-  // Build P10/P50/P90 fan
+  // Build P10/P50/P90 fan (net worth + cash)
   const fan: FanPoint[] = new Array(M);
+  const cashFan: CashFanPoint[] = new Array(M);
   const buf = new Float64Array(N);
+  const cashBuf = new Float64Array(N);
   for (let i = 0; i < M; i++) {
-    for (let s = 0; s < N; s++) buf[s] = paths[s][i];
+    for (let s = 0; s < N; s++) {
+      buf[s] = paths[s][i];
+      cashBuf[s] = cashPaths[s][i];
+    }
     const sorted = Array.from(buf).sort((a, b) => a - b);
+    const cashSorted = Array.from(cashBuf).sort((a, b) => a - b);
     fan[i] = {
       month: months[i],
       p10: pct(sorted, 0.10),
       p50: pct(sorted, 0.50),
       p90: pct(sorted, 0.90),
     };
+    cashFan[i] = {
+      month: months[i],
+      p10: pct(cashSorted, 0.10),
+      p50: pct(cashSorted, 0.50),
+      p90: pct(cashSorted, 0.90),
+    };
   }
 
-  // Terminal NW samples
+  // Terminal NW + cash samples
   const terminalNw = paths.map((p) => p[M - 1]);
+  const terminalCash = cashPaths.map((p) => p[M - 1]);
 
   // Find sim whose terminal NW is closest to terminal P50 — used as
   // representative "median path"
@@ -118,7 +150,11 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
 
   return {
     fan,
+    cashFan,
     terminalNw,
+    terminalCash,
+    medianNwPath: paths[bestSim],
+    medianCashPath: cashPaths[bestSim],
     medianFinalState: finalStates[bestSim],
     simulationCount: N,
     runtimeMs: perfNow() - t0,

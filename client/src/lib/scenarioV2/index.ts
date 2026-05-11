@@ -68,7 +68,15 @@ export {
   runMonteCarlo,
   type MonteCarloInput,
   type MonteCarloOutput,
+  type CashFanPoint,
 } from "./monteCarlo";
+
+// Risk metrics
+export {
+  computeRiskMetrics,
+  type RiskMetrics,
+  type RiskInput,
+} from "./riskMetrics";
 
 // Orchestrator
 export {
