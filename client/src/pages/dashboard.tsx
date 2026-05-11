@@ -2007,11 +2007,16 @@ export default function DashboardPage() {
           ═════════════════════════════════════════════════════════════════ */}
       {dataAvailability.allActualEmpty && (
         <div className="px-4 pb-2" data-testid="banner-no-actuals">
+          {/* Audit P1-8: warning banner must stay legible in BOTH themes.
+              In light mode the previous amber-200 text on amber-500/10 bg
+              was ~2.4:1 (well below AA). We use Tailwind's dark: prefix to
+              keep the dark experience and route light mode through a high-
+              contrast amber-900 foreground. */}
           <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-            <div className="font-semibold text-amber-200">
+            <div className="font-semibold text-amber-900 dark:text-amber-200">
               No actual balances entered yet
             </div>
-            <div className="text-amber-100/80 text-xs mt-1">
+            <div className="text-amber-900/80 dark:text-amber-100/80 text-xs mt-1">
               The cards below show $0 because these sections are empty:{" "}
               {dataAvailability.emptySections.join(", ")}.
               {" "}Open the snapshot form, or the Properties / Stocks / Crypto
