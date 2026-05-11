@@ -1509,9 +1509,9 @@ export default function DashboardPage() {
       { label: "Emergency",     value: `${emergencyScore}/100`, sub: `${Math.round(monthsCovered)}mo covered`, Icon: Shield, alert: emergencyScore < 50 },
       { label: "IP Readiness",  value: `${depositReady}%`, sub: "deposit ready", Icon: Building2, alert: depositReady < 30, _pct: depositReady },
       { label: "FIRE Age",      value: `~${fireAge}`, sub: "est. financial freedom", Icon: Clock, alert: fireAge > 60 },
-      { label: "Hidden Money",  value: `${formatCurrency(hiddenMonthly * 12, true)}/yr`, sub: "potential savings", Icon: Eye, alert: hiddenMonthly > 500 },
+      { label: "Hidden Money",  value: `${maskValue(formatCurrency(hiddenMonthly * 12, true), privacyMode)}/yr`, sub: "potential savings", Icon: Eye, alert: hiddenMonthly > 500 },
     ];
-  }, [snap, surplus, savingsRate, stocksTotal, cryptoTotal, depositPowerResult]);
+  }, [snap, surplus, savingsRate, stocksTotal, cryptoTotal, depositPowerResult, privacyMode]);
 
   const fireCard        = wealthCards.find(c => c.label === "FIRE Age");
   const fireProgress    = wealthCards.find(c => c.label === "FIRE Progress");
@@ -2047,12 +2047,15 @@ export default function DashboardPage() {
             label="TOTAL INVESTMENTS"
             value={maskValue(formatCurrency(stocksTotal + cryptoTotal + ipCurrentValueSettled, true), privacyMode)}
             subValue={(() => {
+              // Audit fix P0-3: every dollar amount in a sub-label must
+              // pass through maskValue or it will leak when privacy is on.
+              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
               const parts: string[] = [];
-              if (ipCurrentValueSettled > 0) parts.push(`IPs ${formatCurrency(ipCurrentValueSettled, true)}`);
-              if (stocksTotal > 0)            parts.push(`Stocks ${formatCurrency(stocksTotal, true)}`);
-              if (cryptoTotal > 0)            parts.push(`Crypto ${formatCurrency(cryptoTotal, true)}`);
+              if (ipCurrentValueSettled > 0) parts.push(`IPs ${$(ipCurrentValueSettled)}`);
+              if (stocksTotal > 0)            parts.push(`Stocks ${$(stocksTotal)}`);
+              if (cryptoTotal > 0)            parts.push(`Crypto ${$(cryptoTotal)}`);
               if (parts.length === 0 && ipCurrentValuePlanned > 0)
-                return `${formatCurrency(ipCurrentValuePlanned, true)} planned IP`;
+                return `${$(ipCurrentValuePlanned)} planned IP`;
               return parts.length ? parts.join(" · ") : "— Stocks + Crypto + IP";
             })()}
             icon={<BarChart2 />}
@@ -2062,10 +2065,11 @@ export default function DashboardPage() {
             label="PROPERTY EQUITY"
             value={maskValue(formatCurrency(propertyEquity, true), privacyMode)}
             subValue={(() => {
+              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
               const totalPropValue = snap.ppor + ipCurrentValueSettled;
               if (totalPropValue <= 0) {
                 return ipCurrentValuePlanned > 0
-                  ? `${formatCurrency(ipCurrentValuePlanned, true)} planned`
+                  ? `${$(ipCurrentValuePlanned)} planned`
                   : "No property yet";
               }
               const lvr = Math.round((propertyEquity / totalPropValue) * 100);
@@ -2078,12 +2082,13 @@ export default function DashboardPage() {
             label="DEBT BALANCE"
             value={maskValue(formatCurrency(totalLiab, true), privacyMode)}
             subValue={(() => {
+              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
               if (totalLiab <= 0 && ipLoanBalancePlanned > 0)
-                return `${formatCurrency(ipLoanBalancePlanned, true)} planned`;
+                return `${$(ipLoanBalancePlanned)} planned`;
               const segs: string[] = [];
-              if (snap.mortgage > 0)         segs.push(`PPOR ${formatCurrency(snap.mortgage, true)}`);
-              if (ipLoanBalanceSettled > 0)  segs.push(`IP ${formatCurrency(ipLoanBalanceSettled, true)}`);
-              if (snap.other_debts > 0)      segs.push(`Other ${formatCurrency(snap.other_debts, true)}`);
+              if (snap.mortgage > 0)         segs.push(`PPOR ${$(snap.mortgage)}`);
+              if (ipLoanBalanceSettled > 0)  segs.push(`IP ${$(ipLoanBalanceSettled)}`);
+              if (snap.other_debts > 0)      segs.push(`Other ${$(snap.other_debts)}`);
               return segs.length ? segs.join(" · ") : "Mortgage + Debts";
             })()}
             trend={-1}
@@ -2103,7 +2108,8 @@ export default function DashboardPage() {
                   return s + r * 52 * (1 - v / 100) * (1 - m / 100);
                 }, 0);
                 return projAnnual > 0
-                  ? `${formatCurrency(projAnnual, true)}/yr once IPs settle`
+                  // Audit fix P0-3: sub-labels must respect privacy mode.
+                  ? `${maskValue(formatCurrency(projAnnual, true), privacyMode)}/yr once IPs settle`
                   : "None settled yet";
               }
               return "No rental / dividend income";
