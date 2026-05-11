@@ -5,6 +5,7 @@
  */
 
 import SaveButton from "@/components/SaveButton";
+import AssumptionsPanel from "@/components/AssumptionsPanel";
 import RiskRadarPage from "./risk-radar";
 import FIREPathPage from "./fire-path";
 import MonteCarloDashboard from "@/components/MonteCarloDashboard";
@@ -2835,6 +2836,9 @@ export default function WealthStrategyPage() {
         )}
         {renderTab()}
       </div>
+
+      {/* Audit fix P1.4: assumption transparency on every strategy surface. */}
+      <AssumptionsPanel mode="compact" />
     </div>
   );
 }

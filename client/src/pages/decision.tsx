@@ -81,6 +81,7 @@ import {
 
 // Embedded power-user tab — re-uses every line of premium Scenario Lab UX.
 import ScenarioCompareV2Page from "./scenario-compare-v2";
+import AssumptionsPanel from "@/components/AssumptionsPanel";
 
 // ─── Formatting helpers (mask-aware) ─────────────────────────────────────────
 
@@ -1539,6 +1540,9 @@ export default function DecisionPage() {
           <ScenarioCompareV2Page />
         </TabsContent>
       </Tabs>
+
+      {/* Audit fix P1.4: every engine assumption is surfaced here, collapsible. */}
+      <AssumptionsPanel mode="compact" />
     </div>
   );
 }

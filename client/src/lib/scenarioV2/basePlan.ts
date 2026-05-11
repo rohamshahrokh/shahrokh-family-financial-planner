@@ -22,11 +22,22 @@ import {
   selectCryptoTotal,
   selectSuperCombined,
   selectSettledIPs,
+  selectPlannedIPs,
   selectIpCurrentValueSettled,
   selectIpLoanBalanceSettled,
+  selectIpCurrentValuePlanned,
+  selectIpLoanBalancePlanned,
+  selectCanonicalNetWorth,
 } from "../dashboardDataContract";
 import { snapshotHash } from "./determinism";
-import type { BasePlan, BasePlanAssumptions, PortfolioState, PropertyState, MonthKey } from "./types";
+import type {
+  BasePlan,
+  BasePlanAssumptions,
+  BasePlanAssetTag,
+  PortfolioState,
+  PropertyState,
+  MonthKey,
+} from "./types";
 
 const num = (v: unknown): number => {
   const n = typeof v === "string" ? parseFloat(v) : (v as number);
@@ -188,6 +199,9 @@ export function deriveBasePlan(
     });
   }
 
+  // Audit fix P1.1: seed cars / iran_property / other_assets / other_debts so
+  // the engine's NW reconciles with the dashboard. These were previously
+  // excluded, opening a silent $196k gap on the real user's household.
   const initialState: PortfolioState = {
     month: startMonth,
     cash: cashToday,
@@ -196,6 +210,10 @@ export function deriveBasePlan(
     superRoham,
     superFara,
     properties,
+    cars: num(s.cars),
+    iranProperty: num(s.iran_property),
+    otherAssets: num(s.other_assets),
+    otherDebts: num(s.other_debts),
     fyTaxPaid: 0,
     ttmIncome: monthlyIncome * 12,
     ttmExpenses: (monthlyExpensesLedger + (debtIncluded ? 0 : monthlyDebt)) * 12,
@@ -238,4 +256,134 @@ function amort(principal: number, annualRate: number, termYears: number): number
   const n = termYears * 12;
   if (r === 0) return principal / n;
   return principal * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+}
+
+/**
+ * Enumerate every asset/liability bucket the base plan touches and tag it with
+ * a scope. Surfaced on /decision and /data-health so users can audit which
+ * positions feed the engine vs which are excluded.
+ *
+ * Why this exists: audit fix P1.3. Prior to the fix the engine's intake was
+ * implicit (hard-coded subset of snapshot fields). The audit surfaced cars
+ * and iran_property as silently-excluded; this inventory makes that visible.
+ */
+export function basePlanInventory(inputs: DashboardInputs): BasePlanAssetTag[] {
+  const s = inputs.snapshot ?? {};
+  const canonical = selectCanonicalNetWorth(inputs);
+  const settled = selectSettledIPs(inputs);
+  const planned = selectPlannedIPs(inputs);
+  const settledVal = canonical.assets.settledIpValue;
+  const settledLoans = canonical.liabilities.settledIpLoans;
+  const plannedVal = selectIpCurrentValuePlanned(inputs);
+  const plannedLoans = selectIpLoanBalancePlanned(inputs);
+
+  const rows: BasePlanAssetTag[] = [
+    {
+      key: "cash",
+      scope: "current",
+      label: "Cash + offset",
+      currentValue: canonical.assets.cashOffset,
+      rationale: "Liquid cash buckets and PPOR offset balance — evolves at the short rate.",
+    },
+    {
+      key: "ppor",
+      scope: "current",
+      label: "PPOR (family home)",
+      currentValue: canonical.assets.ppor,
+      rationale: "Owner-occupied dwelling — grows at the property rail with a stochastic shock.",
+    },
+    {
+      key: "superRoham",
+      scope: "current",
+      label: "Super combined",
+      currentValue: canonical.assets.super,
+      rationale: "Concessionally taxed retirement balance — locked until preservation age (60).",
+    },
+    {
+      key: "etfBalance",
+      scope: "current",
+      label: "Stocks / ETF holdings",
+      currentValue: canonical.assets.stocks,
+      rationale: "Listed equities — fat-tailed Student-t shocks with correlation to crypto and property.",
+    },
+    {
+      key: "cryptoBalance",
+      scope: "current",
+      label: "Crypto holdings",
+      currentValue: canonical.assets.crypto,
+      rationale: "Digital assets — fat-tailed with jump-diffusion overlay (mean -5% jumps, ~1.5/yr).",
+    },
+    {
+      key: "settledIP",
+      scope: "current",
+      label: `Settled IPs (${settled.length})`,
+      currentValue: settledVal - settledLoans,
+      rationale: "Investment properties already settled — modelled with rental cashflows, costs, depreciation, and CGT on sale.",
+    },
+    {
+      key: "cars",
+      scope: "non-investable",
+      label: "Cars / vehicles",
+      currentValue: canonical.assets.cars,
+      rationale: "Counted in NW for completeness but engine does not project depreciation stochastically (held flat).",
+    },
+    {
+      key: "iranProperty",
+      scope: "non-investable",
+      label: "Iran property (overseas)",
+      currentValue: canonical.assets.iranProperty,
+      rationale: "Foreign-denominated real estate — grows at half the AU property rail (FX + non-correlation haircut).",
+    },
+    {
+      key: "otherAssets",
+      scope: "non-investable",
+      label: "Other assets",
+      currentValue: canonical.assets.otherAssets,
+      rationale: "Miscellaneous self-reported assets — counted in NW but held flat by engine.",
+    },
+    {
+      key: "plannedIP",
+      scope: "planned",
+      label: `Planned IPs (${planned.length})`,
+      currentValue: plannedVal - plannedLoans,
+      rationale: "Future-settlement IPs — NOT in current NW; only deposit/stamp-duty outflows hit the projection until settlement.",
+    },
+    {
+      key: "mortgage",
+      scope: "current",
+      label: "PPOR mortgage",
+      currentValue: -canonical.liabilities.ppoMortgage,
+      rationale: "PPOR principal balance — amortised at snapshot.mortgage_rate over remaining term.",
+    },
+    {
+      key: "otherDebts",
+      scope: "current",
+      label: "Other debts (cards / personal loans)",
+      currentValue: -canonical.liabilities.otherDebts,
+      rationale: "Non-property liabilities — paid down deterministically at 15% APR / 12 monthly to mirror dashboard heuristic.",
+    },
+  ];
+  // Hide zero rows except the audit-relevant ones (cars/iran/other_debts must
+  // always be visible so users see they ARE being included).
+  return rows.filter(r => {
+    if (r.key === "cars" || r.key === "iranProperty" || r.key === "otherDebts" || r.key === "otherAssets") return true;
+    return Math.abs(r.currentValue) > 0.5;
+  });
+}
+
+/** Compute NW of a PortfolioState including non-investable buckets. */
+export function netWorthOfState(s: PortfolioState): number {
+  const propsNet = s.properties.reduce(
+    (acc, p) => acc + (p.marketValue - p.loanBalance),
+    0,
+  );
+  const cars = s.cars ?? 0;
+  const iran = s.iranProperty ?? 0;
+  const other = s.otherAssets ?? 0;
+  const debts = s.otherDebts ?? 0;
+  return (
+    s.cash + s.etfBalance + s.cryptoBalance +
+    s.superRoham + s.superFara + propsNet +
+    cars + iran + other - debts
+  );
 }

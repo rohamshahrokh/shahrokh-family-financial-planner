@@ -162,6 +162,28 @@ export interface PortfolioState {
   superRoham: number;
   superFara: number;
   properties: PropertyState[];
+  /**
+   * Cars / vehicles — non-investable but counted in NW for completeness so the
+   * engine's net worth reconciles with the dashboard. Held flat by default
+   * (depreciation modelled as zero unless rails introduce a `carsDepreciation`).
+   * Why: NW-1 audit defect — engine was excluding cars, opening a silent
+   * $65k gap vs the dashboard.
+   */
+  cars: number;
+  /**
+   * Overseas (Iran) property — non-AUD-denominated real estate held by the
+   * household. Grows at a haircut of the AU property growth rule because the
+   * macro process driving local property doesn't directly apply offshore.
+   */
+  iranProperty: number;
+  /** Other non-investable assets the user has on snapshot. Held flat. */
+  otherAssets: number;
+  /**
+   * Non-property debts (cards, personal loans, etc.). Paid down deterministically
+   * at the dashboard heuristic of 15% annual / 12 monthly so engine and dashboard
+   * use the same amortisation profile.
+   */
+  otherDebts: number;
   /** Cumulative tax paid this FY (resets each July). */
   fyTaxPaid: number;
   /** Trailing 12-month income (used by serviceability calcs). */
@@ -224,6 +246,31 @@ export interface ScenarioResult {
   attribution: Record<string, number> | null;
   /** Populated by Phase 9. Shape evolves per phase; widened to `unknown` here. */
   serviceability: unknown | null;
+}
+
+// ─── Asset scope tags (decision-engine inventory) ────────────────────────────
+
+/**
+ * How the engine treats an asset bucket in the base plan.
+ *
+ *   • current       — exists today, included in initial NW, evolves stochastically
+ *   • planned       — settles in the future, NOT in initial NW (deposits aside)
+ *   • non-investable — counted in NW but engine does NOT model returns
+ *   • excluded      — outside the scope of this base plan entirely
+ *
+ * The decision engine reports these tags so users can audit exactly which
+ * positions feed the projection. Audit defect NW-1 surfaced this gap.
+ */
+export type AssetScope = "current" | "planned" | "excluded" | "non-investable";
+
+export interface BasePlanAssetTag {
+  /** Key into PortfolioState (or synthetic id for derived buckets). */
+  key: string;
+  scope: AssetScope;
+  label: string;
+  currentValue: number;
+  /** Plain-English explanation of why this bucket carries the chosen scope. */
+  rationale: string;
 }
 
 // ─── Minimal sanity: types compile in isolation ──────────────────────────────

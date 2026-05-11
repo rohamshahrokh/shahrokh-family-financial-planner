@@ -20,6 +20,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { localStore } from "@/lib/localStore";
 import { useLocation } from "wouter";
+import AssumptionsPanel from "@/components/AssumptionsPanel";
 import { formatCurrency, safeNum } from "@/lib/finance";
 // Single-source-of-truth selectors. Financial Plan now DISPLAYS derived values
 // (income from ledger, expenses from budget, mortgage repayment from debt
@@ -938,6 +939,9 @@ export default function MyFinancialPlan() {
           <ArrowRight className="w-3.5 h-3.5" />
         </Button>
       </div>
+
+      {/* Audit fix P1.4: full assumption transparency on the financial plan surface. */}
+      <AssumptionsPanel mode="compact" />
     </div>
   );
 }

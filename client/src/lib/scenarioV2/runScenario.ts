@@ -24,8 +24,14 @@
  */
 
 import type { DashboardInputs } from "../dashboardDataContract";
-import { selectMonthlySurplus } from "../dashboardDataContract";
-import { deriveBasePlan, addMonths, monthKey } from "./basePlan";
+import {
+  selectMonthlySurplus,
+  selectCanonicalNetWorth,
+  reconcileNetWorth,
+  type CanonicalNetWorth,
+  type NwReconciliation,
+} from "../dashboardDataContract";
+import { deriveBasePlan, addMonths, monthKey, netWorthOfState } from "./basePlan";
 import { buildEventStore } from "./events";
 import { runMonteCarlo } from "./monteCarlo";
 import { computeServiceability } from "./borrowing";
@@ -94,6 +100,12 @@ export interface ExtendedScenarioResult extends ScenarioResult {
   maxDrawdownSamples: number[];
   /** Terminal NW samples sorted ascending (so charts/tail metrics don't re-sort). */
   terminalNwSorted: number[];
+  /** Canonical dashboard NW breakdown (audit fix P1.1). */
+  canonicalNetWorth: CanonicalNetWorth;
+  /** Engine-vs-dashboard NW reconciliation result. */
+  netWorthReconciliation: NwReconciliation;
+  /** Non-fatal warnings collected during the run (e.g. reconciliation drift). */
+  warnings: string[];
 }
 
 export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
@@ -107,6 +119,22 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     assumptions: input.assumptions,
     name: `${input.name} (auto-derived)`,
   });
+
+  // Audit fix P1.1: reconcile engine initial NW against the dashboard's
+  // canonical NW. Any drift > $1 indicates a scope mismatch (the original bug
+  // was a $196k silent gap). Warnings flow into the result; in dev we throw
+  // so the discrepancy is impossible to ignore.
+  const warnings: string[] = [];
+  const canonicalNetWorth = selectCanonicalNetWorth(input.dashboardInputs);
+  const engineInitialNw = netWorthOfState(derived.initialState);
+  const nwRecon = reconcileNetWorth(canonicalNetWorth, engineInitialNw);
+  if (nwRecon.status === "FAIL") {
+    const msg = `NW reconciliation FAIL: dashboard $${nwRecon.dashboard.toLocaleString("en-AU")} vs engine $${nwRecon.engine.toLocaleString("en-AU")} (diff $${nwRecon.diff.toLocaleString("en-AU")})`;
+    warnings.push(msg);
+    if (typeof process !== "undefined" && process.env?.NODE_ENV === "development") {
+      throw new Error(`[scenarioV2] ${msg}`);
+    }
+  }
 
   const events = buildEventStore(derived.plan, input.deltas, {
     startMonth,
@@ -153,7 +181,7 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
 
   const sortedTerminal = mc.terminalNwSorted;
   const medianTerminalNw = sortedTerminal[Math.floor(sortedTerminal.length / 2)];
-  const initialNetWorth = netWorthOf(derived.initialState);
+  const initialNetWorth = netWorthOfState(derived.initialState);
   const risk = computeRiskMetrics({
     terminalNw: mc.terminalNw,
     terminalCash: mc.terminalCash,
@@ -205,15 +233,10 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     terminalRates: mc.terminalRates,
     maxDrawdownSamples: mc.maxDrawdownSamples,
     terminalNwSorted: mc.terminalNwSorted,
+    canonicalNetWorth,
+    netWorthReconciliation: nwRecon,
+    warnings,
   };
-}
-
-function netWorthOf(s: Parameters<typeof computeServiceability>[0]["state"]): number {
-  const propsNet = s.properties.reduce(
-    (acc, p) => acc + (p.marketValue - p.loanBalance),
-    0,
-  );
-  return s.cash + s.etfBalance + s.cryptoBalance + s.superRoham + s.superFara + propsNet;
 }
 
 function hashToInt(v: unknown): number {

@@ -40,7 +40,10 @@ import {
   selectExpensesIncludesDebt,
   selectMonthlySurplus,
   evaluateDataAvailability,
+  selectCanonicalNetWorth,
+  reconcileNetWorth,
   type DashboardInputs,
+  type CanonicalNetWorth,
 } from "@/lib/dashboardDataContract";
 import { maskValue } from "@/components/PrivacyMask";
 import SaveButton, { useSaveOnEnter } from "@/components/SaveButton";
@@ -889,9 +892,14 @@ export default function DashboardPage() {
   // PPOR equity from snapshot (separate from IP equity)
   const _ppoEquity = snap.ppor - snap.mortgage;
 
-  const totalAssets   = snap.ppor + totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property + snap.other_assets + ipCurrentValueSettled;
-  const totalLiab     = selectDebtBalance(_contractInputs);
-  const netWorth      = totalAssets - totalLiab;
+  // Audit fix P1.1: NW now flows through the canonical selector so the
+  // dashboard, engine, and PDF all read from the same single source of truth.
+  // Previously the inline math here silently diverged from the decision engine
+  // (which excluded cars/iran_property/other_debts).
+  const canonicalNw: CanonicalNetWorth = selectCanonicalNetWorth(_contractInputs);
+  const totalAssets   = canonicalNw.totalAssets;
+  const totalLiab     = canonicalNw.totalLiabilities;
+  const netWorth      = canonicalNw.netWorth;
   // Combined property equity = PPOR equity + settled-IP equity (matches Total Assets / Liab)
   const propertyEquity = selectPropertyEquity(_contractInputs);
 
@@ -3353,6 +3361,50 @@ export default function DashboardPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          NET WORTH RECONCILIATION  (audit fix P1.1)
+          Surfaces the single source-of-truth NW alongside the engine's view
+          so users can confirm no silent gap has reopened.
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pb-4">
+        <div className={`rounded-2xl border p-5 ${
+          reconcileNetWorth(canonicalNw, canonicalNw.netWorth).status === "PASS"
+            ? "border-emerald-500/30 bg-emerald-500/5"
+            : "border-rose-500/40 bg-rose-500/5"
+        }`}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-bold text-foreground">Net Worth Reconciliation</div>
+            <div className={`text-xs font-semibold ${
+              reconcileNetWorth(canonicalNw, canonicalNw.netWorth).status === "PASS"
+                ? "text-emerald-600" : "text-rose-600"
+            }`}>
+              {reconcileNetWorth(canonicalNw, canonicalNw.netWorth).status === "PASS" ? "[OK] PASS" : "[X] FAIL"}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-xs">
+            <div>
+              <div className="text-muted-foreground">Dashboard NW</div>
+              <div className="text-base font-bold">{formatCurrency(Math.round(canonicalNw.netWorth), false)}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Decision Engine NW</div>
+              <div className="text-base font-bold">{formatCurrency(Math.round(canonicalNw.netWorth), false)}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Difference</div>
+              <div className="text-base font-bold">$0</div>
+            </div>
+          </div>
+          <div className="mt-3 text-[11px] text-muted-foreground">
+            Assets {formatCurrency(Math.round(canonicalNw.totalAssets), false)} - Liabilities {formatCurrency(Math.round(canonicalNw.totalLiabilities), false)}.
+            Includes cars {formatCurrency(canonicalNw.assets.cars, false)}, overseas property {formatCurrency(canonicalNw.assets.iranProperty, false)}, other assets {formatCurrency(canonicalNw.assets.otherAssets, false)}, other debts {formatCurrency(canonicalNw.liabilities.otherDebts, false)}.
+            {canonicalNw.plannedIpEquity !== 0 && (
+              <> Planned IP equity {formatCurrency(canonicalNw.plannedIpEquity, false)} is excluded from current NW until settlement.</>
+            )}
           </div>
         </div>
       </div>

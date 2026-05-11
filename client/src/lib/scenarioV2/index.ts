@@ -40,12 +40,24 @@ export type {
 // Base plan
 export {
   deriveBasePlan,
+  basePlanInventory,
+  netWorthOfState,
   DEFAULT_ASSUMPTIONS,
   monthKey,
   addMonths,
   rangeKeys,
   type DerivedBasePlan,
 } from "./basePlan";
+
+// Asset scope types
+export type { AssetScope, BasePlanAssetTag } from "./types";
+
+// Assumptions inventory (audit P1.4)
+export {
+  collectAssumptionsUsed,
+  type AssumptionRow,
+  type AssumptionCategory,
+} from "./assumptions";
 
 // Events
 export { buildEventStore, sortEvents, groupByMonth, monthsBetween } from "./events";
@@ -146,3 +158,10 @@ export {
   generatePremiumPdf,
   type PdfData,
 } from "./pdfReport";
+
+// Quick decision PDF + pdfSafe helper
+export {
+  generateQuickDecisionPdf,
+  pdfSafe,
+  type QuickDecisionPdfData,
+} from "./quickDecisionPdf";

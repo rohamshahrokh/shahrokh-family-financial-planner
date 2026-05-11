@@ -1332,6 +1332,25 @@ export default function StocksPage() {
         />
       )}
 
+      {/* ─── Empty-state banner (audit fix P1.5 / DH-1) ──────────────────── */}
+      {(() => {
+        const holdingsTotal = (stocks ?? []).reduce(
+          (s: number, x: any) => s + safeNum(x.current_price) * safeNum(x.current_holding),
+          0,
+        );
+        const watchlistRows = (stocks ?? []).length;
+        if (holdingsTotal === 0 && watchlistRows > 0) {
+          return (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700">
+              <span className="font-semibold">{watchlistRows} tickers on watchlist · 0 holdings</span> ·
+              Purchase history not connected. Add a position via the transaction ledger to start tracking
+              market value.
+            </div>
+          );
+        }
+        return null;
+      })()}
+
       {/* ─── Header ────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>

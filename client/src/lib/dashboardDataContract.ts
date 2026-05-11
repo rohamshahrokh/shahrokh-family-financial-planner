@@ -648,3 +648,293 @@ export const ALL_CONTRACT_KEYS = Object.keys(KPI_DATA_CONTRACT) as (keyof typeof
 export function bindingsFor(card: keyof typeof KPI_DATA_CONTRACT): BindingSource[] {
   return KPI_DATA_CONTRACT[card].sources;
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Canonical Net Worth selector (audit fix P1.1)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Why this exists: NW-1 audit defect proved the dashboard and the engine were
+// computing NW from DIFFERENT scopes — dashboard included `cars`,
+// `iran_property`, and `other_debts`; the engine excluded them. The result
+// was a silent $196k gap on the real user's household. This selector becomes
+// the single source of truth: dashboard renders from here, engine reconciles
+// against here, and a runtime guard throws when they drift.
+
+export interface CanonicalNetWorth {
+  assets: {
+    /** PPOR market value (sf_snapshot.ppor). */
+    ppor: number;
+    /** Combined liquid cash including offset. */
+    cashOffset: number;
+    /** Combined super (Roham + Fara). */
+    super: number;
+    stocks: number;
+    crypto: number;
+    /** Settled IP market value (planned IPs excluded). */
+    settledIpValue: number;
+    /** Vehicles — non-investable but in NW. */
+    cars: number;
+    /** Overseas property held by the household. */
+    iranProperty: number;
+    /** Other miscellaneous assets from snapshot. */
+    otherAssets: number;
+  };
+  liabilities: {
+    ppoMortgage: number;
+    settledIpLoans: number;
+    otherDebts: number;
+  };
+  totalAssets: number;
+  totalLiabilities: number;
+  netWorth: number;
+  /** Sum of all PLANNED-but-not-yet-settled IP equity (excluded from current NW). */
+  plannedIpEquity: number;
+}
+
+/**
+ * Build the canonical net worth breakdown from a DashboardInputs payload.
+ *
+ * Rule: every NW figure on the dashboard, every NW figure in the engine, and
+ * every NW figure on the PDF must agree with this selector to within $1.
+ */
+export function selectCanonicalNetWorth(i: DashboardInputs): CanonicalNetWorth {
+  const s = i.snapshot ?? {};
+  const ppor = num(s.ppor);
+  const cashOffset = selectCashToday(i);
+  const superCombined = selectSuperCombined(i);
+  const stocks = selectStocksTotal(i);
+  const crypto = selectCryptoTotal(i);
+  const settledIpValue = selectIpCurrentValueSettled(i);
+  const settledIpLoans = selectIpLoanBalanceSettled(i);
+  const cars = num(s.cars);
+  const iranProperty = num(s.iran_property);
+  const otherAssets = num(s.other_assets);
+  const ppoMortgage = num(s.mortgage);
+  const otherDebts = num(s.other_debts);
+
+  const totalAssets =
+    ppor + cashOffset + superCombined + stocks + crypto +
+    settledIpValue + cars + iranProperty + otherAssets;
+  const totalLiabilities = ppoMortgage + settledIpLoans + otherDebts;
+  const netWorth = totalAssets - totalLiabilities;
+
+  const plannedIpValue = selectIpCurrentValuePlanned(i);
+  const plannedIpLoans = selectIpLoanBalancePlanned(i);
+  const plannedIpEquity = plannedIpValue - plannedIpLoans;
+
+  return {
+    assets: {
+      ppor,
+      cashOffset,
+      super: superCombined,
+      stocks,
+      crypto,
+      settledIpValue,
+      cars,
+      iranProperty,
+      otherAssets,
+    },
+    liabilities: {
+      ppoMortgage,
+      settledIpLoans,
+      otherDebts,
+    },
+    totalAssets,
+    totalLiabilities,
+    netWorth,
+    plannedIpEquity,
+  };
+}
+
+export interface NwReconciliation {
+  dashboard: number;
+  engine: number;
+  diff: number;
+  status: "PASS" | "FAIL";
+  /** Items that contributed to the diff if FAIL, with their amounts. */
+  excludedItems: { label: string; amount: number }[];
+}
+
+/**
+ * Cross-check the canonical NW against an engine-reported NW. The reconciliation
+ * threshold is $1 (rounding tolerance); any larger drift is treated as a real
+ * scope mismatch and surfaces the missing buckets so users can see WHY.
+ */
+export function reconcileNetWorth(
+  canonical: CanonicalNetWorth,
+  engineNW: number,
+): NwReconciliation {
+  const diff = Math.round(canonical.netWorth - engineNW);
+  const pass = Math.abs(diff) <= 1;
+  const excludedItems: { label: string; amount: number }[] = [];
+  if (!pass) {
+    if (canonical.assets.cars > 0) {
+      excludedItems.push({ label: "Cars", amount: canonical.assets.cars });
+    }
+    if (canonical.assets.iranProperty > 0) {
+      excludedItems.push({ label: "Iran property", amount: canonical.assets.iranProperty });
+    }
+    if (canonical.assets.otherAssets > 0) {
+      excludedItems.push({ label: "Other assets", amount: canonical.assets.otherAssets });
+    }
+    if (canonical.liabilities.otherDebts > 0) {
+      excludedItems.push({ label: "Other debts (liability)", amount: -canonical.liabilities.otherDebts });
+    }
+  }
+  return {
+    dashboard: Math.round(canonical.netWorth),
+    engine: Math.round(engineNW),
+    diff,
+    status: pass ? "PASS" : "FAIL",
+    excludedItems,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Canonical Income selector (audit fix P1.2)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Why this exists: TX-1 audit defect proved salary lives in two stores that
+// can diverge — sf_snapshot.{roham,fara}_monthly_income vs
+// sf_tax_profile.{roham,fara}_salary. The tax page reads tax_profile; super
+// math and the decision engine read snapshot. This selector centralises the
+// precedence rule and reports variance so the UI can flag drift.
+
+export interface CanonicalIncome {
+  /** Monthly gross household income (combined). */
+  monthlyGross: number;
+  /** Annualised — monthlyGross * 12. */
+  annualGross: number;
+  perPerson: {
+    roham: { monthly: number; annual: number };
+    fara:  { monthly: number; annual: number };
+  };
+  /** Rental + other passive income (monthly). */
+  passiveMonthly: number;
+  /** Source precedence used. */
+  source: "ledger" | "snapshot_sub_fields" | "snapshot_master" | "empty";
+  /** True when user has manually overridden taxable income on sf_tax_profile. */
+  taxableOverrideActive: boolean;
+  /** Variance vs sf_tax_profile.{roham,fara}_salary, if material. */
+  taxProfileVariance: { roham: number; fara: number; pct: number } | null;
+}
+
+/**
+ * Selector precedence (matches selectMonthlyIncome):
+ *   1. sf_income trailing 6mo avg (ledger)  — split 60/40 if total only
+ *   2. sf_snapshot.{roham,fara}_monthly_income + rental + other
+ *   3. sf_snapshot.monthly_income (master)
+ *
+ * `taxProfileVariance` is populated when the per-person snapshot annualised
+ * differs from the tax profile by more than 2%.
+ */
+export function selectCanonicalIncome(
+  i: DashboardInputs,
+  taxProfile?: any,
+): CanonicalIncome {
+  const s = i.snapshot ?? {};
+  const today = todayIsoFor(i);
+  const ledger = trailingMonthlyAverage(i.incomeRecords, today);
+  const rohamMonthly = num(s.roham_monthly_income);
+  const faraMonthly = num(s.fara_monthly_income);
+  const passive = num(s.rental_income_total) + num(s.other_income);
+  let monthlyGross = 0;
+  let source: CanonicalIncome["source"] = "empty";
+  let rohamM = 0, faraM = 0;
+  if (ledger > 0) {
+    monthlyGross = Math.round(ledger);
+    source = "ledger";
+    // When the ledger gives one combined number, lean on snapshot split if
+    // populated; otherwise default to 60/40 (Roham primary earner).
+    if (rohamMonthly > 0 || faraMonthly > 0) {
+      const sumSnap = rohamMonthly + faraMonthly;
+      rohamM = sumSnap > 0 ? Math.round(monthlyGross * (rohamMonthly / sumSnap)) : monthlyGross * 0.6;
+      faraM = monthlyGross - rohamM;
+    } else {
+      rohamM = Math.round(monthlyGross * 0.6);
+      faraM = monthlyGross - rohamM;
+    }
+  } else if (rohamMonthly + faraMonthly + passive > 0) {
+    monthlyGross = rohamMonthly + faraMonthly + passive;
+    source = "snapshot_sub_fields";
+    rohamM = rohamMonthly;
+    faraM = faraMonthly;
+  } else if (num(s.monthly_income) > 0) {
+    monthlyGross = num(s.monthly_income);
+    source = "snapshot_master";
+    rohamM = monthlyGross * 0.6;
+    faraM = monthlyGross - rohamM;
+  }
+
+  const overrideActive = Boolean(
+    taxProfile && (taxProfile.override_active === true || taxProfile.taxable_override === true)
+  );
+
+  let taxProfileVariance: CanonicalIncome["taxProfileVariance"] = null;
+  if (taxProfile && !overrideActive) {
+    const rohamProfile = num(taxProfile.roham_salary);
+    const faraProfile = num(taxProfile.fara_salary);
+    const rohamAnnualSnap = rohamM * 12;
+    const faraAnnualSnap = faraM * 12;
+    const rohamDiff = rohamProfile - rohamAnnualSnap;
+    const faraDiff = faraProfile - faraAnnualSnap;
+    const totalSnap = rohamAnnualSnap + faraAnnualSnap;
+    const pct = totalSnap > 0 ? Math.abs((rohamDiff + faraDiff) / totalSnap) : 0;
+    if (pct > 0.02 && (rohamProfile > 0 || faraProfile > 0)) {
+      taxProfileVariance = { roham: rohamDiff, fara: faraDiff, pct };
+    }
+  }
+
+  return {
+    monthlyGross,
+    annualGross: monthlyGross * 12,
+    perPerson: {
+      roham: { monthly: rohamM, annual: rohamM * 12 },
+      fara:  { monthly: faraM,  annual: faraM  * 12 },
+    },
+    passiveMonthly: passive,
+    source,
+    taxableOverrideActive: overrideActive,
+    taxProfileVariance,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Holdings reconciliation selector (audit fix P1.5)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Why this exists: DH-1 audit defect proved the dashboard renders stocks/crypto
+// totals without explaining when they're $0 because nothing is tracked, vs $0
+// because the live feed is broken. This reconciler compares "what the pages
+// show" against "what the engine sees" so a real divergence (manual snapshot
+// shows $50k but no holding rows exist) is surfaced as FAIL.
+
+export interface HoldingsReconciliation {
+  stocks: { pagesTotal: number; engineTotal: number; diff: number; status: "PASS" | "FAIL"; rationale: string };
+  crypto: { pagesTotal: number; engineTotal: number; diff: number; status: "PASS" | "FAIL"; rationale: string };
+}
+
+export function reconcileHoldings(
+  i: DashboardInputs,
+  engine: { etfBalance: number; cryptoBalance: number },
+): HoldingsReconciliation {
+  const stocksPages = selectStocksTotal(i);
+  const cryptoPages = selectCryptoTotal(i);
+  const stocksDiff = Math.round(stocksPages - engine.etfBalance);
+  const cryptoDiff = Math.round(cryptoPages - engine.cryptoBalance);
+
+  const stocksStatus: "PASS" | "FAIL" = Math.abs(stocksDiff) <= 1 ? "PASS" : "FAIL";
+  const cryptoStatus: "PASS" | "FAIL" = Math.abs(cryptoDiff) <= 1 ? "PASS" : "FAIL";
+
+  const stocksRationale = stocksStatus === "PASS"
+    ? `Stocks pages and engine agree at $${stocksPages.toLocaleString("en-AU")}.`
+    : `Manual snapshot $${stocksPages.toLocaleString("en-AU")} but live holdings $${engine.etfBalance.toLocaleString("en-AU")}. Connect purchase history or remove manual override.`;
+  const cryptoRationale = cryptoStatus === "PASS"
+    ? `Crypto pages and engine agree at $${cryptoPages.toLocaleString("en-AU")}.`
+    : `Manual snapshot $${cryptoPages.toLocaleString("en-AU")} but live holdings $${engine.cryptoBalance.toLocaleString("en-AU")}. Connect purchase history or remove manual override.`;
+
+  return {
+    stocks: { pagesTotal: stocksPages, engineTotal: engine.etfBalance, diff: stocksDiff, status: stocksStatus, rationale: stocksRationale },
+    crypto: { pagesTotal: cryptoPages, engineTotal: engine.cryptoBalance, diff: cryptoDiff, status: cryptoStatus, rationale: cryptoRationale },
+  };
+}
