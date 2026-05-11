@@ -54,7 +54,45 @@ export { buildEventStore, sortEvents, groupByMonth, monthsBetween } from "./even
 export { translateDelta } from "./deltas";
 
 // Tick + helpers
-export { tick, netWorth, monthlySurplusOf, type TickContext } from "./tick";
+export { tick, netWorth, monthlySurplusOf, type TickContext, type TickDraws, type ExtendedPortfolioState } from "./tick";
+
+// AU Tax
+export {
+  computeWageTax,
+  propertyAnnualTax,
+  annualDepreciation,
+  computeCgt,
+  stampDutyByState,
+  estimateLMI,
+  type WageTaxInput,
+  type WageTaxOutput,
+  type CgtInput,
+  type CgtOutput,
+  type AuState,
+  type DepreciationInputs,
+} from "./auTax";
+
+// Stochastic engine
+export {
+  ASSET_NAMES,
+  DEFAULT_CORRELATION,
+  DEFAULT_RATE_PROCESS,
+  DEFAULT_INFLATION_REGIMES,
+  CRYPTO_JUMPS,
+  cholesky,
+  drawCorrelatedNormals,
+  studentT,
+  drawJumpMultiplier,
+  vasicekStep,
+  inflationStep,
+  sequenceRiskMetric,
+  type CorrelationMatrix,
+  type VasicekParams,
+  type JumpDiffusionParams,
+  type InflationRegimeParams,
+  type AssetKey,
+  type InflationRegime,
+} from "./stochastic";
 
 // Borrowing
 export {

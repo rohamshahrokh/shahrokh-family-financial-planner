@@ -588,7 +588,7 @@ export default function ScenarioCompareV2Page() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto" ref={reportRef}>
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6 max-w-7xl mx-auto" ref={reportRef}>
       {/* Active banner — proves the new UI is what you're looking at */}
       <div
         data-testid="scenario-engine-v2-active-banner"
@@ -628,13 +628,13 @@ export default function ScenarioCompareV2Page() {
             across Property, Crypto, and Cash — with real volatility, leverage, and liquidity scoring.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
           {results.length > 0 && (
-            <Button variant="outline" onClick={handleDownloadPdf}>
+            <Button variant="outline" onClick={handleDownloadPdf} className="flex-1 sm:flex-none">
               <Download className="h-4 w-4 mr-2" /> Download PDF
             </Button>
           )}
-          <Button onClick={handleRun} disabled={!dashboardInputs || running} size="lg">
+          <Button onClick={handleRun} disabled={!dashboardInputs || running} size="lg" className="flex-1 sm:flex-none">
             {running ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
             {running ? "Running…" : results.length ? "Re-run with current assumptions" : "Run engine"}
           </Button>
@@ -847,6 +847,10 @@ export default function ScenarioCompareV2Page() {
                     <th className="py-2 pr-4 text-right">LVR</th>
                     <th className="py-2 pr-4 text-right">Downside</th>
                     <th className="py-2 pr-4 text-right">Vol (CV)</th>
+                    <th className="py-2 pr-4 text-right" title="Probability that property equity goes negative at any point">Neg-Eq P</th>
+                    <th className="py-2 pr-4 text-right" title="Probability of cash buffer running below safety threshold">Liq Stress</th>
+                    <th className="py-2 pr-4 text-right" title="Probability of breaching APRA serviceability buffer">Refi P</th>
+                    <th className="py-2 pr-4 text-right" title="Coefficient of variation across terminal net-worth samples — captures sequence-of-returns dispersion">Seq σ</th>
                     <th className="py-2 pr-4 text-right">Risk-Adj NW</th>
                     <th className="py-2 pr-4">Band</th>
                   </tr>
@@ -872,6 +876,10 @@ export default function ScenarioCompareV2Page() {
                         <td className="py-2 pr-4 text-right tabular-nums">{pct(safeNum(r.serviceability?.lvr))}</td>
                         <td className="py-2 pr-4 text-right tabular-nums">{pct(r.riskMetrics.downsideRisk)}</td>
                         <td className="py-2 pr-4 text-right tabular-nums">{pct(r.riskMetrics.volatility)}</td>
+                        <td className={`py-2 pr-4 text-right tabular-nums ${r.negativeEquityProbability > 0.10 ? "text-red-700 font-semibold" : ""}`}>{pct(r.negativeEquityProbability)}</td>
+                        <td className={`py-2 pr-4 text-right tabular-nums ${r.liquidityStressProbability > 0.10 ? "text-red-700 font-semibold" : ""}`}>{pct(r.liquidityStressProbability)}</td>
+                        <td className={`py-2 pr-4 text-right tabular-nums ${r.refinancePressureProbability > 0.10 ? "text-red-700 font-semibold" : ""}`}>{pct(r.refinancePressureProbability)}</td>
+                        <td className="py-2 pr-4 text-right tabular-nums">{pct(r.sequenceDispersion.cv)}</td>
                         <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt$(r.riskMetrics.riskAdjustedNw)}</td>
                         <td className="py-2 pr-4">
                           <Badge variant="outline" className={bandClass(r.serviceability?.band ?? "")}>
@@ -888,6 +896,70 @@ export default function ScenarioCompareV2Page() {
         </Card>
       )}
 
+      {/* STRESS PATHS */}
+      {results.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              Stress paths · downside probabilities
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Probability of hitting each stress condition at any point over the horizon, plus dispersion of terminal outcomes (sequence-of-returns surrogate). Values above 10% are highlighted.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              {results.map(r => {
+                const colorKey = SCENARIO_KEY_MAP[r.scenarioId] ?? "base";
+                return (
+                  <div key={r.scenarioId} className="rounded-lg border bg-card p-3 space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-semibold truncate">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: SCENARIO_COLORS[colorKey] }} />
+                      <span className="truncate">{r.name}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-[11px]">
+                      <div className="text-muted-foreground">Neg-Equity P</div>
+                      <div className={`text-right tabular-nums font-semibold ${r.negativeEquityProbability > 0.10 ? "text-red-700" : ""}`}>
+                        {pct(r.negativeEquityProbability)}
+                      </div>
+                      <div className="text-muted-foreground">Liquidity stress</div>
+                      <div className={`text-right tabular-nums font-semibold ${r.liquidityStressProbability > 0.10 ? "text-red-700" : ""}`}>
+                        {pct(r.liquidityStressProbability)}
+                      </div>
+                      <div className="text-muted-foreground">Refi pressure</div>
+                      <div className={`text-right tabular-nums font-semibold ${r.refinancePressureProbability > 0.10 ? "text-red-700" : ""}`}>
+                        {pct(r.refinancePressureProbability)}
+                      </div>
+                      <div className="text-muted-foreground">Terminal NW CV</div>
+                      <div className="text-right tabular-nums font-semibold">
+                        {pct(r.sequenceDispersion.cv)}
+                      </div>
+                      <div className="text-muted-foreground">Terminal rate (P50)</div>
+                      <div className="text-right tabular-nums">
+                        {(() => {
+                          const sorted = [...r.terminalRates].sort((a, b) => a - b);
+                          const p50 = sorted[Math.floor(sorted.length * 0.5)] ?? 0;
+                          return `${(p50 * 100).toFixed(2)}%`;
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
+              <strong>Neg-Equity P</strong>: probability that property loan balance ever exceeds property value. {" "}
+              <strong>Liquidity stress</strong>: probability that cash buffer drops below 1× monthly expenses. {" "}
+              <strong>Refi pressure</strong>: probability of LVR exceeding 90% (APRA refinance friction). {" "}
+              <strong>Terminal NW CV</strong>: stddev / mean of terminal net worth across all sims — sequence-of-returns dispersion. {" "}
+              <strong>Terminal rate</strong>: median short-rate at horizon end from the Vasicek process.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* CHARTS */}
       {results.length > 0 && (
         <Card>
@@ -897,7 +969,7 @@ export default function ScenarioCompareV2Page() {
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="nw">
-              <TabsList className="grid grid-cols-4 w-full max-w-2xl">
+              <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full max-w-2xl h-auto">
                 <TabsTrigger value="nw">Net Worth</TabsTrigger>
                 <TabsTrigger value="liq">Liquidity</TabsTrigger>
                 <TabsTrigger value="delta">Δ vs Base</TabsTrigger>

@@ -1,23 +1,26 @@
 /**
- * Scenario Engine V2 — runScenario (Orchestrator)
- *
- * Public entry point users invoke. Composes everything:
+ * Scenario Engine V2 — runScenario (Orchestrator, Production Build)
  *
  *   DashboardInputs + Delta[]
  *      │
  *      ▼ deriveBasePlan()        — auto-derive from snapshot, no manual fields
  *   BasePlan + initialState
  *      │
- *      ▼ buildEventStore()       — translate deltas into sorted events
+ *      ▼ buildEventStore()       — translate all 17 delta types into events
  *   ScenarioEvent[]
  *      │
- *      ▼ runMonteCarlo()         — N seeded sims through pure `tick`
- *   FanChart + terminalNw[]
+ *      ▼ runMonteCarlo()         — N seeded sims, correlated draws,
+ *                                  Vasicek rates, fat tails, crypto jumps,
+ *                                  stochastic vacancy, inflation regimes
+ *   FanChart + terminal samples + stress probabilities
  *      │
- *      ▼ computeServiceability() — APRA-style metrics on median final state
+ *      ▼ computeServiceability() — APRA buffered metrics on median final state
  *   ServiceabilityResult
  *      │
- *      ▼ assemble                — ScenarioResult
+ *      ▼ computeRiskMetrics()    — volatility, downside, leverage, liquidity,
+ *                                  concentration, sequence dispersion
+ *      │
+ *      ▼ assemble                — ExtendedScenarioResult
  */
 
 import type { DashboardInputs } from "../dashboardDataContract";
@@ -27,7 +30,8 @@ import { buildEventStore } from "./events";
 import { runMonteCarlo } from "./monteCarlo";
 import { computeServiceability } from "./borrowing";
 import { computeRiskMetrics } from "./riskMetrics";
-import { snapshotHash, stableHash } from "./determinism";
+import { sequenceRiskMetric } from "./stochastic";
+import { stableHash } from "./determinism";
 import type {
   BasePlanAssumptions,
   MonthKey,
@@ -36,57 +40,46 @@ import type {
 } from "./types";
 
 export interface RunScenarioInput {
-  /** Live dashboard inputs — same shape the dashboard uses. */
   dashboardInputs: DashboardInputs;
-  /** Display name for the scenario. */
   name: string;
-  /** Optional stable id (used for seeding). Defaults to `name`. */
   scenarioId?: string;
-  /** Delta list. May be empty for the Base case. */
   deltas: ScenarioDelta[];
-  /** Forecast horizon in months. Default 120 (10y). */
   horizonMonths?: number;
-  /** Start month. Default = current month. */
   startMonth?: MonthKey;
-  /** Override default rails (returns, volatility, etc). */
   assumptions?: Partial<BasePlanAssumptions>;
-  /** MC sim count. Default 500 (cheap, still meaningful). 1000+ in prod. */
   simulationCount?: number;
-  /** Parent seed for the entire run. Default = stable hash of scenario name + snapshot. */
   seed?: number;
+  /** Pass through to MC: HELP debt + private hospital cover for accurate tax. */
+  hasHelpDebt?: boolean;
+  hasPrivateHospitalCover?: boolean;
+  /** Toggle fat tails (default true). */
+  useFatTails?: boolean;
 }
 
 export interface ExtendedScenarioResult extends ScenarioResult {
-  /** Display name (UI convenience). */
   name: string;
-  /** Reconciliation: month-0 surplus vs dashboard's selectMonthlySurplus. */
   reconciledMonthlySurplus: number;
-  /** Dashboard's selectMonthlySurplus for comparison. */
   dashboardMonthlySurplus: number;
-  /** True if |reconciledMonthlySurplus − dashboardMonthlySurplus| <= $1. */
   reconcilesToDashboard: boolean;
-  /** Serviceability metrics on the median final state. */
   serviceability: ReturnType<typeof computeServiceability>;
-  /** Real risk metrics derived from MC dispersion + median state. */
   riskMetrics: import("./riskMetrics").RiskMetrics;
-  /** Cash-balance fan chart (liquidity over time). */
   cashFan: import("./monteCarlo").MonteCarloOutput["cashFan"];
-  /** Median path NW trajectory (one number per month). */
   medianNwPath: number[];
-  /** Median path cash trajectory. */
   medianCashPath: number[];
-  /** Initial state for diagnostics. */
   initialNetWorth: number;
-  /** Terminal NW samples (length = simulationCount). */
   terminalNwSamples: number[];
-  /** Terminal cash samples. */
   terminalCashSamples: number[];
-  /** Wall-clock runtime in ms. */
   runtimeMs: number;
-  /** Sim count actually executed. */
   simulationCount: number;
-  /** Horizon used. */
   horizonMonths: number;
+  /** Stress probabilities exposed by the MC engine. */
+  negativeEquityProbability: number;
+  liquidityStressProbability: number;
+  refinancePressureProbability: number;
+  /** Dispersion metrics (sequence-of-returns risk surrogate). */
+  sequenceDispersion: ReturnType<typeof sequenceRiskMetric>;
+  /** Terminal short-rate samples (for narrative). */
+  terminalRates: number[];
 }
 
 export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
@@ -106,7 +99,6 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     endMonth,
   });
 
-  // Seed = stable hash of (scenarioId or name, snapshotHash, deltas)
   const seedKey = {
     sid: input.scenarioId ?? input.name,
     snap: derived.plan.snapshotHash,
@@ -119,7 +111,6 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
   };
   const seed = input.seed ?? hashToInt(seedKey);
 
-  const baseMonthlyIncome = derived.ttmIncome / 12;
   const baseMonthlyExpenses = derived.ttmExpenseLedger / 12
     + (derived.expensesIncludeDebt ? 0 : derived.monthlyDebtService);
 
@@ -134,10 +125,11 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     expensesIncludeDebt: derived.expensesIncludeDebt,
     simulationCount,
     parentSeed: seed,
+    useFatTails: input.useFatTails ?? true,
+    hasHelpDebt: input.hasHelpDebt,
+    hasPrivateHospitalCover: input.hasPrivateHospitalCover,
   });
 
-  // Serviceability on the median final state — uses the same mortgage rate
-  // the BasePlan was derived with.
   const service = computeServiceability({
     state: mc.medianFinalState,
     monthlyGrossIncome: mc.medianFinalState.ttmIncome / 12,
@@ -145,7 +137,6 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     mortgageRate: derived.plan.assumptions.mortgageRate,
   });
 
-  // Sort terminal samples for risk metrics + compute median expenses for runway.
   const sortedTerminal = [...mc.terminalNw].sort((a, b) => a - b);
   const medianTerminalNw = sortedTerminal[Math.floor(sortedTerminal.length / 2)];
   const risk = computeRiskMetrics({
@@ -159,16 +150,18 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
   const dashboardSurplus = selectMonthlySurplus(input.dashboardInputs);
   const reconciledSurplus = derived.reconciledMonthlySurplus;
 
+  const dispersion = sequenceRiskMetric(mc.terminalNw);
+
   return {
     scenarioId: input.scenarioId ?? input.name,
     name: input.name,
     snapshotHash: derived.plan.snapshotHash,
     seed,
-    runTimestamp: "1970-01-01T00:00:00Z", // deterministic; UI assigns real timestamp
+    runTimestamp: "1970-01-01T00:00:00Z",
     netWorthFan: mc.fan,
-    confidence: [], // Phase 12
-    risk: null,    // Phase 10 (legacy field — real metrics live on riskMetrics)
-    attribution: null, // Phase 13
+    confidence: [],
+    risk: null,
+    attribution: null,
     serviceability: service,
     riskMetrics: risk,
     cashFan: mc.cashFan,
@@ -183,10 +176,13 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     runtimeMs: mc.runtimeMs,
     simulationCount: mc.simulationCount,
     horizonMonths,
+    negativeEquityProbability: mc.negativeEquityProbability,
+    liquidityStressProbability: mc.liquidityStressProbability,
+    refinancePressureProbability: mc.refinancePressureProbability,
+    sequenceDispersion: dispersion,
+    terminalRates: mc.terminalRates,
   };
 }
-
-// ─── helpers ────────────────────────────────────────────────────────────────
 
 function netWorthOf(s: Parameters<typeof computeServiceability>[0]["state"]): number {
   const propsNet = s.properties.reduce(
@@ -197,7 +193,6 @@ function netWorthOf(s: Parameters<typeof computeServiceability>[0]["state"]): nu
 }
 
 function hashToInt(v: unknown): number {
-  // Hash the full canonical JSON, not the whitelisted snapshot subset.
   const h = stableHash(v);
   return parseInt(h, 16) >>> 0;
 }
