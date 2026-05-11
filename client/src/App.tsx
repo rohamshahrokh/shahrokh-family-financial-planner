@@ -46,6 +46,7 @@ import MyFinancialPlanPage     from "./pages/financial-plan";
 import LedgerAuditPage         from "./pages/ledger-audit";
 import CGTSimulatorPage        from "./pages/cgt-simulator";
 import ScenarioComparePage     from "./pages/scenario-compare";
+import ScenarioCompareV2Page   from "./pages/scenario-compare-v2";
 import WhatIfScenariosPage     from "./pages/what-if-scenarios";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
@@ -212,7 +213,13 @@ function AppRouter() {
           <ProtectedRoute component={CGTSimulatorPage} title="CGT Simulator" />
         </Route>
         <Route path="/scenario-compare">
-          <ProtectedRoute component={ScenarioComparePage} title="Scenario Compare Lab" />
+          <ProtectedRoute component={ScenarioCompareV2Page} title="Scenario Lab" />
+        </Route>
+        <Route path="/scenario-compare-v2">
+          <ProtectedRoute component={ScenarioCompareV2Page} title="Scenario Lab" />
+        </Route>
+        <Route path="/scenario-compare-legacy">
+          <ProtectedRoute component={ScenarioComparePage} title="Scenario Compare (Legacy)" />
         </Route>
         <Route path="/what-if-scenarios">
           <ProtectedRoute component={WhatIfScenariosPage} title="What-If Scenarios" />

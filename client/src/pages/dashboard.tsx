@@ -14,6 +14,34 @@ import { runCashEngine, getCashKPICards, type CashEvent } from "@/lib/cashEngine
 import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import { calcDepositPower, projectEquityTimeline } from "@/lib/equityEngine";
+// Authoritative dashboard source-of-truth bindings + selectors. See
+// docs/DASHBOARD_DATA_CONTRACT.md and client/src/lib/dashboardDataContract.ts.
+// The regression check (`npm run test:dashboard-contract`) fails the build
+// if these selectors stop binding to the documented Supabase fields.
+import {
+  selectStocksTotal as contractStocksTotal,
+  selectCryptoTotal as contractCryptoTotal,
+  selectIpCurrentValueSettled,
+  selectIpLoanBalanceSettled,
+  selectIpCurrentValuePlanned,
+  selectIpLoanBalancePlanned,
+  selectSettledIPs,
+  selectPlannedIPs,
+  selectTotalInvestments,
+  selectPropertyEquity,
+  selectDebtBalance,
+  selectPassiveIncome,
+  selectMonthlyIncome,
+  selectMonthlyExpensesLedger,
+  selectMortgageRepayment,
+  selectOtherDebtRepayment,
+  selectSettledIpDebtService,
+  selectMonthlyDebtService,
+  selectExpensesIncludesDebt,
+  selectMonthlySurplus,
+  evaluateDataAvailability,
+  type DashboardInputs,
+} from "@/lib/dashboardDataContract";
 import { maskValue } from "@/components/PrivacyMask";
 import SaveButton, { useSaveOnEnter } from "@/components/SaveButton";
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from "react";
@@ -733,7 +761,57 @@ export default function DashboardPage() {
 
   const snap = useMemo(() => {
     if (!snapshot) return SNAP_ZERO;
-    const s = snapshot;
+    const s: any = snapshot;
+
+    // ── Super: schema columns are roham_super_balance / fara_super_balance ──
+    // Legacy code referenced super_roham / super_fara which no longer exist on
+    // sf_snapshot. Read the per-person balances and fall back to the legacy
+    // names + the aggregate super_balance for backward compatibility.
+    const superRoham = safeNum(
+      s.roham_super_balance ?? s.super_roham ?? 0
+    );
+    const superFara  = safeNum(
+      s.fara_super_balance  ?? s.super_fara  ?? 0
+    );
+    // If master super_balance is 0 but per-person balances exist, surface the sum.
+    const superMaster = safeNum(s.super_balance);
+    const superTotal  = superMaster > 0 ? superMaster : (superRoham + superFara);
+
+    // ── Income: master monthly_income may be 0 while sub-fields hold the truth ──
+    // Order of precedence: master snapshot field → sum of sub-fields → derived
+    // from the last 6 months of sf_income transactions (handled below).
+    const masterIncome = safeNum(s.monthly_income);
+    const subIncomeMonthly =
+      safeNum(s.roham_monthly_income) +
+      safeNum(s.fara_monthly_income) +
+      safeNum(s.rental_income_total) +
+      safeNum(s.other_income);
+    let monthlyIncome = masterIncome > 0 ? masterIncome : subIncomeMonthly;
+
+    // Fallback: derive from sf_income transactions in the last 6 months.
+    // Only used if both master + sub-fields are zero so user-entered values
+    // always take precedence.
+    if (monthlyIncome === 0 && Array.isArray(incomeRecords) && incomeRecords.length > 0) {
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      const cutoff = sixMonthsAgo.toISOString().split('T')[0];
+      const recent = incomeRecords.filter((r: any) => (r.date ?? '') >= cutoff);
+      const total  = recent.reduce((sum: number, r: any) => sum + safeNum(r.amount), 0);
+      if (total > 0) monthlyIncome = Math.round(total / 6);
+    }
+
+    // ── Expenses: master monthly_expenses may be 0; derive from sf_expenses ──
+    const masterExpenses = safeNum(s.monthly_expenses);
+    let monthlyExpenses = masterExpenses;
+    if (monthlyExpenses === 0 && Array.isArray(expenses) && expenses.length > 0) {
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      const cutoff = sixMonthsAgo.toISOString().split('T')[0];
+      const recent = expenses.filter((e: any) => (e.date ?? '') >= cutoff);
+      const total  = recent.reduce((sum: number, e: any) => sum + safeNum(e.amount), 0);
+      if (total > 0) monthlyExpenses = Math.round(total / 6);
+    }
+
     return {
       ppor:             safeNum(s.ppor),
       // Everyday cash (transaction/chequing account)
@@ -743,29 +821,49 @@ export default function DashboardPage() {
       savings_cash:     safeNum(s.savings_cash),
       emergency_cash:   safeNum(s.emergency_cash),
       other_cash:       safeNum(s.other_cash),
-      super_balance:    safeNum(s.super_balance),
-      super_roham:      safeNum(s.super_roham ?? s.super_balance),
-      super_fara:       safeNum(s.super_fara),
+      super_balance:    superTotal,
+      super_roham:      superRoham,
+      super_fara:       superFara,
       cars:             safeNum(s.cars),
       iran_property:    safeNum(s.iran_property),
+      // Manual portfolio totals on the snapshot itself — these are user-entered
+      // aggregates (e.g. “I have \$50k in stocks”) that should be surfaced when
+      // the per-ticker holdings tables are empty.
+      stocks:           safeNum(s.stocks),
+      crypto:           safeNum(s.crypto),
+      other_assets:     safeNum(s.other_assets),
       mortgage:         safeNum(s.mortgage),
       other_debts:      safeNum(s.other_debts),
-      monthly_income:   safeNum(s.monthly_income),
-      monthly_expenses: safeNum(s.monthly_expenses),
+      monthly_income:   monthlyIncome,
+      monthly_expenses: monthlyExpenses,
       mortgage_rate:    safeNum(s.mortgage_rate) || 6.5,
       mortgage_term_years: safeNum(s.mortgage_term_years) || 30,
     };
-  }, [snapshot]);
+  }, [snapshot, incomeRecords, expenses]);
 
-  // Live stocks / crypto from holdings
-  const liveStocks = useMemo(() =>
-    (holdingsRaw ?? []).filter((h: any) => h.asset_type === "stock").reduce((sum: number, h: any) => sum + safeNum(h.current_value), 0),
-    [holdingsRaw]);
-  const liveCrypto = useMemo(() =>
-    (holdingsRaw ?? []).filter((h: any) => h.asset_type === "crypto").reduce((sum: number, h: any) => sum + safeNum(h.current_value), 0),
-    [holdingsRaw]);
-  const stocksTotal = liveStocks || (stocks ?? []).reduce((s: number, x: any) => s + safeNum(x.current_value), 0);
-  const cryptoTotal = liveCrypto || (cryptos ?? []).reduce((s: number, x: any) => s + safeNum(x.current_value), 0);
+  // ─── Dashboard data-contract inputs ──────────────────────────────────────
+  // SOURCE-OF-TRUTH: docs/DASHBOARD_DATA_CONTRACT.md +
+  //                  client/src/lib/dashboardDataContract.ts
+  // Every KPI card derived below MUST go through a selector imported from
+  // the contract module. The regression script
+  // (`script/test-dashboard-contract.ts`) fails the build if any selector
+  // stops binding to the documented Supabase fields. Do not bypass the
+  // selectors with inline calculations — that is exactly the class of bug
+  // that produced silent $0 cards in production.
+  const _contractInputs: DashboardInputs = useMemo(() => ({
+    snapshot, properties, stocks, cryptos,
+    holdingsRaw, incomeRecords, expenses,
+  }), [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses]);
+
+  // ─── Live stocks / crypto value (delegates to data contract) ────────────
+  // Bug pre-fix: the dashboard only summed the unified holdings API and a
+  // non-existent `current_value` column on sf_stocks, producing 0 for users
+  // who entered values via the manual snapshot form. The selector now reads
+  // all three sources (unified holdings → per-ticker market value → manual
+  // snapshot aggregate) and returns the highest available, so manual
+  // entries are never silently overridden by an empty live feed.
+  const stocksTotal = contractStocksTotal(_contractInputs);
+  const cryptoTotal = contractCryptoTotal(_contractInputs);
 
   const _totalSuperNow = snap.super_roham + snap.super_fara;
 
@@ -776,15 +874,147 @@ export default function DashboardPage() {
   const _safeOtherCash = (snap.other_cash > 0 && snap.other_cash === snap.offset_balance) ? 0 : snap.other_cash;
   const totalLiquidCash = snap.cash + snap.savings_cash + snap.emergency_cash + _safeOtherCash + snap.offset_balance;
 
-  const totalAssets   = snap.ppor + totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property;
-  const totalLiab     = snap.mortgage + snap.other_debts;
+  // ─── Investment property aggregates (delegates to data contract) ─────────
+  // SOURCE-OF-TRUTH: docs/DASHBOARD_DATA_CONTRACT.md →
+  //   property_equity / debt_balance / total_investments
+  // All IP/stocks/crypto/property-equity logic lives in the contract module.
+  const _settledIPs           = useMemo(() => selectSettledIPs(_contractInputs), [_contractInputs]);
+  const _plannedIPs           = useMemo(() => selectPlannedIPs(_contractInputs), [_contractInputs]);
+  const ipCurrentValueSettled = selectIpCurrentValueSettled(_contractInputs);
+  const ipLoanBalanceSettled  = selectIpLoanBalanceSettled(_contractInputs);
+  const ipEquitySettled       = ipCurrentValueSettled - ipLoanBalanceSettled;
+  const ipCurrentValuePlanned = selectIpCurrentValuePlanned(_contractInputs);
+  const ipLoanBalancePlanned  = selectIpLoanBalancePlanned(_contractInputs);
+
+  // PPOR equity from snapshot (separate from IP equity)
+  const _ppoEquity = snap.ppor - snap.mortgage;
+
+  const totalAssets   = snap.ppor + totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property + snap.other_assets + ipCurrentValueSettled;
+  const totalLiab     = selectDebtBalance(_contractInputs);
   const netWorth      = totalAssets - totalLiab;
-  const propertyEquity = snap.ppor - snap.mortgage;
-  // Mortgage is already included in monthly_expenses — do not deduct again
-  const monthlyMortgageRepay = 0;
-  const surplus       = snap.monthly_income - snap.monthly_expenses;
-  const totalMonthlyOutgoings = snap.monthly_expenses;
-  const savingsRate   = calcSavingsRate(snap.monthly_income, snap.monthly_expenses);
+  // Combined property equity = PPOR equity + settled-IP equity (matches Total Assets / Liab)
+  const propertyEquity = selectPropertyEquity(_contractInputs);
+
+  // Data-availability flags drive the "actual balances missing" banner below.
+  const dataAvailability = useMemo(() =>
+    evaluateDataAvailability(_contractInputs),
+  [_contractInputs]);
+
+  // ─── [Dashboard] Diagnostic logs (TEMPORARY) ───────────────────────────────
+  // Surface every input that drives the four KPI cards so the user can verify
+  // exactly what the dashboard is reading. Remove once the source-of-truth for
+  // current balances is confirmed and stable.
+  if (typeof window !== 'undefined' && snapshot) {
+    /* eslint-disable no-console */
+    // Per-source breakdowns are computed locally for the diagnostic log only;
+    // the headline figures above are the contract selectors' results.
+    const _diagLiveStocks  = (holdingsRaw ?? []).filter((h: any) => h.asset_type === 'stock').reduce((s: number, h: any) => s + safeNum(h.current_value), 0);
+    const _diagLiveCrypto  = (holdingsRaw ?? []).filter((h: any) => h.asset_type === 'crypto').reduce((s: number, h: any) => s + safeNum(h.current_value), 0);
+    const _diagTickerStocks = (stocks ?? []).reduce((s: number, x: any) => s + safeNum(x.current_value ?? safeNum(x.current_price) * safeNum(x.current_holding)), 0);
+    const _diagTickerCrypto = (cryptos ?? []).reduce((s: number, x: any) => s + safeNum(x.current_value ?? safeNum(x.current_price) * safeNum(x.current_holding)), 0);
+    console.groupCollapsed('[Dashboard] KPI calculation inputs');
+    console.log('TOTAL INVESTMENTS', {
+      result_value: stocksTotal + cryptoTotal + ipCurrentValueSettled,
+      stocksTotal, cryptoTotal, ipCurrentValueSettled,
+      sources: {
+        liveStocks: _diagLiveStocks, tickerStocksValue: _diagTickerStocks, snap_stocks: snap.stocks,
+        liveCrypto: _diagLiveCrypto, tickerCryptoValue: _diagTickerCrypto, snap_crypto: snap.crypto,
+        settled_ip_count: _settledIPs.length,
+        planned_ip_count: _plannedIPs.length,
+        planned_ip_value: ipCurrentValuePlanned,
+      },
+    });
+    console.log('PROPERTY EQUITY', {
+      result_value: propertyEquity,
+      ppor_equity: _ppoEquity,
+      ip_equity_settled: ipEquitySettled,
+      sources: {
+        ppor: snap.ppor, mortgage: snap.mortgage,
+        ipCurrentValueSettled, ipLoanBalanceSettled,
+        ipCurrentValuePlanned, ipLoanBalancePlanned,
+      },
+    });
+    console.log('DEBT BALANCE', {
+      result_value: totalLiab,
+      sources: {
+        snap_mortgage: snap.mortgage,
+        snap_other_debts: snap.other_debts,
+        ipLoanBalanceSettled, ipLoanBalancePlanned,
+      },
+    });
+    console.log('SNAPSHOT_RAW (key fields)', {
+      ppor: (snapshot as any)?.ppor, mortgage: (snapshot as any)?.mortgage,
+      stocks: (snapshot as any)?.stocks, crypto: (snapshot as any)?.crypto,
+      other_assets: (snapshot as any)?.other_assets,
+      other_debts: (snapshot as any)?.other_debts,
+      super_balance: (snapshot as any)?.super_balance,
+      roham_super_balance: (snapshot as any)?.roham_super_balance,
+      fara_super_balance: (snapshot as any)?.fara_super_balance,
+    });
+    console.log('PROPERTIES_RAW', (properties as any[] ?? []).map((p: any) => ({
+      id: p.id, name: p.name, type: p.type,
+      current_value: p.current_value, loan_amount: p.loan_amount,
+      settlement_date: p.settlement_date, weekly_rent: p.weekly_rent,
+    })));
+    console.log('STOCKS_RAW', (stocks ?? []).map((x: any) => ({
+      ticker: x.ticker, current_price: x.current_price,
+      current_holding: x.current_holding,
+      mv: safeNum(x.current_price) * safeNum(x.current_holding),
+    })));
+    console.log('CRYPTO_RAW', (cryptos ?? []).map((x: any) => ({
+      symbol: x.symbol, current_price: x.current_price,
+      current_holding: x.current_holding,
+      mv: safeNum(x.current_price) * safeNum(x.current_holding),
+    })));
+    console.log('HOLDINGS_RAW (unified API)', (holdingsRaw ?? []));
+    console.groupEnd();
+    /* eslint-enable no-console */
+  }
+  // ─── MONTHLY SURPLUS — single-source-of-truth derivation ────────────────
+  // SOURCE-OF-TRUTH: docs/DASHBOARD_DATA_CONTRACT.md → monthly_surplus +
+  //                  client/src/lib/dashboardDataContract.ts SOURCE_OF_TRUTH map.
+  //
+  // Prior bug (May 2026 "$17K surplus"):
+  //   const surplus = snap.monthly_income - snap.monthly_expenses;
+  //   const monthlyMortgageRepay = 0;
+  // This silently:
+  //   1. ate the manual sf_snapshot.monthly_expenses override (\$4,500) and
+  //      ignored the \~\$15K/mo ledger truth; and
+  //   2. assumed mortgage was already in `expenses`, which is false —
+  //      sf_expenses categories never include mortgage P&I.
+  //
+  // New formula (enforced by selectors):
+  //   surplus = monthlyIncome (ledger → sub-fields → master)
+  //           − monthlyExpensesLedger (ledger → manual)
+  //           − mortgageRepayment (PMT from debt module)
+  //           − otherDebtRepayment (cards/personal loans)
+  //           − settledIpDebtService (each IP loan amortised separately)
+  const monthlyIncomeSOT       = selectMonthlyIncome(_contractInputs);
+  const monthlyExpensesSOT     = selectMonthlyExpensesLedger(_contractInputs);
+  const monthlyMortgageRepay   = selectMortgageRepayment(_contractInputs);
+  const monthlyOtherDebtRepay  = selectOtherDebtRepayment(_contractInputs);
+  const monthlyIpDebtService   = selectSettledIpDebtService(_contractInputs);
+  const monthlyDebtServiceSOT  = selectMonthlyDebtService(_contractInputs);
+  // True when expenses already include mortgage/debt rows (ledger has
+  // "Housing / Mortgage", "Debt Repayment", etc.). In that case we MUST NOT
+  // subtract debt again — doing so double-counts.
+  const expensesIncludesDebt   = selectExpensesIncludesDebt(_contractInputs);
+  // For downstream cards/charts that need the household's true monthly
+  // outflow: when debt is already in expenses, outgoings == expenses;
+  // otherwise add debt service.
+  const totalMonthlyOutgoings  = expensesIncludesDebt
+    ? monthlyExpensesSOT
+    : monthlyExpensesSOT + monthlyDebtServiceSOT;
+  const surplus                = selectMonthlySurplus(_contractInputs);
+  const savingsRate            = calcSavingsRate(monthlyIncomeSOT, totalMonthlyOutgoings);
+
+  // Down-stream forecasts/projections still reference snap.monthly_income
+  // and snap.monthly_expenses. Rebind the surface of `snap` to the SOT values
+  // so the entire page reads from the same single source. The original `snap`
+  // memo still exposes the raw snapshot fields for any caller that needs
+  // them explicitly (none below currently do).
+  snap.monthly_income   = monthlyIncomeSOT;
+  snap.monthly_expenses = monthlyExpensesSOT;
 
   // ─── NG Summary ───────────────────────────────────────────────────────────
   const ngSummary = useMemo<NGSummary>(() => {
@@ -821,22 +1051,45 @@ export default function DashboardPage() {
     });
   }, [snapshot, snap, properties, stocks, cryptos, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, expenses, billsRaw, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
   const year10NW      = projection[9]?.endNetWorth || netWorth;
-  // Passive income: only count properties already settled + actual stock/crypto dividends today
-  // projection[0] includes future planned properties (e.g. July IP) which inflates today's figure
+  // Passive income: rental from settled IPs + snapshot-level rental_income_total
+  // + estimated dividends from current stock / crypto holdings.
+  // "Settled" = settlement_date ≤ today (planned IPs still in the future are
+  // surfaced in the card sub-text, never added to current passive income).
   const todayStr = new Date().toISOString().split('T')[0];
   const passiveIncome = useMemo(() => {
     const settledProperties = (properties ?? []).filter((p: any) =>
-      p.type !== 'ppor' && p.settlement_date && p.settlement_date <= todayStr
+      p.type !== 'ppor' && p.type !== 'owner_occupied' &&
+      (!p.settlement_date || p.settlement_date <= todayStr)
     );
-    const annualRental = settledProperties.reduce((sum: number, p: any) => {
+    const annualRentalFromIPs = settledProperties.reduce((sum: number, p: any) => {
       const wRent = safeNum(p.weekly_rent);
       const vacancy = safeNum(p.vacancy_rate) || 0;
       const mgmt = safeNum(p.management_fee) || 0;
       return sum + wRent * 52 * (1 - vacancy / 100) * (1 - mgmt / 100);
     }, 0);
+    // Manual rental override on the snapshot (annualises monthly rental_income_total)
+    const annualRentalManual = safeNum((snapshot as any)?.rental_income_total) * 12;
+    const annualRental = Math.max(annualRentalFromIPs, annualRentalManual);
+    // Manual other-income override (treat as passive too)
+    const annualOtherPassive = safeNum((snapshot as any)?.other_income) * 12;
     const annualDividends = stocksTotal * 0.02 + cryptoTotal * 0.01;
-    return Math.round(annualRental + annualDividends);
-  }, [properties, stocksTotal, cryptoTotal, todayStr]);
+    const total = Math.round(annualRental + annualOtherPassive + annualDividends);
+    if (typeof window !== 'undefined') {
+      // eslint-disable-next-line no-console
+      console.log('[Dashboard] PASSIVE INCOME', {
+        result_value: total,
+        annualRentalFromIPs, annualRentalManual,
+        annualOtherPassive, annualDividends,
+        sources: {
+          settled_ip_count: settledProperties.length,
+          rental_income_total_monthly: (snapshot as any)?.rental_income_total,
+          other_income_monthly: (snapshot as any)?.other_income,
+          stocksTotal, cryptoTotal,
+        },
+      });
+    }
+    return total;
+  }, [properties, stocksTotal, cryptoTotal, todayStr, snapshot]);
 
   // ─── Equity Engine ─────────────────────────────────────────────────────────
   // Investment properties (all non-PPOR from /api/properties)
@@ -1220,7 +1473,8 @@ export default function DashboardPage() {
     const currentInvestable = totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal;
     const requiredFIRE = (10000 * 12) / 0.04;
     const fireProgress = Math.min(100, Math.round((currentInvestable / requiredFIRE) * 100));
-    const totalMonthly = snap.monthly_expenses + monthlyMortgageRepay;
+    // Use canonical totalMonthlyOutgoings so emergency-fund coverage matches the surplus formula.
+    const totalMonthly = totalMonthlyOutgoings;
     const monthsCovered = (totalLiquidCash) / totalMonthly;
     const emergencyScore = Math.min(100, Math.round((monthsCovered / 6) * 100));
     const totalDebt = snap.mortgage + snap.other_debts;
@@ -1327,11 +1581,15 @@ export default function DashboardPage() {
       const cat = e.category || "Other";
       cats[cat] = (cats[cat] || 0) + safeNum(e.monthly_amount || e.amount);
     });
-    if (snap.mortgage > 0) cats["Mortgage"] = (cats["Mortgage"] || 0) + monthlyMortgageRepay;
+    // Only add a separate "Mortgage" slice if expenses DO NOT already include
+    // mortgage rows — otherwise the pie double-counts the same dollars.
+    if (!expensesIncludesDebt && snap.mortgage > 0) {
+      cats["Mortgage"] = (cats["Mortgage"] || 0) + monthlyMortgageRepay;
+    }
     return Object.entries(cats).map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 7);
-  }, [expenses, snap.mortgage]);
+  }, [expenses, snap.mortgage, expensesIncludesDebt, monthlyMortgageRepay]);
 
   // ─── NG per-property display ──────────────────────────────────────────────
   const ngProperties = useMemo(() => {
@@ -1559,7 +1817,7 @@ export default function DashboardPage() {
 
   const monthlyCFBarData = [
     { name: "Income", value: snap.monthly_income },
-    { name: "Expenses", value: snap.monthly_expenses + monthlyMortgageRepay },
+    { name: "Expenses", value: totalMonthlyOutgoings },
     { name: "Surplus", value: Math.max(0, surplus) },
   ];
   const MONTHLY_CF_COLORS = ["hsl(142,60%,45%)", "hsl(0,72%,51%)", "hsl(43,85%,55%)"];
@@ -1734,6 +1992,29 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
+          DATA-AVAILABILITY BANNER
+          Non-blocking advisory shown when every actual-balance source is
+          empty so users see WHY cards read $0 instead of silently looking
+          broken. Backed by `evaluateDataAvailability` from the data contract.
+          ═════════════════════════════════════════════════════════════════ */}
+      {dataAvailability.allActualEmpty && (
+        <div className="px-4 pb-2" data-testid="banner-no-actuals">
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+            <div className="font-semibold text-amber-200">
+              No actual balances entered yet
+            </div>
+            <div className="text-amber-100/80 text-xs mt-1">
+              The cards below show $0 because these sections are empty:{" "}
+              {dataAvailability.emptySections.join(", ")}.
+              {" "}Open the snapshot form, or the Properties / Stocks / Crypto
+              pages, to record current balances. Forecast and planned values
+              are not used for these headline cards.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════
           KPI CARDS
           ═════════════════════════════════════════════════════════════════ */}
       <div className="px-4 pb-2 db-section-keycards">
@@ -1741,29 +2022,62 @@ export default function DashboardPage() {
           <KpiCard
             label="MONTHLY SURPLUS"
             value={maskValue(formatCurrency(surplus, true), privacyMode)}
-            subValue={`${maskValue(formatCurrency(surplus * 12, true), privacyMode)} / year`}
+            subValue={
+              maskValue(
+                // Debt-aware breakdown so users can verify what's in/out.
+                expensesIncludesDebt
+                  ? `Inc ${formatCurrency(monthlyIncomeSOT, true)} − Exp ${formatCurrency(monthlyExpensesSOT, true)} (debt incl.) = ${formatCurrency(surplus, true)}`
+                  : `Inc ${formatCurrency(monthlyIncomeSOT, true)} − Exp ${formatCurrency(monthlyExpensesSOT, true)} − Debt ${formatCurrency(monthlyDebtServiceSOT, true)} = ${formatCurrency(surplus, true)}`,
+                privacyMode,
+              )
+            }
             trend={surplus >= 0 ? 1 : -1}
             icon={<PiggyBank />}
             accent="hsl(142,60%,45%)"
           />
           <KpiCard
             label="TOTAL INVESTMENTS"
-            value={maskValue(formatCurrency(stocksTotal + cryptoTotal, true), privacyMode)}
-            subValue={stocksTotal + cryptoTotal === 0 ? "— Stocks + Crypto" : `Stocks: ${formatCurrency(stocksTotal, true)}`}
+            value={maskValue(formatCurrency(stocksTotal + cryptoTotal + ipCurrentValueSettled, true), privacyMode)}
+            subValue={(() => {
+              const parts: string[] = [];
+              if (ipCurrentValueSettled > 0) parts.push(`IPs ${formatCurrency(ipCurrentValueSettled, true)}`);
+              if (stocksTotal > 0)            parts.push(`Stocks ${formatCurrency(stocksTotal, true)}`);
+              if (cryptoTotal > 0)            parts.push(`Crypto ${formatCurrency(cryptoTotal, true)}`);
+              if (parts.length === 0 && ipCurrentValuePlanned > 0)
+                return `${formatCurrency(ipCurrentValuePlanned, true)} planned IP`;
+              return parts.length ? parts.join(" · ") : "— Stocks + Crypto + IP";
+            })()}
             icon={<BarChart2 />}
             accent="hsl(210,75%,52%)"
           />
           <KpiCard
             label="PROPERTY EQUITY"
             value={maskValue(formatCurrency(propertyEquity, true), privacyMode)}
-            subValue={`${Math.round((propertyEquity / (snap.ppor || 1)) * 100)}% LVR met`}
+            subValue={(() => {
+              const totalPropValue = snap.ppor + ipCurrentValueSettled;
+              if (totalPropValue <= 0) {
+                return ipCurrentValuePlanned > 0
+                  ? `${formatCurrency(ipCurrentValuePlanned, true)} planned`
+                  : "No property yet";
+              }
+              const lvr = Math.round((propertyEquity / totalPropValue) * 100);
+              return `${lvr}% equity · ${_settledIPs.length} IP${_settledIPs.length === 1 ? '' : 's'}`;
+            })()}
             icon={<Home />}
             accent="hsl(188,60%,48%)"
           />
           <KpiCard
             label="DEBT BALANCE"
             value={maskValue(formatCurrency(totalLiab, true), privacyMode)}
-            subValue="Mortgage + Debts"
+            subValue={(() => {
+              if (totalLiab <= 0 && ipLoanBalancePlanned > 0)
+                return `${formatCurrency(ipLoanBalancePlanned, true)} planned`;
+              const segs: string[] = [];
+              if (snap.mortgage > 0)         segs.push(`PPOR ${formatCurrency(snap.mortgage, true)}`);
+              if (ipLoanBalanceSettled > 0)  segs.push(`IP ${formatCurrency(ipLoanBalanceSettled, true)}`);
+              if (snap.other_debts > 0)      segs.push(`Other ${formatCurrency(snap.other_debts, true)}`);
+              return segs.length ? segs.join(" · ") : "Mortgage + Debts";
+            })()}
             trend={-1}
             icon={<CreditCard />}
             accent="hsl(5,70%,52%)"
@@ -1771,7 +2085,21 @@ export default function DashboardPage() {
           <KpiCard
             label="PASSIVE INCOME"
             value={maskValue(formatCurrency(passiveIncome, true), privacyMode)}
-            subValue="Rental + Dividends"
+            subValue={(() => {
+              if (passiveIncome > 0) return "Rental + Dividends (annual)";
+              if (_plannedIPs.length > 0) {
+                const projAnnual = _plannedIPs.reduce((s: number, p: any) => {
+                  const r = safeNum(p.weekly_rent);
+                  const v = safeNum(p.vacancy_rate) || 0;
+                  const m = safeNum(p.management_fee) || 0;
+                  return s + r * 52 * (1 - v / 100) * (1 - m / 100);
+                }, 0);
+                return projAnnual > 0
+                  ? `${formatCurrency(projAnnual, true)}/yr once IPs settle`
+                  : "None settled yet";
+              }
+              return "No rental / dividend income";
+            })()}
             icon={<Landmark />}
             accent="hsl(145,55%,42%)"
           />
@@ -2540,7 +2868,7 @@ export default function DashboardPage() {
             {/* TAB: RISK */}
             {wdcTab === "RISK" && (() => {
               const liquidCash = totalLiquidCash;
-              const totalMonthlyOut = snap.monthly_expenses + monthlyMortgageRepay;
+              const totalMonthlyOut = totalMonthlyOutgoings;
               const monthsCov = totalMonthlyOut > 0 ? liquidCash / totalMonthlyOut : 0;
               const debtRatio = snap.monthly_income > 0 ? totalLiab / (snap.monthly_income * 12) : 0;
               const propPct = totalAssets > 0 ? (snap.ppor / totalAssets) * 100 : 0;

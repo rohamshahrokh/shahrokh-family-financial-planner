@@ -617,19 +617,24 @@ export const sbUsers = {
 };
 
 // ─── FIRE Settings ────────────────────────────────────────────────────────────
+//
+// LEGACY: `sf_fire_settings` does NOT exist in production. The live FIRE
+// settings are stored in `mc_fire_settings` (single row keyed by id).
+// This shim preserves the public API but reads/writes the real table so the
+// dashboard stops 404-ing while we migrate the calling code to sbMCFireSettings.
 
 const FIRE_SETTINGS_ID = "shahrokh-family-main";
 
 export const sbFireSettings = {
   async get(): Promise<any | null> {
     try {
-      const rows = await sbGet("sf_fire_settings", `id=eq.${FIRE_SETTINGS_ID}`);
+      const rows = await sbGet("mc_fire_settings", `id=eq.${FIRE_SETTINGS_ID}`);
       return rows[0] ?? null;
     } catch { return null; }
   },
   async upsert(data: object): Promise<any | null> {
     try {
-      return await sbUpsert("sf_fire_settings", {
+      return await sbUpsert("mc_fire_settings", {
         id: FIRE_SETTINGS_ID,
         ...data,
         updated_at: new Date().toISOString(),
@@ -639,60 +644,48 @@ export const sbFireSettings = {
 };
 
 // ─── FIRE Scenario Config ─────────────────────────────────────────────────────
+//
+// LEGACY: `sf_fire_scenario_config` does NOT exist in production. The live
+// FIRE flow uses Monte Carlo presets (`mc_fire_presets`) instead. We do NOT
+// silently redirect writes here because the schemas differ — quietly mutating
+// presets could corrupt MC behavior. Reads return [], writes are no-ops.
+// The dashboard's FIREPathCard already tolerates an empty array.
 
 export const sbFireScenarioConfig = {
   async getAll(): Promise<any[]> {
-    try {
-      return await sbGet("sf_fire_scenario_config", `record_owner=eq.${FIRE_SETTINGS_ID}&order=id.asc`);
-    } catch { return []; }
+    return [];
   },
-  async upsert(data: { scenario_id: string; [key: string]: any }): Promise<any | null> {
-    try {
-      return await sbUpsert("sf_fire_scenario_config", {
-        record_owner: FIRE_SETTINGS_ID,
-        ...data,
-        updated_at: new Date().toISOString(),
-      });
-    } catch { return null; }
+  async upsert(_data: { scenario_id: string; [key: string]: any }): Promise<any | null> {
+    return null;
   },
-  async upsertAll(rows: any[]): Promise<void> {
-    try {
-      for (const row of rows) {
-        await sbUpsert("sf_fire_scenario_config", {
-          record_owner: FIRE_SETTINGS_ID,
-          ...row,
-          updated_at: new Date().toISOString(),
-        });
-      }
-    } catch { /* swallow */ }
+  async upsertAll(_rows: any[]): Promise<void> {
+    /* no-op: legacy table removed */
   },
 };
 
 // ─── FIRE Year Assumptions ────────────────────────────────────────────────────
+//
+// LEGACY: `sf_fire_year_assumptions` does NOT exist in production. Year-by-year
+// assumptions live in `sf_forecast_assumptions` (which already has
+// `assumption_year` and `record_owner` columns). We redirect READS so the
+// dashboard renders. WRITES are intentionally no-ops to avoid mutating live
+// forecast data through a legacy code path — forecast saves should go through
+// forecastStore.sbSaveAssumptions.
 
 export const sbFireYearAssumptions = {
   async getAll(): Promise<any[]> {
     try {
-      return await sbGet("sf_fire_year_assumptions", `record_owner=eq.${FIRE_SETTINGS_ID}&order=assumption_year.asc`);
+      return await sbGet(
+        "sf_forecast_assumptions",
+        `record_owner=eq.${FIRE_SETTINGS_ID}&order=assumption_year.asc`,
+      );
     } catch { return []; }
   },
-  async upsert(data: { assumption_year: number; [key: string]: any }): Promise<any | null> {
-    try {
-      return await sbUpsert("sf_fire_year_assumptions", {
-        record_owner: FIRE_SETTINGS_ID,
-        ...data,
-      });
-    } catch { return null; }
+  async upsert(_data: { assumption_year: number; [key: string]: any }): Promise<any | null> {
+    return null;
   },
-  async upsertAll(rows: any[]): Promise<void> {
-    try {
-      for (const row of rows) {
-        await sbUpsert("sf_fire_year_assumptions", {
-          record_owner: FIRE_SETTINGS_ID,
-          ...row,
-        });
-      }
-    } catch { /* swallow */ }
+  async upsertAll(_rows: any[]): Promise<void> {
+    /* no-op: writes must go through forecastStore.sbSaveAssumptions */
   },
 };
 
@@ -794,6 +787,133 @@ export interface HouseholdPermissionSettings {
   telegram_fara_enabled: boolean;
   updated_at?: string;
 }
+
+// ─── Scenario Engine V2 — Persistence ────────────────────────────────────────
+//
+// Two tables created via migration `v2_scenario_persistence`:
+//   sf_v2_scenarios          — saved scenarios + last-run results
+//   sf_v2_assumptions_preset — named assumption presets (+ last-used flag)
+//
+// Both are owner_id keyed for future multi-user. Anonymous Supabase access via
+// app-level password gate; RLS policies are permissive but enabled.
+
+const V2_OWNER = "shahrokh-family-main";
+
+export interface V2ScenarioRow {
+  id?: string;
+  owner_id?: string;
+  name: string;
+  description?: string | null;
+  status?: "draft" | "saved" | "archived";
+  assumptions: Record<string, any>;
+  deltas: any[];
+  horizon_months: number;
+  simulation_count: number;
+  start_month: string;
+  seed?: number | null;
+  snapshot_hash?: string | null;
+  assumptions_hash?: string | null;
+  last_result?: Record<string, any> | null;
+  last_run_at?: string | null;
+  last_run_ms?: number | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface V2AssumptionsPresetRow {
+  id?: string;
+  owner_id?: string;
+  name: string;
+  is_default?: boolean;
+  payload: Record<string, any>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const sbV2Scenarios = {
+  async getAll(): Promise<V2ScenarioRow[]> {
+    try { return await sbGet("sf_v2_scenarios", `owner_id=eq.${V2_OWNER}&order=updated_at.desc`); } catch { return []; }
+  },
+  async getById(id: string): Promise<V2ScenarioRow | null> {
+    try {
+      const rows = await sbGet("sf_v2_scenarios", `id=eq.${id}&owner_id=eq.${V2_OWNER}`);
+      return rows[0] ?? null;
+    } catch { return null; }
+  },
+  async create(data: V2ScenarioRow): Promise<V2ScenarioRow> {
+    return await sbInsert("sf_v2_scenarios", {
+      ...data,
+      owner_id: V2_OWNER,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+  },
+  async update(id: string, data: Partial<V2ScenarioRow>): Promise<V2ScenarioRow> {
+    const res = await fetch(`${BASE}/sf_v2_scenarios?id=eq.${id}&owner_id=eq.${V2_OWNER}`, {
+      method: "PATCH",
+      headers: HEADERS,
+      body: JSON.stringify({ ...data, updated_at: new Date().toISOString() }),
+    });
+    if (!res.ok) throw new Error(`Supabase PATCH sf_v2_scenarios: ${res.status} ${await res.text()}`);
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows[0] : rows;
+  },
+  async delete(id: string): Promise<void> {
+    const res = await fetch(`${BASE}/sf_v2_scenarios?id=eq.${id}&owner_id=eq.${V2_OWNER}`, {
+      method: "DELETE",
+      headers: HEADERS,
+    });
+    if (!res.ok) throw new Error(`Supabase DELETE sf_v2_scenarios: ${res.status} ${await res.text()}`);
+  },
+};
+
+export const sbV2AssumptionsPreset = {
+  async getAll(): Promise<V2AssumptionsPresetRow[]> {
+    try { return await sbGet("sf_v2_assumptions_preset", `owner_id=eq.${V2_OWNER}&order=updated_at.desc`); } catch { return []; }
+  },
+  async getDefault(): Promise<V2AssumptionsPresetRow | null> {
+    try {
+      const rows = await sbGet("sf_v2_assumptions_preset", `owner_id=eq.${V2_OWNER}&is_default=eq.true&limit=1`);
+      return rows[0] ?? null;
+    } catch { return null; }
+  },
+  async create(data: V2AssumptionsPresetRow): Promise<V2AssumptionsPresetRow> {
+    return await sbInsert("sf_v2_assumptions_preset", {
+      ...data,
+      owner_id: V2_OWNER,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+  },
+  async update(id: string, data: Partial<V2AssumptionsPresetRow>): Promise<V2AssumptionsPresetRow> {
+    const res = await fetch(`${BASE}/sf_v2_assumptions_preset?id=eq.${id}&owner_id=eq.${V2_OWNER}`, {
+      method: "PATCH",
+      headers: HEADERS,
+      body: JSON.stringify({ ...data, updated_at: new Date().toISOString() }),
+    });
+    if (!res.ok) throw new Error(`Supabase PATCH sf_v2_assumptions_preset: ${res.status} ${await res.text()}`);
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows[0] : rows;
+  },
+  async setDefault(id: string): Promise<void> {
+    // Clear all defaults first
+    await fetch(`${BASE}/sf_v2_assumptions_preset?owner_id=eq.${V2_OWNER}&is_default=eq.true`, {
+      method: "PATCH",
+      headers: HEADERS,
+      body: JSON.stringify({ is_default: false, updated_at: new Date().toISOString() }),
+    });
+    await this.update(id, { is_default: true });
+  },
+  async delete(id: string): Promise<void> {
+    const res = await fetch(`${BASE}/sf_v2_assumptions_preset?id=eq.${id}&owner_id=eq.${V2_OWNER}`, {
+      method: "DELETE",
+      headers: HEADERS,
+    });
+    if (!res.ok) throw new Error(`Supabase DELETE sf_v2_assumptions_preset: ${res.status} ${await res.text()}`);
+  },
+};
+
+// ─── Household Permissions ────────────────────────────────────────────────────
 
 export const sbHouseholdPermissions = {
   async get(): Promise<HouseholdPermissionSettings | null> {
