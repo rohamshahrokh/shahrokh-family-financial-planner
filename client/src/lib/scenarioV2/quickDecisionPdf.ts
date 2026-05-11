@@ -36,6 +36,103 @@ import type {
   RiskControlMode,
 } from "./decisionEngine/candidateGenerator";
 import type { InvestorProfileSpec } from "./registry";
+import { collectAssumptionsUsed } from "./assumptions";
+import type { CanonicalNetWorth, NwReconciliation } from "../dashboardDataContract";
+
+// ─── PDF glyph sanitisation (audit fix P1.6 / PDF-1) ─────────────────────────
+//
+// jsPDF's default WinAnsi encoding cannot render the box-drawing characters,
+// arrow symbols, and emoji that creep into the source as visual flourishes.
+// Embedding a Unicode TTF adds ~200KB to the bundle; instead we map every
+// known offender to an ASCII equivalent and strip any remaining > 0xFF
+// codepoint to "?".
+
+const PDF_GLYPH_MAP: Record<string, string> = {
+  "→": "->",   // →
+  "←": "<-",   // ←
+  "↑": "^",    // ↑
+  "↓": "v",    // ↓
+  "≥": ">=",   // ≥
+  "≤": "<=",   // ≤
+  "≠": "!=",   // ≠
+  "≈": "~=",   // ≈
+  "±": "+/-",  // ±
+  "−": "-",    // −
+  "—": "--",   // —
+  "–": "-",    // –
+  "·": "-",    // ·
+  "•": "*",    // •
+  "…": "...",  // …
+  "✓": "[OK]", // ✓
+  "✗": "[X]",  // ✗
+  "⚠": "[!]",  // ⚠
+  "★": "*",    // ★
+  "☆": "*",    // ☆
+  "°": " deg", // °
+  "“": '"',    // “
+  "”": '"',    // ”
+  "‘": "'",    // ‘
+  "’": "'",    // ’
+  "∞": "inf",  // ∞
+  "ν": "nu",   // ν
+  "σ": "sigma", // σ
+  "μ": "mu",   // μ
+  // Box-drawing
+  "─": "-", "│": "|",
+  "┌": "+", "┐": "+", "└": "+", "┘": "+",
+  "├": "+", "┤": "+", "┬": "+", "┴": "+", "┼": "+",
+};
+
+/** Replace every non-WinAnsi glyph with an ASCII fallback. */
+export function pdfSafe(s: string | number | undefined | null): string {
+  if (s === null || s === undefined) return "";
+  let out = typeof s === "number" ? String(s) : s;
+  for (const [u, a] of Object.entries(PDF_GLYPH_MAP)) {
+    if (out.indexOf(u) >= 0) out = out.split(u).join(a);
+  }
+  // Anything else > 0xFF is replaced with "?" so the WinAnsi encoder cannot
+  // produce wide blank rectangles.
+  return out.replace(/[^\x00-\xFF]/g, "?");
+}
+
+/**
+ * Monkey-patch a jsPDF instance so every `doc.text(...)` call routes through
+ * `pdfSafe`. Cleaner than search-replacing 200 callsites; carries no behaviour
+ * change beyond the glyph sanitisation.
+ */
+function installPdfSafeText(doc: jsPDF): void {
+  const orig = doc.text.bind(doc) as (...args: any[]) => any;
+  (doc as any).text = (...args: any[]) => {
+    const t = args[0];
+    if (typeof t === "string") {
+      args[0] = pdfSafe(t);
+    } else if (Array.isArray(t)) {
+      args[0] = t.map(x => (typeof x === "string" ? pdfSafe(x) : x));
+    }
+    return orig(...args);
+  };
+}
+
+/** Sanitise an autoTable `body` matrix (every cell string is passed through pdfSafe). */
+function sanitiseTableBody(body: any[][]): any[][] {
+  return body.map(row => row.map(cell => (typeof cell === "string" ? pdfSafe(cell) : cell)));
+}
+
+/** Sanitise an autoTable `head` matrix. */
+function sanitiseTableHead(head: any[][]): any[][] {
+  return head.map(row => row.map(cell => (typeof cell === "string" ? pdfSafe(cell) : cell)));
+}
+
+/**
+ * Wrapper around jspdf-autotable that pre-sanitises any string in head/body
+ * cells (numbers + arrays of style objects pass through unchanged).
+ */
+function safeAutoTable(doc: jsPDF, opts: Parameters<typeof autoTable>[1]): void {
+  const next: any = { ...opts };
+  if (Array.isArray(next.body)) next.body = sanitiseTableBody(next.body);
+  if (Array.isArray(next.head)) next.head = sanitiseTableHead(next.head);
+  autoTable(doc, next);
+}
 
 // ─── Palette (mirrors pdfReport.ts so the two PDFs look consistent) ──────────
 
@@ -174,6 +271,15 @@ export interface QuickDecisionPdfData {
     fanChart?: HTMLElement | null;
     waterfall?: HTMLElement | null;
   };
+  /**
+   * Audit fix P1.6: canonical NW + reconciliation snapshot. When supplied, the
+   * PDF renders a dedicated reconciliation page so users can confirm the
+   * underlying figures match the dashboard.
+   */
+  netWorthReconciliation?: {
+    canonical: CanonicalNetWorth;
+    reconciliation: NwReconciliation;
+  };
 }
 
 // ─── Cover page ──────────────────────────────────────────────────────────────
@@ -294,6 +400,10 @@ function prettyQuestion(q: string): string {
 
 export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Promise<jsPDF> {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
+  // Audit fix P1.6: every string we render must pass through pdfSafe so that
+  // jsPDF's WinAnsi encoding doesn't substitute wide blank rectangles for
+  // arrows / box-drawing / emoji.
+  installPdfSafeText(doc);
   const F = buildFmts(data.hideValues ?? false);
   const out = data.output;
   const winner = out.ranked[0];
@@ -381,6 +491,55 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
   }
   y += 8;
 
+  // ── Net Worth Reconciliation page (audit fix P1.6 / P1.1) ─────────────────
+  if (data.netWorthReconciliation) {
+    doc.addPage();
+    let yn = MARGIN + 12;
+    yn = sectionHeader(doc, yn, "Net Worth Reconciliation", COLORS.primary);
+    yn = paragraph(
+      doc,
+      "Side-by-side check of the dashboard's canonical NW vs the decision " +
+      "engine's seeded initial state. Any drift greater than $1 is flagged as " +
+      "a scope mismatch; the engine refuses to project when they disagree.",
+      yn,
+      { color: COLORS.muted, fontSize: 9.5 },
+    );
+    const cn = data.netWorthReconciliation.canonical;
+    const rn = data.netWorthReconciliation.reconciliation;
+    safeAutoTable(doc, {
+      startY: yn,
+      head: [["Component", "Amount"]],
+      body: [
+        ["PPOR",                          F.fmt$(cn.assets.ppor)],
+        ["Cash + offset",                 F.fmt$(cn.assets.cashOffset)],
+        ["Super (combined)",              F.fmt$(cn.assets.super)],
+        ["Stocks",                        F.fmt$(cn.assets.stocks)],
+        ["Crypto",                        F.fmt$(cn.assets.crypto)],
+        ["Settled IP value",              F.fmt$(cn.assets.settledIpValue)],
+        ["Cars",                          F.fmt$(cn.assets.cars)],
+        ["Iran property",                 F.fmt$(cn.assets.iranProperty)],
+        ["Other assets",                  F.fmt$(cn.assets.otherAssets)],
+        ["Total assets",                  F.fmt$(cn.totalAssets)],
+        ["PPOR mortgage",                 F.fmt$(-cn.liabilities.ppoMortgage)],
+        ["Settled IP loans",              F.fmt$(-cn.liabilities.settledIpLoans)],
+        ["Other debts",                   F.fmt$(-cn.liabilities.otherDebts)],
+        ["Total liabilities",             F.fmt$(-cn.totalLiabilities)],
+        ["Net worth (dashboard)",         F.fmt$(rn.dashboard)],
+        ["Net worth (engine initial)",    F.fmt$(rn.engine)],
+        ["Difference",                    F.fmt$(rn.diff)],
+        ["Status",                        rn.status],
+      ],
+      styles: { fontSize: 9, cellPadding: 4, textColor: COLORS.text },
+      headStyles: { fillColor: COLORS.primary, textColor: [255, 255, 255], fontStyle: "bold" },
+      alternateRowStyles: { fillColor: COLORS.bgSoft },
+      margin: { left: MARGIN, right: MARGIN },
+      columnStyles: {
+        0: { cellWidth: 250 },
+        1: { halign: "right" },
+      },
+    });
+  }
+
   // ── Score Waterfall page ─────────────────────────────────────────────────
   doc.addPage();
   let yw = MARGIN + 12;
@@ -394,7 +553,7 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
   );
 
   const sortedBreakdown = [...winner.score.breakdown].sort((a, b) => b.contribution - a.contribution);
-  autoTable(doc, {
+  safeAutoTable(doc, {
     startY: yw,
     head: [["Axis", "Weight", "Raw value", "Contribution"]],
     body: sortedBreakdown.map(b => [
@@ -420,7 +579,7 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
   const penalties = winner.score.penalties.filter(p => p.magnitude > 0);
   if (penalties.length > 0) {
     yw = ensureSpace(doc, yw, 80);
-    autoTable(doc, {
+    safeAutoTable(doc, {
       startY: yw,
       head: [["Penalty", "Magnitude", "Detail"]],
       body: penalties.map(p => [p.reason, `−${p.magnitude.toFixed(1)}`, p.id]),
@@ -470,7 +629,7 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
     ["Refinance pressure P", F.pct(winner.result.refinancePressureProbability ?? 0, 1), "Probability NSR drops below 0.85"],
     ["Negative-equity P", F.pct(winner.result.negativeEquityProbability ?? 0, 1), "Probability loan ever exceeds property value"],
   ];
-  autoTable(doc, {
+  safeAutoTable(doc, {
     startY: yt,
     head: [["Metric", "Value", "Definition"]],
     body: tailRows,
@@ -510,7 +669,7 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
   const fanFinal = fan[fan.length - 1];
   if (fanInitial && fanFinal) {
     yt = ensureSpace(doc, yt, 80);
-    autoTable(doc, {
+    safeAutoTable(doc, {
       startY: yt,
       head: [["Percentile", "Month 0 (today)", "Terminal (final)", "Change"]],
       body: [
@@ -561,7 +720,7 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
       };
     }).sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
 
-    autoTable(doc, {
+    safeAutoTable(doc, {
       startY: yc,
       head: [["Axis", "Winner pts", "Runner-up pts", "Gap"]],
       body: gapRows.map(r => [
@@ -845,7 +1004,7 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
         ["Primary driver", F.sentence(d.explanation.primaryDriver)],
         ["Stress window", F.sentence(d.explanation.stressPeriod)],
       ];
-      autoTable(doc, {
+      safeAutoTable(doc, {
         startY: yd,
         body: expRows,
         styles: { fontSize: 8.5, cellPadding: 4, textColor: COLORS.text, valign: "top" },
@@ -855,6 +1014,10 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
           1: { cellWidth: "auto" },
         },
         theme: "plain",
+        // Audit fix P1.6 / PDF-3: long explanation strings used to overflow the
+        // page; tableWidth: "wrap" forces autoTable to respect the column widths
+        // and split content across rows instead of clipping it.
+        tableWidth: "wrap",
       });
       yd = (doc as any).lastAutoTable.finalY + 4;
 
@@ -981,7 +1144,7 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
     ["Allow high-risk paths", rc.resolved.allowHighRiskPaths ? "Yes" : "No", "Surface soft-warning candidates under their own section"],
     ["Show filtered paths", rc.resolved.showFilteredHighRiskPaths ? "Yes" : "No", "Show high-risk paths in UI alongside ranked list"],
   ];
-  autoTable(doc, {
+  safeAutoTable(doc, {
     startY: yrc,
     head: [["Control", "Resolved value", "Meaning"]],
     body: ctrlRows,
@@ -1013,12 +1176,50 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
   doc.text("• minNsrBuffered is clamped to ≥ 0.70 (APRA serviceability buffer)", MARGIN + 12, yrc + 54);
   yrc += 72;
 
+  // ── Assumptions Appendix (audit fix P1.6 / AS-1) ─────────────────────────
+  doc.addPage();
+  let yas = MARGIN + 12;
+  yas = sectionHeader(doc, yas, "Assumptions Appendix", COLORS.primary);
+  yas = paragraph(
+    doc,
+    "Every editable rail and locked Monte Carlo constant the engine touched " +
+    "to produce this projection. Editable rows can be tuned on /wealth-strategy; " +
+    "non-editable rows reflect regulatory or process constants enforced by the engine.",
+    yas,
+    { color: COLORS.muted, fontSize: 9.5 },
+  );
+  const assumptionRows = collectAssumptionsUsed();
+  safeAutoTable(doc, {
+    startY: yas,
+    head: [["Category", "Assumption", "Value", "Source", "Editable", "Impacts"]],
+    body: assumptionRows.map(r => [
+      r.category,
+      r.label,
+      r.value,
+      r.source,
+      r.editable ? "Yes" : "No",
+      r.impacts,
+    ]),
+    styles: { fontSize: 8, cellPadding: 3, textColor: COLORS.text, valign: "top" },
+    headStyles: { fillColor: COLORS.primary, textColor: [255, 255, 255], fontStyle: "bold" },
+    alternateRowStyles: { fillColor: COLORS.bgSoft },
+    margin: { left: MARGIN, right: MARGIN },
+    columnStyles: {
+      0: { cellWidth: 55, fontStyle: "bold" },
+      1: { cellWidth: 110 },
+      2: { cellWidth: 80, halign: "right" },
+      3: { cellWidth: 90 },
+      4: { cellWidth: 40, halign: "center" },
+      5: { cellWidth: "auto" },
+    },
+  });
+
   // ── Audit trail + disclaimer ─────────────────────────────────────────────
   doc.addPage();
   let ya = MARGIN + 12;
   ya = sectionHeader(doc, ya, "Audit Trail & Reproducibility", COLORS.slate);
 
-  autoTable(doc, {
+  safeAutoTable(doc, {
     startY: ya,
     head: [["Field", "Value"]],
     body: [
@@ -1043,27 +1244,28 @@ export async function generateQuickDecisionPdf(data: QuickDecisionPdfData): Prom
   });
   ya = (doc as any).lastAutoTable.finalY + 18;
 
-  ya = ensureSpace(doc, ya, 100);
-  setText(doc, COLORS.muted);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.text("DISCLAIMER", MARGIN, ya);
-  ya += 12;
+  // Dedicated Limitations & Disclaimer page (audit fix P1.6) — pulled out of
+  // the audit trail page so the legal text has space and a clear visual break.
+  doc.addPage();
+  let yl = MARGIN + 12;
+  yl = sectionHeader(doc, yl, "Limitations & Disclaimer", COLORS.slate);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
+  doc.setFontSize(9.5);
+  setText(doc, COLORS.text);
   const disc =
-    "This report is generated by an automated financial planning tool using your own ledger data and " +
-    "the assumptions you specified. It is not personal financial advice, and the operator of this tool " +
-    "is not a licensed financial adviser. Monte Carlo projections illustrate a range of possible outcomes " +
-    "given the input assumptions; actual results will differ — sometimes materially. APRA serviceability " +
-    "buffers (≥3.00% on the assessment rate) and DTI scrutiny lines (≥6.0) are applied as the engine's " +
-    "default proxies for bank policy — individual lenders may apply tighter rules. Property, equity, and " +
-    "crypto markets carry significant risk including total loss of capital. Past performance is not a " +
-    "reliable indicator of future performance. Tax outcomes are simplified estimates and may not reflect " +
-    "your individual circumstances. Consider consulting a licensed financial adviser, tax agent, and " +
+    "This report is generated from simulated outcomes using Monte Carlo techniques and your self-reported " +
+    "financial position. It is not financial advice. Past performance does not predict future results. " +
+    "Assumed returns may not be achieved. Consult a licensed financial advisor (AFSL) before making " +
+    "investment decisions. Tax outcomes vary by individual circumstance and depend on ATO rules current " +
+    "at the time of lodgement. APRA serviceability buffers (+3.00pp on the assessment rate) and DTI " +
+    "scrutiny lines are applied as the engine's default proxies for bank policy; individual lenders may " +
+    "apply tighter rules. Property, equity, and crypto markets carry significant risk including total " +
+    "loss of capital. Monte Carlo projections illustrate a range of possible outcomes given the input " +
+    "assumptions; actual results will differ, sometimes materially. The operator of this tool is not a " +
+    "licensed financial adviser. Consider consulting a licensed financial adviser, tax agent, and " +
     "mortgage broker before acting on any analysis in this report.";
   const discLines = doc.splitTextToSize(disc, CONTENT_W) as string[];
-  discLines.forEach(l => { doc.text(l, MARGIN, ya); ya += 11; });
+  discLines.forEach(l => { doc.text(l, MARGIN, yl); yl += 12; });
 
   // ── Footers ──────────────────────────────────────────────────────────────
   const totalPages = doc.getNumberOfPages();

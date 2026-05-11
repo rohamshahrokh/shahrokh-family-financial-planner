@@ -309,6 +309,31 @@ export function tick(
     draws?.superShock ?? null,
   );
 
+  // Non-investable buckets (audit fix P1.1) — kept in NW for reconciliation
+  // with the dashboard. Cars/otherAssets are held flat (no stochastic model);
+  // iran_property grows at half the AU property rate (FX + non-correlation
+  // haircut); otherDebts amortises at 15% APR / 12 from cash to mirror the
+  // dashboard's heuristic.
+  if (next.cars == null) next.cars = 0;
+  if (next.iranProperty == null) next.iranProperty = 0;
+  if (next.otherAssets == null) next.otherAssets = 0;
+  if (next.otherDebts == null) next.otherDebts = 0;
+
+  if (next.iranProperty > 0) {
+    const iranMu = Math.pow(1 + rails.propertyGrowth * 0.5, 1 / 12) - 1;
+    next.iranProperty *= 1 + iranMu;
+  }
+
+  if (next.otherDebts > 0) {
+    // Same heuristic as dashboardDataContract.selectOtherDebtRepayment so the
+    // engine and dashboard agree on amortisation pace.
+    const payment = Math.min(next.otherDebts, (next.otherDebts * 0.15) / 12);
+    if (payment > 0) {
+      next.cash -= payment;
+      next.otherDebts = Math.max(0, next.otherDebts - payment);
+    }
+  }
+
   // ─── 7. FY tax true-up at end of June ────────────────────────────────────
   if (ctx.calendarMonth === 6) {
     applyFyTax(next, acc, rails, ctx);
@@ -684,15 +709,24 @@ function weeklyToMonthlyRent(weekly: number, vacancyRate: number, mgmtFee: numbe
   return ((weekly * 52) / 12) * (1 - vacancyRate) * (1 - mgmtFee);
 }
 
-/** Compute the terminal net worth of a state. Used by the result builder. */
+/**
+ * Compute terminal net worth of a state. Includes the non-investable buckets
+ * (cars / iran_property / other_assets) and subtracts other_debts — see audit
+ * fix P1.1. Without these the engine NW silently diverged from the dashboard.
+ */
 export function netWorth(s: PortfolioState): number {
   const propsNet = s.properties.reduce(
     (acc, p) => acc + (p.marketValue - p.loanBalance),
     0,
   );
+  const cars = s.cars ?? 0;
+  const iran = s.iranProperty ?? 0;
+  const otherA = s.otherAssets ?? 0;
+  const otherD = s.otherDebts ?? 0;
   return (
     s.cash + s.etfBalance + s.cryptoBalance +
-    s.superRoham + s.superFara + propsNet
+    s.superRoham + s.superFara + propsNet +
+    cars + iran + otherA - otherD
   );
 }
 

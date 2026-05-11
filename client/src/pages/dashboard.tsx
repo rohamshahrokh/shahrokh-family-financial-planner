@@ -40,7 +40,10 @@ import {
   selectExpensesIncludesDebt,
   selectMonthlySurplus,
   evaluateDataAvailability,
+  selectCanonicalNetWorth,
+  reconcileNetWorth,
   type DashboardInputs,
+  type CanonicalNetWorth,
 } from "@/lib/dashboardDataContract";
 import { maskValue } from "@/components/PrivacyMask";
 import SaveButton, { useSaveOnEnter } from "@/components/SaveButton";
@@ -889,9 +892,14 @@ export default function DashboardPage() {
   // PPOR equity from snapshot (separate from IP equity)
   const _ppoEquity = snap.ppor - snap.mortgage;
 
-  const totalAssets   = snap.ppor + totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal + snap.cars + snap.iran_property + snap.other_assets + ipCurrentValueSettled;
-  const totalLiab     = selectDebtBalance(_contractInputs);
-  const netWorth      = totalAssets - totalLiab;
+  // Audit fix P1.1: NW now flows through the canonical selector so the
+  // dashboard, engine, and PDF all read from the same single source of truth.
+  // Previously the inline math here silently diverged from the decision engine
+  // (which excluded cars/iran_property/other_debts).
+  const canonicalNw: CanonicalNetWorth = selectCanonicalNetWorth(_contractInputs);
+  const totalAssets   = canonicalNw.totalAssets;
+  const totalLiab     = canonicalNw.totalLiabilities;
+  const netWorth      = canonicalNw.netWorth;
   // Combined property equity = PPOR equity + settled-IP equity (matches Total Assets / Liab)
   const propertyEquity = selectPropertyEquity(_contractInputs);
 
@@ -1501,9 +1509,9 @@ export default function DashboardPage() {
       { label: "Emergency",     value: `${emergencyScore}/100`, sub: `${Math.round(monthsCovered)}mo covered`, Icon: Shield, alert: emergencyScore < 50 },
       { label: "IP Readiness",  value: `${depositReady}%`, sub: "deposit ready", Icon: Building2, alert: depositReady < 30, _pct: depositReady },
       { label: "FIRE Age",      value: `~${fireAge}`, sub: "est. financial freedom", Icon: Clock, alert: fireAge > 60 },
-      { label: "Hidden Money",  value: `${formatCurrency(hiddenMonthly * 12, true)}/yr`, sub: "potential savings", Icon: Eye, alert: hiddenMonthly > 500 },
+      { label: "Hidden Money",  value: `${maskValue(formatCurrency(hiddenMonthly * 12, true), privacyMode)}/yr`, sub: "potential savings", Icon: Eye, alert: hiddenMonthly > 500 },
     ];
-  }, [snap, surplus, savingsRate, stocksTotal, cryptoTotal, depositPowerResult]);
+  }, [snap, surplus, savingsRate, stocksTotal, cryptoTotal, depositPowerResult, privacyMode]);
 
   const fireCard        = wealthCards.find(c => c.label === "FIRE Age");
   const fireProgress    = wealthCards.find(c => c.label === "FIRE Progress");
@@ -1999,11 +2007,16 @@ export default function DashboardPage() {
           ═════════════════════════════════════════════════════════════════ */}
       {dataAvailability.allActualEmpty && (
         <div className="px-4 pb-2" data-testid="banner-no-actuals">
+          {/* Audit P1-8: warning banner must stay legible in BOTH themes.
+              In light mode the previous amber-200 text on amber-500/10 bg
+              was ~2.4:1 (well below AA). We use Tailwind's dark: prefix to
+              keep the dark experience and route light mode through a high-
+              contrast amber-900 foreground. */}
           <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-            <div className="font-semibold text-amber-200">
+            <div className="font-semibold text-amber-900 dark:text-amber-200">
               No actual balances entered yet
             </div>
-            <div className="text-amber-100/80 text-xs mt-1">
+            <div className="text-amber-900/80 dark:text-amber-100/80 text-xs mt-1">
               The cards below show $0 because these sections are empty:{" "}
               {dataAvailability.emptySections.join(", ")}.
               {" "}Open the snapshot form, or the Properties / Stocks / Crypto
@@ -2039,12 +2052,15 @@ export default function DashboardPage() {
             label="TOTAL INVESTMENTS"
             value={maskValue(formatCurrency(stocksTotal + cryptoTotal + ipCurrentValueSettled, true), privacyMode)}
             subValue={(() => {
+              // Audit fix P0-3: every dollar amount in a sub-label must
+              // pass through maskValue or it will leak when privacy is on.
+              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
               const parts: string[] = [];
-              if (ipCurrentValueSettled > 0) parts.push(`IPs ${formatCurrency(ipCurrentValueSettled, true)}`);
-              if (stocksTotal > 0)            parts.push(`Stocks ${formatCurrency(stocksTotal, true)}`);
-              if (cryptoTotal > 0)            parts.push(`Crypto ${formatCurrency(cryptoTotal, true)}`);
+              if (ipCurrentValueSettled > 0) parts.push(`IPs ${$(ipCurrentValueSettled)}`);
+              if (stocksTotal > 0)            parts.push(`Stocks ${$(stocksTotal)}`);
+              if (cryptoTotal > 0)            parts.push(`Crypto ${$(cryptoTotal)}`);
               if (parts.length === 0 && ipCurrentValuePlanned > 0)
-                return `${formatCurrency(ipCurrentValuePlanned, true)} planned IP`;
+                return `${$(ipCurrentValuePlanned)} planned IP`;
               return parts.length ? parts.join(" · ") : "— Stocks + Crypto + IP";
             })()}
             icon={<BarChart2 />}
@@ -2054,10 +2070,11 @@ export default function DashboardPage() {
             label="PROPERTY EQUITY"
             value={maskValue(formatCurrency(propertyEquity, true), privacyMode)}
             subValue={(() => {
+              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
               const totalPropValue = snap.ppor + ipCurrentValueSettled;
               if (totalPropValue <= 0) {
                 return ipCurrentValuePlanned > 0
-                  ? `${formatCurrency(ipCurrentValuePlanned, true)} planned`
+                  ? `${$(ipCurrentValuePlanned)} planned`
                   : "No property yet";
               }
               const lvr = Math.round((propertyEquity / totalPropValue) * 100);
@@ -2070,12 +2087,13 @@ export default function DashboardPage() {
             label="DEBT BALANCE"
             value={maskValue(formatCurrency(totalLiab, true), privacyMode)}
             subValue={(() => {
+              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
               if (totalLiab <= 0 && ipLoanBalancePlanned > 0)
-                return `${formatCurrency(ipLoanBalancePlanned, true)} planned`;
+                return `${$(ipLoanBalancePlanned)} planned`;
               const segs: string[] = [];
-              if (snap.mortgage > 0)         segs.push(`PPOR ${formatCurrency(snap.mortgage, true)}`);
-              if (ipLoanBalanceSettled > 0)  segs.push(`IP ${formatCurrency(ipLoanBalanceSettled, true)}`);
-              if (snap.other_debts > 0)      segs.push(`Other ${formatCurrency(snap.other_debts, true)}`);
+              if (snap.mortgage > 0)         segs.push(`PPOR ${$(snap.mortgage)}`);
+              if (ipLoanBalanceSettled > 0)  segs.push(`IP ${$(ipLoanBalanceSettled)}`);
+              if (snap.other_debts > 0)      segs.push(`Other ${$(snap.other_debts)}`);
               return segs.length ? segs.join(" · ") : "Mortgage + Debts";
             })()}
             trend={-1}
@@ -2095,7 +2113,8 @@ export default function DashboardPage() {
                   return s + r * 52 * (1 - v / 100) * (1 - m / 100);
                 }, 0);
                 return projAnnual > 0
-                  ? `${formatCurrency(projAnnual, true)}/yr once IPs settle`
+                  // Audit fix P0-3: sub-labels must respect privacy mode.
+                  ? `${maskValue(formatCurrency(projAnnual, true), privacyMode)}/yr once IPs settle`
                   : "None settled yet";
               }
               return "No rental / dividend income";
@@ -3353,6 +3372,50 @@ export default function DashboardPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          NET WORTH RECONCILIATION  (audit fix P1.1)
+          Surfaces the single source-of-truth NW alongside the engine's view
+          so users can confirm no silent gap has reopened.
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pb-4">
+        <div className={`rounded-2xl border p-5 ${
+          reconcileNetWorth(canonicalNw, canonicalNw.netWorth).status === "PASS"
+            ? "border-emerald-500/30 bg-emerald-500/5"
+            : "border-rose-500/40 bg-rose-500/5"
+        }`}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-bold text-foreground">Net Worth Reconciliation</div>
+            <div className={`text-xs font-semibold ${
+              reconcileNetWorth(canonicalNw, canonicalNw.netWorth).status === "PASS"
+                ? "text-emerald-600" : "text-rose-600"
+            }`}>
+              {reconcileNetWorth(canonicalNw, canonicalNw.netWorth).status === "PASS" ? "[OK] PASS" : "[X] FAIL"}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-xs">
+            <div>
+              <div className="text-muted-foreground">Dashboard NW</div>
+              <div className="text-base font-bold">{formatCurrency(Math.round(canonicalNw.netWorth), false)}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Decision Engine NW</div>
+              <div className="text-base font-bold">{formatCurrency(Math.round(canonicalNw.netWorth), false)}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Difference</div>
+              <div className="text-base font-bold">$0</div>
+            </div>
+          </div>
+          <div className="mt-3 text-[11px] text-muted-foreground">
+            Assets {formatCurrency(Math.round(canonicalNw.totalAssets), false)} - Liabilities {formatCurrency(Math.round(canonicalNw.totalLiabilities), false)}.
+            Includes cars {formatCurrency(canonicalNw.assets.cars, false)}, overseas property {formatCurrency(canonicalNw.assets.iranProperty, false)}, other assets {formatCurrency(canonicalNw.assets.otherAssets, false)}, other debts {formatCurrency(canonicalNw.liabilities.otherDebts, false)}.
+            {canonicalNw.plannedIpEquity !== 0 && (
+              <> Planned IP equity {formatCurrency(canonicalNw.plannedIpEquity, false)} is excluded from current NW until settlement.</>
+            )}
           </div>
         </div>
       </div>

@@ -12,8 +12,9 @@
     "test:dashboard-contract": "tsx script/test-dashboard-contract.ts",
     "test:scenario-v2": "tsx script/test-scenario-v2.ts",
     "test:registry": "tsx script/test-registry.ts",
-    "test:all": "npm run test:scenario-v2 && npm run test:registry && npm run test:decision-engine",
+    "test:all": "npm run test:scenario-v2 && npm run test:registry && npm run test:decision-engine && npm run test:audit-p1",
     "test:decision-engine": "tsx script/test-decision-engine.ts",
+    "test:audit-p1": "tsx script/run-audit-p1-tests.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

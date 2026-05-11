@@ -19,6 +19,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { useAppStore } from "./lib/store";
+import { PrivacyProvider } from "@/contexts/PrivacyContext";
 import { useEffect, useRef } from "react";
 import { trackPageView } from "./lib/analytics";
 
@@ -308,9 +309,11 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AppRouter />
-      <Toaster />
-      <PwaInstallBanner />
+      <PrivacyProvider>
+        <AppRouter />
+        <Toaster />
+        <PwaInstallBanner />
+      </PrivacyProvider>
     </QueryClientProvider>
   );
 }

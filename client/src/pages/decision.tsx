@@ -33,6 +33,7 @@ import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
   Trophy, Shield, Droplet, TrendingDown, Target, Info, Eye, EyeOff, ShieldAlert,
@@ -81,6 +82,7 @@ import {
 
 // Embedded power-user tab — re-uses every line of premium Scenario Lab UX.
 import ScenarioCompareV2Page from "./scenario-compare-v2";
+import AssumptionsPanel from "@/components/AssumptionsPanel";
 
 // ─── Formatting helpers (mask-aware) ─────────────────────────────────────────
 
@@ -179,6 +181,10 @@ function QuickDecisionTab() {
   const [investorProfile, setInvestorProfile] = useState<InvestorProfile>(DEFAULT_PRESET.defaults.investorProfile);
   const [hasHelpDebt, setHasHelpDebt] = useState<boolean>(false);
   const [hasPrivateHospitalCover, setHasPrivateHospitalCover] = useState<boolean>(true);
+  // Audit P1-6: on mobile (< md) the seven secondary inputs collapse into a
+  // disclosure so the question selector and the Run button are visible above
+  // the fold. md:+ ignores this state (the contents render unconditionally).
+  const [mobileInputsOpen, setMobileInputsOpen] = useState<boolean>(false);
 
   // ── Phase 2.8: Risk Control Mode ──────────────────────────────────────────
   const [riskMode, setRiskMode] = useState<RiskControlMode>("balanced");
@@ -349,10 +355,12 @@ function QuickDecisionTab() {
                 <button
                   key={opt.value}
                   onClick={() => setQuestion(opt.value)}
+                  // Audit P1-8: nested tile uses --surface-2 so the
+                  // hierarchy reads card → tile without bumping border weight.
                   className={`text-left rounded-lg border p-3 transition-all min-h-[64px]
                     ${question === opt.value
                       ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 ring-2 ring-indigo-200 dark:ring-indigo-800"
-                      : "border-border bg-card hover:bg-muted/50"}`}
+                      : "border-border bg-[hsl(var(--surface-2))] hover:bg-muted/50"}`}
                   aria-pressed={question === opt.value}
                 >
                   <div className="text-xs font-semibold text-foreground">{opt.label}</div>
@@ -362,6 +370,32 @@ function QuickDecisionTab() {
             </div>
           </div>
 
+          {/* Mobile-only collapsible trigger (audit P1-6). Hidden on md+. */}
+          <div className="md:hidden">
+            <Collapsible open={mobileInputsOpen} onOpenChange={setMobileInputsOpen}>
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="w-full justify-between h-11"
+                  aria-expanded={mobileInputsOpen}
+                >
+                  <span className="text-xs font-semibold">Inputs &amp; assumptions</span>
+                  <ChevronDown className={`h-4 w-4 transition-transform ${mobileInputsOpen ? "rotate-180" : ""}`} />
+                </Button>
+              </CollapsibleTrigger>
+              {/* The actual content lives in the shared block below; this
+                  trigger only toggles the local state, and the wrapping
+                  div uses `data-state` styling to hide on mobile when closed. */}
+            </Collapsible>
+          </div>
+
+          {/* Inputs block — always rendered on md+, collapsible on mobile.
+              `md:!block` forces visibility on tablet/desktop regardless of
+              the mobile collapsible state. */}
+          <div
+            className={`${mobileInputsOpen ? "block" : "hidden"} md:block space-y-5`}
+            data-testid="decision-inputs-block"
+          >
           {/* Inputs grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-1.5">
@@ -476,6 +510,7 @@ function QuickDecisionTab() {
             expanded={showRiskControls}
             onToggleExpanded={() => setShowRiskControls((v) => !v)}
           />
+          </div>{/* /Mobile collapsible inputs block (audit P1-6) */}
 
           {liveReadouts && (
             <div className="rounded-lg border border-border bg-card/50 p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -486,14 +521,16 @@ function QuickDecisionTab() {
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-            <div className="text-[11px] text-muted-foreground">
+          {/* Run row — sticky on mobile so the CTA is always reachable
+              when results scroll off the bottom (audit P1-6). */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1 sticky bottom-2 md:static md:bottom-auto md:bg-transparent bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/70 border-t md:border-0 border-border -mx-4 px-4 py-3 md:m-0 md:p-0 z-10">
+            <div className="text-[11px] text-muted-foreground hidden md:block">
               500-path Monte Carlo per candidate · banded DSR · LVR 0.85 ceiling · dynamic liquidity floor
             </div>
             <Button
               onClick={run}
               disabled={running || !canRun}
-              className="min-w-[160px]"
+              className="min-w-[160px] h-11 md:h-10 w-full md:w-auto"
             >
               {running ? (
                 <><Activity className="h-4 w-4 mr-2 animate-pulse" /> Running…</>
@@ -1519,11 +1556,11 @@ export default function DecisionPage() {
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as "quick" | "advanced")}>
         <TabsList className="grid w-full grid-cols-2 sm:w-auto sm:inline-flex">
-          <TabsTrigger value="quick" className="text-xs sm:text-sm">
+          <TabsTrigger value="quick" className="text-xs sm:text-sm h-11 sm:h-9">
             <Sparkles className="h-3.5 w-3.5 mr-1.5" />
             Quick Decision
           </TabsTrigger>
-          <TabsTrigger value="advanced" className="text-xs sm:text-sm">
+          <TabsTrigger value="advanced" className="text-xs sm:text-sm h-11 sm:h-9">
             <Beaker className="h-3.5 w-3.5 mr-1.5" />
             Advanced Builder
           </TabsTrigger>
@@ -1539,6 +1576,9 @@ export default function DecisionPage() {
           <ScenarioCompareV2Page />
         </TabsContent>
       </Tabs>
+
+      {/* Audit fix P1.4: every engine assumption is surfaced here, collapsible. */}
+      <AssumptionsPanel mode="compact" />
     </div>
   );
 }

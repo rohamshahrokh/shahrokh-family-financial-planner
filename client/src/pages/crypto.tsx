@@ -22,7 +22,9 @@ import {
   Plus, Trash2, Edit2, Bitcoin, CheckSquare, Square,
   ArrowUpRight, ArrowDownRight, X, Calendar, Filter,
   Upload, RefreshCw, Download, ToggleLeft, ToggleRight, ShoppingCart, TrendingUp,
+  LineChart as LineChartIcon,
 } from "lucide-react";
+import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx";
 
@@ -1285,6 +1287,25 @@ export default function CryptoPage() {
         />
       )}
 
+      {/* ─── Empty-state banner (audit fix P1.5 / DH-1) ──────────────────── */}
+      {(() => {
+        const holdingsTotal = (cryptos ?? []).reduce(
+          (s: number, x: any) => s + safeNum(x.current_price) * safeNum(x.current_holding),
+          0,
+        );
+        const watchlistRows = (cryptos ?? []).length;
+        if (holdingsTotal === 0 && watchlistRows > 0) {
+          return (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700">
+              <span className="font-semibold">{watchlistRows} coins on watchlist · 0 holdings</span> ·
+              Purchase history not connected. Add a position via the transaction ledger to start tracking
+              market value.
+            </div>
+          );
+        }
+        return null;
+      })()}
+
       {/* ─── Header ────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -1401,22 +1422,33 @@ export default function CryptoPage() {
         <div className="grid lg:grid-cols-2 gap-4">
           <div className="bg-card border border-border rounded-xl p-5">
             <h3 className="text-sm font-bold mb-4">Portfolio Growth (10Y)</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="cryptoGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
-                <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
-                <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                <Tooltip content={<CustomTooltip />} />
-                <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#cryptoGrad)" strokeWidth={2} name="Portfolio Value" />
-                <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
-              </AreaChart>
-            </ResponsiveContainer>
+            {/* Audit P1-9: empty state when no holdings — avoids the flat
+                zero-line chart that reads as a broken graph. */}
+            {totalCurrentValue <= 0 ? (
+              <EmptyState
+                icon={<LineChartIcon className="w-5 h-5" />}
+                title="No holdings yet"
+                description="Add your first position to see growth projection."
+                variant="inline"
+              />
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <AreaChart data={combinedProjection} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="cryptoGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="hsl(43,85%,55%)" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="hsl(43,85%,55%)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(224,12%,20%)" />
+                  <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} />
+                  <YAxis tick={{ fontSize: 10, fill: "hsl(220,10%,55%)" }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Area type="monotone" dataKey="value" stroke="hsl(43,85%,55%)" fill="url(#cryptoGrad)" strokeWidth={2} name="Portfolio Value" />
+                  <Area type="monotone" dataKey="invested" stroke="hsl(188,60%,48%)" fill="none" strokeWidth={1.5} strokeDasharray="4 2" name="Total Invested" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </div>
 
           <div className="bg-card border border-border rounded-xl p-5">
@@ -1464,10 +1496,13 @@ export default function CryptoPage() {
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm">
-                <Bitcoin className="w-8 h-8 opacity-30 mb-2" />
-                <p>Set holdings to see allocation</p>
-              </div>
+              /* Audit P1-9: unified empty state. */
+              <EmptyState
+                icon={<Bitcoin className="w-5 h-5" />}
+                title="No allocation data"
+                description="Add a position with units > 0 to see the allocation donut."
+                variant="inline"
+              />
             )}
           </div>
         </div>
