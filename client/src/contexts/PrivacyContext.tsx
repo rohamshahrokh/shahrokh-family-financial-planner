@@ -47,8 +47,8 @@ export interface PrivacyContextValue {
 const PrivacyContext = createContext<PrivacyContextValue | null>(null);
 
 export function PrivacyProvider({ children }: { children: React.ReactNode }) {
-  const isPrivate = useAppStore(s => s.privacyMode);
-  const togglePrivacy = useAppStore(s => s.togglePrivacy);
+  const isPrivate = useAppStore((s: any) => s.privacyMode);
+  const togglePrivacy = useAppStore((s: any) => s.togglePrivacy);
 
   // Mirror to localStorage under the documented key so PWA/service-worker
   // surfaces can read it without bundling the zustand store.
@@ -77,8 +77,8 @@ export function PrivacyProvider({ children }: { children: React.ReactNode }) {
 export function usePrivacy(): PrivacyContextValue {
   const ctx = useContext(PrivacyContext);
   // Fallback so call-sites outside the provider don't crash (e.g. in tests).
-  const storeIsPrivate = useAppStore(s => s.privacyMode);
-  const storeToggle = useAppStore(s => s.togglePrivacy);
+  const storeIsPrivate = useAppStore((s: any) => s.privacyMode);
+  const storeToggle = useAppStore((s: any) => s.togglePrivacy);
   if (ctx) return ctx;
   return {
     isPrivate: storeIsPrivate,
