@@ -13,6 +13,8 @@ import {
   type TaxAlphaStrategy,
   type TaxAlphaResult,
 } from '@/lib/taxAlphaEngine';
+import { apiRequest } from '@/lib/queryClient';
+import { selectCanonicalIncome } from '@/lib/dashboardDataContract';
 import { useAppStore } from '@/lib/store';
 import { maskValue } from '@/components/PrivacyMask';
 import { formatCurrency } from '@/lib/finance';
@@ -190,6 +192,13 @@ export default function TaxAlphaPage() {
 
   const { data: snap } = useQuery<any>({ queryKey: ['/api/snapshot'] });
   const { data: properties = [] } = useQuery<any[]>({ queryKey: ['/api/properties'] });
+  // Read the saved tax profile so Tax Alpha uses the same salary source the
+  // user saved on the Tax Calculator. When override_active is on, profile
+  // salaries win; otherwise we surface canonical income.
+  const { data: taxProfile } = useQuery<any>({
+    queryKey: ['/api/tax-profile'],
+    queryFn: () => apiRequest('GET', '/api/tax-profile').then(r => r.json()).catch(() => null),
+  });
 
   if (!snap) {
     return (
@@ -201,8 +210,27 @@ export default function TaxAlphaPage() {
     );
   }
 
-  const input  = buildTaxAlphaInput(snap, properties);
+  const canonicalIncome = selectCanonicalIncome(
+    {
+      snapshot: snap,
+      properties: undefined,
+      stocks: undefined,
+      cryptos: undefined,
+      holdingsRaw: undefined,
+      incomeRecords: undefined,
+      expenses: undefined,
+    },
+    taxProfile ?? undefined,
+  );
+
+  const input  = buildTaxAlphaInput(snap, properties, taxProfile, canonicalIncome);
   const result = computeTaxAlpha(input);
+
+  const overrideActive = Boolean(taxProfile?.override_active === true);
+  const sourceLabel = overrideActive
+    ? 'Using saved tax profile'
+    : 'Using income ledger';
+  const variancePct = canonicalIncome.taxProfileVariance?.pct ?? 0;
   const { strategies, top3, total_annual_saving, total_saving_label,
     roham_tax_now, fara_tax_now, household_tax_now, data_coverage, fy } = result;
 
@@ -210,6 +238,27 @@ export default function TaxAlphaPage() {
     <div className="space-y-5">
 
       {/* ── Summary KPIs ───────────────────────────────────────────────────── */}
+            {/* Salary source banner (fixes #FixTaxAlphaUsesSavedTaxProfile) */}
+      <div
+        data-testid="tax-alpha-source-banner"
+        className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-xs ${
+          overrideActive
+            ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+            : 'border-border bg-muted/30 text-muted-foreground'
+        }`}
+      >
+        <span className="font-semibold">{sourceLabel}</span>
+        <span className="opacity-75">
+          {' '}· Roham {mv(formatCurrency(input.roham_annual_income, true))}
+          {input.fara_annual_income > 0 ? ` · Fara ${mv(formatCurrency(input.fara_annual_income, true))}` : ''}
+        </span>
+        {!overrideActive && variancePct > 0.02 && (
+          <span className="ml-2 px-2 py-0.5 rounded bg-rose-500/15 text-rose-700 dark:text-rose-300 font-semibold">
+            Advisory: tax profile differs by {(variancePct * 100).toFixed(1)}% — review on Tax Calculator
+          </span>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Potential Savings', value: mv(total_saving_label), sub: 'top strategies', color: 'text-emerald-400' },

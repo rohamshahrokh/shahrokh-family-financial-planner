@@ -23,6 +23,8 @@ const SCRIPTS = [
   "test-canonical-nw-consistency.ts",
   "test-canonical-cashflow.ts",
   "test-no-unicode-escapes.ts",
+  // #FixTaxAlphaUsesSavedTaxProfile regression
+  "test-tax-alpha-uses-saved-profile.ts",
 ];
 
 let totalFail = 0;
