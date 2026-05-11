@@ -549,23 +549,95 @@ export function computeTaxAlpha(inp: TaxAlphaInput): TaxAlphaResult {
 }
 
 // ─── Build input from Supabase snapshot ──────────────────────────────────────
+//
+// Salary source precedence (fixes #FixTaxAlphaUsesSavedTaxProfile):
+//   1. If `taxProfile.override_active === true` and roham_salary/fara_salary
+//      are set on the profile, USE THEM. The Tax Calculator + Tax Alpha now
+//      share the same source the user explicitly saved.
+//   2. Else, if `canonicalIncome` is provided (ledger-derived per-person
+//      annualised salary), use that.
+//   3. Else, fall back to legacy snapshot fields (monthly_income * 12) so
+//      callers that don't have the new context still get a result.
+//
+// Tax flags (super rate, salary sacrifice, private health, HELP debt) are
+// always preferred from the saved tax profile when set there — those fields
+// are naturally owned by sf_tax_profile and the snapshot copies are stale
+// secondaries.
 
-export function buildTaxAlphaInput(snap: any, properties: any[]): TaxAlphaInput {
+/** Minimal shape required from canonical income selector. */
+export interface CanonicalIncomeLike {
+  perPerson: {
+    roham: { annual: number };
+    fara:  { annual: number };
+  };
+}
+
+/**
+ * Minimal shape required from the shared household-tax selector. Kept as
+ * a structural interface so `taxAlphaEngine.ts` does not import
+ * `householdTaxInputs.ts` (avoids a hard cycle and lets tests pass a
+ * literal object). See `householdTaxInputs.ts` for the canonical type.
+ */
+export interface HouseholdTaxInputsLike {
+  rohamAnnual:    number;
+  faraAnnual:     number;
+  overrideActive: boolean;
+}
+
+export function buildTaxAlphaInput(
+  snap: any,
+  properties: any[],
+  taxProfile?: any,
+  canonicalIncome?: CanonicalIncomeLike,
+  household?: HouseholdTaxInputsLike,
+): TaxAlphaInput {
   const n = (v: any) => safeNum(v);
 
-  // Fara income: try sf_income data via snap, fallback to 0
-  const rohamMonthly = n(snap.monthly_income);
-  const faraMonthly  = n(snap.fara_monthly_income) || 0;
+  // ── Salary source ───────────────────────────────────────────────────
+  // Priority (fix #FixTaxAlphaWrongIncomeSourceStillBroken):
+  //   1. `household` from the shared selector — single source of truth.
+  //      The Tax Calculator and Tax Alpha now both flow through
+  //      `getHouseholdTaxInputs`, so passing it here means the engine
+  //      cannot diverge from the Calculator's totals.
+  //   2. (Legacy callers only) Re-derive locally: profile override >
+  //      canonical > zero. We DO NOT fall back to snap.monthly_income
+  //      directly — that field is the COMBINED household figure and
+  //      using it as Roham's salary double-counts Fara.
+  const overrideActive    = Boolean(taxProfile && taxProfile.override_active === true);
+  const profileRohamAnnual = n(taxProfile?.roham_salary);
+  const profileFaraAnnual  = n(taxProfile?.fara_salary);
+  const canonRohamAnnual   = n(canonicalIncome?.perPerson?.roham?.annual);
+  const canonFaraAnnual    = n(canonicalIncome?.perPerson?.fara?.annual);
+
+  let rohamAnnual: number;
+  let faraAnnual:  number;
+  if (household) {
+    // Shared selector path — preferred.
+    rohamAnnual = n(household.rohamAnnual);
+    faraAnnual  = n(household.faraAnnual);
+  } else if (overrideActive && (profileRohamAnnual > 0 || profileFaraAnnual > 0)) {
+    rohamAnnual = profileRohamAnnual > 0 ? profileRohamAnnual : canonRohamAnnual;
+    faraAnnual  = profileFaraAnnual  > 0 ? profileFaraAnnual  : canonFaraAnnual;
+  } else {
+    rohamAnnual = canonRohamAnnual;
+    faraAnnual  = canonFaraAnnual;
+  }
+
+  // ── Tax flags: prefer tax profile when explicitly set ─────────────────
+  const tp = taxProfile ?? {};
+  const pickBool = (a: any, b: any): boolean =>
+    (a !== undefined && a !== null) ? Boolean(a) : Boolean(b);
+  const pickNum = (a: any, b: any): number => (n(a) > 0 ? n(a) : n(b));
 
   return {
-    roham_annual_income:  rohamMonthly * 12,
-    fara_annual_income:   faraMonthly * 12,
+    roham_annual_income:  rohamAnnual,
+    fara_annual_income:   faraAnnual,
     roham_super_balance:  n(snap.roham_super_balance) || n(snap.super_balance) * 0.6,
     fara_super_balance:   n(snap.fara_super_balance)  || n(snap.super_balance) * 0.4,
-    roham_employer_sg_rate:         n(snap.roham_employer_contrib) || 12,
-    roham_salary_sacrifice_monthly: n(snap.roham_salary_sacrifice),
-    fara_employer_sg_rate:          n(snap.fara_employer_contrib)  || 12,
-    fara_salary_sacrifice_monthly:  n(snap.fara_salary_sacrifice)  || 0,
+    roham_employer_sg_rate:         pickNum(tp.roham_super_rate,      snap.roham_employer_contrib) || 12,
+    roham_salary_sacrifice_monthly: pickNum(tp.roham_salary_sacrifice, snap.roham_salary_sacrifice),
+    fara_employer_sg_rate:          pickNum(tp.fara_super_rate,       snap.fara_employer_contrib) || 12,
+    fara_salary_sacrifice_monthly:  pickNum(tp.fara_salary_sacrifice,  snap.fara_salary_sacrifice),
     properties: (properties || []).map((p: any) => ({
       is_ppor:        p.is_ppor || p.property_type === 'PPOR' || false,
       weekly_rent:    n(p.weekly_rent),
@@ -583,10 +655,10 @@ export function buildTaxAlphaInput(snap: any, properties: any[]): TaxAlphaInput 
     stocks_value:      n(snap.stocks),
     crypto_value:      n(snap.crypto),
     other_debts:       n(snap.other_debts),
-    roham_has_private_health: Boolean(snap.roham_has_private_health),
-    fara_has_private_health:  Boolean(snap.fara_has_private_health),
-    roham_has_help_debt:      Boolean(snap.roham_has_help_debt),
-    fara_has_help_debt:       Boolean(snap.fara_has_help_debt),
+    roham_has_private_health: pickBool(tp.roham_has_private_health, snap.roham_has_private_health),
+    fara_has_private_health:  pickBool(tp.fara_has_private_health,  snap.fara_has_private_health),
+    roham_has_help_debt:      pickBool(tp.roham_has_help_debt,      snap.roham_has_help_debt),
+    fara_has_help_debt:       pickBool(tp.fara_has_help_debt,       snap.fara_has_help_debt),
     unrealised_gains:         n(snap.unrealised_gains),
   };
 }
