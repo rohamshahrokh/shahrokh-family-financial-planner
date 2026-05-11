@@ -79,6 +79,7 @@ import {
   ExecutionPlanTimeline,
   ConditionalRecsList,
 } from "@/components/decisionEngine/RecommendationLayer";
+import { StrategyCard } from "@/components/decisionEngine/StrategyCard";
 
 // Embedded power-user tab — re-uses every line of premium Scenario Lab UX.
 import ScenarioCompareV2Page from "./scenario-compare-v2";
@@ -748,17 +749,16 @@ function QuickDecisionTab() {
               All ranked paths ({ranked.length})
             </CardTitle>
             <CardDescription>
-              Tap a path to inspect its assumptions, formulas invoked, and event timeline.
+              Each path is an investment-committee–style explanation with trade-offs, baseline delta, stress, and a deep-dive sheet.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="space-y-3">
             {ranked.map((c, idx) => (
-              <CandidateRow
+              <StrategyCard
                 key={c.id}
                 rank={idx + 1}
                 candidate={c}
-                expanded={expandedCandidateId === c.id}
-                onToggle={() => setExpandedCandidateId(expandedCandidateId === c.id ? null : c.id)}
+                baseline={output!.baseScenarioResult}
                 fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
                 privacyMode={privacyMode}
               />
