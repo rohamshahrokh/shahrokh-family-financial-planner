@@ -63,6 +63,10 @@ import {
   divisionTwoNinetyThreeTax,
   superGuaranteeRate,
   SUPER_CONSTANTS_FY26,
+  realDollars,
+  realCagr,
+  sortinoRatio,
+  APRA_CONSTANTS,
   FORMULA_REGISTRY,
   getFormula,
   listFormulas,
@@ -348,6 +352,165 @@ section("A. Formula Registry");
   const f1 = dynamicLiquidityFloor({ monthlyExpenses: 8000, dependants: 1, incomeVolatility: 0.1, totalLvr: 0.6, illiquidAssetShare: 0.5, upcomingEvents12mo: [{type:"refinance"}] });
   const f2 = dynamicLiquidityFloor({ monthlyExpenses: 8000, dependants: 1, incomeVolatility: 0.1, totalLvr: 0.6, illiquidAssetShare: 0.5, upcomingEvents12mo: [{type:"refinance"}] });
   assert("dynLiqFloor deterministic", f1.floorMonths === f2.floorMonths && f1.floorDollars === f2.floorDollars);
+}
+
+// ─── Phase 2.5: real dollars / real CAGR / Sortino / APRA constants ──────────
+{
+  // realDollars: t=0 returns nominal
+  assert(
+    "realDollars t=0 returns nominal",
+    realDollars({ nominal: 100_000, monthIndex: 0, inflationAnnual: 0.03 }) === 100_000,
+  );
+
+  // realDollars: inflation=0 returns nominal at any horizon
+  assert(
+    "realDollars inflation=0 returns nominal",
+    near(realDollars({ nominal: 250_000, monthIndex: 240, inflationAnnual: 0 }), 250_000, 1e-9),
+  );
+
+  // realDollars: monotonically deflates as t grows under positive inflation
+  const r0 = realDollars({ nominal: 100_000, monthIndex: 0, inflationAnnual: 0.03 });
+  const r12 = realDollars({ nominal: 100_000, monthIndex: 12, inflationAnnual: 0.03 });
+  const r60 = realDollars({ nominal: 100_000, monthIndex: 60, inflationAnnual: 0.03 });
+  const r240 = realDollars({ nominal: 100_000, monthIndex: 240, inflationAnnual: 0.03 });
+  assert("realDollars strictly decreasing with t (3% CPI)", r0 > r12 && r12 > r60 && r60 > r240);
+
+  // realDollars: 12 months @ 3% CPI ≈ nominal / 1.03 (within 1e-9 since monthly compounds to annual)
+  assert(
+    "realDollars 12m @ 3% ≈ nominal / 1.03",
+    near(r12, 100_000 / 1.03, 1e-6),
+    `got ${r12.toFixed(4)}, expected ${(100_000 / 1.03).toFixed(4)}`,
+  );
+
+  // realDollars: handles negative monthIndex by clamping to 0
+  assert(
+    "realDollars clamps negative monthIndex → t=0 behaviour",
+    realDollars({ nominal: 1000, monthIndex: -5, inflationAnnual: 0.03 }) === 1000,
+  );
+
+  // realDollars: determinism
+  const a1 = realDollars({ nominal: 100_000, monthIndex: 120, inflationAnnual: 0.025 });
+  const a2 = realDollars({ nominal: 100_000, monthIndex: 120, inflationAnnual: 0.025 });
+  assert("realDollars deterministic", a1 === a2);
+
+  // realCagr: Fisher equation — nominal=0.07, inflation=0.03 → ~0.0388
+  const rc = realCagr({ nominalCagr: 0.07, inflationAnnual: 0.03 });
+  assert(
+    "realCagr Fisher: nominal 7% real ≈ 3.883%",
+    near(rc, (1.07 / 1.03) - 1, 1e-12),
+    `got ${rc.toFixed(6)}`,
+  );
+
+  // realCagr: inflation=0 returns nominal (within float tolerance)
+  assert(
+    "realCagr inflation=0 → nominal",
+    near(realCagr({ nominalCagr: 0.08, inflationAnnual: 0 }), 0.08, 1e-12),
+  );
+
+  // realCagr: nominal=inflation → 0% real
+  assert(
+    "realCagr nominal=inflation → 0%",
+    near(realCagr({ nominalCagr: 0.03, inflationAnnual: 0.03 }), 0, 1e-12),
+  );
+
+  // sortinoRatio: empty sample → 0
+  assert(
+    "sortinoRatio empty samples → 0",
+    sortinoRatio({ samples: [], minAcceptableReturn: 0 }) === 0,
+  );
+
+  // sortinoRatio: all-upside (no downside, mean>MAR) → +Infinity
+  assert(
+    "sortinoRatio all-upside → +Infinity",
+    sortinoRatio({ samples: [0.1, 0.2, 0.3, 0.4], minAcceptableReturn: 0.05 }) === Number.POSITIVE_INFINITY,
+  );
+
+  // sortinoRatio: all-upside but mean=MAR → 0 (excess=0, no downside)
+  assert(
+    "sortinoRatio all-equal-to-MAR → 0",
+    sortinoRatio({ samples: [0.05, 0.05, 0.05], minAcceptableReturn: 0.05 }) === 0,
+  );
+
+  // sortinoRatio: mean<MAR with downside → negative
+  const sNeg = sortinoRatio({ samples: [-0.1, -0.05, 0, 0.02], minAcceptableReturn: 0.05 });
+  assert("sortinoRatio mean<MAR → negative", sNeg < 0, `got ${sNeg}`);
+
+  // sortinoRatio: deterministic
+  const s1 = sortinoRatio({ samples: [-0.1, 0.05, 0.1, -0.02, 0.08], minAcceptableReturn: 0.03 });
+  const s2 = sortinoRatio({ samples: [-0.1, 0.05, 0.1, -0.02, 0.08], minAcceptableReturn: 0.03 });
+  assert("sortinoRatio deterministic", s1 === s2);
+
+  // sortinoRatio: finite for typical case
+  assert(
+    "sortinoRatio finite for mixed sample",
+    Number.isFinite(s1),
+    `got ${s1}`,
+  );
+
+  // APRA_CONSTANTS: shape & values
+  assert(
+    "APRA_CONSTANTS.serviceabilityBufferPct === 0.03",
+    APRA_CONSTANTS.serviceabilityBufferPct === 0.03,
+  );
+  assert(
+    "APRA_CONSTANTS.dtiScrutinyLine === 6.0",
+    APRA_CONSTANTS.dtiScrutinyLine === 6.0,
+  );
+  assert(
+    "APRA_CONSTANTS.dtiCapZone === 8.0",
+    APRA_CONSTANTS.dtiCapZone === 8.0,
+  );
+  assert(
+    "APRA_CONSTANTS.floorAssessmentRate === 0.0825",
+    APRA_CONSTANTS.floorAssessmentRate === 0.0825,
+  );
+  assert(
+    "APRA_CONSTANTS scrutiny < capZone",
+    APRA_CONSTANTS.dtiScrutinyLine < APRA_CONSTANTS.dtiCapZone,
+  );
+
+  // FORMULA_REGISTRY: new entries registered
+  assert(
+    "FORMULA_REGISTRY contains realDollars",
+    Boolean(getFormula("realDollars")),
+  );
+  assert(
+    "FORMULA_REGISTRY contains realCagr",
+    Boolean(getFormula("realCagr")),
+  );
+  assert(
+    "FORMULA_REGISTRY contains sortinoRatio",
+    Boolean(getFormula("sortinoRatio")),
+  );
+
+  // listFormulas surfaces them too (returns string[] of ids, insertion order)
+  const ids = listFormulas();
+  assert(
+    "listFormulas surfaces all three Phase 2.5 helpers",
+    ids.includes("realDollars") && ids.includes("realCagr") && ids.includes("sortinoRatio"),
+  );
+
+  // Registry compute path matches direct call (realDollars)
+  const direct = realDollars({ nominal: 100_000, monthIndex: 60, inflationAnnual: 0.03 });
+  const viaReg = getFormula("realDollars")!.compute({
+    nominal: 100_000, monthIndex: 60, inflationAnnual: 0.03,
+  } as any) as number;
+  assert(
+    "realDollars: registry.compute matches direct call",
+    direct === viaReg,
+    `direct=${direct}, registry=${viaReg}`,
+  );
+
+  // Registry compute path matches direct call (sortinoRatio)
+  const dSort = sortinoRatio({ samples: [-0.05, 0.1, 0.02, -0.01, 0.08], minAcceptableReturn: 0.03 });
+  const rSort = getFormula("sortinoRatio")!.compute({
+    samples: [-0.05, 0.1, 0.02, -0.01, 0.08], minAcceptableReturn: 0.03,
+  } as any) as number;
+  assert(
+    "sortinoRatio: registry.compute matches direct call",
+    dSort === rSort,
+    `direct=${dSort}, registry=${rSort}`,
+  );
 }
 
 // ════════════════════════════════════════════════════════════════════════════

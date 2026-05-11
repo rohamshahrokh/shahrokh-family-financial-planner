@@ -27,6 +27,11 @@ export {
   divisionTwoNinetyThreeTax,
   superGuaranteeRate,
   SUPER_CONSTANTS_FY26,
+  // Phase 2.5 — inflation, Sortino, APRA constants
+  realDollars,
+  realCagr,
+  sortinoRatio,
+  APRA_CONSTANTS,
   // Registry index
   FORMULA_REGISTRY,
   getFormula,

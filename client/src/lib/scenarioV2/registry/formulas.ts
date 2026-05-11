@@ -386,6 +386,90 @@ export function riskAdjustedReturn(p: {
   return Math.max(-0.5, Math.min(0.5, raw));
 }
 
+/**
+ * Phase 2.5 — deflate a nominal cashflow / amount to real dollars at month t.
+ *
+ *   real = nominal / (1 + monthlyInflation)^t
+ *
+ * `inflationAnnual` is annual CPI (e.g. 0.03). Caller passes month-index t.
+ * Monotone, deterministic, no clamping (real values may be negative).
+ */
+export function realDollars(p: {
+  nominal: number;
+  monthIndex: number;
+  inflationAnnual: number;
+}): number {
+  const m = (1 + p.inflationAnnual) ** (1 / 12);
+  return p.nominal / m ** Math.max(0, p.monthIndex);
+}
+
+/**
+ * Phase 2.5 — convert a nominal CAGR to a real CAGR via Fisher equation.
+ *
+ *   realCagr = (1 + nominal) / (1 + inflation) − 1
+ */
+export function realCagr(p: { nominalCagr: number; inflationAnnual: number }): number {
+  return (1 + p.nominalCagr) / (1 + p.inflationAnnual) - 1;
+}
+
+/**
+ * Phase 2.5 — Sortino ratio over a per-sim terminal NW sample. Unlike the
+ * Sharpe ratio, only DOWNSIDE deviation (squared semideviation below the
+ * minimum acceptable return) enters the denominator. Inputs are samples of
+ * terminal NW (or any equivalent return-like sample); the function annualises
+ * via the horizon length in months.
+ *
+ *   excess  = mean(samples) − MAR
+ *   downstd = sqrt( mean( min(samples − MAR, 0)^2 ) )
+ *   sortino = excess / max(downstd, eps)
+ *
+ * Returns 0 when downstd is zero (degenerate, no dispersion).
+ */
+export function sortinoRatio(p: {
+  samples: number[];
+  minAcceptableReturn: number;
+  /** Optional: epsilon to avoid divide-by-zero. */
+  eps?: number;
+}): number {
+  const eps = p.eps ?? 1e-9;
+  if (!p.samples || p.samples.length === 0) return 0;
+  const n = p.samples.length;
+  const mean = p.samples.reduce((a, b) => a + b, 0) / n;
+  const excess = mean - p.minAcceptableReturn;
+  let downSq = 0;
+  let downCount = 0;
+  for (const s of p.samples) {
+    const d = s - p.minAcceptableReturn;
+    if (d < 0) { downSq += d * d; downCount++; }
+  }
+  if (downCount === 0) {
+    // Float-safe: treat |excess| ≤ eps as "no excess" → 0; otherwise sign-aware infinity.
+    if (Math.abs(excess) <= eps) return 0;
+    return excess > 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+  }
+  const downStd = Math.sqrt(downSq / n);  // population semideviation
+  if (downStd <= eps) return 0;
+  return excess / downStd;
+}
+
+/**
+ * Phase 2.5 — APRA-related buffer constants exported for the registry.
+ * Centralised here so the engine + tests + UI all reference one source.
+ * (Existing apraBufferPct default of 0.03 in borrowing.ts unchanged.)
+ */
+export const APRA_CONSTANTS = {
+  /** APG 223 §39 — add to assessment rate when computing NSR. */
+  serviceabilityBufferPct: 0.03,
+  /** APRA scrutiny line for DTI (debt-to-income). */
+  dtiScrutinyLine: 6.0,
+  /** APRA cap-zone DTI — banks must justify exceptions. */
+  dtiCapZone: 8.0,
+  /** APRA-aligned floor rate banks generally adopt internally. */
+  floorAssessmentRate: 0.0825,
+  /** Reference: APG 223 — Residential Mortgage Lending (Dec 2014, updated 2022). */
+  reference: "APRA APG 223 §39 (residential mortgage serviceability buffer)",
+} as const;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Section D — Formula Registry index
 // ─────────────────────────────────────────────────────────────────────────────
@@ -782,6 +866,40 @@ export const FORMULA_REGISTRY: Record<string, FormulaSpec> = {
     output: "decimal",
     references: ["unified_decision_engine_spec.md §5.3"],
     compute: (i) => riskAdjustedReturn(i as any),
+  },
+  // Phase 2.5 — inflation, Sortino
+  realDollars: {
+    id: "realDollars",
+    description: "Deflate a nominal dollar amount at month-index t to today's purchasing power.",
+    formula: "real = nominal / (1 + inflation)^(t/12)",
+    unit: "AUD (real, t0)",
+    category: "return",
+    inputs: { nominal: "AUD (nominal)", monthIndex: "months", inflationAnnual: "decimal" },
+    output: "AUD (real)",
+    references: ["ABS CPI series; standard real-vs-nominal deflator"],
+    compute: (i) => realDollars(i as any),
+  },
+  realCagr: {
+    id: "realCagr",
+    description: "Fisher equation — convert nominal CAGR to real CAGR given an inflation rate.",
+    formula: "(1 + nominal) / (1 + inflation) − 1",
+    unit: "decimal",
+    category: "return",
+    inputs: { nominalCagr: "decimal", inflationAnnual: "decimal" },
+    output: "decimal",
+    references: ["Fisher (1930) The Theory of Interest, ch. II"],
+    compute: (i) => realCagr(i as any),
+  },
+  sortinoRatio: {
+    id: "sortinoRatio",
+    description: "Excess return divided by downside semideviation; rewards upside, penalises downside only.",
+    formula: "sortino = (mean(samples) − MAR) / sqrt(mean(min(samples−MAR, 0)^2))",
+    unit: "ratio (dimensionless if samples are returns)",
+    category: "risk",
+    inputs: { samples: "number[]", minAcceptableReturn: "same units as samples" },
+    output: "ratio",
+    references: ["Sortino & van der Meer (1991), Journal of Risk Management"],
+    compute: (i) => sortinoRatio(i as any),
   },
 };
 
