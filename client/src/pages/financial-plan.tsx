@@ -21,6 +21,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { localStore } from "@/lib/localStore";
 import { useLocation } from "wouter";
 import AssumptionsPanel from "@/components/AssumptionsPanel";
+import { computeCanonicalNetWorth } from "@/lib/canonicalNetWorth";
 import { formatCurrency, safeNum } from "@/lib/finance";
 // Single-source-of-truth selectors. Financial Plan now DISPLAYS derived values
 // (income from ledger, expenses from budget, mortgage repayment from debt
@@ -394,12 +395,18 @@ export default function MyFinancialPlan() {
   const sotSuperCombined    = selectSuperCombined(sotInputs);
   const sotCashToday        = selectCashToday(sotInputs);
 
-  // Derived totals
+  // Derived totals.
+  //
+  // SOURCE-OF-TRUTH: the live "Net Worth" preview reads from the canonical
+  // selector applied to the in-progress draft (so the preview reflects pending
+  // edits) — NOT a separate hand-rolled sum. This is the same code path the
+  // dashboard, reports, and timeline use, so the four NW numbers stay
+  // identical. Local "totalLiquidAssets / totalExpenses" remain because the
+  // editor card needs the sub-totals for individual cells.
   const d = draft;
   const totalIncome = d
     ? safeNum(d.roham_monthly_income) + safeNum(d.fara_monthly_income) + safeNum(d.rental_income_total) + safeNum(d.other_income)
     : 0;
-  // Total liquid cash from ledger: all 4 cash buckets + offset (same formula as dashboard)
   const totalLiquidCash = d
     ? safeNum(d.cash) + safeNum(d.savings_cash ?? 0) + safeNum(d.emergency_cash ?? 0) + safeNum(d.other_cash ?? 0) + safeNum(d.offset_balance)
     : 0;
@@ -409,13 +416,21 @@ export default function MyFinancialPlan() {
   const totalExpenses = d
     ? safeNum(d.monthly_expenses) + safeNum(d.childcare_monthly) + safeNum(d.insurance_monthly) + safeNum(d.utilities_monthly) + safeNum(d.subscriptions_monthly)
     : 0;
-  const totalLiabilities = d
-    ? safeNum(d.mortgage) + safeNum(d.other_debts)
-    : 0;
-  const totalAssets = d
-    ? safeNum(d.ppor) + totalLiquidCash + safeNum(d.super_balance) + safeNum(d.stocks) + safeNum(d.crypto) + safeNum(d.cars) + safeNum(d.iran_property)
-    : 0;
-  const netWorth = totalAssets - totalLiabilities;
+  // Route the live preview through the canonical selector so the editor's NW
+  // matches every other surface to the dollar.
+  const draftCanonicalInputs = d ? {
+    snapshot: d as any,
+    properties,
+    stocks: [],
+    cryptos: [],
+    holdingsRaw: [],
+    incomeRecords: undefined,
+    expenses: undefined,
+  } : null;
+  const draftCanonical = draftCanonicalInputs ? computeCanonicalNetWorth(draftCanonicalInputs) : null;
+  const totalLiabilities = draftCanonical?.raw.totalLiabilities ?? 0;
+  const totalAssets      = draftCanonical?.raw.totalAssets ?? 0;
+  const netWorth         = draftCanonical?.netWorth ?? 0;
   const monthlySurplus = totalIncome > 0
     ? totalIncome - totalExpenses
     : (d ? safeNum(d.monthly_income) - totalExpenses : 0);

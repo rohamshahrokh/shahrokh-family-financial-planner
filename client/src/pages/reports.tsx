@@ -13,6 +13,7 @@ import { formatCurrency, calcSavingsRate, safeNum } from "@/lib/finance";
 import { runCashEngine } from "@/lib/cashEngine";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import { useAppStore } from "@/lib/store";
+import { computeCanonicalNetWorth } from "@/lib/canonicalNetWorth";
 import { Button } from "@/components/ui/button";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { useToast } from "@/hooks/use-toast";
@@ -162,13 +163,19 @@ export default function ReportsPage() {
 
   const snap = snapshot ?? {};
 
-  // ── Core derived numbers (central ledger) ─────────────────────────────────
-  const cash          = safeNum(snap.cash) + safeNum(snap.offset_balance);
-  const totalAssets   = safeNum(snap.ppor) + cash + safeNum(snap.super_balance)
-                      + safeNum(snap.stocks) + safeNum(snap.crypto)
-                      + safeNum(snap.cars) + safeNum(snap.iran_property);
-  const totalLiab     = safeNum(snap.mortgage) + safeNum(snap.other_debts);
-  const netWorth      = totalAssets - totalLiab;
+  // ── Core derived numbers ─────────────────────────────────────────────────
+  // SOURCE-OF-TRUTH: canonicalNetWorth — DO NOT re-sum snapshot fields here.
+  // Previously this page summed snapshot.cash + ppor + super_balance directly,
+  // which produced a NW figure that diverged from the dashboard ($816K vs
+  // $856K) because it missed the savings_cash/emergency/other_cash buckets.
+  const canonicalNw = computeCanonicalNetWorth({
+    snapshot, properties, stocks, cryptos,
+    holdingsRaw: [], incomeRecords, expenses,
+  });
+  const cash          = canonicalNw.components.cashTotal;
+  const totalAssets   = canonicalNw.raw.totalAssets;
+  const totalLiab     = canonicalNw.raw.totalLiabilities;
+  const netWorth      = canonicalNw.netWorth;
   const monthlyInc    = safeNum(snap.monthly_income);
   const monthlyExp    = safeNum(snap.monthly_expenses);
   const surplus       = monthlyInc - monthlyExp;
