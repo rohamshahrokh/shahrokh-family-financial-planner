@@ -9,6 +9,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useAppStore } from "@/lib/store";
+import { usePwaBannerVisible } from "@/components/PwaInstallBanner";
 import { applyTheme } from "@/lib/store";
 import type { Permission } from "@/lib/store";
 import { Button } from "@/components/ui/button";
@@ -187,6 +188,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [location, navigate] = useLocation();
   const { theme, toggleTheme, setTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role, isDemo, householdRole, permissions, hasPermission } =
     useAppStore();
+  // Reserve bottom padding when the PWA install banner is showing (audit P1-5).
+  const pwaVisible = usePwaBannerVisible();
 
   // Apply theme whenever it changes (dark/light only, no auto)
   useEffect(() => {
@@ -629,8 +632,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        {/* Page content */}
-        <main className="pwa-main-scroll flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6">
+        {/* Page content — reserves bottom padding when the PWA banner is shown
+            (audit fix P1-5) so scrolling content does not hide behind it. */}
+        <main className={`pwa-main-scroll flex-1 overflow-y-auto overflow-x-hidden p-4 md:px-6 lg:p-6 ${pwaVisible ? "pb-32" : ""}`}>
           {children}
         </main>
       </div>

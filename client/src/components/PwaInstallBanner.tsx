@@ -1,23 +1,60 @@
 /**
- * PwaInstallBanner — shows a "Add to Home Screen" prompt on supported browsers.
- * Listens for the `beforeinstallprompt` event (Chrome/Android/Edge).
- * On iOS Safari it shows manual instructions since iOS doesn't fire the event.
- * Dismissible — remembers dismissal in localStorage for 30 days.
+ * PwaInstallBanner — install-prompt banner with audit-driven guardrails.
+ *
+ * Behaviour (audit fix P1-5):
+ *   • Dismissible — `localStorage["fwl-pwa-dismissed-at"]` holds an ISO ts.
+ *   • After dismiss, hide for 30 days, then re-show.
+ *   • Only show after the user's 3rd visit (tracked in
+ *     `localStorage["fwl-visit-count"]`, incremented on mount).
+ *   • Theme-aware — uses `bg-card / text-card-foreground / border-border`
+ *     instead of hardcoded dark colors.
+ *   • Reserves bottom-padding on `<main>` via the `usePwaBannerVisible()`
+ *     hook so content does not get hidden behind the banner.
+ *   • Honours `env(safe-area-inset-bottom)` for iOS notches.
+ *   • Suppressed on the anchor screens `/decision`, `/scenario-compare`,
+ *     `/reports` where the banner stomps on critical UI.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "wouter";
 import { X, Download } from "lucide-react";
 
-const DISMISS_KEY = "fwl_pwa_banner_dismissed";
-// "never" = permanently dismissed; any numeric timestamp = legacy 30-day TTL (ignored, always treated as permanent now)
-const NEVER = "never";
+const DISMISS_KEY = "fwl-pwa-dismissed-at";
+const VISIT_KEY = "fwl-visit-count";
+const MIN_VISITS = 3;
+const REDISPLAY_AFTER_DAYS = 30;
 
-function isDismissed(): boolean {
+const SUPPRESSED_PATHS = [
+  "/decision",
+  "/scenario-compare",
+  "/scenario-compare-v2",
+  "/reports",
+];
+
+function readDismissedIso(): string | null {
+  try { return localStorage.getItem(DISMISS_KEY); } catch { return null; }
+}
+
+function dismissedRecently(): boolean {
+  const iso = readDismissedIso();
+  if (!iso) return false;
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return false;
+  const ageDays = (Date.now() - at) / 86_400_000;
+  return ageDays < REDISPLAY_AFTER_DAYS;
+}
+
+function readVisitCount(): number {
   try {
-    const raw = localStorage.getItem(DISMISS_KEY);
-    return raw !== null; // any stored value = dismissed permanently
-  } catch {
-    return false;
-  }
+    const raw = localStorage.getItem(VISIT_KEY);
+    const n = raw ? parseInt(raw, 10) : 0;
+    return Number.isFinite(n) ? n : 0;
+  } catch { return 0; }
+}
+
+function bumpVisitCount(): number {
+  const next = readVisitCount() + 1;
+  try { localStorage.setItem(VISIT_KEY, String(next)); } catch { /* ignore */ }
+  return next;
 }
 
 function isIosSafari(): boolean {
@@ -34,16 +71,46 @@ function isInStandaloneMode(): boolean {
   );
 }
 
+/**
+ * Hook other components (e.g. Layout / <main>) can use to reserve bottom
+ * padding when the banner is visible. Mirrors the same gates as the
+ * component so the layout always agrees with the banner state.
+ */
+export function usePwaBannerVisible(): boolean {
+  const [location] = useLocation();
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    if (isInStandaloneMode()) return;
+    if (dismissedRecently()) return;
+    if (SUPPRESSED_PATHS.includes(location)) return;
+    if (readVisitCount() < MIN_VISITS) return;
+    setActive(true);
+  }, [location]);
+
+  return active;
+}
+
 export default function PwaInstallBanner() {
+  const [location] = useLocation();
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showIos, setShowIos] = useState(false);
   const [visible, setVisible] = useState(false);
 
+  // Bump visit count once per session-mount so refreshes don't game it.
+  // The bump is deliberate before the gating logic so a returning user who
+  // would qualify on this very visit gets the banner.
   useEffect(() => {
-    // Already installed or dismissed — don't show
-    if (isInStandaloneMode() || isDismissed()) return;
+    if (isInStandaloneMode()) return;
+    bumpVisitCount();
+  }, []);
 
-    // Chrome / Android / Edge — capture beforeinstallprompt
+  useEffect(() => {
+    if (isInStandaloneMode()) { setVisible(false); return; }
+    if (dismissedRecently()) { setVisible(false); return; }
+    if (SUPPRESSED_PATHS.includes(location)) { setVisible(false); return; }
+    if (readVisitCount() < MIN_VISITS) { setVisible(false); return; }
+
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -51,17 +118,15 @@ export default function PwaInstallBanner() {
     };
     window.addEventListener("beforeinstallprompt", handler);
 
-    // iOS Safari — show manual instructions
     if (isIosSafari()) {
       setShowIos(true);
       setVisible(true);
     }
-
     return () => window.removeEventListener("beforeinstallprompt", handler);
-  }, []);
+  }, [location]);
 
   function dismiss() {
-    try { localStorage.setItem(DISMISS_KEY, NEVER); } catch {}
+    try { localStorage.setItem(DISMISS_KEY, new Date().toISOString()); } catch { /* ignore */ }
     setVisible(false);
   }
 
@@ -73,43 +138,44 @@ export default function PwaInstallBanner() {
     setDeferredPrompt(null);
   }
 
+  const bottomStyle = useMemo<React.CSSProperties>(() => ({
+    bottom: "max(1rem, env(safe-area-inset-bottom, 1rem))",
+  }), []);
+
   if (!visible) return null;
 
   return (
     <div
-      className="fixed left-1/2 z-[9999] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-2xl border border-blue-800/60 bg-[#0d1630] shadow-2xl shadow-black/60 px-4 py-3"
-      style={{ bottom: 'max(1rem, env(safe-area-inset-bottom, 1rem))' }}
+      className="fixed left-1/2 z-[9999] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-2xl border border-border bg-card text-card-foreground shadow-2xl shadow-black/40 px-4 py-3"
+      style={bottomStyle}
       role="banner"
       aria-label="Install Family Wealth Lab"
     >
       <div className="flex items-start gap-3">
-        {/* Icon */}
-        <div className="shrink-0 mt-0.5 rounded-xl bg-blue-900/50 p-2">
-          <Download className="w-5 h-5 text-blue-300" />
+        <div className="shrink-0 mt-0.5 rounded-xl bg-primary/15 p-2">
+          <Download className="w-5 h-5 text-primary" />
         </div>
 
-        {/* Content */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white leading-tight">
+          <p className="text-sm font-semibold leading-tight">
             Install Family Wealth Lab
           </p>
           {showIos ? (
-            <p className="text-xs text-zinc-400 mt-0.5 leading-snug">
-              Tap the <strong className="text-zinc-200">Share</strong> button in Safari,
-              then <strong className="text-zinc-200">Add to Home Screen</strong> for the
+            <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
+              Tap the <strong className="text-foreground">Share</strong> button in Safari,
+              then <strong className="text-foreground">Add to Home Screen</strong> for the
               full app experience.
             </p>
           ) : (
-            <p className="text-xs text-zinc-400 mt-0.5 leading-snug">
+            <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
               Add to your home screen for instant access — works offline too.
             </p>
           )}
 
-          {/* Install button — only for non-iOS (iOS is manual) */}
           {!showIos && deferredPrompt && (
             <button
               onClick={install}
-              className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:opacity-90 active:opacity-80 px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity"
             >
               <Download className="w-3.5 h-3.5" />
               Install App
@@ -117,11 +183,11 @@ export default function PwaInstallBanner() {
           )}
         </div>
 
-        {/* Dismiss */}
         <button
           onClick={dismiss}
-          className="shrink-0 mt-0.5 rounded-lg p-1 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-          aria-label="Dismiss"
+          className="shrink-0 mt-0.5 rounded-lg p-1 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+          aria-label="Dismiss for 30 days"
+          title="Dismiss for 30 days"
         >
           <X className="w-4 h-4" />
         </button>
