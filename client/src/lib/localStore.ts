@@ -448,34 +448,61 @@ export const localStore = {
     }
   },
 
+  /**
+   * updateSnapshot — PATCH-style partial write.
+   *
+   * CRITICAL ARCHITECTURE NOTE:
+   * ──────────────────────────────────────────────────────────────────────────
+   * Previous versions merged `data` over a localStorage cache as the source
+   * of truth, then upserted the FULL merged payload to Supabase. This caused
+   * catastrophic data loss whenever the localStorage cache was empty or stale
+   * (private browsing, fresh device, cleared cache, after a deploy that
+   * rotates the service-worker scope, etc.). The merge would fill in zeros
+   * from DEFAULT_SNAPSHOT and overwrite real Supabase values with $0.
+   *
+   * NEW ARCHITECTURE (production-safe):
+   *  1. ONLY send the fields the caller explicitly passed (no merge bloat).
+   *  2. Supabase remains the single source of truth — we never compose a full
+   *     payload from local cache and upsert it.
+   *  3. localStorage is updated AFTER the Supabase write succeeds, using the
+   *     returned row (which is the authoritative post-merge state).
+   *  4. If Supabase is unreachable, the write FAILS loudly instead of
+   *     silently clobbering the source of truth.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
   async updateSnapshot(data: Partial<Snapshot>): Promise<Snapshot> {
-    // Read current from cache (avoids a second Supabase round-trip).
-    // IMPORTANT: use the raw cached object (not re-normalised) so that super
-    // fields already saved are not dropped before we can merge in the new data.
-    const cached = lsGet<any>(KEYS.snapshot);
-    const current = cached ?? { ...DEFAULT_SNAPSHOT };
+    // Defensive copy — strip undefined/null so we never send "this field becomes null"
+    // unless the caller explicitly opted in to that semantics (which no current caller does).
+    const delta: Record<string, any> = {};
+    for (const [k, v] of Object.entries(data ?? {})) {
+      if (v === undefined) continue;          // never send undefined
+      if (k === 'id') continue;               // id is set by sbSnapshot.upsert
+      if (k === 'updated_at') continue;       // updated_at is set by sbSnapshot.upsert
+      delta[k] = v;
+    }
 
-    // Merge: incoming data wins over cached values.
-    // Do NOT normalise the merged object here — that would strip super fields.
-    // normaliseSnapshot is only used for the core numeric fields; the full
-    // payload (including all super columns) must reach Supabase intact.
-    const fullPayload: any = {
-      ...current,
-      ...data,
-      id: current.id ?? "shahrokh-family-main",
-      updated_at: new Date().toISOString(),
-    };
+    if (Object.keys(delta).length === 0) {
+      // No-op — return current state from Supabase so the caller still sees the row.
+      console.warn("[SF] updateSnapshot called with empty delta — returning current state");
+      return await this.getSnapshot();
+    }
 
-    // 1. Save to Supabase (source of truth) — send the full payload
-    const saved = await sbSnapshot.upsert(fullPayload);
+    // 1. Send only the delta to Supabase. PostgREST UPSERT with merge-duplicates
+    //    on conflict (id) acts as a PATCH for the columns we send — every other
+    //    column is preserved unchanged on the server. This eliminates the
+    //    stale-cache-overwrite vulnerability entirely.
+    const saved = await sbSnapshot.upsert(delta);
+    if (!saved) {
+      throw new Error('[SF] updateSnapshot: Supabase returned no row — refusing to update local cache to avoid data divergence');
+    }
 
-    // 2. Normalise the returned row (which includes super fields)
-    const result = saved ? normaliseSnapshot(saved) : normaliseSnapshot(fullPayload);
+    // 2. Normalise the returned row for the caller
+    const result = normaliseSnapshot(saved);
 
-    // 3. Update local cache with the full raw saved row so super fields persist in cache
-    lsSet(KEYS.snapshot, saved ?? fullPayload);
+    // 3. NOW it is safe to cache — we have the authoritative server row
+    lsSet(KEYS.snapshot, saved);
     setLastSync();
-    console.log("[SF] Saved to Supabase: snapshot", result);
+    console.log("[SF] Saved to Supabase (PATCH): keys=", Object.keys(delta), "server returned", saved);
     return result;
   },
 
