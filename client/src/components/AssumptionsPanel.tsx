@@ -65,7 +65,9 @@ export default function AssumptionsPanel({
               <span className="font-semibold">Modelling disclaimer:</span>{" "}
               {MODELLING_DISCLAIMER} The “TaxPolicy” and “DecisionEngine” categories
               below are user-editable rails that simulate the proposed 2027 reform
-              — they do not represent enacted Australian law.
+              — they do not represent enacted Australian law. The existing Current
+              Rules engine is preserved unchanged and runs alongside the new regime layer;
+              every output can be viewed under Current Rules, Proposed Reform, or both.
             </div>
           </div>
           <table className="w-full text-[11px]">

@@ -21,6 +21,8 @@ export type {
   PropertyType,
   TaxPolicyRegime,
   TaxPolicyRegimeKind,
+  ConcreteRegimeKind,
+  AutoDetectResolution,
   CGTMethod,
   NegativeGearingTreatment,
   PropertyTypeOverrides,
@@ -36,12 +38,29 @@ export {
   PROPOSED_2027_REFORM_REGIME,
   CUSTOM_STRESS_TEST_REGIME,
   REGIMES_BY_KIND,
+  REGIME_SELECTOR_OPTIONS,
   DEFAULT_REGIME_KIND,
   BUDGET_NIGHT_CUTOFF_DEFAULT,
   REFORM_START_DATE_DEFAULT,
   cloneRegime,
   isReformCarveOutType,
 } from "./regimes";
+
+export {
+  resolveAutoDetectedRegime,
+  resolveSelector,
+  compareCashflowBothRegimes,
+  compareCgtBothRegimes,
+  compareStatusBothRegimes,
+  type AutoDetectInput,
+  type ResolveSelectorOutput,
+  type CashflowComparisonInput,
+  type CashflowComparisonOutput,
+  type CgtComparisonInput,
+  type CgtComparisonOutput,
+  type StatusComparisonInput,
+  type StatusComparisonOutput,
+} from "./autoDetect";
 
 export {
   resolvePropertyTaxStatus,

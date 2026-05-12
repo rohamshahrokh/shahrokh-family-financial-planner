@@ -41,14 +41,42 @@ export const DEFAULT_PROPERTY_TYPE: PropertyType = "UNKNOWN";
 // ─── Policy regimes ──────────────────────────────────────────────────────────
 
 /**
- * The three regimes a scenario can be evaluated under. CUSTOM_STRESS_TEST
- * lets the user clone any regime and tweak any rail (e.g. zero discount,
- * NG abolished entirely, indexed cost base, etc.).
+ * Tax policy regime selector. AUTO_DETECT is the meta-option that
+ * resolves each property to a concrete regime at evaluation time based
+ * on its contractDate + propertyType. CURRENT_RULES, PROPOSED_2027_REFORM,
+ * and CUSTOM_STRESS_TEST are concrete regimes a scenario can be evaluated
+ * under directly.
+ *
+ * Parallel-pathway rule (#FWL_DoNotOverride_CurrentTaxLogic):
+ *   The legacy current-rules tax pipeline ALWAYS remains available. The
+ *   new regime layer runs ALONGSIDE it, never instead of it. Every output
+ *   surface can render both pathways simultaneously.
  */
 export type TaxPolicyRegimeKind =
+  | "AUTO_DETECT"
   | "CURRENT_RULES"
   | "PROPOSED_2027_REFORM"
   | "CUSTOM_STRESS_TEST";
+
+/**
+ * Concrete (non-AUTO_DETECT) regime kinds. AUTO_DETECT resolves to one
+ * of these per-property and is never the *effective* regime applied to
+ * a specific calculation.
+ */
+export type ConcreteRegimeKind = Exclude<TaxPolicyRegimeKind, "AUTO_DETECT">;
+
+/**
+ * Resolution outcome when AUTO_DETECT runs against a property. Engines
+ * may use the `requiresUserConfirmation` flag to surface the
+ * "Tax treatment unknown — please confirm" UI state.
+ */
+export interface AutoDetectResolution {
+  resolvedRegimeKind: ConcreteRegimeKind;
+  /** True when the property lacked enough metadata for a confident decision. */
+  requiresUserConfirmation: boolean;
+  /** Plain-English explanation of why this regime was chosen. */
+  reason: string;
+}
 
 /** CGT calculation method — current rules use the 50% discount. */
 export type CGTMethod =
@@ -93,7 +121,8 @@ export interface PropertyTypeOverrides {
  * engines themselves.
  */
 export interface TaxPolicyRegime {
-  kind: TaxPolicyRegimeKind;
+  /** Concrete regime kind. AUTO_DETECT is a selector, not a regime, so it cannot appear here. */
+  kind: ConcreteRegimeKind;
   /** Human-readable name surfaced in the UI. */
   label: string;
   /** Plain-English summary surfaced in tooltips. */
@@ -162,6 +191,15 @@ export interface PropertyTaxStatus {
   effectiveCGTMethod: CGTMethod;
   /** The actual CGT discount that applies (0..1). */
   effectiveCGTDiscountPct: number;
+
+  /**
+   * Set when this status came out of AUTO_DETECT and either dates or
+   * property type were ambiguous. UI surfaces should render the
+   * "Tax treatment unknown — please confirm" state when true.
+   */
+  autoDetectNeedsConfirmation?: boolean;
+  /** Plain-English reason when status was produced by AUTO_DETECT. */
+  autoDetectReason?: string;
 }
 
 // ─── Carried-forward loss ledger (property_tax_ledger) ───────────────────────

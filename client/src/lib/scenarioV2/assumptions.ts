@@ -163,9 +163,17 @@ export function collectAssumptionsUsed(
     // Modelling-only rails for the proposed Australian negative-gearing /
     // CGT reform. All editable so the user can model alternate proposals.
     // Disclaimer: "This is modelling only and not personal tax advice."
-    { category: "TaxPolicy", label: "Active regime", value: CURRENT_RULES_REGIME.label,
-      source: "taxPolicyEngine/regimes.ts", editable: true,
-      impacts: "Switches all property cashflow + CGT + Decision Engine outputs between regimes." },
+    { category: "TaxPolicy", label: "Tax Policy Regime selector",
+      value: "Auto-detect (default) │ Current Rules │ Proposed 2027 Reform │ Custom Stress Test",
+      source: "taxPolicyEngine/regimes.ts (REGIME_SELECTOR_OPTIONS)", editable: true,
+      impacts: "User chooses how each property is evaluated. Current Rules preserves the legacy pipeline; " +
+               "Auto-detect applies grandfathering by acquisition date + property type; Reform forces the " +
+               "proposed rules; Custom stress test exposes every rail." },
+    { category: "TaxPolicy", label: "Auto-detect: missing-data behaviour",
+      value: "Fall back to Current Rules + flag for confirmation",
+      source: "taxPolicyEngine/autoDetect.ts", editable: false,
+      impacts: "When acquisition date or property type is missing, the property keeps current-rules " +
+               "treatment and the UI shows ‘Tax treatment unknown — please confirm’." },
     { category: "TaxPolicy", label: "Budget-night cutoff", value: BUDGET_NIGHT_CUTOFF_DEFAULT,
       source: "taxPolicyEngine (BUDGET_NIGHT_CUTOFF_DEFAULT)", editable: true,
       impacts: "Properties acquired on or before this date are grandfathered to current rules." },

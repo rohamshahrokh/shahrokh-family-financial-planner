@@ -10,6 +10,7 @@
 import type {
   TaxPolicyRegime,
   TaxPolicyRegimeKind,
+  ConcreteRegimeKind,
   PropertyTypeOverrides,
   PropertyType,
 } from "./types";
@@ -93,14 +94,67 @@ export const CUSTOM_STRESS_TEST_REGIME: TaxPolicyRegime = {
 
 // ─── Lookup ──────────────────────────────────────────────────────────────────
 
-export const REGIMES_BY_KIND: Record<TaxPolicyRegimeKind, TaxPolicyRegime> = {
+/**
+ * Lookup for the three CONCRETE regimes. AUTO_DETECT is excluded
+ * because it's a selector mode — it resolves to one of these per property
+ * at evaluation time via resolveAutoDetectedRegime().
+ */
+export const REGIMES_BY_KIND: Record<ConcreteRegimeKind, TaxPolicyRegime> = {
   CURRENT_RULES: CURRENT_RULES_REGIME,
   PROPOSED_2027_REFORM: PROPOSED_2027_REFORM_REGIME,
   CUSTOM_STRESS_TEST: CUSTOM_STRESS_TEST_REGIME,
 };
 
-/** Default regime when nothing is selected (matches spec UI default). */
-export const DEFAULT_REGIME_KIND: TaxPolicyRegimeKind = "CURRENT_RULES";
+/**
+ * The four selector values surfaced in the Tax Policy Regime UI.
+ *  - AUTO_DETECT: choose per-property by date + type
+ *  - CURRENT_RULES: force current rules everywhere (preserves legacy behaviour)
+ *  - PROPOSED_2027_REFORM: force reform rules everywhere
+ *  - CUSTOM_STRESS_TEST: editable regime
+ */
+export const REGIME_SELECTOR_OPTIONS: ReadonlyArray<{
+  kind: TaxPolicyRegimeKind;
+  label: string;
+  description: string;
+}> = [
+  {
+    kind: "AUTO_DETECT",
+    label: "Auto-detect (recommended)",
+    description:
+      "Each property is evaluated under the regime that would actually apply to it: " +
+      "grandfathered properties under current rules, post-cutoff established dwellings under " +
+      "the reform, carve-outs (new build / BTR / affordable) under their eligible treatment.",
+  },
+  {
+    kind: "CURRENT_RULES",
+    label: "Current rules",
+    description:
+      "Force current Australian tax rules across all properties. Negative gearing offsets " +
+      "wage income same year. 50% CGT discount over 12 months. This is the pre-reform world.",
+  },
+  {
+    kind: "PROPOSED_2027_REFORM",
+    label: "Proposed 2027 reform",
+    description:
+      "Force the hypothetical reform across all properties (ignoring grandfathering). Useful " +
+      "to see the worst-case impact if the reform applied to everything.",
+  },
+  {
+    kind: "CUSTOM_STRESS_TEST",
+    label: "Custom stress test",
+    description:
+      "Editable regime. Tune every rail (NG treatment, CGT method, discount, indexation, carve-outs).",
+  },
+];
+
+/**
+ * Default selector value: AUTO_DETECT preserves legacy behaviour for
+ * existing grandfathered properties while applying reform rules only to
+ * post-cutoff acquisitions. Users can switch to CURRENT_RULES to fully
+ * preserve the pre-reform pathway, or PROPOSED_2027_REFORM to see the
+ * reform impact uniformly.
+ */
+export const DEFAULT_REGIME_KIND: TaxPolicyRegimeKind = "AUTO_DETECT";
 
 /** Spec §22 — surfaces shown to user must include this disclaimer. */
 export { MODELLING_DISCLAIMER } from "./types";
