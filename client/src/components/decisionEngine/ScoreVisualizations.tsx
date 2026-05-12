@@ -23,6 +23,7 @@ import { TrendingUp, TrendingDown, AlertTriangle, Trophy, Medal, ShieldAlert, Ta
 
 import type { RankedCandidate, QuickDecisionOutput } from "@/lib/scenarioV2/decisionEngine/candidateGenerator";
 import type { MaskFmt } from "@/components/decisionEngine/RiskVisualizations";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 
 // ─── ScoreWaterfall ──────────────────────────────────────────────────────────
 
@@ -56,8 +57,9 @@ export function ScoreWaterfall({ candidate, title = "Score waterfall", compact =
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <TrendingUp className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+          <TrendingUp className="h-3.5 w-3.5 text-[hsl(var(--intelligence-light))]" />
           <span className="text-xs uppercase tracking-wide font-semibold text-foreground">{title}</span>
+          <InfoTooltip term="Score waterfall" size={11} />
         </div>
         <div className="text-[10px] text-muted-foreground tabular-nums">
           base {baseScore.toFixed(1)} → final <span className="font-semibold text-foreground">{finalScore.toFixed(1)}</span>

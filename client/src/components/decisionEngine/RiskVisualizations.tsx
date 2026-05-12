@@ -25,6 +25,7 @@ import type { ReactNode } from "react";
 
 import type { ExtendedScenarioResult } from "@/lib/scenarioV2/runScenario";
 import type { FanPoint } from "@/lib/scenarioV2/types";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 
 // ─── shared formatter type (mirrors useMaskFmt return) ───────────────────────
 
@@ -68,6 +69,8 @@ export interface FanChartProps {
   initialNetWorth?: number;
   /** Privacy mask state — only affects axis tick text. */
   hidden?: boolean;
+  /** Glossary key for an "i" tooltip next to the title (optional). */
+  infoTerm?: string;
 }
 
 export function FanChart({
@@ -79,6 +82,7 @@ export function FanChart({
   height = 240,
   initialNetWorth,
   hidden = false,
+  infoTerm = "Wealth-path fan",
 }: FanChartProps) {
   // Defensive guards — if engine ever returns empty, render an empty state.
   if (!fan || fan.length === 0) {
@@ -96,7 +100,10 @@ export function FanChart({
     <div className="w-full">
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
-          <div className="text-xs uppercase tracking-wide font-semibold text-foreground">{title}</div>
+          <div className="text-xs uppercase tracking-wide font-semibold text-foreground flex items-center gap-1">
+            {title}
+            {infoTerm && <InfoTooltip term={infoTerm} size={11} />}
+          </div>
           <div className="text-[10px] text-muted-foreground">{subtitle}</div>
         </div>
         {showTerminalCallout && (
@@ -395,11 +402,18 @@ export function DistributionHistogram({
     <div className="w-full">
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
-          <div className="text-xs uppercase tracking-wide font-semibold text-foreground">
-            Terminal net-worth distribution
+          <div className="text-xs uppercase tracking-wide font-semibold text-foreground flex items-center gap-1">
+            <span className="inline-flex items-center gap-0.5">
+              Terminal net-worth<InfoTooltip term="Terminal net worth" size={11} />
+            </span>
+            <span>distribution</span>
           </div>
-          <div className="text-[10px] text-muted-foreground">
-            {terminalNwSorted.length} simulations · VaR/CVaR markers anchored at initial NW
+          <div className="text-[10px] text-muted-foreground inline-flex items-center gap-1 flex-wrap">
+            <span>{terminalNwSorted.length} simulations ·</span>
+            <span className="inline-flex items-center gap-0.5">VaR<InfoTooltip term="VaR" size={11} /></span>
+            <span>/</span>
+            <span className="inline-flex items-center gap-0.5">CVaR<InfoTooltip term="CVaR" size={11} /></span>
+            <span>markers anchored at initial NW</span>
           </div>
         </div>
         <div className="text-right text-[10px] text-muted-foreground hidden sm:block">
@@ -688,13 +702,19 @@ export function TailRiskCard({ result, fmt, compact = false }: TailRiskCardProps
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <ShieldAlert className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />
+      <div className="flex items-center gap-2 flex-wrap">
+        <ShieldAlert className="h-3.5 w-3.5 text-[hsl(var(--danger-light))]" />
         <span className="text-xs uppercase tracking-wide font-semibold text-foreground">
           Institutional tail-risk profile
         </span>
-        <span className="text-[10px] text-muted-foreground">
-          dollar VaR/CVaR · drawdown · survivability
+        <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1 flex-wrap">
+          <span>dollar</span>
+          <span className="inline-flex items-center gap-0.5">VaR<InfoTooltip term="VaR" size={11} /></span>
+          <span>/</span>
+          <span className="inline-flex items-center gap-0.5">CVaR<InfoTooltip term="CVaR" size={11} /></span>
+          <span>·</span>
+          <span className="inline-flex items-center gap-0.5">drawdown<InfoTooltip term="Max drawdown" size={11} /></span>
+          <span>· survivability</span>
         </span>
       </div>
       <div className={`grid gap-2 ${compact ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-6"}`}>
