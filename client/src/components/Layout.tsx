@@ -13,6 +13,8 @@ import { usePwaBannerVisible } from "@/components/PwaInstallBanner";
 import { applyTheme } from "@/lib/store";
 import type { Permission } from "@/lib/store";
 import { Button } from "@/components/ui/button";
+// FWL P1b: Global tax-regime selector strip (route-scoped, additive).
+import { TaxRegimeHeaderStrip } from "@/components/taxRegime";
 import {
   // Step 1 — Snapshot
   LayoutDashboard, TrendingUp, DollarSign, Receipt, PiggyBank,
@@ -525,7 +527,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {/* Breadcrumb: shows which step + page */}
           <TopBarBreadcrumb location={location} isAdmin={isAdmin} />
 
+          {/* FWL P1b: Tax-regime selector strip — appears on Dashboard,
+              Decision Engine, Property Plan, CGT, Forecast, FIRE only. */}
+          <TaxRegimeHeaderStrip className="hidden md:flex ml-3" />
+
           <div className="ml-auto flex items-center gap-2">
+            {/* FWL P1b: Mobile-visible regime selector (compact) */}
+            <span className="md:hidden"><TaxRegimeHeaderStrip /></span>
             <span className="live-clock-display"><LiveClock /></span>
             <span className="chart-view-toggle-header"><ChartViewToggle /></span>
 
