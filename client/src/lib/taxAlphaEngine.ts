@@ -535,6 +535,33 @@ export function computeTaxAlpha(inp: TaxAlphaInput): TaxAlphaResult {
     hasIncome && hasProps && hasPortfolio ? 'full' :
     hasIncome ? 'partial' : 'minimal';
 
+  // ── #AuditTaxAlphaIncomeSource — temporary diagnostic logging ──────
+  // Emits the final calc-chain values so the displayed “Current Tax
+  // Position” numbers can be reconciled against the source-of-truth
+  // table from buildTaxAlphaInput. Audit-only.
+  if (typeof window !== 'undefined') {
+    /* eslint-disable no-console */
+    console.groupCollapsed('%c[tax-alpha-audit] computeTaxAlpha result', 'color:#34d399;font-weight:bold');
+    console.table({
+      'Roham annualGross':         rohamTax.annualGross,
+      'Roham taxableIncome':       rohamTax.taxableIncome,
+      'Roham incomeTax':           rohamTax.incomeTax,
+      'Roham medicareLevy':        rohamTax.medicareLevy,
+      'Roham medicareSurcharge':   rohamTax.medicareLevySurcharge,
+      'Roham helpRepayment':       rohamTax.helpRepayment,
+      'Roham totalDeductions':     rohamTax.totalDeductions,
+      'Roham netAnnual':           rohamTax.netAnnual,
+      'Roham effectiveTaxRate':    rohamTax.effectiveTaxRate,
+      'Roham marginalRate':        rohamTax.marginalRate,
+      'Fara annualGross':          faraTax.annualGross,
+      'Fara taxableIncome':        faraTax.taxableIncome,
+      'Fara totalDeductions':      faraTax.totalDeductions,
+      'Household totalDeductions': householdTax,
+    });
+    console.groupEnd();
+    /* eslint-enable no-console */
+  }
+
   return {
     strategies,
     top3,
@@ -611,16 +638,58 @@ export function buildTaxAlphaInput(
 
   let rohamAnnual: number;
   let faraAnnual:  number;
+  let pickedPath:  'household' | 'profile-override' | 'canonical' | 'zero';
   if (household) {
     // Shared selector path — preferred.
     rohamAnnual = n(household.rohamAnnual);
     faraAnnual  = n(household.faraAnnual);
+    pickedPath  = 'household';
   } else if (overrideActive && (profileRohamAnnual > 0 || profileFaraAnnual > 0)) {
     rohamAnnual = profileRohamAnnual > 0 ? profileRohamAnnual : canonRohamAnnual;
     faraAnnual  = profileFaraAnnual  > 0 ? profileFaraAnnual  : canonFaraAnnual;
-  } else {
+    pickedPath  = 'profile-override';
+  } else if (canonRohamAnnual > 0 || canonFaraAnnual > 0) {
     rohamAnnual = canonRohamAnnual;
     faraAnnual  = canonFaraAnnual;
+    pickedPath  = 'canonical';
+  } else {
+    rohamAnnual = 0;
+    faraAnnual  = 0;
+    pickedPath  = 'zero';
+  }
+
+  // ── #AuditTaxAlphaIncomeSource — temporary diagnostic logging ──────
+  // Emits every contributing source the engine considered, which branch
+  // of the priority hierarchy actually fired, and the resulting annual
+  // gross. Audit-only — remove once #11 is fully validated in prod.
+  // No financial logic, no DB writes, no PII beyond what user sees on the page.
+  if (typeof window !== 'undefined') {
+    /* eslint-disable no-console */
+    console.groupCollapsed('%c[tax-alpha-audit] buildTaxAlphaInput sources', 'color:#34d399;font-weight:bold');
+    console.table({
+      'snap.monthly_income (COMBINED household)': n(snap?.monthly_income),
+      'snap.roham_monthly_income (per-person)':   n(snap?.roham_monthly_income),
+      'snap.fara_monthly_income  (per-person)':   n(snap?.fara_monthly_income),
+      'snap.rental_income_total':                 n(snap?.rental_income_total),
+      'snap.other_income':                        n(snap?.other_income),
+    });
+    console.table({
+      'taxProfile.override_active':   overrideActive,
+      'taxProfile.roham_salary':      profileRohamAnnual,
+      'taxProfile.fara_salary':       profileFaraAnnual,
+      'canonicalIncome.roham.annual': canonRohamAnnual,
+      'canonicalIncome.fara.annual':  canonFaraAnnual,
+      'household.rohamAnnual':        n(household?.rohamAnnual),
+      'household.faraAnnual':         n(household?.faraAnnual),
+      'household.overrideActive':     household?.overrideActive ?? null,
+    });
+    console.table({
+      'PICKED PATH':           pickedPath,
+      'roham_annual_income':   rohamAnnual,
+      'fara_annual_income':    faraAnnual,
+    });
+    console.groupEnd();
+    /* eslint-enable no-console */
   }
 
   // ── Tax flags: prefer tax profile when explicitly set ─────────────────
