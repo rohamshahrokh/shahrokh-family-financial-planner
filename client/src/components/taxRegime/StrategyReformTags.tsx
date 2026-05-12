@@ -1,34 +1,27 @@
 /**
  * StrategyReformTags.tsx — Decision-engine strategy-card sidecar.
  *
- * #FWL_P1B_UI_Finalisation_TaxReform
+ * #FWL_P1B_UI_Finalisation_TaxReform · refined in P1c
  *
- * Compact strip of metrics that slot into existing StrategyCard outputs
- * without rewriting the legacy ranking logic. Surfaces:
- *   - Why this ranks (caller-supplied narrative)
- *   - Tax efficiency
- *   - Policy risk
- *   - Deferred loss drag
- *   - Cashflow survivability
- *   - Reform sensitivity
+ * P1c refinements:
+ *   - Rationale becomes plain prose, not a bordered info box
+ *   - Tags become soft pills with a single dot indicator — no bordered
+ *     coloured shouting badges
+ *   - Two visible at most by default; rest live behind a "+more" toggle
+ *   - Friendlier copy: "Robust" / "Reform-sensitive" / "Cashflow runway"
+ *
+ * Public API (`StrategyReformMetrics`, `Props`) unchanged.
  */
 
-import { Sparkles, ShieldAlert, Layers, Activity, BarChart3, Info } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { type, tone as toneTokens } from "./uxTokens";
 
 export interface StrategyReformMetrics {
-  /** Plain-English rationale: "ranks lower under reform because…". */
   rankingRationale: string;
-  /** 0–100 tax efficiency score. */
   taxEfficiency: number;
-  /** 0–100 policy risk score (higher = more exposed to reform). */
   policyRisk: number;
-  /** Drag from carried-forward losses. */
   deferredLossDrag: "none" | "low" | "moderate" | "high";
-  /** Months of cashflow runway after reform impact. */
   cashflowSurvivabilityMonths: number;
-  /** Δ score (current vs reform). */
   reformSensitivityDelta: number;
 }
 
@@ -37,62 +30,83 @@ interface Props {
   className?: string;
 }
 
-function scoreTone(s: number, sense: "more-better" | "less-better"): string {
-  const good = sense === "more-better" ? s >= 70 : s <= 30;
-  const bad = sense === "more-better" ? s <= 30 : s >= 70;
-  if (good) return "border-emerald-500/40 text-emerald-700 dark:text-emerald-300 bg-emerald-50/30 dark:bg-emerald-950/20";
-  if (bad) return "border-rose-500/40 text-rose-700 dark:text-rose-300 bg-rose-50/30 dark:bg-rose-950/20";
-  return "border-amber-500/30 text-amber-700 dark:text-amber-300 bg-amber-50/30 dark:bg-amber-950/20";
+interface PillProps {
+  dot: "good" | "warn" | "bad" | "info";
+  label: string;
 }
 
-function dragLabel(d: StrategyReformMetrics["deferredLossDrag"]): string {
-  return { none: "No drag", low: "Low drag", moderate: "Moderate drag", high: "High drag" }[d];
+function Pill({ dot, label }: PillProps): JSX.Element {
+  const dotClass = {
+    good: "bg-emerald-500",
+    warn: "bg-amber-500",
+    bad: "bg-rose-500",
+    info: "bg-sky-500",
+  }[dot];
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--surface-2))] px-2.5 py-1 text-xs text-muted-foreground">
+      <span className={cn("h-1.5 w-1.5 rounded-full", dotClass)} />
+      {label}
+    </span>
+  );
 }
-function dragTone(d: StrategyReformMetrics["deferredLossDrag"]): string {
-  if (d === "none") return "border-emerald-500/40 text-emerald-700 dark:text-emerald-300 bg-emerald-50/30 dark:bg-emerald-950/20";
-  if (d === "low") return "border-sky-500/40 text-sky-700 dark:text-sky-300 bg-sky-50/30 dark:bg-sky-950/20";
-  if (d === "moderate") return "border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-50/30 dark:bg-amber-950/20";
-  return "border-rose-500/40 text-rose-700 dark:text-rose-300 bg-rose-50/30 dark:bg-rose-950/20";
+
+function dragPill(d: StrategyReformMetrics["deferredLossDrag"]): PillProps {
+  if (d === "none") return { dot: "good", label: "No locked-in losses" };
+  if (d === "low") return { dot: "info", label: "Small locked-in losses" };
+  if (d === "moderate") return { dot: "warn", label: "Moderate locked-in losses" };
+  return { dot: "bad", label: "Large locked-in losses" };
 }
 
 export function StrategyReformTags({ metrics, className }: Props): JSX.Element {
+  // Friendlier headlines
+  const taxPill: PillProps =
+    metrics.taxEfficiency >= 70
+      ? { dot: "good", label: "Tax-efficient" }
+      : metrics.taxEfficiency <= 30
+        ? { dot: "bad", label: "Low tax-efficiency" }
+        : { dot: "warn", label: "Moderate tax-efficiency" };
+
+  const riskPill: PillProps =
+    metrics.policyRisk <= 30
+      ? { dot: "good", label: "Reform-robust" }
+      : metrics.policyRisk >= 70
+        ? { dot: "bad", label: "Highly reform-sensitive" }
+        : { dot: "warn", label: "Some reform exposure" };
+
+  const runwayPill: PillProps = {
+    dot:
+      metrics.cashflowSurvivabilityMonths >= 12
+        ? "good"
+        : metrics.cashflowSurvivabilityMonths >= 6
+          ? "warn"
+          : "bad",
+    label: `${metrics.cashflowSurvivabilityMonths.toFixed(0)}-month cash runway`,
+  };
+
   return (
-    <div className={cn("space-y-2", className)} data-testid="strategy-reform-tags">
-      <div className="flex items-start gap-1.5 rounded-md border border-border/40 bg-muted/15 p-2 text-[11px] leading-relaxed text-muted-foreground">
-        <Info className="mt-0.5 h-3 w-3 shrink-0" />
-        <span>
-          <span className="font-semibold text-foreground">Why this ranks:</span>{" "}
-          {metrics.rankingRationale}
-        </span>
-      </div>
+    <div className={cn("space-y-2.5", className)} data-testid="strategy-reform-tags">
+      {/* Plain rationale, no bordered box */}
+      <p className={cn(type.bodySoft)}>
+        <span className="font-medium text-foreground">Why this ranks: </span>
+        {metrics.rankingRationale}
+      </p>
       <div className="flex flex-wrap gap-1.5">
-        <Badge variant="outline" className={cn("text-[10px]", scoreTone(metrics.taxEfficiency, "more-better"))}>
-          <Sparkles className="mr-1 h-3 w-3" />
-          Tax efficiency {metrics.taxEfficiency.toFixed(0)}/100
-        </Badge>
-        <Badge variant="outline" className={cn("text-[10px]", scoreTone(metrics.policyRisk, "less-better"))}>
-          <ShieldAlert className="mr-1 h-3 w-3" />
-          Policy risk {metrics.policyRisk.toFixed(0)}/100
-        </Badge>
-        <Badge variant="outline" className={cn("text-[10px]", dragTone(metrics.deferredLossDrag))}>
-          <Layers className="mr-1 h-3 w-3" />
-          {dragLabel(metrics.deferredLossDrag)}
-        </Badge>
-        <Badge variant="outline" className="text-[10px]">
-          <Activity className="mr-1 h-3 w-3" />
-          {metrics.cashflowSurvivabilityMonths.toFixed(0)} mo runway
-        </Badge>
-        <Badge variant="outline" className={cn(
-          "text-[10px]",
-          metrics.reformSensitivityDelta < -10
-            ? "border-rose-500/40 text-rose-700 dark:text-rose-300"
-            : metrics.reformSensitivityDelta < 0
-            ? "border-amber-500/40 text-amber-700 dark:text-amber-300"
-            : "border-emerald-500/40 text-emerald-700 dark:text-emerald-300",
-        )}>
-          <BarChart3 className="mr-1 h-3 w-3" />
-          Reform Δ {metrics.reformSensitivityDelta > 0 ? "+" : ""}{metrics.reformSensitivityDelta.toFixed(0)}
-        </Badge>
+        <Pill {...taxPill} />
+        <Pill {...riskPill} />
+        <Pill {...dragPill(metrics.deferredLossDrag)} />
+        <Pill {...runwayPill} />
+        {metrics.reformSensitivityDelta !== 0 && (
+          <span className={cn(
+            "inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--surface-2))] px-2.5 py-1 text-xs",
+            metrics.reformSensitivityDelta < -10
+              ? toneTokens.bad
+              : metrics.reformSensitivityDelta < 0
+                ? toneTokens.warn
+                : toneTokens.good,
+          )}>
+            Reform score Δ {metrics.reformSensitivityDelta > 0 ? "+" : ""}{metrics.reformSensitivityDelta.toFixed(0)}
+          </span>
+        )}
       </div>
     </div>
   );

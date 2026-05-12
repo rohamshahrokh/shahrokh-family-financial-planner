@@ -1,22 +1,26 @@
 /**
- * RegimeDashboardCards.tsx — Compact dashboard tiles for the regime layer.
+ * RegimeDashboardCards.tsx — Premium dashboard tiles for the regime layer.
  *
- * #FWL_P1B_UI_Finalisation_TaxReform
+ * #FWL_P1B_UI_Finalisation_TaxReform · refined in P1c
  *
- * Six KPI tiles described in the brief:
- *   - Tax Regime Active
- *   - Deferred Loss Balance
- *   - Tax Timing Drag
- *   - Reform Sensitivity
- *   - Tax-Adjusted Net Worth
- *   - FIRE Delay / Acceleration
+ * The brief's six KPIs are now presented as a calmer, mobile-first hierarchy:
  *
- * Caller supplies the values (already computed by P1 overlays). The tiles
- * are mobile-first, two-up on phone, three-up on tablet+, six-up wide.
+ *   Hero card (full-width, mobile + desktop)
+ *     → "Wealth impact" — the single most important number
+ *
+ *   Secondary row (2 cols mobile, 5 cols desktop)
+ *     → Active rules · Retirement shift · Reform exposure · Locked-in losses · Tax friction
+ *
+ * P1c refinements:
+ *   - No internal jargon — labels use the PLAIN_LABEL dictionary
+ *   - Hero numbers are large (text-2xl→text-3xl), captions are soft
+ *   - Soft tinted surfaces instead of hard tinted borders
+ *   - Single accent per card — no competing colours
+ *   - Caller still supplies engine values verbatim — engine layer untouched
  */
 
 import {
-  ScaleIcon,
+  Sparkles,
   Layers,
   Clock3,
   AlertTriangle,
@@ -24,11 +28,10 @@ import {
   Flame,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { fmtAud, fmtAudSigned } from "./formatters";
-import { regimeKindLabel } from "@/hooks/useActiveRegime";
 import type { TaxPolicyRegimeKind } from "@/lib/taxPolicyEngine";
+import { PLAIN_LABEL, PLAIN_HINT, type, tint, tone, spacing } from "./uxTokens";
 
 export interface RegimeDashboardData {
   /** Active regime selector kind. */
@@ -52,46 +55,65 @@ interface Props {
   className?: string;
 }
 
+/** A single calm tile — soft surface, no borders, hero number first. */
 interface TileProps {
   icon: React.ReactNode;
   label: string;
   value: string;
   hint?: string;
-  tone?: "default" | "good" | "warn" | "violet" | "sky";
-  className?: string;
+  accent?: keyof typeof tint;       // soft tint background, optional
+  valueTone?: keyof typeof tone;    // colour applied to the value only
+  hero?: boolean;                    // larger number, more padding
+  full?: boolean;                    // span full width
   "data-testid"?: string;
 }
 
-function Tile({ icon, label, value, hint, tone = "default", className, ...rest }: TileProps): JSX.Element {
-  const accent = {
-    default: "border-border",
-    good: "border-emerald-500/30 bg-emerald-50/30 dark:bg-emerald-950/15",
-    warn: "border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/15",
-    violet: "border-violet-500/30 bg-violet-50/30 dark:bg-violet-950/15",
-    sky: "border-sky-500/30 bg-sky-50/30 dark:bg-sky-950/15",
-  }[tone];
+function Tile({
+  icon, label, value, hint, accent = "none", valueTone, hero, full, ...rest
+}: TileProps): JSX.Element {
   return (
-    <Card className={cn("border transition-colors", accent, className)} data-testid={rest["data-testid"]}>
-      <CardContent className="space-y-1 p-3">
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {icon}
-          <span className="truncate">{label}</span>
+    <Card
+      className={cn(
+        // Soft surface, no border
+        "rounded-2xl border-0 shadow-[var(--shadow-sm)]",
+        "bg-[hsl(var(--surface-1))]",
+        tint[accent],
+        full && "col-span-full",
+      )}
+      data-testid={rest["data-testid"]}
+    >
+      <CardContent className={cn(hero ? "p-5 sm:p-6" : "p-4 sm:p-5")}>
+        {/* Eyebrow row — icon + soft label */}
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <span className="inline-flex h-5 w-5 items-center justify-center">{icon}</span>
+          <span className={type.eyebrow}>{label}</span>
         </div>
-        <div className="text-base font-bold tabular-nums leading-tight">{value}</div>
-        {hint && <div className="text-[10px] leading-snug text-muted-foreground">{hint}</div>}
+        {/* Hero number */}
+        <div
+          className={cn(
+            "mt-2",
+            hero ? type.hero : type.number,
+            valueTone && tone[valueTone],
+          )}
+        >
+          {value}
+        </div>
+        {/* Soft caption */}
+        {hint && <div className={cn("mt-1", type.caption)}>{hint}</div>}
       </CardContent>
     </Card>
   );
 }
 
 function sensitivityLabel(s: number): string {
-  if (s >= 70) return "High";
-  if (s >= 40) return "Medium";
-  return "Low";
+  if (s >= 70) return "High — multiple strategies affected";
+  if (s >= 40) return "Moderate — some adjustments helpful";
+  return "Low — your plan is largely robust";
 }
-function sensitivityTone(s: number): TileProps["tone"] {
+
+function sensitivityAccent(s: number): keyof typeof tint {
   if (s >= 70) return "warn";
-  if (s >= 40) return "sky";
+  if (s >= 40) return "info";
   return "good";
 }
 
@@ -100,69 +122,107 @@ export function RegimeDashboardCards({ data, className }: Props): JSX.Element {
     data.activeRegime === "PROPOSED_2027_REFORM" ||
     (data.activeRegime === "AUTO_DETECT" && data.effectiveRegime === "PROPOSED_2027_REFORM");
 
+  // Hero — Wealth Impact (the single most important number)
+  const wealthDelta = data.taxAdjustedNwDelta;
+  const wealthTone: keyof typeof tone =
+    wealthDelta < 0 ? "bad" : wealthDelta > 0 ? "good" : "soft";
+  const wealthAccent: keyof typeof tint =
+    wealthDelta < 0 ? "bad" : wealthDelta > 0 ? "good" : "none";
+
+  // FIRE shift
+  const fireValue =
+    data.fireDeltaYears === 0
+      ? "Unchanged"
+      : `${data.fireDeltaYears > 0 ? "+" : "−"}${Math.abs(data.fireDeltaYears).toFixed(1)} yrs`;
+  const fireHint =
+    data.fireDeltaYears > 0
+      ? "Reform delays your retirement"
+      : data.fireDeltaYears < 0
+        ? "Reform brings retirement closer"
+        : "No change to your retirement year";
+
+  // Active regime
+  const activeValue = PLAIN_LABEL[data.activeRegime];
+  const activeHint =
+    data.activeRegime === "AUTO_DETECT" && data.effectiveRegime
+      ? `Best fit: ${data.effectiveRegime === "PROPOSED_2027_REFORM" ? "Proposed reform" : "Today's rules"}`
+      : PLAIN_HINT.ACTIVE_REGIME;
+
   return (
     <div
       className={cn(
-        "grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6",
+        // Mobile: 2 cols (hero spans full). Tablet: 2. Desktop: 5 + hero spans full.
+        "grid grid-cols-2 lg:grid-cols-5",
+        spacing.gridGap,
         className,
       )}
       data-testid="regime-dashboard-cards"
     >
+      {/* HERO: Wealth Impact — full-width on every breakpoint */}
       <Tile
-        icon={<ScaleIcon className="h-3.5 w-3.5" />}
-        label="Tax Regime"
-        value={regimeKindLabel(data.activeRegime)}
+        full
+        hero
+        icon={<Wallet className="h-4 w-4" />}
+        label={PLAIN_LABEL.TAX_ADJUSTED_NW}
+        value={fmtAudSigned(wealthDelta)}
         hint={
-          data.activeRegime === "AUTO_DETECT" && data.effectiveRegime
-            ? `Resolved: ${data.effectiveRegime === "PROPOSED_2027_REFORM" ? "Reform" : "Current"}`
-            : "Active selection"
+          wealthDelta === 0
+            ? "Your projected wealth is unchanged under the proposed reform"
+            : wealthDelta < 0
+              ? `Projected wealth is ${fmtAud(Math.abs(wealthDelta))} lower at year 10 under the proposed reform`
+              : `Projected wealth is ${fmtAud(Math.abs(wealthDelta))} higher at year 10 under the proposed reform`
         }
-        tone={reformActive ? "warn" : "good"}
+        valueTone={wealthTone}
+        accent={wealthAccent}
+        data-testid="tile-tax-adjusted-nw"
+      />
+
+      {/* Secondary row */}
+      <Tile
+        icon={<Sparkles className="h-4 w-4" />}
+        label={PLAIN_LABEL.TAX_REGIME_ACTIVE}
+        value={activeValue}
+        hint={activeHint}
+        accent={reformActive ? "warn" : "good"}
         data-testid="tile-active-regime"
       />
       <Tile
-        icon={<Layers className="h-3.5 w-3.5" />}
-        label="Deferred Loss"
-        value={fmtAud(data.deferredLossBalance)}
-        hint="Quarantined NG balance"
-        tone="violet"
-        data-testid="tile-deferred-loss"
+        icon={<Flame className="h-4 w-4" />}
+        label={PLAIN_LABEL.FIRE_DELAY}
+        value={fireValue}
+        hint={fireHint}
+        valueTone={data.fireDeltaYears > 0 ? "bad" : data.fireDeltaYears < 0 ? "good" : "soft"}
+        data-testid="tile-fire-delay"
       />
       <Tile
-        icon={<Clock3 className="h-3.5 w-3.5" />}
-        label="Timing Drag"
-        value={fmtAudSigned(-Math.abs(data.timingDragYr1))}
-        hint="Cumulative early-year drag"
-        tone={data.timingDragYr1 > 0 ? "warn" : "default"}
-        data-testid="tile-timing-drag"
-      />
-      <Tile
-        icon={<AlertTriangle className="h-3.5 w-3.5" />}
-        label="Reform Sensitivity"
-        value={`${data.reformSensitivity.toFixed(0)} / 100`}
+        icon={<AlertTriangle className="h-4 w-4" />}
+        label={PLAIN_LABEL.REFORM_SENSITIVITY}
+        value={
+          data.reformSensitivity >= 70
+            ? "High"
+            : data.reformSensitivity >= 40
+              ? "Moderate"
+              : "Low"
+        }
         hint={sensitivityLabel(data.reformSensitivity)}
-        tone={sensitivityTone(data.reformSensitivity)}
+        accent={sensitivityAccent(data.reformSensitivity)}
         data-testid="tile-reform-sensitivity"
       />
       <Tile
-        icon={<Wallet className="h-3.5 w-3.5" />}
-        label="Tax-Adjusted NW"
-        value={fmtAudSigned(data.taxAdjustedNwDelta)}
-        hint="Δ at Y10 under reform"
-        tone={data.taxAdjustedNwDelta < 0 ? "warn" : "good"}
-        data-testid="tile-tax-adjusted-nw"
+        icon={<Layers className="h-4 w-4" />}
+        label={PLAIN_LABEL.DEFERRED_LOSS_BALANCE}
+        value={fmtAud(data.deferredLossBalance)}
+        hint={PLAIN_HINT.DEFERRED_LOSSES}
+        valueTone="soft"
+        data-testid="tile-deferred-loss"
       />
       <Tile
-        icon={<Flame className="h-3.5 w-3.5" />}
-        label="FIRE Delay"
-        value={
-          data.fireDeltaYears === 0
-            ? "No delay"
-            : `${data.fireDeltaYears > 0 ? "+" : "−"}${Math.abs(data.fireDeltaYears).toFixed(1)} yrs`
-        }
-        hint={data.fireDeltaYears > 0 ? "Reform delays FIRE" : data.fireDeltaYears < 0 ? "Reform accelerates FIRE" : "Unchanged"}
-        tone={data.fireDeltaYears > 0 ? "warn" : data.fireDeltaYears < 0 ? "good" : "default"}
-        data-testid="tile-fire-delay"
+        icon={<Clock3 className="h-4 w-4" />}
+        label={PLAIN_LABEL.TAX_TIMING_DRAG}
+        value={fmtAudSigned(-Math.abs(data.timingDragYr1))}
+        hint={PLAIN_HINT.TAX_FRICTION}
+        valueTone={data.timingDragYr1 > 0 ? "bad" : "soft"}
+        data-testid="tile-timing-drag"
       />
     </div>
   );

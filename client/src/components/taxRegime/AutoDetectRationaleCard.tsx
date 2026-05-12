@@ -1,28 +1,25 @@
 /**
- * AutoDetectRationaleCard.tsx — Plain-English explanation of auto-detection.
+ * AutoDetectRationaleCard.tsx — Plain-English "why this regime?" sidecar.
  *
- * #FWL_P1B_UI_Finalisation_TaxReform
+ * #FWL_P1B_UI_Finalisation_TaxReform · refined in P1c
  *
- * Renders the reason returned by `resolveAutoDetectedRegime` for a given
- * property's metadata. Intended to sit directly beneath the global regime
- * selector or inline on property cards when AUTO_DETECT is active.
+ * P1c refinements:
+ *   - No bordered coloured banner. The card is a calm soft well that picks
+ *     up a single accent dot for tone — Apple-like, not warning-poster.
+ *   - Plain-English status line replaces stacked badges.
+ *   - One-line rationale leads. The disclaimer is muted and small.
+ *   - Header pill is optional and very quiet when shown.
  *
- * Examples (from the spec brief):
- *   - "This property is treated as grandfathered because the purchase date
- *      is before the reform cutoff."
- *   - "This established property falls under proposed reform rules because
- *      it was acquired after the reform effective date."
- *   - "This new-build property retains immediate negative gearing treatment."
+ * Public API (`Props`) unchanged.
  */
 
-import { Info, ShieldCheck, AlertTriangle, HelpCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
   resolveAutoDetectedRegime,
   type PropertyType,
 } from "@/lib/taxPolicyEngine";
+import { type, tone as toneTokens } from "./uxTokens";
 
 interface Props {
   property: {
@@ -32,7 +29,7 @@ interface Props {
     purchaseDate?: string;
   };
   className?: string;
-  /** Hide the "Auto Detect" pill — useful when card is in a tight grid. */
+  /** Hide the eyebrow row — useful when card is in a tight grid. */
   hideHeader?: boolean;
 }
 
@@ -46,53 +43,48 @@ export function AutoDetectRationaleCard({ property, className, hideHeader }: Pro
   const isReform = result.resolvedRegimeKind === "PROPOSED_2027_REFORM";
   const isUnknown = result.requiresUserConfirmation;
 
-  const Icon = isUnknown ? HelpCircle : isReform ? AlertTriangle : ShieldCheck;
-  const accent = isUnknown
-    ? "text-amber-600 dark:text-amber-400 border-amber-400/40 bg-amber-50/40 dark:bg-amber-950/20"
+  // Tone: green = grandfathered, amber = reform-affected, soft = unknown
+  const dotTone: keyof typeof toneTokens = isUnknown ? "warn" : isReform ? "warn" : "good";
+  const dotClass = isUnknown
+    ? "bg-amber-500"
     : isReform
-    ? "text-amber-700 dark:text-amber-300 border-amber-500/40 bg-amber-50/50 dark:bg-amber-950/25"
-    : "text-emerald-700 dark:text-emerald-300 border-emerald-500/40 bg-emerald-50/40 dark:bg-emerald-950/20";
+      ? "bg-amber-500"
+      : "bg-emerald-500";
+
+  const headline = isUnknown
+    ? "Needs your confirmation"
+    : isReform
+      ? "Treated under proposed reform"
+      : "Treated under today's rules";
 
   return (
     <Card
       className={cn(
-        "border shadow-none transition-colors",
-        accent,
+        "rounded-2xl border-0 bg-[hsl(var(--surface-1))] shadow-[var(--shadow-sm)]",
         className,
       )}
       data-testid="auto-detect-rationale"
     >
-      <CardContent className="flex items-start gap-3 p-3">
-        <Icon className="mt-0.5 h-4 w-4 shrink-0" />
-        <div className="min-w-0 flex-1">
-          {!hideHeader && (
-            <div className="mb-1 flex flex-wrap items-center gap-1.5">
-              <Badge variant="outline" className="border-current text-[10px] uppercase tracking-wide">
-                Auto Detect
-              </Badge>
-              <Badge variant="secondary" className="text-[10px]">
-                {isReform ? "Reform" : "Current Rules"}
-              </Badge>
-              {isUnknown && (
-                <Badge variant="destructive" className="text-[10px]">
-                  Needs Confirmation
-                </Badge>
-              )}
-              {property.label && (
-                <span className="text-[11px] text-muted-foreground">
-                  {property.label}
-                </span>
-              )}
-            </div>
-          )}
-          <p className="text-xs leading-relaxed text-foreground/80">
-            {result.reason}
-          </p>
-          <p className="mt-1.5 flex items-start gap-1 text-[10px] italic text-muted-foreground">
-            <Info className="mt-0.5 h-3 w-3 shrink-0" />
-            This is modelling only and not personal tax advice.
-          </p>
+      <CardContent className="p-4 space-y-2">
+        {!hideHeader && (
+          <div className="flex items-center justify-between gap-2">
+            <p className={type.eyebrow}>Smart auto-detect</p>
+            {property.label && (
+              <span className={cn(type.caption, "truncate max-w-[55%]")}>{property.label}</span>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <span className={cn("h-2 w-2 rounded-full shrink-0", dotClass)} aria-hidden="true" />
+          <p className={cn("text-sm font-medium", toneTokens[dotTone])}>{headline}</p>
         </div>
+
+        <p className={type.body}>{result.reason}</p>
+
+        <p className={cn(type.caption, "italic")}>
+          This is modelling only and not personal tax advice.
+        </p>
       </CardContent>
     </Card>
   );

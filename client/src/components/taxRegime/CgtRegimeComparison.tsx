@@ -1,35 +1,32 @@
 /**
- * CgtRegimeComparison.tsx — Current vs Reform CGT three-line breakdown.
+ * CgtRegimeComparison.tsx — Current vs Reform CGT comparison.
  *
- * #FWL_P1B_UI_Finalisation_TaxReform
+ * #FWL_P1B_UI_Finalisation_TaxReform · refined in P1c
  *
- * Renders the standard sequence required by the spec:
+ * P1c refinements:
+ *   - 3 headline tiles up top: Estimated tax · Net you keep · Difference
+ *     (these are the only numbers most users will ever look at)
+ *   - Full 8-step breakdown moves behind a "Show step-by-step" toggle
+ *   - Soft surfaces, no harsh table grid, no bordered banner
+ *   - Plain-English step labels ("Capital gain on sale" not "Gross capital gain")
  *
- *   Gross Capital Gain
- *   − Deferred losses applied
- *   = Adjusted Capital Gain
- *   × CGT discount (50% current / 0% reform / custom)
- *   = Taxable gain
- *   × Marginal rate
- *   = Estimated CGT
- *   = Net sale proceeds
- *
- * Caller supplies the two CgtBranch objects (already computed off the P0
- * `cgt.ts` engine + regime overlay). Component never imports the engine.
+ * Public API (`CgtBranch`, `Props`) is unchanged from P1b.
  */
 
+import { useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { fmtAud, fmtAudSigned, fmtPct } from "./formatters";
+import { type, tone as toneTokens, PLAIN_LABEL } from "./uxTokens";
 
 export interface CgtBranch {
   grossGain: number;
   deferredLossesApplied: number;
   adjustedGain: number;
-  discountPct: number;          // 0..1
+  discountPct: number;
   taxableGain: number;
-  marginalRatePct: number;      // 0..1
+  marginalRatePct: number;
   estimatedCgt: number;
   netSaleProceeds: number;
 }
@@ -38,7 +35,6 @@ interface Props {
   current: CgtBranch;
   reform: CgtBranch;
   className?: string;
-  /** Title override; default "CGT — Current vs Reform". */
   title?: string;
 }
 
@@ -46,65 +42,152 @@ interface RowProps {
   label: string;
   current: number;
   reform: number;
-  emphasis?: boolean;
   isPct?: boolean;
   isSubtract?: boolean;
+  bold?: boolean;
 }
 
-function Row({ label, current, reform, emphasis, isPct, isSubtract }: RowProps): JSX.Element {
+function Row({ label, current, reform, isPct, isSubtract, bold }: RowProps): JSX.Element {
   const delta = reform - current;
-  const fmt = (v: number): string => isPct ? fmtPct(v) : (isSubtract ? `−${fmtAud(v)}` : fmtAud(v));
+  const fmt = (v: number) => (isPct ? fmtPct(v) : isSubtract ? `−${fmtAud(v)}` : fmtAud(v));
+  const deltaStr = isPct ? `${(delta * 100).toFixed(0)}pp` : fmtAudSigned(delta);
+  const deltaTone =
+    delta === 0
+      ? toneTokens.soft
+      : delta < 0
+        ? toneTokens.bad
+        : toneTokens.good;
   return (
     <div className={cn(
-      "grid grid-cols-12 items-center gap-2 px-3 py-2",
-      emphasis && "bg-muted/30 font-semibold",
+      "grid grid-cols-12 items-center gap-2 rounded-lg px-3 py-2.5",
+      bold && "bg-[hsl(var(--surface-2))]",
     )}>
-      <div className={cn("col-span-5 text-xs", emphasis && "text-sm")}>{label}</div>
-      <div className="col-span-3 text-right text-xs tabular-nums text-emerald-700 dark:text-emerald-400 sm:text-sm">
+      <div className={cn(
+        "col-span-5 text-sm",
+        bold ? "font-semibold text-foreground" : "text-foreground/85",
+      )}>
+        {label}
+      </div>
+      <div className={cn("col-span-3 text-right tabular-nums text-sm", toneTokens.soft, bold && "text-foreground font-semibold")}>
         {fmt(current)}
       </div>
-      <div className="col-span-2 text-right text-xs tabular-nums text-amber-700 dark:text-amber-400 sm:text-sm">
+      <div className={cn("col-span-2 text-right tabular-nums text-sm", toneTokens.soft, bold && "text-foreground font-semibold")}>
         {fmt(reform)}
       </div>
-      <div className={cn(
-        "col-span-2 text-right text-xs tabular-nums sm:text-sm",
-        delta < 0 ? "text-rose-600 dark:text-rose-400" : delta > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
-      )}>
-        {isPct ? `${(delta * 100).toFixed(0)}pp` : fmtAudSigned(delta)}
+      <div className={cn("col-span-2 text-right tabular-nums text-sm font-medium", deltaTone)}>
+        {deltaStr}
       </div>
     </div>
   );
 }
 
-export function CgtRegimeComparison({ current, reform, className, title = "CGT — Current vs Reform" }: Props): JSX.Element {
+interface HeroTileProps {
+  label: string;
+  value: string;
+  caption?: string;
+  toneClass?: string;
+  tintClass?: string;
+}
+
+function HeroTile({ label, value, caption, toneClass, tintClass }: HeroTileProps): JSX.Element {
   return (
-    <Card className={cn("overflow-hidden", className)} data-testid="cgt-regime-comparison">
+    <div className={cn(
+      "rounded-2xl p-4 sm:p-5 bg-[hsl(var(--surface-2))]",
+      tintClass,
+    )}>
+      <div className={type.eyebrow}>{label}</div>
+      <div className={cn("mt-1.5", type.hero, toneClass)}>{value}</div>
+      {caption && <div className={cn("mt-1", type.caption)}>{caption}</div>}
+    </div>
+  );
+}
+
+export function CgtRegimeComparison({
+  current, reform, className, title = "If you sold today: tax outcome",
+}: Props): JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const taxDelta = reform.estimatedCgt - current.estimatedCgt;
+  const proceedsDelta = reform.netSaleProceeds - current.netSaleProceeds;
+
+  return (
+    <Card
+      className={cn(
+        "overflow-hidden rounded-2xl border-0 shadow-[var(--shadow-sm)]",
+        "bg-[hsl(var(--surface-1))]",
+        className,
+      )}
+      data-testid="cgt-regime-comparison"
+    >
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-base font-semibold">
-          {title}
-          <Badge variant="outline" className="text-[10px]">3-way breakdown</Badge>
-        </CardTitle>
+        <CardTitle className={type.sectionTitle}>{title}</CardTitle>
+        <p className={cn(type.caption, "mt-1")}>
+          Compares the capital gains tax you'd pay under today's rules and the proposed reform.
+        </p>
       </CardHeader>
-      <CardContent className="p-0">
-        <div className="grid grid-cols-12 gap-2 border-b border-border/40 bg-muted/30 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          <div className="col-span-5">Step</div>
-          <div className="col-span-3 text-right text-emerald-700 dark:text-emerald-400">Current</div>
-          <div className="col-span-2 text-right text-amber-700 dark:text-amber-400">Reform</div>
-          <div className="col-span-2 text-right">Δ</div>
+      <CardContent className="space-y-4 p-5 pt-2 sm:p-6 sm:pt-2">
+        {/* Three hero tiles */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <HeroTile
+            label="Tax you'd pay (today's rules)"
+            value={fmtAud(current.estimatedCgt)}
+            caption={`On a gain of ${fmtAud(current.grossGain)}`}
+          />
+          <HeroTile
+            label="Tax you'd pay (proposed reform)"
+            value={fmtAud(reform.estimatedCgt)}
+            caption={`Discount: ${fmtPct(reform.discountPct)} · Marginal: ${fmtPct(reform.marginalRatePct)}`}
+          />
+          <HeroTile
+            label="You'd pay more under reform"
+            value={fmtAudSigned(taxDelta)}
+            caption={
+              proceedsDelta === 0
+                ? "Net proceeds unchanged"
+                : `Net proceeds change: ${fmtAudSigned(proceedsDelta)}`
+            }
+            toneClass={taxDelta > 0 ? toneTokens.bad : taxDelta < 0 ? toneTokens.good : toneTokens.soft}
+          />
         </div>
-        <div className="divide-y divide-border/30">
-          <Row label="Gross capital gain" current={current.grossGain} reform={reform.grossGain} />
-          <Row label="− Deferred losses applied" current={current.deferredLossesApplied} reform={reform.deferredLossesApplied} isSubtract />
-          <Row label="Adjusted capital gain" current={current.adjustedGain} reform={reform.adjustedGain} emphasis />
-          <Row label="× CGT discount" current={current.discountPct} reform={reform.discountPct} isPct />
-          <Row label="Taxable gain" current={current.taxableGain} reform={reform.taxableGain} emphasis />
-          <Row label="× Marginal rate" current={current.marginalRatePct} reform={reform.marginalRatePct} isPct />
-          <Row label="Estimated CGT" current={current.estimatedCgt} reform={reform.estimatedCgt} emphasis />
-          <Row label="Net sale proceeds" current={current.netSaleProceeds} reform={reform.netSaleProceeds} emphasis />
-        </div>
-        <div className="border-t border-border/40 bg-muted/20 px-3 py-2 text-[10px] italic text-muted-foreground">
+
+        {/* Progressive disclosure — full step-by-step breakdown */}
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5",
+            "text-xs font-medium text-muted-foreground hover:text-foreground",
+            "hover:bg-[hsl(var(--surface-2))] transition-colors",
+          )}
+          data-testid="cgt-breakdown-toggle"
+        >
+          {expanded ? <>Hide step-by-step <ChevronUp className="h-3.5 w-3.5" /></> : <>Show step-by-step <ChevronDown className="h-3.5 w-3.5" /></>}
+        </button>
+
+        {expanded && (
+          <div className="space-y-3">
+            {/* Soft column header */}
+            <div className="grid grid-cols-12 px-3 text-muted-foreground">
+              <div className={cn("col-span-5", type.eyebrow)}>Step</div>
+              <div className={cn("col-span-3 text-right", type.eyebrow)}>{PLAIN_LABEL.CURRENT}</div>
+              <div className={cn("col-span-2 text-right", type.eyebrow)}>{PLAIN_LABEL.REFORM}</div>
+              <div className={cn("col-span-2 text-right", type.eyebrow)}>{PLAIN_LABEL.DELTA}</div>
+            </div>
+            <div className="space-y-1">
+              <Row label="Capital gain on sale" current={current.grossGain} reform={reform.grossGain} />
+              <Row label="Less: deferred losses applied" current={current.deferredLossesApplied} reform={reform.deferredLossesApplied} isSubtract />
+              <Row label="Adjusted gain" current={current.adjustedGain} reform={reform.adjustedGain} bold />
+              <Row label="CGT discount" current={current.discountPct} reform={reform.discountPct} isPct />
+              <Row label="Taxable gain" current={current.taxableGain} reform={reform.taxableGain} bold />
+              <Row label="Marginal tax rate" current={current.marginalRatePct} reform={reform.marginalRatePct} isPct />
+              <Row label="Estimated CGT" current={current.estimatedCgt} reform={reform.estimatedCgt} bold />
+              <Row label="Net you keep after tax" current={current.netSaleProceeds} reform={reform.netSaleProceeds} bold />
+            </div>
+          </div>
+        )}
+
+        <p className={cn(type.caption, "italic opacity-70")}>
           This is modelling only and not personal tax advice.
-        </div>
+        </p>
       </CardContent>
     </Card>
   );

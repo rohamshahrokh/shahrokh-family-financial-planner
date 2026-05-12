@@ -1,41 +1,35 @@
 /**
- * DeferredLossLedgerCard.tsx — Visual ledger of quarantined NG losses.
+ * DeferredLossLedgerCard.tsx — Visual ledger of carry-forward losses.
  *
- * #FWL_P1B_UI_Finalisation_TaxReform
+ * #FWL_P1B_UI_Finalisation_TaxReform · refined in P1c
  *
- * Renders the running carried-forward loss ledger (P0 carriedForwardLoss
- * engine) in a premium card. NOT a spreadsheet — uses sparkline-style
- * stacked bars to convey accumulation + expected usage timing.
+ * P1c refinements:
+ *   - Reframed in plain English: "Locked-in losses you can use later"
+ *   - Hero number = the tax saving you'll eventually recover, not the
+ *     raw balance (more meaningful to the user)
+ *   - Calmer bar chart — single soft violet, no double-stacked
+ *     overlay; emerald dot marks the years applied
+ *   - Explanatory note becomes a single soft caption, not a bordered card
  *
- * The component is presentation-only. Callers supply the rows (one per
- * year/FY) and the headline aggregates.
+ * Public API (`DeferredLossRow`, `Props`) unchanged from P1b.
  */
 
-import { Layers, ArrowDownToLine, CalendarClock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { fmtAud } from "./formatters";
+import { type, tone as toneTokens } from "./uxTokens";
 
 export interface DeferredLossRow {
-  /** Year label (e.g. "FY26" or "2028"). */
   year: string;
-  /** Accumulated balance at end of year. */
   balance: number;
-  /** Amount applied this year against rental income. */
   appliedAgainstRent?: number;
-  /** Amount realised this year against capital gain at disposal. */
   appliedAgainstCgt?: number;
 }
 
 interface Props {
-  /** Headline: total accumulated balance at end of horizon. */
   totalBalance: number;
-  /** Estimated tax value of the balance (balance × marginal rate). */
   estimatedTaxValue: number;
-  /** Expected timing of utilisation in plain English. */
   expectedUsageNarrative?: string;
-  /** Per-year breakdown — recommended 5-10 rows. */
   rows: DeferredLossRow[];
   className?: string;
 }
@@ -48,58 +42,58 @@ export function DeferredLossLedgerCard({
   className,
 }: Props): JSX.Element {
   const maxBalance = Math.max(1, ...rows.map((r) => r.balance));
-  const maxApplied = Math.max(
-    1,
-    ...rows.map((r) => (r.appliedAgainstRent ?? 0) + (r.appliedAgainstCgt ?? 0)),
-  );
 
   return (
-    <Card className={cn("overflow-hidden border-violet-200/50 dark:border-violet-900/40", className)} data-testid="deferred-loss-ledger">
-      <CardHeader className="pb-3">
-        <div className="flex items-center gap-2">
-          <Layers className="h-4 w-4 text-violet-600 dark:text-violet-400" />
-          <CardTitle className="text-base font-semibold">Deferred Loss Ledger</CardTitle>
-          <Badge variant="outline" className="ml-auto text-[10px]">
-            Reform pathway
-          </Badge>
-        </div>
+    <Card
+      className={cn(
+        "overflow-hidden rounded-2xl border-0 shadow-[var(--shadow-sm)]",
+        "bg-[hsl(var(--surface-1))]",
+        className,
+      )}
+      data-testid="deferred-loss-ledger"
+    >
+      <CardHeader className="pb-2">
+        <CardTitle className={type.sectionTitle}>Locked-in losses you can use later</CardTitle>
+        <p className={cn(type.caption, "mt-1")}>
+          Under the proposed reform, losses on established properties can't be deducted today —
+          but they carry forward and offset rental income or capital gains in future years.
+        </p>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Accumulated balance
-            </div>
-            <div className="text-lg font-bold tabular-nums">{fmtAud(totalBalance)}</div>
-          </div>
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Estimated tax value
-            </div>
-            <div className="text-lg font-bold tabular-nums text-violet-700 dark:text-violet-400">
+      <CardContent className="space-y-5 p-5 pt-2 sm:p-6 sm:pt-2">
+        {/* Hero pair: tax value (primary) + balance (secondary) */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl bg-[hsl(var(--surface-2))] p-4 sm:p-5">
+            <div className={type.eyebrow}>Estimated tax you'll recover</div>
+            <div className={cn("mt-1.5", type.hero, "text-violet-600 dark:text-violet-400")}>
               {fmtAud(estimatedTaxValue)}
             </div>
+            <p className={cn("mt-1", type.caption)}>
+              {expectedUsageNarrative ?? "Applied when you sell the property"}
+            </p>
           </div>
-          <div className="col-span-2 sm:col-span-1">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Expected usage
+          <div className="rounded-2xl bg-[hsl(var(--surface-2))] p-4 sm:p-5">
+            <div className={type.eyebrow}>Total carry-forward balance</div>
+            <div className={cn("mt-1.5", type.hero, toneTokens.soft)}>
+              {fmtAud(totalBalance)}
             </div>
-            <div className="flex items-center gap-1 text-sm font-medium">
-              <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="truncate">{expectedUsageNarrative ?? "At disposal"}</span>
-            </div>
+            <p className={cn("mt-1", type.caption)}>
+              Across the household, end of modelling horizon
+            </p>
           </div>
         </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span>Per-year balance (rear-bar) vs applied (front-bar)</span>
-            <span className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-sm bg-violet-500/70" /> Balance
+        {/* Per-year bar chart — calmer, single colour, ratio bars */}
+        <div className="space-y-3">
+          <div className={cn(type.eyebrow, "flex items-center justify-between")}>
+            <span>Carry-forward balance by year</span>
+            <span className="inline-flex items-center gap-3 normal-case tracking-normal text-xs">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-violet-400/80" />
+                Balance
               </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-sm bg-emerald-500/80" /> Applied
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-emerald-400/90" />
+                Applied
               </span>
             </span>
           </div>
@@ -107,39 +101,30 @@ export function DeferredLossLedgerCard({
             {rows.map((r, i) => {
               const balancePct = (r.balance / maxBalance) * 100;
               const applied = (r.appliedAgainstRent ?? 0) + (r.appliedAgainstCgt ?? 0);
-              const appliedPct = (applied / maxApplied) * 100;
               return (
-                <div key={i} className="flex flex-col items-center gap-1">
-                  <div className="relative flex h-20 w-full items-end">
+                <div key={i} className="flex flex-col items-center gap-1.5">
+                  <div className="relative flex h-24 w-full items-end">
                     <div
-                      className="w-full rounded-sm bg-violet-500/30 dark:bg-violet-500/40"
+                      className="w-full rounded-md bg-violet-500/30 dark:bg-violet-400/30"
                       style={{ height: `${balancePct}%` }}
-                      aria-label={`${r.year} balance ${fmtAud(r.balance)}`}
+                      aria-label={`${r.year}: balance ${fmtAud(r.balance)}`}
+                      title={`Balance: ${fmtAud(r.balance)}`}
                     />
-                    <div
-                      className="absolute bottom-0 left-1/4 w-1/2 rounded-sm bg-emerald-500/80"
-                      style={{ height: `${appliedPct}%` }}
-                      aria-label={`${r.year} applied ${fmtAud(applied)}`}
-                    />
+                    {applied > 0 && (
+                      <span
+                        className="absolute left-1/2 bottom-1 -translate-x-1/2 h-1.5 w-1.5 rounded-full bg-emerald-400"
+                        title={`Applied: ${fmtAud(applied)}`}
+                      />
+                    )}
                   </div>
-                  <div className="text-[9px] font-medium text-muted-foreground">{r.year}</div>
+                  <div className="text-[10px] font-medium text-muted-foreground">{r.year}</div>
                 </div>
               );
             })}
           </div>
         </div>
 
-        <div className="flex items-start gap-2 rounded-md border border-border/40 bg-muted/20 p-3 text-xs leading-relaxed text-muted-foreground">
-          <ArrowDownToLine className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>
-            Under proposed 2027 reform, negative-gearing losses on established
-            properties are quarantined and carried forward. They can offset
-            future rental income from the same property, and any remainder
-            applies against the capital gain at disposal. You still receive
-            the tax benefit — it's just deferred.
-          </span>
-        </div>
-        <p className="text-[10px] italic text-muted-foreground">
+        <p className={cn(type.caption, "italic opacity-70")}>
           This is modelling only and not personal tax advice.
         </p>
       </CardContent>

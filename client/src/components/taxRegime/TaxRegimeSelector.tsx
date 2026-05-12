@@ -1,29 +1,25 @@
 /**
  * TaxRegimeSelector.tsx — Global tax-policy regime selector.
  *
- * #FWL_P1B_UI_Finalisation_TaxReform
+ * #FWL_P1B_UI_Finalisation_TaxReform · refined in P1c
  *
- * Premium, mobile-first dropdown that lets the user pick between
- * Auto Detect / Current Rules / Proposed 2027 Reform / Custom Stress Test.
- * Selection persists to localStorage via useActiveRegime and propagates
- * reactively to every overlay-aware surface (no page reload).
- *
- * Layout intent:
- *   - sits inline in a page header strip
- *   - chip-style trigger, regime kind always visible
- *   - tooltip-grade description shown in a popover under the selector
- *   - light + dark mode both tuned for AA contrast
+ * Premium, mobile-first regime picker. P1c refinements:
+ *   - Calmer chrome — soft pill, single accent dot, no bordered shouting
+ *   - Larger touch target on mobile (44px height)
+ *   - Plain-English labels via PLAIN_LABEL (no internal jargon surfaced)
+ *   - Description hint sits inline only when not compact
+ *   - Single accent at a time (dot + value text), everything else neutral
  */
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ScaleIcon, ShieldCheck, AlertTriangle, FlaskConical } from "lucide-react";
+import { Sparkles, ShieldCheck, Compass, FlaskConical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   useActiveRegime,
-  regimeKindLabel,
   regimeKindDescription,
 } from "@/hooks/useActiveRegime";
 import type { TaxPolicyRegimeKind } from "@/lib/taxPolicyEngine";
+import { PLAIN_LABEL } from "./uxTokens";
 
 const REGIMES: TaxPolicyRegimeKind[] = [
   "AUTO_DETECT",
@@ -34,20 +30,29 @@ const REGIMES: TaxPolicyRegimeKind[] = [
 
 function regimeIcon(kind: TaxPolicyRegimeKind): React.ReactNode {
   switch (kind) {
-    case "AUTO_DETECT":          return <ScaleIcon className="h-3.5 w-3.5" />;
+    case "AUTO_DETECT":          return <Sparkles className="h-3.5 w-3.5" />;
     case "CURRENT_RULES":        return <ShieldCheck className="h-3.5 w-3.5" />;
-    case "PROPOSED_2027_REFORM": return <AlertTriangle className="h-3.5 w-3.5" />;
+    case "PROPOSED_2027_REFORM": return <Compass className="h-3.5 w-3.5" />;
     case "CUSTOM_STRESS_TEST":   return <FlaskConical className="h-3.5 w-3.5" />;
   }
 }
 
-/** Color accent for each regime — used for chip border and dot. */
-function regimeAccent(kind: TaxPolicyRegimeKind): string {
+/** Soft accent dot colour — one of four regime states. */
+function regimeDot(kind: TaxPolicyRegimeKind): string {
   switch (kind) {
-    case "AUTO_DETECT":          return "text-sky-600 dark:text-sky-400";
-    case "CURRENT_RULES":        return "text-emerald-600 dark:text-emerald-400";
-    case "PROPOSED_2027_REFORM": return "text-amber-600 dark:text-amber-400";
-    case "CUSTOM_STRESS_TEST":   return "text-violet-600 dark:text-violet-400";
+    case "AUTO_DETECT":          return "bg-sky-500";
+    case "CURRENT_RULES":        return "bg-emerald-500";
+    case "PROPOSED_2027_REFORM": return "bg-amber-500";
+    case "CUSTOM_STRESS_TEST":   return "bg-violet-500";
+  }
+}
+
+function regimeIconColor(kind: TaxPolicyRegimeKind): string {
+  switch (kind) {
+    case "AUTO_DETECT":          return "text-sky-500";
+    case "CURRENT_RULES":        return "text-emerald-500";
+    case "PROPOSED_2027_REFORM": return "text-amber-500";
+    case "CUSTOM_STRESS_TEST":   return "text-violet-500";
   }
 }
 
@@ -62,47 +67,52 @@ export function TaxRegimeSelector({ compact, className }: Props): JSX.Element {
 
   return (
     <div
-      className={cn(
-        "inline-flex flex-col gap-1.5",
-        className,
-      )}
+      className={cn("inline-flex flex-col gap-1.5", className)}
       data-testid="tax-regime-selector"
     >
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Tax Policy Regime
+      {!compact && (
+        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+          Modelling against
         </span>
-      </div>
+      )}
       <Select
         value={selector}
         onValueChange={(v) => setSelector(v as TaxPolicyRegimeKind)}
       >
         <SelectTrigger
           className={cn(
-            "h-9 w-[220px] gap-2 rounded-full border-2 bg-background/80 px-3 text-sm font-medium shadow-sm backdrop-blur-sm",
-            "transition-colors hover:bg-background",
-            regimeAccent(selector),
+            // Pill-shaped, soft surface — no aggressive borders
+            "h-11 sm:h-10 min-w-[200px] gap-2.5 rounded-full px-4",
+            "bg-[hsl(var(--surface-2))] border border-transparent",
+            "text-sm font-medium shadow-[var(--shadow-sm)]",
+            "hover:bg-[hsl(var(--surface-3))] transition-colors",
+            // Focus ring leans on the app's --ring token
+            "focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring)/0.4)]",
           )}
-          aria-label="Tax Policy Regime selector"
+          aria-label="Choose which tax rules to model against"
         >
-          <span className={cn("inline-flex items-center gap-2", regimeAccent(selector))}>
+          <span className={cn("inline-flex items-center gap-2", regimeIconColor(selector))}>
+            <span className={cn("h-1.5 w-1.5 rounded-full", regimeDot(selector))} />
             {regimeIcon(selector)}
-            <SelectValue placeholder="Select regime" />
+            <SelectValue>
+              <span className="text-foreground">{PLAIN_LABEL[selector]}</span>
+            </SelectValue>
           </span>
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className="rounded-xl border-[hsl(var(--border)/0.6)]">
           {REGIMES.map((r) => (
-            <SelectItem key={r} value={r}>
-              <span className={cn("inline-flex items-center gap-2", regimeAccent(r))}>
-                {regimeIcon(r)}
-                <span className="text-foreground">{regimeKindLabel(r)}</span>
+            <SelectItem key={r} value={r} className="rounded-lg py-2.5">
+              <span className="inline-flex items-center gap-2.5">
+                <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", regimeDot(r))} />
+                <span className={cn("shrink-0", regimeIconColor(r))}>{regimeIcon(r)}</span>
+                <span className="text-foreground font-medium">{PLAIN_LABEL[r]}</span>
               </span>
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
       {!compact && (
-        <p className="max-w-[280px] text-[11px] leading-snug text-muted-foreground">
+        <p className="max-w-[280px] text-xs leading-relaxed text-muted-foreground">
           {regimeKindDescription(selector)}
         </p>
       )}
