@@ -1,0 +1,379 @@
+{
+  "captured_at": "2026-05-12T00:00:00Z",
+  "fixture_name": "roham-like-household-v1",
+  "output": {
+    "monthly_count": 116,
+    "annual_count": 10,
+    "nw_count": 10,
+    "nw_year_1": {
+      "year": 2027,
+      "startNetWorth": 1540000,
+      "income": 272495,
+      "expenses": 179220,
+      "netCashflow": 93275,
+      "propertyValue": 1537000,
+      "propertyLoans": 711952,
+      "propertyEquity": 825048,
+      "propertyDetails": [
+        {
+          "name": "Property undefined",
+          "value": 0,
+          "loanBalance": 0,
+          "equity": 0,
+          "annualCashFlow": 0
+        },
+        {
+          "name": "Property undefined",
+          "value": 0,
+          "loanBalance": 0,
+          "equity": 0,
+          "annualCashFlow": 29565
+        }
+      ],
+      "stockValue": 100859,
+      "cryptoValue": 44149,
+      "cash": 468421,
+      "superRoham": 287162,
+      "superFara": 198291,
+      "totalSuper": 485453,
+      "totalAssets": 2635882,
+      "totalLiabilities": 722752,
+      "accessibleNetWorth": 1427677,
+      "endNetWorth": 1913130,
+      "growth": 373130,
+      "growthPct": 24.23,
+      "growthBreakdown": {
+        "savings": 123688,
+        "propertyAppreciation": 87000,
+        "stockAppreciation": 5859,
+        "cryptoAppreciation": 2149,
+        "debtPaydown": 9248,
+        "superGrowth": 65453,
+        "total": 373130
+      },
+      "cagr": 24.23,
+      "realGrowth": 326930,
+      "realGrowthPct": 21.23,
+      "passiveIncome": 32024,
+      "monthlyCashFlow": 5891,
+      "cashBridge": {
+        "startCash": 344733,
+        "income": 273682,
+        "livingExpenses": 179891,
+        "pporRepayments": 0,
+        "investmentRepayments": 0,
+        "propertyDeposits": 0,
+        "buyingCosts": 0,
+        "rentalIncome": 29896,
+        "plannedStockBuys": 0,
+        "plannedCryptoBuys": 0,
+        "dcaOutflows": 0,
+        "taxRefundOrPayment": 0,
+        "other": 1,
+        "endCash": 468421
+      },
+      "propertyBridge": {
+        "startValue": 1450000,
+        "marketGrowth": 87000,
+        "newPurchases": 0,
+        "endValue": 1537000
+      },
+      "liabilityBridge": {
+        "openingDebt": 732000,
+        "newLoans": 0,
+        "repayments": 9248,
+        "closingDebt": 722752
+      },
+      "passiveIncomeBreakdown": {
+        "netRent": 29565,
+        "dividends": 2017,
+        "cryptoYield": 441,
+        "total": 32024
+      }
+    },
+    "nw_year_5": {
+      "year": 2031,
+      "startNetWorth": 2894299,
+      "income": 312694,
+      "expenses": 201714,
+      "netCashflow": 110980,
+      "propertyValue": 1940427,
+      "propertyLoans": 673999,
+      "propertyEquity": 1266428,
+      "propertyDetails": [
+        {
+          "name": "Property undefined",
+          "value": 0,
+          "loanBalance": 0,
+          "equity": 0,
+          "annualCashFlow": 0
+        },
+        {
+          "name": "Property undefined",
+          "value": 0,
+          "loanBalance": 0,
+          "equity": 0,
+          "annualCashFlow": 33276
+        }
+      ],
+      "stockValue": 128141,
+      "cryptoValue": 53901,
+      "cash": 1016006,
+      "superRoham": 489697,
+      "superFara": 310177,
+      "totalSuper": 799874,
+      "totalAssets": 3938349,
+      "totalLiabilities": 679999,
+      "accessibleNetWorth": 2458476,
+      "endNetWorth": 3258350,
+      "growth": 364051,
+      "growthPct": 12.58,
+      "growthBreakdown": {
+        "savings": 145237,
+        "propertyAppreciation": 109835,
+        "stockAppreciation": 7444,
+        "cryptoAppreciation": 2623,
+        "debtPaydown": 11630,
+        "superGrowth": 87281,
+        "total": 364051
+      },
+      "cagr": 16.17,
+      "realGrowth": 277222,
+      "realGrowthPct": 9.58,
+      "passiveIncome": 36378,
+      "monthlyCashFlow": 7729,
+      "cashBridge": {
+        "startCash": 870769,
+        "income": 314058,
+        "livingExpenses": 202468,
+        "pporRepayments": 0,
+        "investmentRepayments": 0,
+        "propertyDeposits": 0,
+        "buyingCosts": 0,
+        "rentalIncome": 33647,
+        "plannedStockBuys": 0,
+        "plannedCryptoBuys": 0,
+        "dcaOutflows": 0,
+        "taxRefundOrPayment": 0,
+        "other": 0,
+        "endCash": 1016006
+      },
+      "propertyBridge": {
+        "startValue": 1830592,
+        "marketGrowth": 109835,
+        "newPurchases": 0,
+        "endValue": 1940427
+      },
+      "liabilityBridge": {
+        "openingDebt": 691629,
+        "newLoans": 0,
+        "repayments": 11630,
+        "closingDebt": 679999
+      },
+      "passiveIncomeBreakdown": {
+        "netRent": 33276,
+        "dividends": 2563,
+        "cryptoYield": 539,
+        "total": 36378
+      }
+    },
+    "nw_year_10": {
+      "year": 2036,
+      "startNetWorth": 4930093,
+      "income": 371382,
+      "expenses": 233841,
+      "netCashflow": 137541,
+      "propertyValue": 2596729,
+      "propertyLoans": 610388,
+      "propertyEquity": 1986341,
+      "propertyDetails": [
+        {
+          "name": "Property undefined",
+          "value": 0,
+          "loanBalance": 0,
+          "equity": 0,
+          "annualCashFlow": 0
+        },
+        {
+          "name": "Property undefined",
+          "value": 0,
+          "loanBalance": 0,
+          "equity": 0,
+          "annualCashFlow": 38576
+        }
+      ],
+      "stockValue": 172843,
+      "cryptoValue": 69174,
+      "cash": 1658602,
+      "superRoham": 840337,
+      "superFara": 503881,
+      "totalSuper": 1344218,
+      "totalAssets": 5841566,
+      "totalLiabilities": 610388,
+      "accessibleNetWorth": 3886960,
+      "endNetWorth": 5231178,
+      "growth": 301085,
+      "growthPct": 6.11,
+      "growthBreakdown": {
+        "savings": 0,
+        "propertyAppreciation": 146985,
+        "stockAppreciation": 10041,
+        "cryptoAppreciation": 3367,
+        "debtPaydown": 15623,
+        "superGrowth": 125070,
+        "total": 301085
+      },
+      "cagr": 13.01,
+      "realGrowth": 153182,
+      "realGrowthPct": 3.11,
+      "passiveIncome": 42724,
+      "monthlyCashFlow": 10471,
+      "cashBridge": {
+        "startCash": 1658602,
+        "income": 0,
+        "livingExpenses": 0,
+        "pporRepayments": 0,
+        "investmentRepayments": 0,
+        "propertyDeposits": 0,
+        "buyingCosts": 0,
+        "rentalIncome": 0,
+        "plannedStockBuys": 0,
+        "plannedCryptoBuys": 0,
+        "dcaOutflows": 0,
+        "taxRefundOrPayment": 0,
+        "other": 0,
+        "endCash": 1658602
+      },
+      "propertyBridge": {
+        "startValue": 2449744,
+        "marketGrowth": 146985,
+        "newPurchases": 0,
+        "endValue": 2596729
+      },
+      "liabilityBridge": {
+        "openingDebt": 626011,
+        "newLoans": 0,
+        "repayments": 15623,
+        "closingDebt": 610388
+      },
+      "passiveIncomeBreakdown": {
+        "netRent": 38576,
+        "dividends": 3457,
+        "cryptoYield": 692,
+        "total": 42724
+      }
+    },
+    "nw_final": {
+      "year": 2036,
+      "startNetWorth": 4930093,
+      "income": 371382,
+      "expenses": 233841,
+      "netCashflow": 137541,
+      "propertyValue": 2596729,
+      "propertyLoans": 610388,
+      "propertyEquity": 1986341,
+      "propertyDetails": [
+        {
+          "name": "Property undefined",
+          "value": 0,
+          "loanBalance": 0,
+          "equity": 0,
+          "annualCashFlow": 0
+        },
+        {
+          "name": "Property undefined",
+          "value": 0,
+          "loanBalance": 0,
+          "equity": 0,
+          "annualCashFlow": 38576
+        }
+      ],
+      "stockValue": 172843,
+      "cryptoValue": 69174,
+      "cash": 1658602,
+      "superRoham": 840337,
+      "superFara": 503881,
+      "totalSuper": 1344218,
+      "totalAssets": 5841566,
+      "totalLiabilities": 610388,
+      "accessibleNetWorth": 3886960,
+      "endNetWorth": 5231178,
+      "growth": 301085,
+      "growthPct": 6.11,
+      "growthBreakdown": {
+        "savings": 0,
+        "propertyAppreciation": 146985,
+        "stockAppreciation": 10041,
+        "cryptoAppreciation": 3367,
+        "debtPaydown": 15623,
+        "superGrowth": 125070,
+        "total": 301085
+      },
+      "cagr": 13.01,
+      "realGrowth": 153182,
+      "realGrowthPct": 3.11,
+      "passiveIncome": 42724,
+      "monthlyCashFlow": 10471,
+      "cashBridge": {
+        "startCash": 1658602,
+        "income": 0,
+        "livingExpenses": 0,
+        "pporRepayments": 0,
+        "investmentRepayments": 0,
+        "propertyDeposits": 0,
+        "buyingCosts": 0,
+        "rentalIncome": 0,
+        "plannedStockBuys": 0,
+        "plannedCryptoBuys": 0,
+        "dcaOutflows": 0,
+        "taxRefundOrPayment": 0,
+        "other": 0,
+        "endCash": 1658602
+      },
+      "propertyBridge": {
+        "startValue": 2449744,
+        "marketGrowth": 146985,
+        "newPurchases": 0,
+        "endValue": 2596729
+      },
+      "liabilityBridge": {
+        "openingDebt": 626011,
+        "newLoans": 0,
+        "repayments": 15623,
+        "closingDebt": 610388
+      },
+      "passiveIncomeBreakdown": {
+        "netRent": 38576,
+        "dividends": 3457,
+        "cryptoYield": 692,
+        "total": 42724
+      }
+    },
+    "annual_first": {
+      "year": 2026,
+      "income": 177295,
+      "totalExpenses": 117008,
+      "rentalIncome": 19448,
+      "mortgageRepayment": 0,
+      "investmentLoanRepayment": 0,
+      "ngTaxBenefit": 0,
+      "ngBenefitSpread": 0,
+      "netCashFlow": 79733,
+      "endingBalance": 344733,
+      "hasActualMonths": 0
+    },
+    "annual_last": {
+      "year": 2035,
+      "income": 360388,
+      "totalExpenses": 227881,
+      "rentalIncome": 37870,
+      "mortgageRepayment": 0,
+      "investmentLoanRepayment": 0,
+      "ngTaxBenefit": 0,
+      "ngBenefitSpread": 0,
+      "netCashFlow": 170380,
+      "endingBalance": 1658602,
+      "hasActualMonths": 0
+    }
+  }
+}

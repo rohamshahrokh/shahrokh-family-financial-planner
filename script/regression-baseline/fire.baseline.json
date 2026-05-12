@@ -1,0 +1,86 @@
+{
+  "captured_at": "2026-05-12T00:00:00Z",
+  "fixture_name": "roham-like-household-v1",
+  "output": {
+    "best_scenario": "aggressive",
+    "best_label": "Aggressive Growth",
+    "best_fire_year": 2039,
+    "target_capital": 4500000,
+    "target_passive_income": 15000,
+    "current_progress_pct": 18,
+    "investable_now": 402000,
+    "super_now": 420000,
+    "total_nw_now": 1540000,
+    "fire_gap": 3678000,
+    "semi_fire_year": 2037,
+    "data_coverage": "full",
+    "scenarios_summary": [
+      {
+        "id": "property",
+        "label": "Property Focused",
+        "fire_year": 2047,
+        "years_to_fire": 21,
+        "net_worth_at_fire": 11886402,
+        "monthly_passive_at_fire": 39621,
+        "risk_level": "Medium",
+        "progress_pct": 18,
+        "annual_invest": 26784,
+        "timeline_length": 26
+      },
+      {
+        "id": "etf",
+        "label": "ETF / Stock Focused",
+        "fire_year": 2040,
+        "years_to_fire": 14,
+        "net_worth_at_fire": 7722500,
+        "monthly_passive_at_fire": 25742,
+        "risk_level": "Low",
+        "progress_pct": 18,
+        "annual_invest": 71424,
+        "timeline_length": 19
+      },
+      {
+        "id": "mixed",
+        "label": "Mixed Strategy",
+        "fire_year": 2043,
+        "years_to_fire": 17,
+        "net_worth_at_fire": 10497270,
+        "monthly_passive_at_fire": 34991,
+        "risk_level": "Medium",
+        "progress_pct": 18,
+        "annual_invest": 49104,
+        "timeline_length": 22
+      },
+      {
+        "id": "aggressive",
+        "label": "Aggressive Growth",
+        "fire_year": 2039,
+        "years_to_fire": 13,
+        "net_worth_at_fire": 7464770,
+        "monthly_passive_at_fire": 24883,
+        "risk_level": "Very High",
+        "progress_pct": 18,
+        "annual_invest": 62496,
+        "timeline_length": 18
+      }
+    ],
+    "sensitivity": {
+      "returns_minus_2pct": {
+        "fire_year": 2044,
+        "delta": 5
+      },
+      "expenses_plus_10pct": {
+        "fire_year": 2042,
+        "delta": 3
+      },
+      "surplus_minus_20pct": {
+        "fire_year": 2041,
+        "delta": 2
+      },
+      "property_flat": {
+        "fire_year": 2052,
+        "delta": 13
+      }
+    }
+  }
+}
