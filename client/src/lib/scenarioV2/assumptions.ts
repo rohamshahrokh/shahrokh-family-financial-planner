@@ -20,6 +20,13 @@ import {
   DEFAULT_INFLATION_REGIMES,
   CRYPTO_JUMPS,
 } from "./stochastic";
+import {
+  CURRENT_RULES_REGIME,
+  PROPOSED_2027_REFORM_REGIME,
+  BUDGET_NIGHT_CUTOFF_DEFAULT,
+  REFORM_START_DATE_DEFAULT,
+} from "../taxPolicyEngine";
+import { DEFAULT_DECISION_ENGINE_WEIGHTS } from "../taxPolicyEngine/decisionEngineWeights";
 
 export type AssumptionCategory =
   | "Macro"
@@ -32,7 +39,9 @@ export type AssumptionCategory =
   | "Super"
   | "CGT"
   | "MC"
-  | "Risk";
+  | "Risk"
+  | "TaxPolicy"
+  | "DecisionEngine";
 
 export interface AssumptionRow {
   category: AssumptionCategory;
@@ -149,5 +158,71 @@ export function collectAssumptionsUsed(
     // Property-correlation (used as additional MC row for completeness).
     { category: "MC", label: "Correlation: property-crypto", value: sig(corrPC, 2),
       source: "stochastic.ts", editable: false, impacts: "Joint downside between property and crypto." },
+
+    // ── TaxPolicy (P0) ──────────────────────────────────────────────────────────
+    // Modelling-only rails for the proposed Australian negative-gearing /
+    // CGT reform. All editable so the user can model alternate proposals.
+    // Disclaimer: "This is modelling only and not personal tax advice."
+    { category: "TaxPolicy", label: "Active regime", value: CURRENT_RULES_REGIME.label,
+      source: "taxPolicyEngine/regimes.ts", editable: true,
+      impacts: "Switches all property cashflow + CGT + Decision Engine outputs between regimes." },
+    { category: "TaxPolicy", label: "Budget-night cutoff", value: BUDGET_NIGHT_CUTOFF_DEFAULT,
+      source: "taxPolicyEngine (BUDGET_NIGHT_CUTOFF_DEFAULT)", editable: true,
+      impacts: "Properties acquired on or before this date are grandfathered to current rules." },
+    { category: "TaxPolicy", label: "Reform start date", value: REFORM_START_DATE_DEFAULT,
+      source: "taxPolicyEngine (REFORM_START_DATE_DEFAULT)", editable: true,
+      impacts: "Date the reform regime begins applying to non-grandfathered properties." },
+    { category: "TaxPolicy", label: "NG treatment (reform default)",
+      value: PROPOSED_2027_REFORM_REGIME.defaultNegativeGearing,
+      source: "taxPolicyEngine (PROPOSED_2027_REFORM_REGIME)", editable: true,
+      impacts: "How property losses are treated for non-grandfathered established dwellings." },
+    { category: "TaxPolicy", label: "CGT method (reform default)",
+      value: PROPOSED_2027_REFORM_REGIME.defaultCGTMethod,
+      source: "taxPolicyEngine (PROPOSED_2027_REFORM_REGIME)", editable: true,
+      impacts: "Method used to compute capital gain on disposal under the reform." },
+    { category: "TaxPolicy", label: "CGT discount (current rules)",
+      value: pct(CURRENT_RULES_REGIME.defaultCGTDiscountPct),
+      source: "taxPolicyEngine (CURRENT_RULES_REGIME)", editable: true,
+      impacts: "Discount applied to capital gains held > 12 months under current rules." },
+    { category: "TaxPolicy", label: "Indexation rate (INDEXED_COST_BASE)",
+      value: pct(PROPOSED_2027_REFORM_REGIME.indexationRate),
+      source: "taxPolicyEngine (PROPOSED_2027_REFORM_REGIME)", editable: true,
+      impacts: "Annual CPI proxy used to index the cost base when the regime uses INDEXED_COST_BASE." },
+    { category: "TaxPolicy", label: "Carve-outs",
+      value: "NEW_BUILD, BUILD_TO_RENT, AFFORDABLE_HOUSING",
+      source: "taxPolicyEngine/regimes.ts", editable: true,
+      impacts: "Property types that keep current rules even under the proposed reform." },
+
+    // ── Decision Engine weights (P0 surface, P2 will fully wire scoring) ──────
+    // Spec §14: net worth, FIRE, cashflow survival, liquidity, tax efficiency,
+    // downside protection, policy risk penalty.
+    { category: "DecisionEngine", label: "Weight: Net worth",
+      value: pct(DEFAULT_DECISION_ENGINE_WEIGHTS.netWorth, 0),
+      source: "taxPolicyEngine/decisionEngineWeights.ts", editable: true,
+      impacts: "Drives net-worth contribution to the composite Decision score." },
+    { category: "DecisionEngine", label: "Weight: FIRE timing",
+      value: pct(DEFAULT_DECISION_ENGINE_WEIGHTS.fireTiming, 0),
+      source: "taxPolicyEngine/decisionEngineWeights.ts", editable: true,
+      impacts: "Drives FIRE-year contribution." },
+    { category: "DecisionEngine", label: "Weight: Cashflow survival",
+      value: pct(DEFAULT_DECISION_ENGINE_WEIGHTS.cashflowSurvival, 0),
+      source: "taxPolicyEngine/decisionEngineWeights.ts", editable: true,
+      impacts: "Drives months-of-runway contribution." },
+    { category: "DecisionEngine", label: "Weight: Liquidity",
+      value: pct(DEFAULT_DECISION_ENGINE_WEIGHTS.liquidity, 0),
+      source: "taxPolicyEngine/decisionEngineWeights.ts", editable: true,
+      impacts: "Drives accessible-cash contribution." },
+    { category: "DecisionEngine", label: "Weight: Tax efficiency",
+      value: pct(DEFAULT_DECISION_ENGINE_WEIGHTS.taxEfficiency, 0),
+      source: "taxPolicyEngine/decisionEngineWeights.ts", editable: true,
+      impacts: "Drives after-tax wealth contribution under the active regime." },
+    { category: "DecisionEngine", label: "Weight: Downside protection",
+      value: pct(DEFAULT_DECISION_ENGINE_WEIGHTS.downsideProtection, 0),
+      source: "taxPolicyEngine/decisionEngineWeights.ts", editable: true,
+      impacts: "Drives Monte Carlo P10 contribution." },
+    { category: "DecisionEngine", label: "Weight: Policy risk penalty",
+      value: pct(DEFAULT_DECISION_ENGINE_WEIGHTS.policyRiskPenalty, 0),
+      source: "taxPolicyEngine/decisionEngineWeights.ts", editable: true,
+      impacts: "Negative weight applied when the plan is highly exposed to reform risk." },
   ];
 }

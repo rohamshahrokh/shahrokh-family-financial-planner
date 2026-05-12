@@ -152,6 +152,22 @@ export interface PropertyState {
    * it is false.
    */
   inLedger?: boolean;
+
+  // ── Tax Policy Engine fields (P0) ─────────────────────────────────────────
+  // Optional and additive. Legacy properties default to UNKNOWN classification
+  // and no contract date, which means grandfathering can fall back to
+  // purchaseDate or be treated conservatively. See client/src/lib/taxPolicyEngine.
+  /** Classification driving NG / CGT carve-out logic under a reform regime. */
+  propertyType?:
+    | "ESTABLISHED"
+    | "NEW_BUILD"
+    | "BUILD_TO_RENT"
+    | "AFFORDABLE_HOUSING"
+    | "UNKNOWN";
+  /** ISO YYYY-MM-DD contract signing date (grandfathering check). */
+  contractDate?: string;
+  /** ISO YYYY-MM-DD settlement date (fallback when contract date is missing). */
+  purchaseDate?: string;
 }
 
 export interface PortfolioState {

@@ -16,7 +16,8 @@ import {
   type AssumptionRow,
   type BasePlanAssumptions,
 } from "@/lib/scenarioV2";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
+import { MODELLING_DISCLAIMER } from "@/lib/taxPolicyEngine";
 
 export interface AssumptionsPanelProps {
   /** Override the rails portion of the inventory; otherwise defaults are used. */
@@ -58,6 +59,15 @@ export default function AssumptionsPanel({
 
       {(open || mode === "full") && (
         <div className="mt-3 overflow-x-auto">
+          <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+            <AlertTriangle className="w-3.5 h-3.5 mt-[1px] shrink-0" />
+            <div>
+              <span className="font-semibold">Modelling disclaimer:</span>{" "}
+              {MODELLING_DISCLAIMER} The “TaxPolicy” and “DecisionEngine” categories
+              below are user-editable rails that simulate the proposed 2027 reform
+              — they do not represent enacted Australian law.
+            </div>
+          </div>
           <table className="w-full text-[11px]">
             <thead>
               <tr className="text-left text-muted-foreground">
@@ -99,7 +109,7 @@ export default function AssumptionsPanel({
 
 function groupByCategory(rows: AssumptionRow[]) {
   const order: AssumptionRow["category"][] =
-    ["Macro", "Property", "Stocks", "Crypto", "Cash", "Debt", "Tax", "Super", "CGT", "MC", "Risk"];
+    ["Macro", "Property", "Stocks", "Crypto", "Cash", "Debt", "Tax", "Super", "CGT", "TaxPolicy", "DecisionEngine", "MC", "Risk"];
   const map: Map<string, AssumptionRow[]> = new Map();
   for (const r of rows) {
     if (!map.has(r.category)) map.set(r.category, []);
