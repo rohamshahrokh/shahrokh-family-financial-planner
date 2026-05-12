@@ -4092,3 +4092,48 @@ nav a[aria-current="page"] {
   border: 1px solid hsl(var(--border)) !important;
   box-shadow: var(--shadow-lg) !important;
 }
+
+/* ╔════════════════════════════════════════════════════════════════════════╗
+ * ║  Decision Engine — selectable card states                              ║
+ * ║                                                                        ║
+ * ║  Replaces hardcoded `bg-violet-50 dark:bg-violet-950/40` etc. that      ║
+ * ║  washed-out selected cards in dark mode (the app uses `.light` for     ║
+ * ║  the override, so Tailwind's `dark:` variants never fired and the      ║
+ * ║  light-mode `bg-violet-50` leaked through).                            ║
+ * ║                                                                        ║
+ * ║  Uses semantic tokens so contrast is correct in BOTH light and dark.   ║
+ * ╚════════════════════════════════════════════════════════════════════════╝ */
+.de-selectable-card {
+  /* base motion + border anchor (border colour overridden by .selected) */
+  border-width: 1px;
+  border-style: solid;
+}
+
+.de-selectable-card.selected {
+  /* Dark mode (default): use surface-3 (a perceivable step above card) with
+     a bright primary border + ring. Text inherits foreground tokens. */
+  background-color: hsl(var(--surface-3));
+  border-color: hsl(var(--primary) / 0.55);
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.35),
+    var(--shadow-sm);
+}
+
+/* Light mode override — light tinted surface, primary border, dark text. */
+.light .de-selectable-card.selected {
+  background-color: hsl(var(--primary) / 0.08);
+  border-color: hsl(var(--primary) / 0.55);
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.25),
+    var(--shadow-sm);
+}
+
+/* ── Decision Engine specific contrast tweaks ─────────────────────────── */
+
+/* Helper text inside Decision Engine inputs block — bump from muted-foreground
+   to foreground/70 so it isn't faint on mobile in dark mode. */
+[data-testid="decision-inputs-block"] .text-muted-foreground {
+  /* Only soften slightly so primary content still dominates. */
+  color: hsl(var(--foreground) / 0.72);
+}
+

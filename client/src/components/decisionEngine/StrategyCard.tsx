@@ -37,6 +37,7 @@ import type { MaskFmt } from "@/components/decisionEngine/RiskVisualizations";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 
 import { StrategyDeepDive } from "./StrategyDeepDive";
 
@@ -145,12 +146,14 @@ export function StrategyCard({ rank, candidate, baseline, fmt, privacyMode }: St
             icon={<Wallet className="h-3 w-3" />}
             label="P50 Net Worth"
             value={privacyMode ? "•••" : fmt.fmt$M(candidate.result.netWorthFan.at(-1)?.p50 ?? 0)}
+            infoTerm="P50"
           />
           <MetricTile
             icon={<Shield className="h-3 w-3" />}
             label="Survival"
             value={`${(survival * 100).toFixed(0)}%`}
             tone={survival >= 0.9 ? "good" : survival >= 0.75 ? "warn" : "bad"}
+            infoTerm="Survival probability"
           />
           <MetricTile
             icon={<TrendingUp className="h-3 w-3" />}
@@ -162,6 +165,7 @@ export function StrategyCard({ rank, candidate, baseline, fmt, privacyMode }: St
             })()}
             tone={intel.baselineDelta.fireYearsDelta < -0.5 ? "good" :
                   intel.baselineDelta.fireYearsDelta > 0.5 ? "bad" : "neutral"}
+            infoTerm="FIRE"
           />
         </div>
 
@@ -312,23 +316,26 @@ export function StrategyCard({ rank, candidate, baseline, fmt, privacyMode }: St
 // ─── Subcomponents ───────────────────────────────────────────────────────────
 
 function MetricTile({
-  icon, label, value, tone = "neutral",
+  icon, label, value, tone = "neutral", infoTerm,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   tone?: "good" | "warn" | "bad" | "neutral";
+  /** Glossary key for inline info tooltip. */
+  infoTerm?: string;
 }) {
   const toneClass =
-    tone === "good" ? "text-emerald-300" :
-    tone === "warn" ? "text-amber-300" :
-    tone === "bad"  ? "text-rose-300" :
+    tone === "good" ? "text-[hsl(var(--success-light))]" :
+    tone === "warn" ? "text-[hsl(var(--warning-light))]" :
+    tone === "bad"  ? "text-[hsl(var(--danger-light))]" :
                       "text-foreground";
   return (
     <div className="bg-card p-2.5 sm:p-3">
       <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
         {icon}
         <span className="truncate">{label}</span>
+        {infoTerm && <InfoTooltip term={infoTerm} size={10} />}
       </div>
       <div className={`mt-0.5 text-sm sm:text-base font-bold tabular-nums ${toneClass}`}>
         {value}

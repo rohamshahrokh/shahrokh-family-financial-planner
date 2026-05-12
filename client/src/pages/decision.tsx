@@ -34,6 +34,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { SmartNumInput } from "@/components/ui/smart-num-input";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
   Trophy, Shield, Droplet, TrendingDown, Target, Info, Eye, EyeOff, ShieldAlert,
@@ -401,17 +403,17 @@ function QuickDecisionTab() {
           {/* Inputs grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-1.5">
-              <Label className="text-xs">Capital available (AUD)</Label>
-              <Input
-                type="number"
-                inputMode="decimal"
+              <Label className="text-xs flex items-center gap-1">
+                Capital available (AUD)
+              </Label>
+              {/* iOS-safe SmartNumInput: tap-to-clear-zero + select-on-focus.
+                  Replaces plain <Input type=number> which appended digits on iOS. */}
+              <SmartNumInput
                 value={capital}
                 min={0}
                 step={1000}
-                onChange={(e) => {
-                  const n = parseFloat(e.target.value);
-                  if (Number.isFinite(n)) setCapital(Math.max(0, n));
-                }}
+                prefix="$"
+                onChange={(n) => setCapital(Math.max(0, n))}
               />
             </div>
             <div className="space-y-1.5">
@@ -426,16 +428,12 @@ function QuickDecisionTab() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Dependants</Label>
-              <Input
-                type="number"
+              <SmartNumInput
                 value={dependants}
                 min={0}
                 max={6}
                 step={1}
-                onChange={(e) => {
-                  const n = parseInt(e.target.value, 10);
-                  if (Number.isFinite(n)) setDependants(Math.max(0, Math.min(6, n)));
-                }}
+                onChange={(n) => setDependants(Math.max(0, Math.min(6, Math.round(n))))}
               />
             </div>
             <div className="space-y-1.5">
@@ -475,27 +473,30 @@ function QuickDecisionTab() {
 
           {/* Investor profile selector (Phase 2.1) */}
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <SlidersHorizontal className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+            <div className="flex items-center gap-2 flex-wrap">
+              <SlidersHorizontal className="h-3.5 w-3.5 text-[hsl(var(--intelligence))]" />
               <Label className="text-xs font-medium">Investor profile</Label>
               <span className="text-[10px] text-muted-foreground">
                 re-weights ranking · raw math unchanged
               </span>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2" data-testid="investor-profile-grid">
               {listInvestorProfiles().map(p => (
                 <button
                   key={p.id}
                   onClick={() => setInvestorProfile(p.id)}
-                  className={`text-left rounded-lg border p-2 transition-all min-h-[64px]
-                    ${investorProfile === p.id
-                      ? "border-violet-500 bg-violet-50 dark:bg-violet-950/40 ring-2 ring-violet-200 dark:ring-violet-800"
-                      : "border-border bg-card hover:bg-muted/50"}`}
+                  data-testid={`investor-profile-${p.id}`}
+                  className={
+                    investorProfile === p.id
+                      ? // Selected — semantic tokens, high-contrast in both modes
+                        "de-selectable-card selected text-left rounded-lg p-2 transition-all min-h-[64px]"
+                      : "de-selectable-card text-left rounded-lg border border-border bg-card p-2 transition-all min-h-[64px] hover:bg-muted/50"
+                  }
                   aria-pressed={investorProfile === p.id}
                   title={p.description}
                 >
                   <div className="text-[11px] font-semibold text-foreground truncate">{p.label}</div>
-                  <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">
+                  <div className="text-[10px] text-foreground/70 mt-0.5 leading-snug line-clamp-2">
                     {p.description}
                   </div>
                 </button>
@@ -526,8 +527,16 @@ function QuickDecisionTab() {
           {/* Run row — sticky on mobile so the CTA is always reachable
               when results scroll off the bottom (audit P1-6). */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-1 sticky bottom-2 md:static md:bottom-auto md:bg-transparent bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/70 border-t md:border-0 border-border -mx-4 px-4 py-3 md:m-0 md:p-0 z-10">
-            <div className="text-[11px] text-muted-foreground hidden md:block">
-              500-path Monte Carlo per candidate · banded DSR · LVR 0.85 ceiling · dynamic liquidity floor
+            <div className="text-[11px] text-muted-foreground hidden md:flex items-center gap-1">
+              <span>500-path</span>
+              <span className="inline-flex items-center gap-0.5">
+                Monte Carlo<InfoTooltip term="Monte Carlo" size={11} />
+              </span>
+              <span>per candidate · banded</span>
+              <span className="inline-flex items-center gap-0.5">DSR<InfoTooltip term="DSR" size={11} /></span>
+              <span>·</span>
+              <span className="inline-flex items-center gap-0.5">LVR<InfoTooltip term="LVR" size={11} /></span>
+              <span>0.85 ceiling · dynamic liquidity floor</span>
             </div>
             <Button
               onClick={run}
@@ -602,24 +611,28 @@ function QuickDecisionTab() {
                 label="Survival"
                 value={pct(winner.trace.scoreDerivation.find(s => s.axis === "survivalProbability")?.rawValue ?? 0, 0)}
                 tone="emerald"
+                infoTerm="Survival probability"
               />
               <MetricTile
                 icon={<Droplet className="h-3 w-3" />}
                 label="Liquidity factor"
                 value={(winner.trace.scoreDerivation.find(s => s.axis === "liquidityFactor")?.rawValue ?? 0).toFixed(2)}
                 tone="sky"
+                infoTerm="Liquidity factor"
               />
               <MetricTile
                 icon={<TrendingDown className="h-3 w-3" />}
                 label="Risk-adj CAGR"
                 value={pct(winner.trace.scoreDerivation.find(s => s.axis === "riskAdjustedReturn")?.rawValue ?? 0, 1)}
                 tone="indigo"
+                infoTerm="Risk-adjusted return"
               />
               <MetricTile
                 icon={<Target className="h-3 w-3" />}
                 label="Terminal NW (P50)"
                 value={fmt$M(winner.trace.scoreDerivation.find(s => s.axis === "terminalNetWorth")?.rawValue ?? 0)}
                 tone="amber"
+                infoTerm="P50"
               />
             </div>
 
@@ -857,19 +870,22 @@ function RiskControlsPanel({
   const resolved = resolveRiskControls(mode, mode === "custom" ? customControls : undefined);
 
   return (
-    <div className="space-y-2 rounded-lg border border-violet-200 dark:border-violet-900 bg-violet-50/30 dark:bg-violet-950/15 p-3">
-      <div className="flex items-center gap-2">
-        <Gauge className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
+    <div className="space-y-2 rounded-lg border border-border bg-card/60 p-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Gauge className="h-3.5 w-3.5 text-[hsl(var(--intelligence))]" />
         <Label className="text-xs font-medium">Risk control mode</Label>
-        <span className="text-[10px] text-muted-foreground">decides which soft warnings discard vs. show as high-risk</span>
+        <InfoTooltip term="Risk control mode" />
+        <span className="text-[10px] text-foreground/70 hidden sm:inline">decides which soft warnings discard vs. show as high-risk</span>
         <button
           onClick={onToggleExpanded}
           aria-expanded={expanded}
-          className="ml-auto text-[10px] text-violet-700 dark:text-violet-300 underline-offset-2 hover:underline"
+          className="ml-auto text-[11px] font-medium text-[hsl(var(--intelligence))] hover:underline underline-offset-2"
         >
           {expanded ? "Hide details" : "Show details"}
         </button>
       </div>
+      {/* Helper line on mobile (full-width row, readable contrast) */}
+      <p className="text-[10px] text-foreground/70 sm:hidden">decides which soft warnings discard vs. show as high-risk</p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" data-testid="risk-mode-grid">
         {modes.map((m) => (
           <button
@@ -877,17 +893,17 @@ function RiskControlsPanel({
             onClick={() => onModeChange(m.id)}
             aria-pressed={mode === m.id}
             data-testid={`risk-mode-${m.id}`}
-            className={`text-left rounded-md border p-2 transition-all min-h-[58px] ${
+            className={
               mode === m.id
-                ? "border-violet-500 bg-violet-100/60 dark:bg-violet-900/40 ring-2 ring-violet-200 dark:ring-violet-800"
-                : "border-border bg-card hover:bg-muted/50"
-            }`}
+                ? "de-selectable-card selected text-left rounded-md p-2 transition-all min-h-[58px]"
+                : "de-selectable-card text-left rounded-md border border-border bg-card p-2 transition-all min-h-[58px] hover:bg-muted/50"
+            }
           >
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
               {m.icon}
               <span className="truncate">{m.label}</span>
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">
+            <div className="text-[10px] text-foreground/70 mt-0.5 leading-snug line-clamp-2">
               {m.desc}
             </div>
           </button>
@@ -1296,26 +1312,39 @@ function ReadoutTile({ label, value }: { label: string; value: string }) {
 }
 
 function MetricTile({
-  icon, label, value, tone,
+  icon, label, value, tone, infoTerm,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   tone: "emerald" | "sky" | "indigo" | "amber";
+  /** Glossary key to attach an <InfoTooltip /> next to the label. */
+  infoTerm?: string;
 }) {
+  // Semantic-token tile shells so contrast is correct in both light and dark.
+  // We pair a low-saturation surface with the tone-specific accent text — and
+  // we make the surface dark enough in dark mode that white-ish digits read
+  // crisply (no more 'muddy' look).
   const tones = {
-    emerald: "border-emerald-200 bg-emerald-50/60 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-900",
-    sky:     "border-sky-200 bg-sky-50/60 text-sky-700 dark:bg-sky-950/30 dark:text-sky-400 dark:border-sky-900",
-    indigo:  "border-indigo-200 bg-indigo-50/60 text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-400 dark:border-indigo-900",
-    amber:   "border-amber-200 bg-amber-50/60 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-900",
+    emerald: "border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success-surface))]",
+    sky:     "border-[hsl(var(--info)/0.35)] bg-[hsl(var(--info)/0.10)]",
+    indigo:  "border-[hsl(var(--intelligence)/0.35)] bg-[hsl(var(--intelligence-surface))]",
+    amber:   "border-[hsl(var(--gold)/0.35)] bg-[hsl(var(--gold-surface))]",
+  };
+  const accents = {
+    emerald: "text-[hsl(var(--success-light))]",
+    sky:     "text-[hsl(var(--info-light))]",
+    indigo:  "text-[hsl(var(--intelligence-light))]",
+    amber:   "text-[hsl(var(--gold-light))]",
   };
   return (
     <div className={`rounded-lg border p-2.5 sm:p-3 ${tones[tone]}`}>
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold opacity-80">
+      <div className={`flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold ${accents[tone]}`}>
         {icon}
         <span className="truncate">{label}</span>
+        {infoTerm && <InfoTooltip term={infoTerm} size={11} />}
       </div>
-      <div className="text-base sm:text-lg font-bold tabular-nums mt-0.5">{value}</div>
+      <div className="text-base sm:text-lg font-bold tabular-nums mt-0.5 text-foreground">{value}</div>
     </div>
   );
 }
