@@ -563,36 +563,41 @@ function QuickDecisionTab() {
 
       {/* ── Winner card ──────────────────────────────────────────────────── */}
       {winner && (
-        <Card className="border-emerald-300 dark:border-emerald-800 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30">
+        <Card className="de-result-card" data-testid="decision-result-card">
           <CardHeader>
             <div className="flex items-start justify-between gap-3">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <Trophy className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                  <Badge variant="default" className="bg-emerald-600">Recommended path</Badge>
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Trophy className="h-5 w-5 text-[hsl(var(--success-light))]" />
+                  <Badge
+                    variant="default"
+                    className="bg-[hsl(var(--success))] text-[hsl(var(--background))] hover:bg-[hsl(var(--success))]/90"
+                  >
+                    Recommended path
+                  </Badge>
                 </div>
-                <CardTitle className="text-base sm:text-xl">{winner.label}</CardTitle>
-                <CardDescription className="text-xs">{sentence(winner.headline)}</CardDescription>
+                <CardTitle className="text-base sm:text-xl text-foreground">{winner.label}</CardTitle>
+                <CardDescription className="text-xs text-foreground/75">{sentence(winner.headline)}</CardDescription>
                 {output && (
                   <div className="flex items-center gap-1.5 pt-1">
-                    <SlidersHorizontal className="h-3 w-3 text-violet-600 dark:text-violet-400" />
-                    <span className="text-[10px] uppercase tracking-wide font-semibold text-violet-700 dark:text-violet-400">
+                    <SlidersHorizontal className="h-3 w-3 text-[hsl(var(--intelligence-light))]" />
+                    <span className="text-[10px] uppercase tracking-wide font-semibold text-[hsl(var(--intelligence-light))]">
                       Ranked under: {output.investorProfile.replace(/_/g, " ")}
                     </span>
                   </div>
                 )}
               </div>
-              <div className="flex flex-col items-end gap-2">
+              <div className="flex flex-col items-end gap-2 shrink-0">
                 <div className="text-right">
-                  <div className="text-2xl sm:text-3xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                  <div className="text-2xl sm:text-3xl font-bold tabular-nums text-[hsl(var(--success-light))]">
                     {winner.score.score.toFixed(0)}
                   </div>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">/100</div>
+                  <div className="text-[10px] uppercase tracking-wide text-foreground/60">/100</div>
                 </div>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="text-xs gap-1.5"
+                  className="text-xs gap-1.5 bg-card text-foreground border-[hsl(var(--success)/0.4)] hover:bg-[hsl(var(--success)/0.12)] hover:text-foreground"
                   onClick={handleDownloadPdf}
                   disabled={pdfBusy}
                   data-testid="button-download-decision-pdf"
@@ -637,15 +642,15 @@ function QuickDecisionTab() {
             </div>
 
             {output && (
-              <div className="rounded-lg bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-3 space-y-3">
+              <div className="de-result-narrative rounded-lg p-3 space-y-3">
                 <div>
-                  <div className="text-[11px] uppercase tracking-wide font-semibold text-emerald-800 dark:text-emerald-400 mb-1">
+                  <div className="text-[11px] uppercase tracking-wide font-semibold text-[hsl(var(--success-light))] mb-1">
                     Why this won
                   </div>
                   <ul className="space-y-1 text-xs">
                     {output.comparativeNarrative.whyWon.map((line, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <CheckCircle2 className="h-3 w-3 text-emerald-600 mt-0.5 shrink-0" />
+                      <li key={i} className="flex items-start gap-2 text-foreground/90">
+                        <CheckCircle2 className="h-3 w-3 text-[hsl(var(--success-light))] mt-0.5 shrink-0" />
                         <span>{sentence(line)}</span>
                       </li>
                     ))}
@@ -654,13 +659,13 @@ function QuickDecisionTab() {
 
                 {output.comparativeNarrative.whatCouldInvalidate.length > 0 && (
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide font-semibold text-amber-800 dark:text-amber-400 mb-1">
+                    <div className="text-[11px] uppercase tracking-wide font-semibold text-[hsl(var(--warning-light))] mb-1">
                       What could invalidate this
                     </div>
                     <ul className="space-y-1 text-xs">
                       {output.comparativeNarrative.whatCouldInvalidate.map((line, i) => (
-                        <li key={i} className="flex items-start gap-2">
-                          <AlertTriangle className="h-3 w-3 text-amber-600 mt-0.5 shrink-0" />
+                        <li key={i} className="flex items-start gap-2 text-foreground/90">
+                          <AlertTriangle className="h-3 w-3 text-[hsl(var(--warning-light))] mt-0.5 shrink-0" />
                           <span>{sentence(line)}</span>
                         </li>
                       ))}
@@ -670,10 +675,10 @@ function QuickDecisionTab() {
 
                 {output.comparativeNarrative.secondPlaceAndWhy && (
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">
+                    <div className="text-[11px] uppercase tracking-wide font-semibold text-foreground/70 mb-1">
                       Runner-up
                     </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
+                    <p className="text-xs text-foreground/80 leading-relaxed">
                       {sentence(output.comparativeNarrative.secondPlaceAndWhy)}
                     </p>
                   </div>

@@ -4137,3 +4137,37 @@ nav a[aria-current="page"] {
   color: hsl(var(--foreground) / 0.72);
 }
 
+
+/* ── Decision Engine Winner Result Card ───────────────────────────────────
+   Root toggles `.light` (DARK is default), so Tailwind `dark:` variants
+   never fire in this app. The previous mint gradient (`bg-emerald-50 …
+   to-teal-50`) leaked through over the dark navy shell, washing out title,
+   metric tiles, and narrative copy on mobile.
+
+   `.de-result-card` resolves to a dark elevated surface in dark mode with
+   a subtle green border, and a soft success-tinted card in light mode.
+   `.de-result-narrative` wraps Why-won / What-could-invalidate / Runner-up. */
+
+/* Dark-mode default */
+.de-result-card {
+  background-color: hsl(var(--surface-2));
+  border: 1px solid hsl(var(--success) / 0.30);
+  box-shadow: var(--shadow-md);
+}
+
+.light .de-result-card {
+  background-color: hsl(var(--success-surface));
+  border-color: hsl(var(--success) / 0.40);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Narrative block: Why this won / What could invalidate / Runner-up */
+.de-result-narrative {
+  background-color: hsl(var(--success-surface));
+  border: 1px solid hsl(var(--success) / 0.25);
+}
+
+.light .de-result-narrative {
+  background-color: hsl(var(--success) / 0.08);
+  border-color: hsl(var(--success) / 0.30);
+}
