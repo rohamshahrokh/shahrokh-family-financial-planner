@@ -5,6 +5,7 @@
  */
 
 import SaveButton from "@/components/SaveButton";
+import AssumptionsPanel from "@/components/AssumptionsPanel";
 import RiskRadarPage from "./risk-radar";
 import FIREPathPage from "./fire-path";
 import MonteCarloDashboard from "@/components/MonteCarloDashboard";
@@ -2799,9 +2800,11 @@ export default function WealthStrategyPage() {
         </Button>
       </div>
 
-      {/* Tab bar */}
-      <div className="bg-card border border-border rounded-2xl mb-6 overflow-hidden">
-        <div className="overflow-x-auto">
+      {/* Tab bar — at tablet portrait (~768px) the 9 tabs overflow. We use
+          a horizontal scroller with a right-edge gradient fade to make the
+          overflow legible and reachable (audit P1-7). */}
+      <div className="bg-card border border-border rounded-2xl mb-6 overflow-hidden relative">
+        <div className="overflow-x-auto scrollbar-thin">
           <div className="flex min-w-max px-2 py-2 gap-1">
             {TABS.map((tab) => {
               const Icon = tab.icon;
@@ -2823,6 +2826,8 @@ export default function WealthStrategyPage() {
             })}
           </div>
         </div>
+        {/* Right-edge gradient fade so users know more tabs are off-screen. */}
+        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-card to-transparent" />
       </div>
 
       {/* Active module */}
@@ -2835,6 +2840,9 @@ export default function WealthStrategyPage() {
         )}
         {renderTab()}
       </div>
+
+      {/* Audit fix P1.4: assumption transparency on every strategy surface. */}
+      <AssumptionsPanel mode="compact" />
     </div>
   );
 }

@@ -3,143 +3,195 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   WEALTH OS — Premium Luxury Dark Fintech Design System
-   Palette: Deep Abyss Navy · Refined Gold · Semantic Signal Colors
-   Philosophy: Calm · Clear · Powerful · Guided · Premium
+   WEALTH OS — Premium Fintech Dark Mode (v2)
+   Inspired by: Linear, Vercel, Stripe Dashboard, Ramp, Mercury, Raycast.
+   3-surface depth system + restrained accent palette + token-driven chrome.
+
+   Philosophy:
+     • Calm, layered, institutional. No neon, no gaming chrome.
+     • Depth via elevation/shadow, NOT borders. Borders only when functional.
+     • Accents = SIGNALS, not decoration:
+         - Blue   → interactive, selected, links
+         - Green  → positive / survivability
+         - Amber  → warning / moderate
+         - Red    → critical / downside
+         - Gold   → premium accent, brand moments (kept from prior system)
+         - Purple → CHARTS ONLY (forecasting), removed from UI chrome
    ───────────────────────────────────────────────────────────────────────────── */
 
 @layer base {
   :root {
-    /* === SURFACES — Deep Abyss (primary dark mode) === */
-    --background:    222 22% 7%;       /* #0d1017 — true deep navy */
-    --foreground:    215 20% 88%;      /* #d6dde8 — cool silver text */
-    --card:          222 20% 10%;      /* #13181f — card surface */
-    --card-foreground: 215 20% 88%;
-    --popover:       222 20% 10%;
-    --popover-foreground: 215 20% 88%;
+    /* === SURFACES — 3-tier depth system =======================================
+       0  Background : #0B1020   (deep ink — app shell)
+       1  Card       : #111827   (primary card surface)
+       2  Elevated   : #172033   (modals, tooltips, charts, popovers)
+       Each step ~3% L brighter than the last so layering is perceivable
+       without resorting to bright 1px borders.
+       ======================================================================== */
+    --background:    225 47% 8%;        /* #0B1020 */
+    --foreground:    220 16% 92%;       /* #E5E9F0 — primary text, slightly warm */
+    --card:          220 39% 11%;       /* #111827 */
+    --card-foreground: 220 16% 92%;
+    --popover:       220 36% 14%;       /* elevated surface for popovers */
+    --popover-foreground: 220 16% 92%;
 
     /* === INTERACTION STATES === */
-    --secondary:     222 18% 15%;      /* #1b2130 — hover/secondary bg */
-    --secondary-foreground: 215 18% 72%;
+    --secondary:     220 32% 16%;       /* hover bg / segmented controls */
+    --secondary-foreground: 220 14% 78%;
 
-    --muted:         222 15% 13%;      /* #181f2a — muted surface */
-    --muted-foreground: 215 16% 70%;   /* #9eaabf — WCAG AA ≥4.5:1 on card bg */
+    --muted:         220 30% 13%;       /* subtle wells (table rows, chips bg) */
+    --muted-foreground: 220 12% 65%;    /* tertiary text, AA 4.6:1 on card */
 
-    /* === BORDERS === */
-    --border:        222 15% 24%;      /* #2e3a4f — visible border with AA contrast */
-    --input:         222 15% 16%;      /* #1e2838 */
-    --ring:          42 80% 52%;       /* gold focus ring */
+    /* === BORDERS — used sparingly, mostly for inputs and dividers ============ */
+    --border:        220 22% 18%;       /* low-contrast hairline */
+    --input:         220 28% 14%;       /* input field bg */
+    --ring:          212 92% 60%;       /* blue focus ring (a11y) */
+
+    /* === NESTED SURFACES ====================================================
+       --surface-1   alias of --card    (level 1)
+       --surface-2   elevated cards inside cards, modals, tooltips, charts
+       --surface-3   one step beyond — used for selected/active wells only
+       ======================================================================== */
+    --surface-1:     220 39% 11%;       /* #111827 */
+    --surface-2:     220 36% 14%;       /* #172033 */
+    --surface-3:     220 32% 17%;       /* selected/active wells */
+
+    /* === ELEVATION SHADOWS — depth without borders ========================= */
+    --shadow-sm:     0 1px 2px hsl(225 47% 4% / 0.5);
+    --shadow-md:     0 4px 16px hsl(225 47% 3% / 0.55), 0 1px 2px hsl(225 47% 3% / 0.4);
+    --shadow-lg:     0 12px 32px hsl(225 47% 3% / 0.65), 0 2px 6px hsl(225 47% 3% / 0.45);
 
     /* === RADIUS === */
     --radius: 0.625rem;                /* 10px — modern, not too round */
 
-    /* === PRIMARY: Refined Gold (actions / CTAs / premium moments) === */
-    --primary:          42 80% 52%;    /* hsl(42, 80%, 52%) */
-    --primary-foreground: 222 22% 7%;  /* dark bg on gold */
+    /* === PRIMARY: Blue (interactive / selected / links) ===================
+       Switched from gold to blue as primary so selected/hover states read as
+       "interactive" first (Linear/Stripe convention). Gold is preserved for
+       brand moments via the --gold-* tokens below.
+       ======================================================================== */
+    --primary:          212 92% 60%;
+    --primary-foreground: 220 39% 11%;
 
     /* === ACCENT === */
-    --accent:        222 18% 15%;
-    --accent-foreground: 215 20% 88%;
+    --accent:        220 32% 16%;
+    --accent-foreground: 220 16% 92%;
 
     /* === DESTRUCTIVE === */
-    --destructive:   0 70% 52%;
+    --destructive:   0 72% 56%;
     --destructive-foreground: 0 0% 98%;
 
     /* ── SEMANTIC PALETTE (semantic roles for data, not decoration) ── */
 
-    /* Gold — actions, CTAs, premium highlights */
-    --gold:          42 80% 52%;
-    --gold-light:    42 85% 65%;
-    --gold-dim:      42 60% 38%;
-    --gold-surface:  42 40% 12%;       /* very dark gold tint for card bg */
+    /* Gold — brand accent, premium moments, mission/strategy highlights. */
+    --gold:          42 80% 56%;
+    --gold-light:    42 88% 68%;
+    --gold-dim:      42 60% 42%;
+    --gold-surface:  42 50% 12%;
 
-    /* Green — healthy, positive, on-track */
-    --success:       145 55% 42%;
-    --success-light: 145 60% 55%;
-    --success-surface: 145 30% 9%;
+    /* Green — positive / survivability / on-track. Calmer than before. */
+    --success:       150 55% 52%;
+    --success-light: 150 60% 64%;
+    --success-surface: 150 32% 11%;
 
-    /* Red — danger, risk, negative */
-    --danger:        5 70% 52%;
-    --danger-light:  5 75% 62%;
-    --danger-surface: 5 30% 9%;
+    /* Red — critical / downside / risk. */
+    --danger:        0 72% 58%;
+    --danger-light:  0 78% 70%;
+    --danger-surface: 0 35% 12%;
 
-    /* Blue — intelligence, AI, data insights */
-    --intelligence:  210 75% 52%;
-    --intelligence-light: 210 80% 65%;
-    --intelligence-surface: 210 40% 10%;
+    /* Amber — warning / moderate (kept distinct from gold to avoid clashes). */
+    --warning:       38 92% 58%;
+    --warning-light: 38 95% 70%;
+    --warning-surface: 38 50% 11%;
 
-    /* Purple — forecasting, projections, Monte Carlo */
-    --forecast:      260 60% 58%;
-    --forecast-light: 260 65% 70%;
-    --forecast-surface: 260 30% 10%;
+    /* Blue — intelligence, interactive, links. Matches --primary. */
+    --intelligence:  212 92% 64%;
+    --intelligence-light: 212 95% 74%;
+    --intelligence-surface: 212 50% 12%;
+
+    /* Purple — CHARTS ONLY (forecasting / Monte Carlo). Removed from UI chrome.
+       Components that previously used forecast-* for non-chart chrome have
+       been migrated to surface-2 + intelligence accent. */
+    --forecast:      258 70% 68%;
+    --forecast-light: 258 80% 78%;
+    --forecast-surface: 258 32% 14%;
 
     /* Teal — info, neutral insights */
-    --info:          188 60% 46%;
-    --info-light:    188 65% 58%;
+    --info:          190 75% 52%;
+    --info-light:    190 80% 64%;
 
-    /* Navy depth layers */
-    --navy-deep:     222 35% 8%;
-    --navy-mid:      222 25% 12%;
-    --navy-light:    222 18% 18%;
+    /* Navy depth layers (legacy aliases; prefer --surface-* going forward) */
+    --navy-deep:     225 47% 6%;
+    --navy-mid:      220 39% 11%;
+    --navy-light:    220 32% 17%;
 
-    /* Chart palette */
-    --chart-1: 42 80% 52%;
-    --chart-2: 210 75% 52%;
-    --chart-3: 145 55% 42%;
-    --chart-4: 5 70% 52%;
-    --chart-5: 260 60% 58%;
-    --chart-6: 188 60% 46%;
+    /* Chart palette — calmer, more harmonious */
+    --chart-1: 212 92% 60%;    /* blue */
+    --chart-2: 150 55% 52%;    /* green */
+    --chart-3: 42 80% 56%;     /* gold */
+    --chart-4: 0 72% 58%;      /* red */
+    --chart-5: 258 70% 68%;    /* purple */
+    --chart-6: 190 75% 52%;    /* teal */
   }
 
-  /* Light mode (kept for toggle, rarely used) */
+  /* Light mode — mirrors the dark token semantics with the same depth model. */
   .light {
-    --background:    220 20% 97%;
+    --background:    220 20% 98%;
     --foreground:    224 30% 10%;
     --card:          0 0% 100%;
     --card-foreground: 224 30% 10%;
     --popover:       0 0% 100%;
     --popover-foreground: 224 30% 10%;
-    --primary:       42 80% 42%;
+    --primary:       212 92% 48%;
     --primary-foreground: 0 0% 100%;
-    --secondary:     220 15% 92%;
+    --secondary:     220 15% 94%;
     --secondary-foreground: 224 20% 20%;
-    --muted:         220 15% 93%;
-    --muted-foreground: 220 10% 45%;
-    --accent:        220 15% 92%;
+    --muted:         220 15% 96%;
+    --muted-foreground: 220 10% 42%;
+    --accent:        220 15% 94%;
     --accent-foreground: 224 20% 20%;
-    --destructive:   0 70% 52%;
+    --destructive:   0 72% 50%;
     --destructive-foreground: 0 0% 98%;
-    --border:        220 15% 84%;
-    --input:         220 15% 90%;
-    --ring:          42 80% 42%;
+    --border:        220 15% 86%;
+    --input:         220 15% 92%;
+    --ring:          212 92% 48%;
+
+    --surface-1:     0 0% 100%;
+    --surface-2:     220 18% 97%;
+    --surface-3:     220 15% 94%;
+    --shadow-sm:     0 1px 2px hsl(220 30% 30% / 0.06);
+    --shadow-md:     0 4px 16px hsl(220 30% 30% / 0.08), 0 1px 2px hsl(220 30% 30% / 0.05);
+    --shadow-lg:     0 12px 32px hsl(220 30% 30% / 0.12), 0 2px 6px hsl(220 30% 30% / 0.06);
 
     --gold:          42 80% 42%;
     --gold-light:    42 85% 52%;
     --gold-dim:      42 60% 32%;
-    --gold-surface:  42 40% 94%;
-    --success:       145 55% 36%;
-    --success-light: 145 60% 44%;
-    --success-surface: 145 40% 93%;
-    --danger:        5 70% 46%;
-    --danger-light:  5 75% 56%;
-    --danger-surface: 5 40% 95%;
-    --intelligence:  210 75% 46%;
-    --intelligence-light: 210 80% 56%;
-    --intelligence-surface: 210 50% 94%;
-    --forecast:      260 60% 52%;
-    --forecast-light: 260 65% 62%;
-    --forecast-surface: 260 40% 94%;
-    --info:          188 60% 38%;
-    --info-light:    188 65% 48%;
+    --gold-surface:  42 50% 95%;
+    --success:       150 55% 36%;
+    --success-light: 150 60% 44%;
+    --success-surface: 150 40% 95%;
+    --danger:        0 72% 50%;
+    --danger-light:  0 78% 60%;
+    --danger-surface: 0 40% 96%;
+    --warning:       38 92% 46%;
+    --warning-light: 38 95% 56%;
+    --warning-surface: 38 60% 94%;
+    --intelligence:  212 92% 48%;
+    --intelligence-light: 212 95% 60%;
+    --intelligence-surface: 212 50% 95%;
+    --forecast:      258 70% 56%;
+    --forecast-light: 258 80% 66%;
+    --forecast-surface: 258 50% 95%;
+    --info:          190 75% 40%;
+    --info-light:    190 80% 52%;
     --navy-deep:     222 35% 14%;
     --navy-mid:      222 25% 20%;
     --navy-light:    222 18% 28%;
-    --chart-1: 42 80% 42%;
-    --chart-2: 210 75% 46%;
-    --chart-3: 145 55% 36%;
-    --chart-4: 5 70% 46%;
-    --chart-5: 260 60% 52%;
-    --chart-6: 188 60% 38%;
+    --chart-1: 212 92% 48%;
+    --chart-2: 150 55% 38%;
+    --chart-3: 42 80% 46%;
+    --chart-4: 0 72% 50%;
+    --chart-5: 258 70% 56%;
+    --chart-6: 190 75% 42%;
   }
 }
 
@@ -547,7 +599,7 @@
   position: sticky;
   top: 0;
   z-index: 30;
-  background: hsl(222 22% 7% / 0.97);
+  background: hsl(var(--background) / 0.97);
   border-bottom: 1px solid hsl(var(--border));
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -724,7 +776,7 @@
 
 .core-card:hover {
   border-color: hsl(var(--border) / 0.9);
-  box-shadow: 0 4px 24px hsl(222 22% 4% / 0.6);
+  box-shadow: 0 4px 24px hsl(var(--background) / 0.6);
 }
 
 .core-card-header {
@@ -1332,7 +1384,7 @@
   transition: border-color 0.15s, background 0.15s;
   position: relative;
 }
-.action-item:hover { border-color: hsl(var(--border) / 0.8); background: hsl(222 20% 12%); }
+.action-item:hover { border-color: hsl(var(--border) / 0.8); background: hsl(var(--card)); }
 
 /* Variant border-left accent */
 .action-item.high      { border-left: 3px solid hsl(var(--danger)); }
@@ -1398,7 +1450,7 @@
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
   padding: 8px 12px;
-  box-shadow: 0 8px 32px hsl(222 22% 3% / 0.7);
+  box-shadow: 0 8px 32px hsl(var(--background) / 0.7);
   font-size: 11px;
 }
 .chart-tooltip-label {
@@ -1763,7 +1815,7 @@
 }
 .chart-panel-expandable:hover {
   border-color: hsl(var(--border) / 1);
-  box-shadow: 0 2px 20px hsl(222 22% 3% / 0.5);
+  box-shadow: 0 2px 20px hsl(var(--background) / 0.5);
 }
 
 
@@ -1782,15 +1834,15 @@
 
 /* ─── Tooltip ──────────────────────────────────────────────────────────────────── */
 .db-tooltip {
-  background: hsl(222 22% 10%);
-  border: 1px solid hsl(222 15% 22%);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
   padding: 10px 14px;
-  box-shadow: 0 8px 32px hsl(222 22% 3% / 0.6);
+  box-shadow: 0 8px 32px hsl(var(--background) / 0.6);
   font-size: 11px;
 }
 .db-tooltip-label {
-  color: hsl(215 12% 52%);
+  color: hsl(var(--muted-foreground));
   font-weight: 600;
   margin-bottom: 6px;
   font-size: 10px;
@@ -1847,7 +1899,7 @@
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: hsl(215 12% 45%);
+  color: hsl(var(--muted-foreground));
 }
 .db-section-link {
   font-size: 11px;
@@ -1870,11 +1922,11 @@
   padding: 0 24px;
   height: 56px;
   background: linear-gradient(90deg,
-    hsl(222 22% 9% / 0.98) 0%,
-    hsl(222 22% 10% / 0.96) 50%,
-    hsl(222 22% 9% / 0.98) 100%
+    hsl(var(--card) / 0.98) 0%,
+    hsl(var(--card) / 0.96) 50%,
+    hsl(var(--card) / 0.98) 100%
   );
-  border-bottom: 1px solid hsl(222 15% 16%);
+  border-bottom: 1px solid hsl(var(--border));
   position: sticky;
   top: 0;
   z-index: 30;
@@ -1891,12 +1943,12 @@
 }
 .db-hero-hello {
   font-size: 13px;
-  color: hsl(215 12% 52%);
+  color: hsl(var(--muted-foreground));
 }
 .db-hero-name {
   font-size: 14px;
   font-weight: 700;
-  color: hsl(215 20% 90%);
+  color: hsl(var(--foreground));
   letter-spacing: 0.01em;
 }
 .db-hero-status {
@@ -1938,7 +1990,7 @@
 .db-hero-sep {
   width: 1px;
   height: 28px;
-  background: hsl(222 15% 20%);
+  background: hsl(var(--border));
   flex-shrink: 0;
 }
 .db-kpi-lbl {
@@ -1946,7 +1998,7 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: hsl(215 12% 45%);
+  color: hsl(var(--muted-foreground));
   line-height: 1;
   margin-bottom: 3px;
   white-space: nowrap;
@@ -1954,7 +2006,7 @@
 .db-kpi-val {
   font-size: 13px;
   font-weight: 700;
-  color: hsl(215 20% 90%);
+  color: hsl(var(--foreground));
   white-space: nowrap;
   letter-spacing: 0.01em;
   line-height: 1;
@@ -1994,9 +2046,9 @@
 .db-ctrl-btn {
   width: 28px; height: 28px;
   border-radius: 6px;
-  border: 1px solid hsl(222 15% 22%);
-  background: hsl(222 22% 12%);
-  color: hsl(215 12% 55%);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--surface-2));
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2026,18 +2078,18 @@
 
 /* ── Chart Card ──────────────────────────────────────────────────────────────── */
 .db-chart-card {
-  background: hsl(222 22% 10%);
-  border: 1px solid hsl(222 15% 18%);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 16px;
   padding: 20px 24px 16px;
   display: flex;
   flex-direction: column;
   gap: 0;
-  box-shadow: 0 4px 24px hsl(222 22% 3% / 0.4);
+  box-shadow: 0 4px 24px hsl(var(--background) / 0.4);
   transition: border-color 0.2s;
   min-height: 400px;
 }
-.db-chart-card:hover { border-color: hsl(222 15% 24%); }
+.db-chart-card:hover { border-color: hsl(var(--border)); }
 
 .db-chart-head {
   display: flex;
@@ -2049,12 +2101,12 @@
 .db-chart-title {
   font-size: 14px;
   font-weight: 700;
-  color: hsl(215 20% 90%);
+  color: hsl(var(--foreground));
   letter-spacing: -0.01em;
 }
 .db-chart-sub {
   font-size: 11px;
-  color: hsl(215 12% 50%);
+  color: hsl(var(--muted-foreground));
   margin-top: 2px;
 }
 .db-chart-controls {
@@ -2065,8 +2117,8 @@
 }
 .db-toggle-group {
   display: flex;
-  background: hsl(222 22% 8%);
-  border: 1px solid hsl(222 15% 18%);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 6px;
   padding: 2px;
   gap: 2px;
@@ -2077,22 +2129,22 @@
   padding: 3px 8px;
   border-radius: 4px;
   cursor: pointer;
-  color: hsl(215 12% 50%);
+  color: hsl(var(--muted-foreground));
   background: transparent;
   border: none;
   transition: background 0.15s, color 0.15s;
   white-space: nowrap;
 }
 .db-toggle-btn.active {
-  background: hsl(222 22% 16%);
-  color: hsl(215 20% 90%);
+  background: hsl(var(--surface-3));
+  color: hsl(var(--foreground));
 }
 .db-expand-btn {
   width: 26px; height: 26px;
   border-radius: 6px;
-  border: 1px solid hsl(222 15% 22%);
+  border: 1px solid hsl(var(--border));
   background: transparent;
-  color: hsl(215 12% 50%);
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: border-color 0.15s, color 0.15s;
@@ -2115,14 +2167,14 @@
   gap: 16px;
   margin-top: 2px;
   padding-top: 10px;
-  border-top: 1px solid hsl(222 15% 16%);
+  border-top: 1px solid hsl(var(--border));
 }
 .db-leg-item {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 10px;
-  color: hsl(215 12% 52%);
+  color: hsl(var(--muted-foreground));
 }
 .db-leg-dot {
   width: 8px; height: 8px;
@@ -2134,9 +2186,9 @@
   gap: 24px;
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid hsl(222 15% 16%);
+  border-top: 1px solid hsl(var(--border));
   font-size: 11px;
-  color: hsl(215 12% 50%);
+  color: hsl(var(--muted-foreground));
   flex-wrap: wrap;
 }
 .db-chart-notes strong {
@@ -2152,19 +2204,19 @@
 
 /* Base stack card */
 .db-stack-card {
-  background: hsl(222 22% 10%);
-  border: 1px solid hsl(222 15% 18%);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 14px;
   padding: 16px 18px;
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: 0 2px 16px hsl(222 22% 3% / 0.3);
+  box-shadow: 0 2px 16px hsl(var(--background) / 0.3);
   transition: border-color 0.2s;
   min-height: 0;
 }
-.db-stack-card:hover { border-color: hsl(222 15% 26%); }
+.db-stack-card:hover { border-color: hsl(var(--border)); }
 
 .db-card-eyebrow {
   font-size: 9px;
@@ -2180,7 +2232,7 @@
 .db-mission-title {
   font-size: 12px;
   font-weight: 700;
-  color: hsl(215 20% 88%);
+  color: hsl(var(--foreground));
   line-height: 1.35;
 }
 .db-mission-ring-row {
@@ -2206,12 +2258,12 @@
 }
 .db-mstat-lbl {
   font-size: 10px;
-  color: hsl(215 12% 48%);
+  color: hsl(var(--muted-foreground));
 }
 .db-mstat-val {
   font-size: 11px;
   font-weight: 700;
-  color: hsl(215 20% 85%);
+  color: hsl(var(--foreground));
 }
 
 /* Best move card */
@@ -2230,7 +2282,7 @@
 .db-bm-title {
   font-size: 12px;
   font-weight: 700;
-  color: hsl(215 20% 88%);
+  color: hsl(var(--foreground));
   line-height: 1.35;
 }
 .db-bm-impact {
@@ -2246,7 +2298,7 @@
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: hsl(215 12% 48%);
+  color: hsl(var(--muted-foreground));
 }
 .db-bm-impact-val {
   font-size: 12px;
@@ -2259,14 +2311,14 @@
 }
 .db-bm-chip {
   flex: 1;
-  background: hsl(222 22% 13%);
+  background: hsl(var(--surface-2));
   border-radius: 6px;
   padding: 5px 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
   font-size: 10px;
-  color: hsl(215 12% 52%);
+  color: hsl(var(--muted-foreground));
 }
 .db-bm-chip strong { font-weight: 700; font-size: 11px; }
 
@@ -2290,7 +2342,7 @@
 }
 .db-risk-track {
   height: 4px;
-  background: hsl(222 15% 18%);
+  background: hsl(var(--border));
   border-radius: 2px;
   overflow: hidden;
 }
@@ -2310,7 +2362,7 @@
   align-items: center;
   font-size: 10px;
 }
-.db-rfact-lbl { color: hsl(215 12% 48%); }
+.db-rfact-lbl { color: hsl(var(--muted-foreground)); }
 .db-rfact-val { font-weight: 700; font-size: 10px; }
 
 /* CTA buttons (shared) */
@@ -2320,9 +2372,9 @@
   letter-spacing: 0.04em;
   padding: 6px 12px;
   border-radius: 6px;
-  background: hsl(222 22% 15%);
-  border: 1px solid hsl(222 15% 24%);
-  color: hsl(215 12% 70%);
+  background: hsl(var(--surface-2));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
   margin-top: auto;
@@ -2350,8 +2402,8 @@
 }
 
 .db-insight-card {
-  background: hsl(222 22% 10%);
-  border: 1px solid hsl(222 15% 17%);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 12px;
   padding: 14px 16px;
   display: flex;
@@ -2361,7 +2413,7 @@
   cursor: default;
 }
 .db-insight-card:hover {
-  border-color: hsl(222 15% 26%);
+  border-color: hsl(var(--border));
   transform: translateY(-1px);
 }
 
@@ -2375,7 +2427,7 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: hsl(215 12% 58%);
+  color: hsl(var(--muted-foreground));
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
@@ -2391,18 +2443,18 @@
 }
 .badge-ok      { background: hsl(145 55% 42% / 0.15); color: hsl(145 55% 55%); border: 1px solid hsl(145 55% 42% / 0.3); }
 .badge-warn    { background: hsl(5 70% 52% / 0.15);   color: hsl(5 70% 62%);   border: 1px solid hsl(5 70% 52% / 0.3); }
-.badge-neutral { background: hsl(222 15% 18%);         color: hsl(215 12% 52%); border: 1px solid hsl(222 15% 24%); }
+.badge-neutral { background: hsl(var(--border));         color: hsl(var(--muted-foreground)); border: 1px solid hsl(var(--border)); }
 
 .db-ic-value {
   font-size: 20px;
   font-weight: 800;
-  color: hsl(215 20% 90%);
+  color: hsl(var(--foreground));
   letter-spacing: -0.02em;
   line-height: 1;
 }
 .db-ic-sub {
   font-size: 10px;
-  color: hsl(215 12% 46%);
+  color: hsl(var(--muted-foreground));
   line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
@@ -2417,7 +2469,7 @@
 .db-ic-bar-track {
   flex: 1;
   height: 3px;
-  background: hsl(222 15% 17%);
+  background: hsl(var(--border));
   border-radius: 2px;
   overflow: hidden;
 }
@@ -2430,7 +2482,7 @@
 .db-ic-bar-lbl {
   font-size: 9px;
   font-weight: 600;
-  color: hsl(215 12% 46%);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -2446,11 +2498,11 @@
 
 /* Actions card */
 .db-actions-card {
-  background: hsl(222 22% 10%);
-  border: 1px solid hsl(222 15% 18%);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 14px;
   padding: 18px 20px;
-  box-shadow: 0 2px 16px hsl(222 22% 3% / 0.3);
+  box-shadow: 0 2px 16px hsl(var(--background) / 0.3);
 }
 .db-actions-head {
   display: flex;
@@ -2461,11 +2513,11 @@
 .db-actions-title {
   font-size: 13px;
   font-weight: 700;
-  color: hsl(215 20% 90%);
+  color: hsl(var(--foreground));
 }
 .db-actions-sub {
   font-size: 10px;
-  color: hsl(215 12% 48%);
+  color: hsl(var(--muted-foreground));
   margin-top: 2px;
 }
 
@@ -2476,7 +2528,7 @@
   font-size: 11px;
 }
 .db-action-table thead tr {
-  border-bottom: 1px solid hsl(222 15% 18%);
+  border-bottom: 1px solid hsl(var(--border));
 }
 .db-action-table th {
   text-align: left;
@@ -2484,15 +2536,15 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: hsl(215 12% 42%);
+  color: hsl(var(--muted-foreground));
   padding: 0 10px 8px;
 }
 .db-action-table th:first-child { padding-left: 0; }
 .db-action-row {
-  border-bottom: 1px solid hsl(222 15% 14%);
+  border-bottom: 1px solid hsl(var(--border));
   transition: background 0.15s;
 }
-.db-action-row:hover { background: hsl(222 22% 13%); }
+.db-action-row:hover { background: hsl(var(--surface-2)); }
 .db-action-row td { padding: 9px 10px; vertical-align: middle; }
 .db-action-row td:first-child { padding-left: 0; }
 
@@ -2500,10 +2552,10 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: hsl(222 22% 16%);
+  background: hsl(var(--surface-3));
   font-size: 10px;
   font-weight: 700;
-  color: hsl(215 12% 55%);
+  color: hsl(var(--muted-foreground));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2512,7 +2564,7 @@
 td.db-act-rank { padding: 9px 0; }
 .db-act-title {
   font-weight: 600;
-  color: hsl(215 20% 85%);
+  color: hsl(var(--foreground));
   font-size: 11px;
 }
 .db-act-impact {
@@ -2521,7 +2573,7 @@ td.db-act-rank { padding: 9px 0; }
 }
 .db-act-meta {
   font-size: 10px;
-  color: hsl(215 12% 52%);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -2535,22 +2587,22 @@ td.db-act-rank { padding: 9px 0; }
 }
 .priority-badge-high     { background: hsl(5 70% 52% / 0.15);   color: hsl(5 70% 62%);   border: 1px solid hsl(5 70% 52% / 0.3); }
 .priority-badge-medium   { background: hsl(42 80% 52% / 0.15);  color: hsl(42 80% 62%);  border: 1px solid hsl(42 80% 52% / 0.3); }
-.priority-badge-low      { background: hsl(222 15% 18%);         color: hsl(215 12% 52%); border: 1px solid hsl(222 15% 24%); }
+.priority-badge-low      { background: hsl(var(--border));         color: hsl(var(--muted-foreground)); border: 1px solid hsl(var(--border)); }
 .priority-badge-strategic{ background: hsl(260 60% 58% / 0.15); color: hsl(260 60% 68%); border: 1px solid hsl(260 60% 58% / 0.3); }
 
 /* Row left border by priority */
 .db-action-row.priority-high     { border-left: 2px solid hsl(5 70% 52%); }
 .db-action-row.priority-medium   { border-left: 2px solid hsl(42 80% 52%); }
-.db-action-row.priority-low      { border-left: 2px solid hsl(222 15% 22%); }
+.db-action-row.priority-low      { border-left: 2px solid hsl(var(--border)); }
 .db-action-row.priority-strategic{ border-left: 2px solid hsl(260 60% 58%); }
 
 /* Balance Sheet card */
 .db-balance-card {
-  background: hsl(222 22% 10%);
-  border: 1px solid hsl(222 15% 18%);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 14px;
   padding: 18px 20px;
-  box-shadow: 0 2px 16px hsl(222 22% 3% / 0.3);
+  box-shadow: 0 2px 16px hsl(var(--background) / 0.3);
 }
 .db-balance-head {
   display: flex;
@@ -2561,11 +2613,11 @@ td.db-act-rank { padding: 9px 0; }
 .db-balance-title {
   font-size: 13px;
   font-weight: 700;
-  color: hsl(215 20% 90%);
+  color: hsl(var(--foreground));
 }
 .db-balance-sub {
   font-size: 10px;
-  color: hsl(215 12% 48%);
+  color: hsl(var(--muted-foreground));
   margin-top: 2px;
 }
 .db-edit-btn {
@@ -2576,9 +2628,9 @@ td.db-act-rank { padding: 9px 0; }
   font-weight: 600;
   padding: 4px 10px;
   border-radius: 6px;
-  border: 1px solid hsl(222 15% 24%);
-  background: hsl(222 22% 13%);
-  color: hsl(215 12% 60%);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--surface-2));
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
 }
@@ -2606,10 +2658,10 @@ td.db-act-rank { padding: 9px 0; }
   justify-content: space-between;
   align-items: center;
   padding: 4px 0;
-  border-bottom: 1px solid hsl(222 15% 15%);
+  border-bottom: 1px solid hsl(var(--border));
 }
-.db-bs-lbl { font-size: 10px; color: hsl(215 12% 52%); }
-.db-bs-val { font-size: 11px; font-weight: 600; color: hsl(215 20% 80%); }
+.db-bs-lbl { font-size: 10px; color: hsl(var(--muted-foreground)); }
+.db-bs-val { font-size: 11px; font-weight: 600; color: hsl(var(--foreground)); }
 .db-bs-total {
   display: flex;
   justify-content: space-between;
@@ -2618,8 +2670,8 @@ td.db-act-rank { padding: 9px 0; }
   margin-top: 4px;
   font-size: 11px;
   font-weight: 700;
-  color: hsl(215 20% 88%);
-  border-top: 1px solid hsl(222 15% 22%);
+  color: hsl(var(--foreground));
+  border-top: 1px solid hsl(var(--border));
 }
 .db-bs-nw-total { border-top: 1px solid hsl(210 75% 52% / 0.3); }
 
@@ -2629,7 +2681,7 @@ td.db-act-rank { padding: 9px 0; }
   gap: 8px;
 }
 .db-snap-field { display: flex; flex-direction: column; gap: 3px; }
-.db-snap-lbl { font-size: 10px; color: hsl(215 12% 52%); }
+.db-snap-lbl { font-size: 10px; color: hsl(var(--muted-foreground)); }
 
 /* ══════════════════════════════════════════════════════════════════════════════════
    ROW 5 — MODULES + WIDGETS
@@ -2640,8 +2692,8 @@ td.db-act-rank { padding: 9px 0; }
   gap: 10px;
 }
 .db-mod-tile {
-  background: hsl(222 22% 10%);
-  border: 1px solid hsl(222 15% 17%);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
   padding: 12px 8px;
   display: flex;
@@ -2653,8 +2705,8 @@ td.db-act-rank { padding: 9px 0; }
   text-align: center;
 }
 .db-mod-tile:hover {
-  border-color: hsl(222 15% 28%);
-  background: hsl(222 22% 13%);
+  border-color: hsl(var(--border));
+  background: hsl(var(--surface-2));
   transform: translateY(-2px);
 }
 .db-mod-icon {
@@ -2666,13 +2718,13 @@ td.db-act-rank { padding: 9px 0; }
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.03em;
-  color: hsl(215 12% 60%);
+  color: hsl(var(--muted-foreground));
   transition: color 0.15s;
 }
-.db-mod-tile:hover .db-mod-label { color: hsl(215 20% 85%); }
+.db-mod-tile:hover .db-mod-label { color: hsl(var(--foreground)); }
 .db-mod-arrow {
   width: 10px; height: 10px;
-  color: hsl(215 12% 38%);
+  color: hsl(var(--muted-foreground));
 }
 
 .db-widgets-row {
@@ -2945,7 +2997,7 @@ td.db-act-rank { padding: 9px 0; }
 
 .db-proj-sub {
   font-size: 10px;
-  color: hsl(215 12% 48%);
+  color: hsl(var(--muted-foreground));
   margin-top: 2px;
 }
 
@@ -2965,9 +3017,9 @@ td.db-act-rank { padding: 9px 0; }
 }
 .db-proj-milestone:last-child { border-right: none; }
 
-.db-pm-year { font-size: 9px; color: hsl(215 12% 48%); font-weight: 600; letter-spacing: 0.5px; }
+.db-pm-year { font-size: 9px; color: hsl(var(--muted-foreground)); font-weight: 600; letter-spacing: 0.5px; }
 .db-pm-val  { font-size: 12px; font-weight: 700; color: hsl(210,75%,62%); font-family: monospace; margin-top: 2px; }
-.db-pm-sub  { font-size: 9px; color: hsl(215 12% 48%); }
+.db-pm-sub  { font-size: 9px; color: hsl(var(--muted-foreground)); }
 
 /* Asset Alloc */
 .db-alloc-head { margin-bottom: 6px; }
@@ -2993,8 +3045,8 @@ td.db-act-rank { padding: 9px 0; }
   flex-shrink: 0;
 }
 
-.db-alloc-name { flex: 1; color: hsl(215 12% 52%); }
-.db-alloc-pct  { font-weight: 600; color: hsl(215 20% 80%); font-family: monospace; }
+.db-alloc-name { flex: 1; color: hsl(var(--muted-foreground)); }
+.db-alloc-pct  { font-weight: 600; color: hsl(var(--foreground)); font-family: monospace; }
 
 /* Master CF chart card */
 .db-master-cf-card {
@@ -3020,7 +3072,7 @@ td.db-act-rank { padding: 9px 0; }
   padding: 2px 7px;
   border-radius: 10px;
   border: 1px solid;
-  background: hsl(222 22% 9%);
+  background: hsl(var(--card));
   white-space: nowrap;
 }
 
@@ -3060,14 +3112,14 @@ td.db-act-rank { padding: 9px 0; }
 }
 
 .db-ng-total-card {
-  background: hsl(222 22% 9%);
+  background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 6px;
   padding: 6px 8px;
   text-align: center;
 }
 
-.db-ng-total-label { font-size: 9px; color: hsl(215 12% 48%); }
+.db-ng-total-label { font-size: 9px; color: hsl(var(--muted-foreground)); }
 .db-ng-total-val   { font-size: 13px; font-weight: 700; font-family: monospace; margin-top: 2px; }
 
 .db-ng-props { display: flex; flex-direction: column; gap: 5px; }
@@ -3077,12 +3129,12 @@ td.db-act-rank { padding: 9px 0; }
   align-items: center;
   gap: 6px;
   padding: 5px 8px;
-  background: hsl(222 22% 9%);
+  background: hsl(var(--card));
   border-radius: 6px;
   border: 1px solid hsl(var(--border));
 }
 
-.db-ng-prop-name  { flex: 1; font-size: 10px; color: hsl(215 20% 80%); }
+.db-ng-prop-name  { flex: 1; font-size: 10px; color: hsl(var(--foreground)); }
 .db-ng-prop-val   { font-size: 10px; font-weight: 700; font-family: monospace; }
 .db-ng-prop-hold  { font-size: 10px; font-weight: 600; font-family: monospace; }
 
@@ -3113,7 +3165,7 @@ td.db-act-rank { padding: 9px 0; }
 
 .db-expense-sub {
   font-size: 10px;
-  color: hsl(215 12% 48%);
+  color: hsl(var(--muted-foreground));
   margin-bottom: 2px;
 }
 
@@ -3135,10 +3187,10 @@ td.db-act-rank { padding: 9px 0; }
   gap: 8px;
 }
 
-.db-mcf-lbl { font-size: 10px; color: hsl(215 12% 52%); }
+.db-mcf-lbl { font-size: 10px; color: hsl(var(--muted-foreground)); }
 .db-mcf-val { font-size: 11px; font-weight: 700; font-family: monospace; }
 .db-mcf-divider { height: 1px; background: hsl(var(--border)); margin: 4px 0; }
-.db-mcf-total .db-mcf-lbl { font-size: 11px; font-weight: 700; color: hsl(215 20% 75%); }
+.db-mcf-total .db-mcf-lbl { font-size: 11px; font-weight: 700; color: hsl(var(--foreground) / 0.85); }
 
 /* FIRE Progress Card */
 .db-fire-action-row {
@@ -3183,12 +3235,12 @@ td.db-act-rank { padding: 9px 0; }
   gap: 8px;
 }
 
-.db-fs-lbl { font-size: 9px; color: hsl(215 12% 48%); }
-.db-fs-val { font-size: 11px; font-weight: 700; font-family: monospace; color: hsl(215 20% 80%); }
+.db-fs-lbl { font-size: 9px; color: hsl(var(--muted-foreground)); }
+.db-fs-val { font-size: 11px; font-weight: 700; font-family: monospace; color: hsl(var(--foreground)); }
 
 .db-fire-bar-track {
   height: 4px;
-  background: hsl(222 15% 16%);
+  background: hsl(var(--border));
   border-radius: 2px;
   overflow: hidden;
 }
@@ -3224,7 +3276,7 @@ td.db-act-rank { padding: 9px 0; }
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: hsl(215 12% 48%);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -3235,7 +3287,7 @@ td.db-act-rank { padding: 9px 0; }
   transition: background 0.1s;
 }
 
-.db-ybyr-table tbody tr:hover { background: hsl(222 22% 11%); }
+.db-ybyr-table tbody tr:hover { background: hsl(var(--card)); }
 
 .db-ybyr-table td { padding: 7px 12px; }
 .db-ybyr-table td:first-child { padding-left: 14px; }
@@ -3245,7 +3297,7 @@ td.db-act-rank { padding: 9px 0; }
 .db-ybyr-year {
   font-size: 11px;
   font-weight: 700;
-  color: hsl(215 20% 85%);
+  color: hsl(var(--foreground));
 }
 
 .db-ybyr-nw {
@@ -3269,13 +3321,13 @@ td.db-act-rank { padding: 9px 0; }
 }
 
 .db-bulletin-tile:hover {
-  background: hsl(222 22% 11%);
+  background: hsl(var(--card));
   border-color: hsl(43 85% 55% / 0.5);
 }
 
 .db-bulletin-icon { font-size: 22px; line-height: 1; }
 .db-bulletin-title { font-size: 13px; font-weight: 700; color: hsl(43,85%,60%); }
-.db-bulletin-sub   { font-size: 10px; color: hsl(215 12% 48%); margin-top: 1px; }
+.db-bulletin-sub   { font-size: 10px; color: hsl(var(--muted-foreground)); margin-top: 1px; }
 
 /* Responsive overrides for new sections */
 @media (max-width: 1024px) {
@@ -3802,4 +3854,320 @@ body {
   .chart-view-toggle-header {
     display: none !important;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PREMIUM FINTECH DARK MODE v2 — Chrome upgrades
+   Linear/Vercel/Stripe-inspired: depth via shadow not borders,
+   3-surface layering, calmer accents, neutral chart gridlines.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Cards: depth via shadow, softer borders ───────────────────────────────── */
+.core-card,
+.dc-widget,
+.chart-panel,
+.action-center,
+.db-chart-card,
+.db-stack-card,
+.db-actions-card,
+.db-balance-card,
+.db-insight-card,
+.db-mod-tile,
+.db-proj-chart-card,
+.db-alloc-card,
+.db-master-cf-card,
+.db-ng-card,
+.db-expense-card,
+.db-mcf-card,
+.db-fire-card,
+.db-ybyr-card,
+.db-bills,
+.db-bulletin-tile,
+.hero-stat-card,
+.collapsible-section {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border) / 0.6);
+  box-shadow: var(--shadow-md);
+  transition: box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.core-card:hover,
+.dc-widget:hover,
+.chart-panel:hover,
+.db-chart-card:hover,
+.db-stack-card:hover,
+.db-mod-tile:hover,
+.db-bulletin-tile:hover,
+.hero-stat-card:hover,
+.collapsible-section:hover {
+  border-color: hsl(var(--border));
+  box-shadow: var(--shadow-lg);
+}
+
+/* ── Tooltips: elevated surface + soft shadow ─────────────────────────────── */
+.recharts-default-tooltip,
+.chart-tooltip,
+.db-tooltip,
+.db-cf-tooltip {
+  background: hsl(var(--surface-2)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  box-shadow: var(--shadow-lg) !important;
+  border-radius: 10px !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+/* ── Chart gridlines: neutral, no neon ─────────────────────────────────────── */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: hsl(var(--border) / 0.5) !important;
+}
+.recharts-cartesian-axis-line {
+  stroke: hsl(var(--border) / 0.6) !important;
+}
+.recharts-cartesian-axis-tick-line {
+  stroke: hsl(var(--border) / 0.5) !important;
+}
+.recharts-cartesian-axis-tick text {
+  fill: hsl(var(--muted-foreground)) !important;
+}
+
+/* ── Command strip + dashboard hero: subtle elevated tint ─────────────────── */
+.cmd-strip,
+.db-hero {
+  background: hsl(var(--background) / 0.92);
+  border: 1px solid hsl(var(--border) / 0.6);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(8px);
+}
+
+/* ── KPI pills: neutral default, semantic-only color ──────────────────────── */
+.kpi-pill.neutral,
+.cmd-mode-badge {
+  background: hsl(var(--surface-2));
+  border: 1px solid hsl(var(--border) / 0.6);
+  color: hsl(var(--foreground));
+}
+
+.cmd-mode-badge.mode-conservative {
+  background: hsl(var(--success) / 0.12);
+  border-color: hsl(var(--success) / 0.35);
+  color: hsl(var(--success));
+}
+.cmd-mode-badge.mode-balanced {
+  background: hsl(var(--primary) / 0.12);
+  border-color: hsl(var(--primary) / 0.35);
+  color: hsl(var(--primary));
+}
+.cmd-mode-badge.mode-aggressive {
+  background: hsl(var(--warning) / 0.12);
+  border-color: hsl(var(--warning) / 0.35);
+  color: hsl(var(--warning));
+}
+
+/* ── Narrative banner: muted surface-2 ────────────────────────────────────── */
+.narrative-banner {
+  background: hsl(var(--surface-2));
+  border: 1px solid hsl(var(--border) / 0.6);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Action items: token-driven semantic surfaces ─────────────────────────── */
+.action-item,
+.action-item-row {
+  background: hsl(var(--surface-2));
+  border: 1px solid hsl(var(--border) / 0.5);
+}
+.action-item:hover,
+.action-item-row:hover {
+  background: hsl(var(--surface-3));
+  border-color: hsl(var(--border));
+}
+
+/* Column headers: surface-3 */
+.col-header,
+.column-header,
+.table-header,
+thead.surface-header th {
+  background: hsl(var(--surface-3));
+  color: hsl(var(--muted-foreground));
+  border-bottom: 1px solid hsl(var(--border) / 0.6);
+}
+
+/* ── Priority badges: calmer borders (alpha-tinted) ───────────────────────── */
+.priority-badge-critical,
+.priority-badge-high {
+  background: hsl(var(--danger) / 0.10);
+  border: 1px solid hsl(var(--danger) / 0.25);
+  color: hsl(var(--danger));
+}
+.priority-badge-medium {
+  background: hsl(var(--warning) / 0.10);
+  border: 1px solid hsl(var(--warning) / 0.25);
+  color: hsl(var(--warning));
+}
+.priority-badge-low {
+  background: hsl(var(--success) / 0.10);
+  border: 1px solid hsl(var(--success) / 0.25);
+  color: hsl(var(--success));
+}
+.priority-badge-info {
+  background: hsl(var(--primary) / 0.10);
+  border: 1px solid hsl(var(--primary) / 0.25);
+  color: hsl(var(--primary));
+}
+
+/* ── Hero status: token-driven semantic colors ────────────────────────────── */
+.db-hero-status.status-warn {
+  background: hsl(var(--warning) / 0.12);
+  border: 1px solid hsl(var(--warning) / 0.30);
+  color: hsl(var(--warning));
+}
+.db-hero-status.status-ok {
+  background: hsl(var(--success) / 0.12);
+  border: 1px solid hsl(var(--success) / 0.30);
+  color: hsl(var(--success));
+}
+.db-hero-status.status-danger {
+  background: hsl(var(--danger) / 0.12);
+  border: 1px solid hsl(var(--danger) / 0.30);
+  color: hsl(var(--danger));
+}
+
+/* ── Focus rings: token-driven ────────────────────────────────────────────── */
+button:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* ── Sidebar nav active state: surface-2, subtle border ───────────────────── */
+.sidebar-nav-item.active,
+.sidebar-nav-item[aria-current="page"],
+nav a.active,
+nav a[aria-current="page"] {
+  background: hsl(var(--surface-2));
+  border-left: 2px solid hsl(var(--primary));
+  color: hsl(var(--foreground));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LIGHT MODE PARITY — mirror token-driven chrome
+   ═══════════════════════════════════════════════════════════════════════════ */
+.light .core-card,
+.light .dc-widget,
+.light .chart-panel,
+.light .action-center,
+.light .db-chart-card,
+.light .db-stack-card,
+.light .db-actions-card,
+.light .db-balance-card,
+.light .db-insight-card,
+.light .db-mod-tile,
+.light .db-proj-chart-card,
+.light .db-alloc-card,
+.light .db-master-cf-card,
+.light .db-ng-card,
+.light .db-expense-card,
+.light .db-mcf-card,
+.light .db-fire-card,
+.light .db-ybyr-card,
+.light .db-bills,
+.light .db-bulletin-tile,
+.light .hero-stat-card,
+.light .collapsible-section {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  box-shadow: var(--shadow-md);
+}
+
+.light .recharts-default-tooltip,
+.light .chart-tooltip,
+.light .db-tooltip,
+.light .db-cf-tooltip {
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+/* ╔════════════════════════════════════════════════════════════════════════╗
+ * ║  Decision Engine — selectable card states                              ║
+ * ║                                                                        ║
+ * ║  Replaces hardcoded `bg-violet-50 dark:bg-violet-950/40` etc. that      ║
+ * ║  washed-out selected cards in dark mode (the app uses `.light` for     ║
+ * ║  the override, so Tailwind's `dark:` variants never fired and the      ║
+ * ║  light-mode `bg-violet-50` leaked through).                            ║
+ * ║                                                                        ║
+ * ║  Uses semantic tokens so contrast is correct in BOTH light and dark.   ║
+ * ╚════════════════════════════════════════════════════════════════════════╝ */
+.de-selectable-card {
+  /* base motion + border anchor (border colour overridden by .selected) */
+  border-width: 1px;
+  border-style: solid;
+}
+
+.de-selectable-card.selected {
+  /* Dark mode (default): use surface-3 (a perceivable step above card) with
+     a bright primary border + ring. Text inherits foreground tokens. */
+  background-color: hsl(var(--surface-3));
+  border-color: hsl(var(--primary) / 0.55);
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.35),
+    var(--shadow-sm);
+}
+
+/* Light mode override — light tinted surface, primary border, dark text. */
+.light .de-selectable-card.selected {
+  background-color: hsl(var(--primary) / 0.08);
+  border-color: hsl(var(--primary) / 0.55);
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.25),
+    var(--shadow-sm);
+}
+
+/* ── Decision Engine specific contrast tweaks ─────────────────────────── */
+
+/* Helper text inside Decision Engine inputs block — bump from muted-foreground
+   to foreground/70 so it isn't faint on mobile in dark mode. */
+[data-testid="decision-inputs-block"] .text-muted-foreground {
+  /* Only soften slightly so primary content still dominates. */
+  color: hsl(var(--foreground) / 0.72);
+}
+
+
+/* ── Decision Engine Winner Result Card ───────────────────────────────────
+   Root toggles `.light` (DARK is default), so Tailwind `dark:` variants
+   never fire in this app. The previous mint gradient (`bg-emerald-50 …
+   to-teal-50`) leaked through over the dark navy shell, washing out title,
+   metric tiles, and narrative copy on mobile.
+
+   `.de-result-card` resolves to a dark elevated surface in dark mode with
+   a subtle green border, and a soft success-tinted card in light mode.
+   `.de-result-narrative` wraps Why-won / What-could-invalidate / Runner-up. */
+
+/* Dark-mode default */
+.de-result-card {
+  background-color: hsl(var(--surface-2));
+  border: 1px solid hsl(var(--success) / 0.30);
+  box-shadow: var(--shadow-md);
+}
+
+.light .de-result-card {
+  background-color: hsl(var(--success-surface));
+  border-color: hsl(var(--success) / 0.40);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Narrative block: Why this won / What could invalidate / Runner-up */
+.de-result-narrative {
+  background-color: hsl(var(--success-surface));
+  border: 1px solid hsl(var(--success) / 0.25);
+}
+
+.light .de-result-narrative {
+  background-color: hsl(var(--success) / 0.08);
+  border-color: hsl(var(--success) / 0.30);
 }

@@ -25,6 +25,7 @@ import {
   type YearlyProjection, type PropertyYearDetail, type NGSummary, type GrowthBreakdown,
 } from "@/lib/finance";
 import { runCashEngine } from "@/lib/cashEngine";
+import { computeCanonicalNetWorth } from "@/lib/canonicalNetWorth";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend, LineChart, Line,
@@ -270,8 +271,18 @@ export default function TimelinePage() {
   );
 
   // ── Summary KPIs ───────────────────────────────────────────────────────────
-  const currentNW = (snap.ppor + snap.cash + snap.offset_balance + snap.super_balance + liveStocks + liveCrypto + snap.cars + snap.iran_property)
-    - (snap.mortgage + snap.other_debts);
+  // SOURCE-OF-TRUTH: canonical NW (matches dashboard / financial-plan / reports
+  // to the dollar). The previous local sum here missed offset_balance and
+  // savings_cash buckets and produced a slightly different NW figure.
+  const currentNW = computeCanonicalNetWorth({
+    snapshot: snapshot ?? null,
+    properties: properties as any[],
+    stocks: [],
+    cryptos: [],
+    holdingsRaw: [],
+    incomeRecords: undefined,
+    expenses: expenses as any[],
+  }).netWorth;
   const finalYear = projection[projection.length - 1];
   const nwIn10y = finalYear?.endNetWorth ?? 0;
   const nwGrowth = nwIn10y - currentNW;
@@ -614,7 +625,9 @@ export default function TimelinePage() {
             </div>
           </div>
         </div>
-        <div className="overflow-x-auto">
+        {/* Audit P1-7: edge-to-edge horizontal scroll on tablet so the
+            right-side columns are obviously reachable. */}
+        <div className="overflow-x-auto -mx-4 px-4">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border">

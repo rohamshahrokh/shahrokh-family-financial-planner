@@ -72,9 +72,13 @@ export interface MonteCarloInput {
 
 export interface CashFanPoint {
   month: MonthKey;
+  p5:  number;
   p10: number;
+  p25: number;
   p50: number;
+  p75: number;
   p90: number;
+  p95: number;
 }
 
 export interface MonteCarloOutput {
@@ -98,12 +102,28 @@ export interface MonteCarloOutput {
   refinancePressureProbability: number;
   /** Probability the household goes insolvent (cash exhausted, assets exhausted). */
   defaultProbability: number;
+  /**
+   * Probability cash drops to ≤0 (true exhaustion) for any month within the
+   * horizon. Distinct from liquidityStressProbability which fires at the
+   * 3-month-buffer threshold.
+   */
+  liquidityExhaustionProbability: number;
   /** Median month-index at which default fires (null if no path defaults). */
   medianDefaultMonth: number | null;
   /** Median month-index at which liquidity stress first fires. */
   medianLiquidityFirstMonth: number | null;
   /** Median month-index at which negative equity first fires. */
   medianNegEquityFirstMonth: number | null;
+  /**
+   * Per-sim peak-to-trough relative drawdown on the NW path (0…1, where 0
+   * = no drawdown, 1 = wipeout). Computed within the same MC loop.
+   */
+  maxDrawdownSamples: number[];
+  /**
+   * Terminal NW samples sorted ascending. Exposed so downstream consumers
+   * (riskMetrics, VaR/CVaR) can avoid re-sorting and stay deterministic.
+   */
+  terminalNwSorted: number[];
 }
 
 export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
@@ -132,7 +152,9 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
   const terminalRates = new Array<number>(N);
   let negativeEquityEvents = 0;
   let liquidityStressEvents = 0;
+  let liquidityExhaustionEvents = 0;
   let refinancePressureEvents = 0;
+  const maxDrawdownSamples = new Array<number>(N);
 
   // Parse start month for calendar tracking
   const [, startMonthNumStr] = (input.startMonth as string).split("-");
@@ -157,11 +179,16 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
 
     let monthRefStress = false;
     let liquidityStress = false;
+    let liquidityExhaustion = false;
     let negativeEquity = false;
     let liquidityStressRun = 0; // consecutive months below threshold
     let liquidityFirstHit = -1;
     let negEqFirstHit = -1;
     let defaultMonthIdx = -1;
+
+    // Peak-to-trough drawdown tracker for this sim's NW path.
+    let peakNw = Number.NEGATIVE_INFINITY;
+    let maxDrawdown = 0;
 
     for (let i = 0; i < M; i++) {
       const m = months[i];
@@ -244,6 +271,11 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
           liquidityStressRun = 0;
         }
       }
+      // Liquidity exhaustion: any month with cash ≤ 0 (real cash-out, not
+      // buffer warning). Fires once and persists for the sim.
+      if (!liquidityExhaustion && state.cash <= 0) {
+        liquidityExhaustion = true;
+      }
       if (!negativeEquity) {
         for (const p of state.properties) {
           if (p.marketValue < p.loanBalance) {
@@ -263,16 +295,29 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
         if (dsr > 0.45) monthRefStress = true;
       }
 
-      path[i] = netWorth(state);
+      const nwNow = netWorth(state);
+      path[i] = nwNow;
       cashPath[i] = state.cash;
+
+      // Drawdown bookkeeping. We only track drawdown once we've seen a
+      // positive peak — a NW path that starts and stays negative is already
+      // in distress and reported by default/insolvency metrics. Drawdown is
+      // reported as a fraction of peak (positive => loss).
+      if (nwNow > peakNw) peakNw = nwNow;
+      if (peakNw > 0) {
+        const dd = (peakNw - nwNow) / peakNw;
+        if (dd > maxDrawdown) maxDrawdown = dd;
+      }
     }
 
     paths[s] = path;
     cashPaths[s] = cashPath;
     finalStates[s] = state;
     terminalRates[s] = shortRate;
+    maxDrawdownSamples[s] = maxDrawdown;
     if (negativeEquity) negativeEquityEvents++;
     if (liquidityStress) liquidityStressEvents++;
+    if (liquidityExhaustion) liquidityExhaustionEvents++;
     if (monthRefStress) refinancePressureEvents++;
     defaultEvents.push(defaultMonthIdx);
     liquidityFirstMonth.push(liquidityFirstHit);
@@ -293,15 +338,23 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
     const cashSorted = Array.from(cashBuf).sort((a, b) => a - b);
     fan[i] = {
       month: months[i],
-      p10: pct(sorted, 0.10),
-      p50: pct(sorted, 0.50),
-      p90: pct(sorted, 0.90),
+      p5:  pctI(sorted, 0.05),
+      p10: pctI(sorted, 0.10),
+      p25: pctI(sorted, 0.25),
+      p50: pctI(sorted, 0.50),
+      p75: pctI(sorted, 0.75),
+      p90: pctI(sorted, 0.90),
+      p95: pctI(sorted, 0.95),
     };
     cashFan[i] = {
       month: months[i],
-      p10: pct(cashSorted, 0.10),
-      p50: pct(cashSorted, 0.50),
-      p90: pct(cashSorted, 0.90),
+      p5:  pctI(cashSorted, 0.05),
+      p10: pctI(cashSorted, 0.10),
+      p25: pctI(cashSorted, 0.25),
+      p50: pctI(cashSorted, 0.50),
+      p75: pctI(cashSorted, 0.75),
+      p90: pctI(cashSorted, 0.90),
+      p95: pctI(cashSorted, 0.95),
     };
   }
 
@@ -321,6 +374,8 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
     }
   }
 
+  const terminalNwSorted = [...terminalNw].sort((a, b) => a - b);
+
   return {
     fan,
     cashFan,
@@ -336,9 +391,12 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
     liquidityStressProbability: liquidityStressEvents / N,
     refinancePressureProbability: refinancePressureEvents / N,
     defaultProbability: defaultEvents.filter((x) => x >= 0).length / N,
+    liquidityExhaustionProbability: liquidityExhaustionEvents / N,
     medianDefaultMonth: medianOrNull(defaultEvents.filter((x) => x >= 0)),
     medianLiquidityFirstMonth: medianOrNull(liquidityFirstMonth.filter((x) => x >= 0)),
     medianNegEquityFirstMonth: medianOrNull(negativeEquityFirstMonth.filter((x) => x >= 0)),
+    maxDrawdownSamples,
+    terminalNwSorted,
   };
 }
 
@@ -350,13 +408,21 @@ function medianOrNull(arr: number[]): number | null {
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-function pct(sortedAsc: number[], p: number): number {
-  if (sortedAsc.length === 0) return 0;
-  const idx = Math.max(
-    0,
-    Math.min(sortedAsc.length - 1, Math.floor(p * sortedAsc.length)),
-  );
-  return sortedAsc[idx];
+/**
+ * Linear-interpolated quantile (“type 7” — the convention used by R and
+ * NumPy's `linear` method). Eliminates the bucket-step artifact of the
+ * naive `Math.floor(p * N)` form, especially in the tails.
+ */
+function pctI(sortedAsc: number[], p: number): number {
+  const n = sortedAsc.length;
+  if (n === 0) return 0;
+  if (n === 1) return sortedAsc[0];
+  const h = (n - 1) * p;
+  const lo = Math.floor(h);
+  const hi = Math.ceil(h);
+  if (lo === hi) return sortedAsc[lo];
+  const w = h - lo;
+  return sortedAsc[lo] * (1 - w) + sortedAsc[hi] * w;
 }
 
 function cloneState(s: PortfolioState): PortfolioState {

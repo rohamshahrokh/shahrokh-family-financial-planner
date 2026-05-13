@@ -152,6 +152,22 @@ export interface PropertyState {
    * it is false.
    */
   inLedger?: boolean;
+
+  // ── Tax Policy Engine fields (P0) ─────────────────────────────────────────
+  // Optional and additive. Legacy properties default to UNKNOWN classification
+  // and no contract date, which means grandfathering can fall back to
+  // purchaseDate or be treated conservatively. See client/src/lib/taxPolicyEngine.
+  /** Classification driving NG / CGT carve-out logic under a reform regime. */
+  propertyType?:
+    | "ESTABLISHED"
+    | "NEW_BUILD"
+    | "BUILD_TO_RENT"
+    | "AFFORDABLE_HOUSING"
+    | "UNKNOWN";
+  /** ISO YYYY-MM-DD contract signing date (grandfathering check). */
+  contractDate?: string;
+  /** ISO YYYY-MM-DD settlement date (fallback when contract date is missing). */
+  purchaseDate?: string;
 }
 
 export interface PortfolioState {
@@ -162,6 +178,28 @@ export interface PortfolioState {
   superRoham: number;
   superFara: number;
   properties: PropertyState[];
+  /**
+   * Cars / vehicles — non-investable but counted in NW for completeness so the
+   * engine's net worth reconciles with the dashboard. Held flat by default
+   * (depreciation modelled as zero unless rails introduce a `carsDepreciation`).
+   * Why: NW-1 audit defect — engine was excluding cars, opening a silent
+   * $65k gap vs the dashboard.
+   */
+  cars: number;
+  /**
+   * Overseas (Iran) property — non-AUD-denominated real estate held by the
+   * household. Grows at a haircut of the AU property growth rule because the
+   * macro process driving local property doesn't directly apply offshore.
+   */
+  iranProperty: number;
+  /** Other non-investable assets the user has on snapshot. Held flat. */
+  otherAssets: number;
+  /**
+   * Non-property debts (cards, personal loans, etc.). Paid down deterministically
+   * at the dashboard heuristic of 15% annual / 12 monthly so engine and dashboard
+   * use the same amortisation profile.
+   */
+  otherDebts: number;
   /** Cumulative tax paid this FY (resets each July). */
   fyTaxPaid: number;
   /** Trailing 12-month income (used by serviceability calcs). */
@@ -180,12 +218,28 @@ export interface PortfolioState {
 
 // ─── Result (output of a full projection) ────────────────────────────────────
 
-/** P10/P50/P90 fan-chart point. */
+/**
+ * Seven-percentile fan-chart point: P5/P10/P25/P50/P75/P90/P95.
+ *
+ * Why all seven:
+ *   • P5/P95   — institutional-grade left/right tail (VaR-aligned)
+ *   • P10/P90  — outer band, preserved for backward compatibility
+ *   • P25/P75  — interquartile (likely range that anchors planning)
+ *   • P50      — median
+ *
+ * Every percentile is computed from the SAME sorted sample array per month,
+ * using linear interpolation (see `pct7` in monteCarlo.ts) — i.e. no
+ * approximation, no separate bootstrap.
+ */
 export interface FanPoint {
   month: MonthKey;
+  p5:  number;
   p10: number;
+  p25: number;
   p50: number;
+  p75: number;
   p90: number;
+  p95: number;
 }
 
 export interface ConfidenceBand {
@@ -208,6 +262,31 @@ export interface ScenarioResult {
   attribution: Record<string, number> | null;
   /** Populated by Phase 9. Shape evolves per phase; widened to `unknown` here. */
   serviceability: unknown | null;
+}
+
+// ─── Asset scope tags (decision-engine inventory) ────────────────────────────
+
+/**
+ * How the engine treats an asset bucket in the base plan.
+ *
+ *   • current       — exists today, included in initial NW, evolves stochastically
+ *   • planned       — settles in the future, NOT in initial NW (deposits aside)
+ *   • non-investable — counted in NW but engine does NOT model returns
+ *   • excluded      — outside the scope of this base plan entirely
+ *
+ * The decision engine reports these tags so users can audit exactly which
+ * positions feed the projection. Audit defect NW-1 surfaced this gap.
+ */
+export type AssetScope = "current" | "planned" | "excluded" | "non-investable";
+
+export interface BasePlanAssetTag {
+  /** Key into PortfolioState (or synthetic id for derived buckets). */
+  key: string;
+  scope: AssetScope;
+  label: string;
+  currentValue: number;
+  /** Plain-English explanation of why this bucket carries the chosen scope. */
+  rationale: string;
 }
 
 // ─── Minimal sanity: types compile in isolation ──────────────────────────────

@@ -113,7 +113,7 @@ const SNAPSHOT_ID = "shahrokh-family-main";
 // Any key NOT in this set is stripped before upsert to prevent PGRST204 errors.
 // Update this list whenever a new column is added via migration.
 const SF_SNAPSHOT_COLS = new Set([
-  "id", "updated_at",
+  "id", "updated_at", "version",
   // Assets
   "ppor", "cash", "super_balance", "stocks", "crypto", "cars", "iran_property",
   "other_assets", "mortgage", "other_debts",
@@ -156,10 +156,12 @@ export const sbSnapshot = {
   },
   async upsert(data: object): Promise<any | null> {
     // Strip unknown columns BEFORE sending to Supabase to prevent PGRST204 errors.
-    // Unknown columns were previously swallowed silently, preventing all income
-    // sub-field saves from reaching the database.
     const safe = toSFSnapshot(data as Record<string, any>);
-    // Re-throw so localStore.updateSnapshot() can surface the error properly.
+    // Drop any client-supplied 'version' — the DB trigger is the source of truth
+    // for monotonic version. Allowing the client to set it would defeat the purpose.
+    delete (safe as any).version;
+    // updated_at is also auto-set by the trigger; we still send a hint for cases
+    // where the trigger is disabled, but the trigger overwrites it if active.
     return await sbUpsert("sf_snapshot", { id: SNAPSHOT_ID, ...safe, updated_at: new Date().toISOString() });
   },
 };

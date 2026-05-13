@@ -323,13 +323,13 @@ function PlannedInvestmentReconciliation({
                 <div className="space-y-0.5 pl-3">
                   {row.crypto && (
                     <div className="flex items-center justify-between">
-                      <span className="text-foreground">{"\u20BF"} Crypto purchase{row.crypto.count > 1 ? ` (${row.crypto.count})` : ""}</span>
+                      <span className="text-foreground">₿ Crypto purchase{row.crypto.count > 1 ? ` (${row.crypto.count})` : ""}</span>
                       <span className="font-mono font-semibold text-purple-300">{mv(formatCurrency(row.crypto.total, true))}</span>
                     </div>
                   )}
                   {row.stocks && (
                     <div className="flex items-center justify-between">
-                      <span className="text-foreground">{"\uD83D\uDCC8"} Stock purchase{row.stocks.count > 1 ? ` (${row.stocks.count})` : ""}</span>
+                      <span className="text-foreground">📈 Stock purchase{row.stocks.count > 1 ? ` (${row.stocks.count})` : ""}</span>
                       <span className="font-mono font-semibold text-blue-300">{mv(formatCurrency(row.stocks.total, true))}</span>
                     </div>
                   )}
@@ -350,7 +350,7 @@ function PlannedInvestmentReconciliation({
             <div className="flex items-center justify-between pt-1.5 border-t border-border">
               <span className="font-semibold">Variance:</span>
               <span className={`font-mono font-bold ${totalOK ? "text-emerald-400" : "text-amber-400"}`}>
-                {totalOK ? "\u2713 In sync" : mv(formatCurrency(totalDelta, true))}
+                {totalOK ? "✓ In sync" : mv(formatCurrency(totalDelta, true))}
               </span>
             </div>
             {!totalOK && (

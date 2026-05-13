@@ -1,0 +1,147 @@
+{
+  "captured_at": "2026-05-12T00:00:00Z",
+  "fixture_name": "roham-like-household-v1",
+  "input": {
+    "roham_annual_income": 185600,
+    "fara_annual_income": 176500,
+    "roham_super_balance": 245000,
+    "fara_super_balance": 175000,
+    "roham_employer_sg_rate": 12,
+    "roham_salary_sacrifice_monthly": 0,
+    "fara_employer_sg_rate": 12,
+    "fara_salary_sacrifice_monthly": 0,
+    "properties": [
+      {
+        "is_ppor": true,
+        "weekly_rent": 0,
+        "loan_amount": 720000,
+        "interest_rate": 6.4,
+        "management_fee": 8,
+        "council_rates": 2400,
+        "insurance": 1800,
+        "maintenance": 2500,
+        "body_corporate": 0
+      },
+      {
+        "is_ppor": false,
+        "weekly_rent": 600,
+        "loan_amount": 480000,
+        "interest_rate": 6.6,
+        "management_fee": 8,
+        "council_rates": 1800,
+        "insurance": 1200,
+        "maintenance": 1500,
+        "body_corporate": 2400
+      }
+    ],
+    "mortgage_balance": 720000,
+    "mortgage_rate": 6.4,
+    "offset_balance": 180000,
+    "stocks_value": 95000,
+    "crypto_value": 42000,
+    "other_debts": 12000,
+    "roham_has_private_health": true,
+    "fara_has_private_health": true,
+    "roham_has_help_debt": false,
+    "fara_has_help_debt": false,
+    "unrealised_gains": 28000
+  },
+  "output": {
+    "fy": "2025-26",
+    "data_coverage": "full",
+    "household_tax_now": 103895,
+    "roham_total_deductions": 53722,
+    "roham_income_tax": 50010,
+    "roham_medicare": 3712,
+    "roham_marginal_rate": 0.37,
+    "roham_effective_rate": 0.29,
+    "roham_net_annual": 131878,
+    "fara_total_deductions": 50173,
+    "fara_income_tax": 46643,
+    "fara_medicare": 3530,
+    "fara_marginal_rate": 0.37,
+    "fara_effective_rate": 0.28,
+    "fara_net_annual": 126327,
+    "total_annual_saving": 20831.64,
+    "total_saving_label": "Up to $21K/yr",
+    "top3_ids": [
+      "offset_account",
+      "cgt_timing",
+      "negative_gearing"
+    ],
+    "strategies_summary": [
+      {
+        "id": "offset_account",
+        "title": "Mortgage Offset Optimisation",
+        "category": "offset",
+        "annual_saving": 11520,
+        "risk": "Low",
+        "priority": 3,
+        "data_reliable": true
+      },
+      {
+        "id": "cgt_timing",
+        "title": "Capital Gains Timing & Discount",
+        "category": "capital_gains",
+        "annual_saving": 5460,
+        "risk": "Low",
+        "priority": 4,
+        "data_reliable": true
+      },
+      {
+        "id": "negative_gearing",
+        "title": "Negative Gearing Deduction",
+        "category": "negative_gearing",
+        "annual_saving": 3851.64,
+        "risk": "Low",
+        "priority": 2,
+        "data_reliable": true
+      },
+      {
+        "id": "super_concessional_roham",
+        "title": "Super Concessional Contribution",
+        "category": "super",
+        "annual_saving": 1854.72,
+        "risk": "Low",
+        "priority": 1,
+        "data_reliable": true
+      },
+      {
+        "id": "debt_restructure",
+        "title": "Deductible Debt Restructure",
+        "category": "debt_structure",
+        "annual_saving": 374.4,
+        "risk": "Medium",
+        "priority": 7,
+        "data_reliable": true
+      },
+      {
+        "id": "spouse_super_split",
+        "title": "Spouse Super Contribution Splitting",
+        "category": "spouse_split",
+        "annual_saving": 0,
+        "risk": "Low",
+        "priority": 5,
+        "data_reliable": true
+      },
+      {
+        "id": "mls_avoidance",
+        "title": "Medicare Levy Surcharge Avoidance",
+        "category": "medicare",
+        "annual_saving": 0,
+        "risk": "Low",
+        "priority": 6,
+        "data_reliable": true
+      },
+      {
+        "id": "bracket_optimisation",
+        "title": "Income & Tax Bracket Optimisation",
+        "category": "bracket",
+        "annual_saving": 0,
+        "risk": "High",
+        "priority": 8,
+        "data_reliable": true
+      }
+    ]
+  }
+}

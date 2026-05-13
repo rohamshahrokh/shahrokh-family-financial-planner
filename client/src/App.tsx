@@ -19,6 +19,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { useAppStore } from "./lib/store";
+import { PrivacyProvider } from "@/contexts/PrivacyContext";
 import { useEffect, useRef } from "react";
 import { trackPageView } from "./lib/analytics";
 
@@ -48,6 +49,7 @@ import CGTSimulatorPage        from "./pages/cgt-simulator";
 import ScenarioComparePage     from "./pages/scenario-compare";
 import ScenarioCompareV2Page   from "./pages/scenario-compare-v2";
 import WhatIfScenariosPage     from "./pages/what-if-scenarios";
+import DecisionPage            from "./pages/decision";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -212,6 +214,9 @@ function AppRouter() {
         <Route path="/cgt-simulator">
           <ProtectedRoute component={CGTSimulatorPage} title="CGT Simulator" />
         </Route>
+        <Route path="/decision">
+          <ProtectedRoute component={DecisionPage} title="Decision Engine" />
+        </Route>
         <Route path="/scenario-compare">
           <ProtectedRoute component={ScenarioCompareV2Page} title="Scenario Lab" />
         </Route>
@@ -304,9 +309,11 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AppRouter />
-      <Toaster />
-      <PwaInstallBanner />
+      <PrivacyProvider>
+        <AppRouter />
+        <Toaster />
+        <PwaInstallBanner />
+      </PrivacyProvider>
     </QueryClientProvider>
   );
 }

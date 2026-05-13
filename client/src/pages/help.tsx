@@ -9,12 +9,14 @@ import {
   LayoutDashboard, Receipt, Home, TrendingUp, Bitcoin,
   FileText, Calculator, Activity, Settings, Shield,
   Trash2, Cloud, FileSpreadsheet, FileDown, Search,
-  ChevronDown, ChevronRight, Info, AlertTriangle, CheckCircle,
+  ChevronDown, ChevronRight, Info,
   HelpCircle, BookOpen, Zap, Database, Globe, Languages,
   Flame, Sword, BarChart3, TrendingDown, Building2, Clock, Brain,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Callout, Formula, Table, PTag, H3, UL } from "./help/helpPrimitives";
+import { decisionEngineSections } from "./help/decisionEngineSections";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,105 +32,15 @@ interface SectionDef {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-function Callout({
-  type,
-  children,
-}: {
-  type: "info" | "warning" | "tip";
-  children: React.ReactNode;
-}) {
-  const styles = {
-    info: {
-      bg: "hsl(210,50%,10%)",
-      border: "hsl(210,60%,35%)",
-      icon: <Info className="w-3.5 h-3.5 shrink-0 text-blue-400" />,
-      text: "text-blue-300",
-    },
-    warning: {
-      bg: "hsl(40,50%,10%)",
-      border: "hsl(43,60%,35%)",
-      icon: <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-yellow-400" />,
-      text: "text-yellow-300",
-    },
-    tip: {
-      bg: "hsl(142,50%,8%)",
-      border: "hsl(142,50%,30%)",
-      icon: <CheckCircle className="w-3.5 h-3.5 shrink-0 text-emerald-400" />,
-      text: "text-emerald-300",
-    },
-  };
-  const s = styles[type];
-  return (
-    <div
-      className="flex gap-2.5 rounded-lg px-3 py-2.5 text-xs my-3"
-      style={{ background: s.bg, border: `1px solid ${s.border}` }}
-    >
-      {s.icon}
-      <span className={s.text}>{children}</span>
-    </div>
-  );
-}
-
-function Formula({ children }: { children: React.ReactNode }) {
-  return (
-    <code
-      className="block rounded-md px-3 py-2 text-xs my-2 font-mono leading-relaxed"
-      style={{
-        background: "hsl(224,15%,8%)",
-        border: "1px solid hsl(224,12%,20%)",
-        color: "hsl(43,85%,65%)",
-      }}
-    >
-      {children}
-    </code>
-  );
-}
-
-function Table({ rows }: { rows: [string, string][] }) {
-  return (
-    <div className="overflow-x-auto my-3 rounded-lg" style={{ border: "1px solid hsl(224,12%,20%)" }}>
-      <table className="w-full text-xs">
-        <tbody>
-          {rows.map(([a, b], i) => (
-            <tr
-              key={i}
-              style={{ background: i % 2 === 0 ? "hsl(224,15%,10%)" : "hsl(224,15%,12%)" }}
-            >
-              <td className="px-3 py-2 font-mono" style={{ color: "hsl(43,85%,65%)", borderRight: "1px solid hsl(224,12%,20%)" }}>{a}</td>
-              <td className="px-3 py-2 text-muted-foreground">{b}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function PTag({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-muted-foreground leading-relaxed mb-3">{children}</p>;
-}
-
-function H3({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-sm font-semibold text-foreground mb-2 mt-4">{children}</h3>;
-}
-
-function UL({ items }: { items: React.ReactNode[] }) {
-  return (
-    <ul className="list-none space-y-1 mb-3">
-      {items.map((item, i) => (
-        <li key={i} className="flex gap-2 text-sm text-muted-foreground">
-          <span style={{ color: "hsl(43,85%,55%)" }}>▸</span>
-          <span>{item}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
+// Callout, Formula, Table, PTag, H3, UL are imported from ./help/helpPrimitives
+// so additional content modules can reuse the same primitives.
 
 // ─── Section Definitions ──────────────────────────────────────────────────────
+// Decision Engine sections (overview, lenses, assumptions, risk metrics,
+// formulas, chart guides) are imported from ./help/decisionEngineSections and
+// prepended to the legacy SECTIONS array so they appear first.
 
-const SECTIONS: SectionDef[] = [
+const SECTIONS_LEGACY: SectionDef[] = [
   // 1. Dashboard
   {
     id: "dashboard",
@@ -2000,6 +1912,9 @@ const SECTIONS: SectionDef[] = [
   },
 ];
 
+// Decision Engine sections come first in the Help Center.
+const SECTIONS: SectionDef[] = [...decisionEngineSections, ...SECTIONS_LEGACY];
+
 // ─── Accordion Item ───────────────────────────────────────────────────────────
 
 function AccordionItem({
@@ -2156,21 +2071,53 @@ export default function HelpPage() {
     });
   };
 
-  // Scroll to section and open it
-  const scrollToSection = (id: string) => {
+  // Scroll to section and open it. Optionally scroll to an anchor inside the
+  // section after the accordion has expanded (used for deep-links from inline
+  // HelpLink components, e.g. /help?topic=de-risk-metrics#cvar).
+  const scrollToSection = (id: string, anchor?: string) => {
     setOpenSections((prev) => {
       const next = new Set(prev);
       next.add(id);
       return next;
     });
-    // Brief delay to allow DOM to update before scrolling
     setTimeout(() => {
-      const el = document.getElementById(id);
+      const targetId = anchor || id;
+      const el = document.getElementById(targetId);
       if (el) {
         el.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
+        // Fallback: scroll to the section header if the anchor isn't found.
+        const fallback = document.getElementById(id);
+        if (fallback) fallback.scrollIntoView({ behavior: "smooth", block: "start" });
       }
-    }, 50);
+    }, 80);
   };
+
+  // Deep-link support: read ?topic=<id>[#anchor] from the URL on mount and
+  // open + scroll to the matching section. Also re-runs when the URL changes
+  // via in-app navigation.
+  useEffect(() => {
+    const apply = () => {
+      const search = new URLSearchParams(window.location.search);
+      const topic = search.get("topic");
+      if (!topic) return;
+      const anchor = window.location.hash ? window.location.hash.slice(1) : undefined;
+      // Only act if the topic matches a known section id.
+      if (SECTIONS.some((s) => s.id === topic)) {
+        scrollToSection(topic, anchor);
+      }
+    };
+    apply();
+    // Also respond to in-app hash/search changes (e.g. clicking an <Anchor />).
+    const onPop = () => apply();
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("hashchange", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("hashchange", onPop);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isRtl = lang === "fa";
   const fa = (str: string) => (

@@ -9,9 +9,12 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useAppStore } from "@/lib/store";
+import { usePwaBannerVisible } from "@/components/PwaInstallBanner";
 import { applyTheme } from "@/lib/store";
 import type { Permission } from "@/lib/store";
 import { Button } from "@/components/ui/button";
+// FWL P1b: Global tax-regime selector strip (route-scoped, additive).
+import { TaxRegimeHeaderStrip } from "@/components/taxRegime";
 import {
   // Step 1 — Snapshot
   LayoutDashboard, TrendingUp, DollarSign, Receipt, PiggyBank,
@@ -19,7 +22,7 @@ import {
   // Step 2 — Strategy
   Home, Bitcoin, CreditCard, Calculator, Target, ClipboardList, Briefcase,
   // Step 3 — Forecast
-  BarChart2, Activity, Sigma, Zap, Map, FlaskConical, FileText,
+  BarChart2, Activity, Sigma, Zap, Map, FlaskConical, FileText, Sparkles,
   // Step 4 — Action
   Lightbulb, Bell, Calendar, BrainCircuit,
   // Support / System
@@ -74,8 +77,11 @@ const NAV_STEPS = [
     badgeClass: "step-3",
     items: [
       { href: "/ai-forecast-engine", label: "Forecast Engine",      icon: Sigma,         adminOnly: true  },
-      { href: "/what-if-scenarios",   label: "What-If Scenarios",     icon: FlaskConical,  adminOnly: false },
-      { href: "/scenario-compare",   label: "Scenario Lab",           icon: FlaskConical,  adminOnly: false },
+      { href: "/decision",            label: "Decision Engine",        icon: Sparkles,      adminOnly: false },
+      // Hidden from sidebar (V1) — routes retained:
+      //   /what-if-scenarios       (legacy What-If)
+      //   /scenario-compare        (legacy Scenario Lab)
+      //   /scenario-compare-legacy (V1 of V1)
       { href: "/market-news",        label: "Market News",            icon: Newspaper,     adminOnly: false },
       { href: "/reports",            label: "Reports",                icon: FileText,      adminOnly: false },
     ],
@@ -184,6 +190,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [location, navigate] = useLocation();
   const { theme, toggleTheme, setTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role, isDemo, householdRole, permissions, hasPermission } =
     useAppStore();
+  // Reserve bottom padding when the PWA install banner is showing (audit P1-5).
+  const pwaVisible = usePwaBannerVisible();
 
   // Apply theme whenever it changes (dark/light only, no auto)
   useEffect(() => {
@@ -519,7 +527,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {/* Breadcrumb: shows which step + page */}
           <TopBarBreadcrumb location={location} isAdmin={isAdmin} />
 
+          {/* FWL P1b: Tax-regime selector strip — appears on Dashboard,
+              Decision Engine, Property Plan, CGT, Forecast, FIRE only. */}
+          <TaxRegimeHeaderStrip className="hidden md:flex ml-3" />
+
           <div className="ml-auto flex items-center gap-2">
+            {/* FWL P1b: Mobile-visible regime selector (compact) */}
+            <span className="md:hidden"><TaxRegimeHeaderStrip /></span>
             <span className="live-clock-display"><LiveClock /></span>
             <span className="chart-view-toggle-header"><ChartViewToggle /></span>
 
@@ -626,8 +640,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        {/* Page content */}
-        <main className="pwa-main-scroll flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6">
+        {/* Page content — reserves bottom padding when the PWA banner is shown
+            (audit fix P1-5) so scrolling content does not hide behind it. */}
+        <main className={`pwa-main-scroll flex-1 overflow-y-auto overflow-x-hidden p-4 md:px-6 lg:p-6 ${pwaVisible ? "pb-32" : ""}`}>
           {children}
         </main>
       </div>

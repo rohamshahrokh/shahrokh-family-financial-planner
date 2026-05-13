@@ -16,6 +16,11 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum } from "@/lib/finance";
+import {
+  selectCanonicalNetWorth,
+  reconcileNetWorth,
+  reconcileHoldings,
+} from "@/lib/dashboardDataContract";
 import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { useToast } from "@/hooks/use-toast";
@@ -445,6 +450,49 @@ export default function DataHealthPage() {
           })()}
         </div>
       </div>
+
+      {/* Reconciliation cards (audit fix P1.1 + P1.5) */}
+      {(() => {
+        const inputs = {
+          snapshot,
+          properties,
+          stocks,
+          cryptos,
+          holdingsRaw: undefined,
+          incomeRecords: undefined,
+          expenses: expenses as any[],
+        } as any;
+        const canonical = selectCanonicalNetWorth(inputs);
+        const nwRecon = reconcileNetWorth(canonical, canonical.netWorth);
+        const holdRecon = reconcileHoldings(inputs, {
+          etfBalance: canonical.assets.stocks,
+          cryptoBalance: canonical.assets.crypto,
+        });
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className={`rounded-xl border p-4 ${nwRecon.status === 'PASS' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-rose-500/40 bg-rose-500/5'}`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-bold">Net Worth Reconciliation</div>
+                <span className={`text-xs font-semibold ${nwRecon.status === 'PASS' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {nwRecon.status === 'PASS' ? '[OK] PASS' : '[X] FAIL'}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div><div className="text-muted-foreground">Dashboard</div><div className="font-bold">{formatCurrency(nwRecon.dashboard, false)}</div></div>
+                <div><div className="text-muted-foreground">Engine</div><div className="font-bold">{formatCurrency(nwRecon.engine, false)}</div></div>
+                <div><div className="text-muted-foreground">Diff</div><div className="font-bold">{formatCurrency(nwRecon.diff, false)}</div></div>
+              </div>
+            </div>
+            <div className={`rounded-xl border p-4 ${holdRecon.stocks.status === 'PASS' && holdRecon.crypto.status === 'PASS' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-rose-500/40 bg-rose-500/5'}`}>
+              <div className="text-sm font-bold mb-2">Holdings Reconciliation</div>
+              <div className="text-[11px] space-y-1">
+                <div>Stocks: {holdRecon.stocks.status} · pages {formatCurrency(holdRecon.stocks.pagesTotal, false)} vs engine {formatCurrency(holdRecon.stocks.engineTotal, false)}</div>
+                <div>Crypto: {holdRecon.crypto.status} · pages {formatCurrency(holdRecon.crypto.pagesTotal, false)} vs engine {formatCurrency(holdRecon.crypto.engineTotal, false)}</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Record counts */}
       <SectionCard title="Record Counts per Table" icon={<Database className="w-4 h-4" />}>

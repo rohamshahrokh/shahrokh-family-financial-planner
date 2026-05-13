@@ -30,6 +30,14 @@ import {
   type TaxYear,
 } from "../australianTax";
 import type { PortfolioState, PropertyState } from "./types";
+import {
+  resolvePropertyTaxStatus,
+  computeCgt as policyComputeCgt,
+  type TaxPolicyRegime,
+  type PropertyTaxLedger,
+  type PropertyType,
+} from "../taxPolicyEngine";
+import { emptyLedger as policyEmptyLedger } from "../taxPolicyEngine";
 
 // ─── Wage tax ────────────────────────────────────────────────────────────────
 
@@ -202,6 +210,26 @@ export interface CgtInput {
   /** Annual gross wage income in the year of sale (for marginal rate). */
   annualWageIncome: number;
   taxYear?: TaxYear;
+
+  // ── Tax Policy Engine extensions (P0) ─────────────────────────────────────
+  // All optional. When omitted, behaviour matches the legacy current-rules
+  // implementation below (50% discount over 12 months). When provided, the
+  // call is delegated to taxPolicyEngine.computeCgt — the single source of
+  // truth for regime-aware CGT.
+  /** Tax policy regime to evaluate under. */
+  regime?: TaxPolicyRegime;
+  /** PropertyType for grandfathering / carve-out resolution. */
+  propertyType?: PropertyType;
+  /** Contract date (ISO YYYY-MM-DD) for grandfathering check. */
+  contractDate?: string;
+  /** Purchase / settlement date (fallback for grandfathering). */
+  purchaseDate?: string;
+  /** Identifier so the ledger can apply carry-forward losses. */
+  propertyId?: string;
+  /** Carry-forward ledger to consume against the gain. */
+  ledger?: PropertyTaxLedger;
+  /** Years held — needed for INDEXED_COST_BASE method. */
+  yearsHeld?: number;
 }
 
 export interface CgtOutput {
@@ -216,6 +244,36 @@ export interface CgtOutput {
 }
 
 export function computeCgt(input: CgtInput): CgtOutput {
+  // ── Delegated path: regime-aware CGT via taxPolicyEngine ─────────────────
+  if (input.regime && input.propertyId) {
+    const status = resolvePropertyTaxStatus(
+      {
+        propertyId: input.propertyId,
+        propertyType: input.propertyType,
+        contractDate: input.contractDate,
+        purchaseDate: input.purchaseDate,
+      },
+      input.regime,
+    );
+    const out = policyComputeCgt({
+      salePrice: input.salePrice,
+      costBase: input.costBase,
+      yearsHeld: input.yearsHeld ?? (input.heldMoreThan12Months ? 2 : 0.5),
+      annualWageIncome: input.annualWageIncome,
+      status,
+      ledger: input.ledger ?? policyEmptyLedger(),
+      indexationRate: input.regime.indexationRate,
+      taxYear: input.taxYear,
+    });
+    return {
+      rawGain: out.rawGain,
+      discountedGain: out.effectiveGain,
+      cgtPayable: out.cgtPayable,
+      netProceeds: out.netProceeds,
+    };
+  }
+
+  // ── Legacy path (current rules only) — preserved verbatim ────────────────
   const year: TaxYear = input.taxYear ?? "2025-26";
   const rawGain = input.salePrice - input.costBase;
   if (rawGain <= 0) {

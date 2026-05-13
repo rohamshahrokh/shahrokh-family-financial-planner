@@ -1233,7 +1233,7 @@ export default function ScenarioCompareLab() {
                     <div>
                       <p className="text-muted-foreground">Net Holding Costs</p>
                       <p className="font-mono text-orange-400"
-                        title={`Interest: ${formatCurrency(cgt.interestExpense)} + Other costs \u2212 rental\nPrincipal ${formatCurrency(cgt.principalRepaid)} excluded \u2014 equity transfer`}>
+                        title={`Interest: ${formatCurrency(cgt.interestExpense)} + Other costs − rental\nPrincipal ${formatCurrency(cgt.principalRepaid)} excluded — equity transfer`}>
                         {formatCurrency(Math.max(0, cgt.netHoldingCosts))}
                       </p>
                     </div>
@@ -1254,7 +1254,7 @@ export default function ScenarioCompareLab() {
                         <span>− Buying Costs</span>
                         <span className="text-red-400">−{formatCurrency(ov.sellPropertyBuyingCosts)}</span>
                       </div>
-                      <div className="flex justify-between" title={`Interest ${formatCurrency(cgt.interestExpense)} + costs \u2212 rental. Principal ${formatCurrency(cgt.principalRepaid)} excluded.`}>
+                      <div className="flex justify-between" title={`Interest ${formatCurrency(cgt.interestExpense)} + costs − rental. Principal ${formatCurrency(cgt.principalRepaid)} excluded.`}>
                         <span>− Net Holding Costs <span className="text-[9px] text-muted-foreground/50">(interest only)</span></span>
                         <span className="text-orange-400">−{formatCurrency(Math.max(0, cgt.netHoldingCosts))}</span>
                       </div>

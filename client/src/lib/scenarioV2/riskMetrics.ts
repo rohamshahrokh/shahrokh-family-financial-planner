@@ -32,6 +32,26 @@ export interface RiskMetrics {
   concentrationRisk: number;
   /** Median terminal NW penalised by downside dispersion. */
   riskAdjustedNw: number;
+  /**
+   * Value-at-Risk at α = 5%, expressed as a DOLLAR LOSS relative to the
+   * initial net worth (positive = loss). Computed as `initialNw − P5(NW_T)`,
+   * floored at 0 — i.e. only reports if the 5th percentile NW path ends below
+   * the starting NW. Auditable, not a risk score.
+   */
+  varDollars95: number;
+  /**
+   * Conditional VaR (Expected Shortfall) at α = 5%. Mean dollar loss versus
+   * initial NW conditional on being in the worst 5% of terminal outcomes.
+   * Floored at 0. Always ≥ VaR. The institutional left-tail metric.
+   */
+  cvarDollars95: number;
+  /**
+   * Median per-sim peak-to-trough drawdown on the NW path (0..1). Computed
+   * inside Monte Carlo, NOT from terminals — captures intra-horizon stress.
+   */
+  maxDrawdownMedian: number;
+  /** 90th-percentile drawdown (a bad path's drawdown). */
+  maxDrawdownP90: number;
   /** Rationale strings — same UX pattern as serviceability rationale. */
   rationale: string[];
 }
@@ -43,6 +63,10 @@ export interface RiskInput {
   medianTerminalNw: number;
   /** Monthly living expenses on the median path (for runway calc). */
   monthlyExpenses: number;
+  /** Initial NW at the start of the horizon (anchor for VaR/CVaR dollars). */
+  initialNetWorth: number;
+  /** Per-sim peak-to-trough drawdown samples (0..1). */
+  maxDrawdownSamples: number[];
 }
 
 export function computeRiskMetrics(input: RiskInput): RiskMetrics {
@@ -93,6 +117,23 @@ export function computeRiskMetrics(input: RiskInput): RiskMetrics {
 
   const riskAdjustedNw = medianTerminalNw * (1 - downsideRisk);
 
+  // ── Tail risk (VaR / CVaR, α = 5%) ─────────────────────────────────────
+  // VaR = initial NW − P5(NW_T), floored at 0. Reports only true loss.
+  // CVaR = mean of the worst 5% of terminal NWs, again versus initial NW.
+  // Both expressed in DOLLARS (institutional convention).
+  const p5 = pctI(sorted, 0.05);
+  const varDollars95 = Math.max(0, input.initialNetWorth - p5);
+
+  const cutoffIdx = Math.max(1, Math.floor(0.05 * sorted.length));
+  const worstTail = sorted.slice(0, cutoffIdx);
+  const tailMean = worstTail.reduce((a, b) => a + b, 0) / worstTail.length;
+  const cvarDollars95 = Math.max(0, input.initialNetWorth - tailMean);
+
+  // ── Max drawdown (per-sim peak-to-trough on NW path) ───────────────────
+  const dd = [...input.maxDrawdownSamples].sort((a, b) => a - b);
+  const maxDrawdownMedian = dd.length > 0 ? pctI(dd, 0.50) : 0;
+  const maxDrawdownP90    = dd.length > 0 ? pctI(dd, 0.90) : 0;
+
   const rationale: string[] = [];
   rationale.push(
     `Volatility (CV) ${(volatility * 100).toFixed(1)}% — ${volatility < 0.20 ? "low" : volatility < 0.40 ? "moderate" : "high"} dispersion of terminal NW`,
@@ -112,6 +153,19 @@ export function computeRiskMetrics(input: RiskInput): RiskMetrics {
   rationale.push(
     `Risk-adjusted NW ≈ $${Math.round(riskAdjustedNw).toLocaleString()} (P50 × (1 − downside))`,
   );
+  if (varDollars95 > 0) {
+    rationale.push(
+      `VaR₅ ≈ $${Math.round(varDollars95).toLocaleString()} — worst 5% terminal NW ends below initial NW by this amount`,
+    );
+  }
+  if (cvarDollars95 > 0) {
+    rationale.push(
+      `CVaR₅ ≈ $${Math.round(cvarDollars95).toLocaleString()} — expected shortfall in the worst 5% of paths`,
+    );
+  }
+  rationale.push(
+    `Max drawdown median ${(maxDrawdownMedian * 100).toFixed(1)}% (P90 ${(maxDrawdownP90 * 100).toFixed(1)}%) — peak-to-trough on NW path`,
+  );
 
   return {
     volatility,
@@ -120,15 +174,27 @@ export function computeRiskMetrics(input: RiskInput): RiskMetrics {
     liquidityRisk,
     concentrationRisk,
     riskAdjustedNw,
+    varDollars95,
+    cvarDollars95,
+    maxDrawdownMedian,
+    maxDrawdownP90,
     rationale,
   };
 }
 
 function percentile(sortedAsc: number[], p: number): number {
-  if (sortedAsc.length === 0) return 0;
-  const idx = Math.max(
-    0,
-    Math.min(sortedAsc.length - 1, Math.floor(p * sortedAsc.length)),
-  );
-  return sortedAsc[idx];
+  return pctI(sortedAsc, p);
+}
+
+/** Linear-interpolated quantile (“type 7”) — matches monteCarlo.ts. */
+function pctI(sortedAsc: number[], p: number): number {
+  const n = sortedAsc.length;
+  if (n === 0) return 0;
+  if (n === 1) return sortedAsc[0];
+  const h = (n - 1) * p;
+  const lo = Math.floor(h);
+  const hi = Math.ceil(h);
+  if (lo === hi) return sortedAsc[lo];
+  const w = h - lo;
+  return sortedAsc[lo] * (1 - w) + sortedAsc[hi] * w;
 }

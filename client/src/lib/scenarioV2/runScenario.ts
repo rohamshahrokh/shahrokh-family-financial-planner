@@ -24,8 +24,14 @@
  */
 
 import type { DashboardInputs } from "../dashboardDataContract";
-import { selectMonthlySurplus } from "../dashboardDataContract";
-import { deriveBasePlan, addMonths, monthKey } from "./basePlan";
+import {
+  selectMonthlySurplus,
+  selectCanonicalNetWorth,
+  reconcileNetWorth,
+  type CanonicalNetWorth,
+  type NwReconciliation,
+} from "../dashboardDataContract";
+import { deriveBasePlan, addMonths, monthKey, netWorthOfState } from "./basePlan";
 import { buildEventStore } from "./events";
 import { runMonteCarlo } from "./monteCarlo";
 import { computeServiceability } from "./borrowing";
@@ -78,6 +84,8 @@ export interface ExtendedScenarioResult extends ScenarioResult {
   refinancePressureProbability: number;
   /** Probability the household becomes insolvent within the horizon. */
   defaultProbability: number;
+  /** Probability cash drops to ≤0 in any month (true exhaustion, distinct from buffer warning). */
+  liquidityExhaustionProbability: number;
   /** Median month-index (0-based) when default fires across defaulting sims (null if 0%). */
   medianDefaultMonth: number | null;
   /** Median month-index when liquidity stress first fires. */
@@ -88,6 +96,16 @@ export interface ExtendedScenarioResult extends ScenarioResult {
   sequenceDispersion: ReturnType<typeof sequenceRiskMetric>;
   /** Terminal short-rate samples (for narrative). */
   terminalRates: number[];
+  /** Per-sim max drawdown samples (0..1) — peak-to-trough on NW path. */
+  maxDrawdownSamples: number[];
+  /** Terminal NW samples sorted ascending (so charts/tail metrics don't re-sort). */
+  terminalNwSorted: number[];
+  /** Canonical dashboard NW breakdown (audit fix P1.1). */
+  canonicalNetWorth: CanonicalNetWorth;
+  /** Engine-vs-dashboard NW reconciliation result. */
+  netWorthReconciliation: NwReconciliation;
+  /** Non-fatal warnings collected during the run (e.g. reconciliation drift). */
+  warnings: string[];
 }
 
 export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
@@ -101,6 +119,22 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     assumptions: input.assumptions,
     name: `${input.name} (auto-derived)`,
   });
+
+  // Audit fix P1.1: reconcile engine initial NW against the dashboard's
+  // canonical NW. Any drift > $1 indicates a scope mismatch (the original bug
+  // was a $196k silent gap). Warnings flow into the result; in dev we throw
+  // so the discrepancy is impossible to ignore.
+  const warnings: string[] = [];
+  const canonicalNetWorth = selectCanonicalNetWorth(input.dashboardInputs);
+  const engineInitialNw = netWorthOfState(derived.initialState);
+  const nwRecon = reconcileNetWorth(canonicalNetWorth, engineInitialNw);
+  if (nwRecon.status === "FAIL") {
+    const msg = `NW reconciliation FAIL: dashboard $${nwRecon.dashboard.toLocaleString("en-AU")} vs engine $${nwRecon.engine.toLocaleString("en-AU")} (diff $${nwRecon.diff.toLocaleString("en-AU")})`;
+    warnings.push(msg);
+    if (typeof process !== "undefined" && process.env?.NODE_ENV === "development") {
+      throw new Error(`[scenarioV2] ${msg}`);
+    }
+  }
 
   const events = buildEventStore(derived.plan, input.deltas, {
     startMonth,
@@ -145,14 +179,17 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     mortgageRate: derived.plan.assumptions.mortgageRate,
   });
 
-  const sortedTerminal = [...mc.terminalNw].sort((a, b) => a - b);
+  const sortedTerminal = mc.terminalNwSorted;
   const medianTerminalNw = sortedTerminal[Math.floor(sortedTerminal.length / 2)];
+  const initialNetWorth = netWorthOfState(derived.initialState);
   const risk = computeRiskMetrics({
     terminalNw: mc.terminalNw,
     terminalCash: mc.terminalCash,
     medianFinalState: mc.medianFinalState,
     medianTerminalNw,
     monthlyExpenses: mc.medianFinalState.ttmExpenses / 12,
+    initialNetWorth,
+    maxDrawdownSamples: mc.maxDrawdownSamples,
   });
 
   const dashboardSurplus = selectMonthlySurplus(input.dashboardInputs);
@@ -178,7 +215,7 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     reconciledMonthlySurplus: reconciledSurplus,
     dashboardMonthlySurplus: dashboardSurplus,
     reconcilesToDashboard: Math.abs(reconciledSurplus - dashboardSurplus) <= 1,
-    initialNetWorth: netWorthOf(derived.initialState),
+    initialNetWorth,
     terminalNwSamples: mc.terminalNw,
     terminalCashSamples: mc.terminalCash,
     runtimeMs: mc.runtimeMs,
@@ -188,20 +225,18 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     liquidityStressProbability: mc.liquidityStressProbability,
     refinancePressureProbability: mc.refinancePressureProbability,
     defaultProbability: mc.defaultProbability,
+    liquidityExhaustionProbability: mc.liquidityExhaustionProbability,
     medianDefaultMonth: mc.medianDefaultMonth,
     medianLiquidityFirstMonth: mc.medianLiquidityFirstMonth,
     medianNegEquityFirstMonth: mc.medianNegEquityFirstMonth,
     sequenceDispersion: dispersion,
     terminalRates: mc.terminalRates,
+    maxDrawdownSamples: mc.maxDrawdownSamples,
+    terminalNwSorted: mc.terminalNwSorted,
+    canonicalNetWorth,
+    netWorthReconciliation: nwRecon,
+    warnings,
   };
-}
-
-function netWorthOf(s: Parameters<typeof computeServiceability>[0]["state"]): number {
-  const propsNet = s.properties.reduce(
-    (acc, p) => acc + (p.marketValue - p.loanBalance),
-    0,
-  );
-  return s.cash + s.etfBalance + s.cryptoBalance + s.superRoham + s.superFara + propsNet;
 }
 
 function hashToInt(v: unknown): number {

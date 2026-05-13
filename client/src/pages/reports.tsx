@@ -13,6 +13,8 @@ import { formatCurrency, calcSavingsRate, safeNum } from "@/lib/finance";
 import { runCashEngine } from "@/lib/cashEngine";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import { useAppStore } from "@/lib/store";
+import { computeCanonicalNetWorth } from "@/lib/canonicalNetWorth";
+import { computeCanonicalCashflow } from "@/lib/canonicalCashflow";
 import { Button } from "@/components/ui/button";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { useToast } from "@/hooks/use-toast";
@@ -162,17 +164,33 @@ export default function ReportsPage() {
 
   const snap = snapshot ?? {};
 
-  // ── Core derived numbers (central ledger) ─────────────────────────────────
-  const cash          = safeNum(snap.cash) + safeNum(snap.offset_balance);
-  const totalAssets   = safeNum(snap.ppor) + cash + safeNum(snap.super_balance)
-                      + safeNum(snap.stocks) + safeNum(snap.crypto)
-                      + safeNum(snap.cars) + safeNum(snap.iran_property);
-  const totalLiab     = safeNum(snap.mortgage) + safeNum(snap.other_debts);
-  const netWorth      = totalAssets - totalLiab;
-  const monthlyInc    = safeNum(snap.monthly_income);
-  const monthlyExp    = safeNum(snap.monthly_expenses);
-  const surplus       = monthlyInc - monthlyExp;
-  const savingsRate   = calcSavingsRate(monthlyInc, monthlyExp);
+  // ── Core derived numbers ─────────────────────────────────────────────────
+  // SOURCE-OF-TRUTH: canonicalNetWorth — DO NOT re-sum snapshot fields here.
+  // Previously this page summed snapshot.cash + ppor + super_balance directly,
+  // which produced a NW figure that diverged from the dashboard ($816K vs
+  // $856K) because it missed the savings_cash/emergency/other_cash buckets.
+  const canonicalNw = computeCanonicalNetWorth({
+    snapshot, properties, stocks, cryptos,
+    holdingsRaw: [], incomeRecords, expenses,
+  });
+  const cash          = canonicalNw.components.cashTotal;
+  const totalAssets   = canonicalNw.raw.totalAssets;
+  const totalLiab     = canonicalNw.raw.totalLiabilities;
+  const netWorth      = canonicalNw.netWorth;
+  // SOURCE-OF-TRUTH: canonicalCashflow — surplus identity is asserted to
+  // hold (income - expenses == surplus) and savingsRate is `null` when
+  // income is 0, so we never render 100.0% / 0.0% / NaN%.
+  const canonicalCf = computeCanonicalCashflow({
+    snapshot, properties, stocks, cryptos,
+    holdingsRaw: [], incomeRecords, expenses,
+  });
+  const monthlyInc    = canonicalCf.monthlyIncome;
+  const monthlyExp    = canonicalCf.monthlyExpenses;
+  const surplus       = canonicalCf.monthlySurplus;
+  /** Number (decimal 0..1) when income > 0, else null — UI renders "—". */
+  const savingsRateRaw = canonicalCf.savingsRate;
+  /** Display % (0..100) for legacy callers expecting a number. Default 0 when null. */
+  const savingsRate   = savingsRateRaw == null ? 0 : Math.round(savingsRateRaw * 100);
   const accessibleWlt = cash + safeNum(snap.stocks) + safeNum(snap.crypto);
   const lockedWlt     = safeNum(snap.super_balance) + safeNum(snap.ppor)
                       + safeNum(snap.iran_property) + safeNum(snap.cars);
@@ -421,7 +439,7 @@ export default function ReportsPage() {
       doc.setTextColor(139, 92, 246);
       doc.setFontSize(36);
       doc.setFont('helvetica', 'bold');
-      doc.text('DEMO DATA \u2014 NOT REAL FINANCIAL ADVICE', 105, 148, { align: 'center', angle: 45 });
+      doc.text('DEMO DATA — NOT REAL FINANCIAL ADVICE', 105, 148, { align: 'center', angle: 45 });
       doc.setTextColor(60, 60, 60);
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
@@ -708,12 +726,19 @@ export default function ReportsPage() {
       </div>
 
       {/* ── Top KPI summary strip ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5">
+      {/* Audit P1-7: narrower phones get 2 columns, larger phones get 3,
+          tablets get 4, desktop fans out to all 7 chips. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2.5">
         <KpiChip label="Net Worth"      value={mv(fmt(netWorth, true))}        accent up={netWorth > 0} />
         <KpiChip label="Accessible"     value={mv(fmt(accessibleWlt, true))}   sub="Cash + Stocks + Crypto" />
         <KpiChip label="Debt Balance"   value={mv(fmt(totalLiab, true))}       up={totalLiab === 0} />
         <KpiChip label="Monthly Surplus" value={mv(fmt(surplus))}              sub={surplus >= 0 ? 'Positive cashflow' : 'Deficit'} up={surplus > 0} />
-        <KpiChip label="Savings Rate"   value={pct(savingsRate)}               sub={savingsRate >= 20 ? 'Strong' : 'Moderate'} up={savingsRate >= 20} />
+        <KpiChip
+          label="Savings Rate"
+          value={savingsRateRaw == null ? "—" : pct(savingsRate)}
+          sub={savingsRateRaw == null ? "Set income to compute" : (savingsRate >= 20 ? "Strong" : "Moderate")}
+          up={savingsRateRaw != null && savingsRate >= 20}
+        />
         <KpiChip label="FIRE Estimate"  value={yearsToFire > 0 ? `${yearsToFire.toFixed(1)}y` : '—'} sub={yearsToFire > 0 ? fmt(fireNumber, true) : 'Set cashflow'} />
         <KpiChip label="Risk Score"     value={`${riskScore}/10`}              sub={riskScore >= 7 ? 'Healthy' : riskScore >= 5 ? 'Moderate' : 'Needs review'} up={riskScore >= 7} />
       </div>
