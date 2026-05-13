@@ -12,6 +12,8 @@
 
 export { TaxRegimeSelector, default as TaxRegimeSelectorDefault } from "./TaxRegimeSelector";
 export { TaxRegimeHeaderStrip, type TaxRegimeHeaderStripProps } from "./TaxRegimeHeaderStrip";
+export { ModellingAssumptionsChip } from "./ModellingAssumptionsChip";
+export { ModellingAssumptionsDialog } from "./ModellingAssumptionsDialog";
 export { AutoDetectRationaleCard } from "./AutoDetectRationaleCard";
 export { PropertyTaxFieldsCard, type PropertyTaxFields } from "./PropertyTaxFieldsCard";
 export { PropertyComparisonPanel, type PropertyComparisonRow } from "./PropertyComparisonPanel";
