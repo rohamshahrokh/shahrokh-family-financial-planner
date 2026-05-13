@@ -11,8 +11,8 @@
  * at the parent (AccordionItem) level via a single style override.
  */
 
-import type { ReactNode } from "react";
-import { Info, AlertTriangle, CheckCircle } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Info, AlertTriangle, CheckCircle, ChevronDown } from "lucide-react";
 
 export function Callout({
   type,
@@ -68,7 +68,7 @@ export function Formula({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-export function Table({ rows }: { rows: [string, string][] }): JSX.Element {
+export function Table({ rows }: { rows: [ReactNode, ReactNode][] }): JSX.Element {
   return (
     <div className="overflow-x-auto my-3 rounded-lg" style={{ border: "1px solid hsl(224,12%,20%)" }}>
       <table className="w-full text-xs">
@@ -78,8 +78,8 @@ export function Table({ rows }: { rows: [string, string][] }): JSX.Element {
               key={i}
               style={{ background: i % 2 === 0 ? "hsl(224,15%,10%)" : "hsl(224,15%,12%)" }}
             >
-              <td className="px-3 py-2 font-mono" style={{ color: "hsl(43,85%,65%)", borderRight: "1px solid hsl(224,12%,20%)" }}>{a}</td>
-              <td className="px-3 py-2 text-muted-foreground">{b}</td>
+              <td className="px-3 py-2 font-mono align-top whitespace-pre-line" style={{ color: "hsl(43,85%,65%)", borderRight: "1px solid hsl(224,12%,20%)" }}>{a}</td>
+              <td className="px-3 py-2 text-muted-foreground align-top">{b}</td>
             </tr>
           ))}
         </tbody>
@@ -137,6 +137,53 @@ export function Anchor({
     >
       {children}
     </a>
+  );
+}
+
+/**
+ * BeginnerAdvanced — two-layer disclosure pattern for Help articles.
+ *
+ * The beginner explanation is shown by default. The advanced details (formulas,
+ * raw thresholds, deeper math) collapse behind a small "Show advanced details"
+ * trigger. This satisfies the V2 simplification mandate — simple first,
+ * advanced under the hood, never lost.
+ *
+ * The label text adapts to the active Help Center language (en/fa) via the
+ * `advancedLabel` prop — callers pass the localised label string.
+ */
+export function BeginnerAdvanced({
+  advancedLabel = "Show advanced details",
+  hideLabel = "Hide advanced details",
+  children,
+}: {
+  advancedLabel?: string;
+  hideLabel?: string;
+  children: ReactNode;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className="mt-2 rounded-lg overflow-hidden"
+      style={{ border: "1px solid hsl(224,12%,18%)", background: "hsl(224,15%,9%)" }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-left transition-colors hover:bg-white/[0.02]"
+        style={{ color: "hsl(43,85%,65%)" }}
+      >
+        <ChevronDown
+          className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+        <span>{open ? hideLabel : advancedLabel}</span>
+      </button>
+      {open && (
+        <div className="px-3 py-2.5 border-t text-xs text-muted-foreground space-y-1.5" style={{ borderColor: "hsl(224,12%,18%)" }}>
+          {children}
+        </div>
+      )}
+    </div>
   );
 }
 

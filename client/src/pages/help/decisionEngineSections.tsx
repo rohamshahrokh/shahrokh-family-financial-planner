@@ -14,12 +14,16 @@
 
 import {
   Brain, Target, Layers, Scale, Sliders, ShieldAlert,
-  Sigma, LineChart,
+  Sigma, LineChart, BookOpen,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import {
   PTag, H3, H4, UL, Callout, Formula, Table, Anchor, MetricCard,
+  BeginnerAdvanced,
 } from "./helpPrimitives";
+import {
+  METRIC_LABELS, LENS_LABELS, ASSUMPTION_LABELS, RISK_MODE_LABELS,
+} from "@/lib/decisionEngineLabels";
 
 // SectionDef is re-declared here to avoid a circular import from help.tsx.
 // The shape is identical to the one in help.tsx and intentionally so.
@@ -39,6 +43,7 @@ const C_ASSUMPTION = "hsl(265, 70%, 64%)"; // violet
 const C_RISK       = "hsl(0, 75%, 60%)";   // rose
 const C_FORMULAS   = "hsl(165, 65%, 45%)"; // teal
 const C_CHARTS     = "hsl(35, 90%, 60%)";  // amber
+const C_GLOSSARY   = "hsl(280, 65%, 62%)"; // soft purple
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION 1 · Decision Engine Overview
@@ -236,9 +241,13 @@ const recommendationLogic: SectionDef = {
         <PTag>
           This lens weights long-term wealth (terminal net worth and risk-adjusted CAGR) much more heavily and accepts more short-term volatility. Use it if you have a long horizon and can stomach drawdowns.
         </PTag>
-        <H4 id="lens-cashflow">3 · Cashflow-safe</H4>
+        <H4 id="lens-cashflow">3 · Safest monthly cashflow</H4>
         <PTag>
-          This lens prioritises survival probability, NSR, liquidity factor, and low refinance pressure. Long-term growth still matters but is dialled down. Use it if a missed mortgage payment would be a real problem.
+          This lens (formerly “Cashflow-safe”) prioritises survival probability, NSR, liquidity factor, and low refinance pressure. Long-term growth still matters but is dialled down. Use it if a missed mortgage payment would be a real problem.
+        </PTag>
+        <H4 id="lens-high-risk">4 · Highest growth (high risk)</H4>
+        <PTag>
+          An optional fourth lens that surfaces only when Risk Control is set to “Show me everything.” It accepts wider concentration and LVR limits in exchange for the highest possible growth ceiling. Treat its winner as the engine’s “if you really want to push it” answer — not a recommendation.
         </PTag>
 
         <H3>What affects rankings</H3>
@@ -285,9 +294,13 @@ const recommendationLogic: SectionDef = {
         <PTag>
           این زاویه ثروت بلندمدت (ارزش خالص پایانی و CAGR تعدیل‌شده با ریسک) را بسیار سنگین‌تر وزن می‌دهد و نوسان کوتاه‌مدت بیشتری را می‌پذیرد. اگر افق بلند دارید و توان تحمل افت سرمایه را دارید، مناسب است.
         </PTag>
-        <H4 id="lens-cashflow-fa">۳ · امن از نظر نقدینگی</H4>
+        <H4 id="lens-cashflow-fa">۳ · امن‌ترین جریان نقدی ماهانه</H4>
         <PTag>
-          این زاویه احتمال بقا، NSR، عامل نقدینگی و فشار کم بازپرداخت را در اولویت می‌گذارد. رشد بلندمدت هنوز اهمیت دارد ولی کم‌رنگ‌تر است. اگر پرداخت‌نشدن یک قسط وام برایتان مسئله جدی است، این زاویه را انتخاب کنید.
+          این زاویه (پیش‌تر به نام «امن از نظر نقدینگی») احتمال بقا، NSR، عامل نقدینگی و فشار کم بازپرداخت را در اولویت می‌گذارد. رشد بلندمدت هنوز اهمیت دارد ولی کم‌رنگ‌تر است. اگر پرداخت‌نشدن یک قسط وام برایتان مسئله جدی است، این زاویه را انتخاب کنید.
+        </PTag>
+        <H4 id="lens-high-risk-fa">۴ · بیشترین رشد (ریسک بالا)</H4>
+        <PTag>
+          یک زاویه چهارم اختیاری که تنها در حالت «همه‌چیز را نشان بده» ظاهر می‌شود. سقف تمرکز و LVR بالاتری را پذیراست تا در عوض بالاترین سقف رشد ممکن را بدهد. برنده آن را جواب موتور به «اگر واقعاً بخواهید پارا را تا ته فشار دهید» در نظر بگیرید — نه یک توصیه.
         </PTag>
 
         <H3>چه چیزهایی روی رتبه‌بندی اثر می‌گذارد</H3>
@@ -1027,9 +1040,173 @@ const chartGuides: SectionDef = {
 // Export ordered list
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 8 · Plain-English Glossary  (V2 simplification companion)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Maps every beginner-friendly UI label introduced in the V2 simplification
+// pass back to its original advanced/quant name. Sourced from the same
+// `decisionEngineLabels.ts` module the UI uses, so labels can never drift.
+//
+// Pattern: beginner explanation on top (always visible), advanced detail in
+// a <BeginnerAdvanced> collapsible underneath — preserves depth without
+// overwhelming first-time users.
+
+/** Render a single glossary row: simple label → advanced name + plainEnglish. */
+function glossaryRow(
+  simple: string,
+  advanced: string,
+  plainEnglish: string,
+): [string, string] {
+  return [`${simple}\n(${advanced})`, plainEnglish];
+}
+
+const plainEnglishGlossary: SectionDef = {
+  id: "de-plain-english-glossary",
+  icon: <BookOpen className="w-4 h-4" />,
+  color: C_GLOSSARY,
+  title: {
+    en: "Plain-English Glossary",
+    fa: "واژه‌نامه به زبان ساده",
+  },
+  keywords: {
+    en: "glossary plain english simple beginner translation labels names dictionary terminology mapping",
+    fa: "واژه‌نامه زبان ساده مبتدی برچسب معادل اصطلاحات ترجمه فرهنگ لغت",
+  },
+  content: {
+    en: (
+      <div>
+        <PTag>
+          The V2 redesign replaces dense technical labels with beginner-friendly headlines. The advanced quant name is still preserved everywhere — in tooltips, in this glossary, and in the deeper sections of this Help Center. Use this page as a quick lookup whenever the UI shows a simplified label and you want to know what it means under the hood.
+        </PTag>
+
+        <Callout type="info">
+          Nothing in the engine changed. The math is identical. Only the labels you see on screen are softer.
+        </Callout>
+
+        <H3 id="glossary-metrics">Risk &amp; return metrics</H3>
+        <PTag>The numbers the engine reports for every strategy.</PTag>
+        <Table rows={Object.values(METRIC_LABELS).map(m =>
+          glossaryRow(m.simple, m.advanced, m.plainEnglish),
+        )} />
+        <BeginnerAdvanced advancedLabel="Show advanced names side-by-side" hideLabel="Hide advanced names">
+          <p>Each metric keeps its original technical name internally — the engine, scoring math, and exported data all still use the advanced names. The simple label exists only at the presentation layer.</p>
+          <p>Deep links to individual metrics still resolve via the original anchors (e.g. <Anchor href="/help?topic=de-risk-metrics#cvar">#cvar</Anchor>, <Anchor href="/help?topic=de-risk-metrics#survival">#survival</Anchor>).</p>
+        </BeginnerAdvanced>
+
+        <H3 id="glossary-lenses">Multi-winner lenses</H3>
+        <PTag>The engine produces up to four "winners" — each ranked under a different priority.</PTag>
+        <Table rows={Object.values(LENS_LABELS).map(l =>
+          glossaryRow(l.simple, l.advanced, l.plainEnglish),
+        )} />
+        <H4>Why this won</H4>
+        <UL items={Object.values(LENS_LABELS).map(l =>
+          <><strong className="text-foreground">{l.simple}:</strong> {l.whyThisWon}</>
+        )} />
+
+        <H3 id="glossary-assumptions">Scenario assumptions</H3>
+        <PTag>Which tax/policy rule set runs the projection.</PTag>
+        <Table rows={Object.values(ASSUMPTION_LABELS).map(a =>
+          glossaryRow(a.simple, a.advanced, a.plainEnglish),
+        )} />
+        <BeginnerAdvanced advancedLabel="Show what changes inside each assumption" hideLabel="Hide details">
+          {Object.values(ASSUMPTION_LABELS).map((a, i) => (
+            <div key={i} className="mb-2">
+              <strong className="text-foreground">{a.simple}:</strong> {a.whatChanges}
+              <br />
+              <em>When to use:</em> {a.whenToUse}
+            </div>
+          ))}
+        </BeginnerAdvanced>
+
+        <H3 id="glossary-risk-modes">Risk control modes</H3>
+        <PTag>How aggressive the engine should be when filtering paths.</PTag>
+        <Table rows={Object.values(RISK_MODE_LABELS).map(r =>
+          glossaryRow(r.simple, r.advanced, r.plainEnglish),
+        )} />
+        <BeginnerAdvanced advancedLabel="Show exact thresholds for each mode" hideLabel="Hide thresholds">
+          {Object.values(RISK_MODE_LABELS).map((r, i) => (
+            <div key={i} className="mb-2">
+              <strong className="text-foreground">{r.simple}:</strong> {r.whatChanges}
+            </div>
+          ))}
+        </BeginnerAdvanced>
+
+        <Callout type="tip">
+          Hover any value in the Decision Engine UI to see its advanced quant name. Click the small (?) next to any label to jump straight back into this Help Center.
+        </Callout>
+      </div>
+    ),
+    fa: (
+      <div>
+        <PTag>
+          در طراحی نسخه ۲، برچسب‌های فنی سنگین با عبارات ساده‌تر جایگزین شده‌اند. نام دقیق فنی همچنان در ابزارهای کمکی (tooltip)، در همین واژه‌نامه و در بخش‌های عمیق‌تر این مرکز راهنما حفظ شده است. هرگاه در رابط کاربری یک برچسب ساده‌شده دیدید و خواستید بدانید زیر پوسته چه چیزی است، به این صفحه مراجعه کنید.
+        </PTag>
+
+        <Callout type="info">
+          هیچ‌چیز در موتور تغییر نکرده است. ریاضیات کاملاً یکسان است. تنها برچسب‌هایی که روی صفحه می‌بینید نرم‌تر شده‌اند.
+        </Callout>
+
+        <H3>معیارهای ریسک و بازده</H3>
+        <PTag>اعدادی که موتور برای هر استراتژی گزارش می‌دهد.</PTag>
+        <Table rows={Object.values(METRIC_LABELS).map(m =>
+          [`${m.simple}\n(${m.advanced})`, m.plainEnglish] as [string, string],
+        )} />
+        <BeginnerAdvanced advancedLabel="نمایش نام‌های فنی در کنار برچسب ساده" hideLabel="پنهان کردن نام‌های فنی">
+          <p>هر معیار در درون موتور نام فنی اصلی خود را حفظ کرده — موتور، محاسبات امتیاز و داده‌های صادراتی همگی همان نام پیشرفته را به‌کار می‌برند. برچسب ساده فقط در لایه نمایشی وجود دارد.</p>
+          <p>پیوندهای عمیق به هر معیار همچنان از طریق لنگرهای اصلی کار می‌کنند (مثلاً <Anchor href="/help?topic=de-risk-metrics#cvar">#cvar</Anchor>، <Anchor href="/help?topic=de-risk-metrics#survival">#survival</Anchor>).</p>
+        </BeginnerAdvanced>
+
+        <H3>زوایای دید برنده‌ها</H3>
+        <PTag>موتور تا چهار «برنده» تولید می‌کند — هرکدام تحت اولویت متفاوتی رتبه‌بندی می‌شود.</PTag>
+        <Table rows={Object.values(LENS_LABELS).map(l =>
+          [`${l.simple}\n(${l.advanced})`, l.plainEnglish] as [string, string],
+        )} />
+        <H4>چرا این برنده شد</H4>
+        <UL items={Object.values(LENS_LABELS).map(l =>
+          <><strong className="text-foreground">{l.simple}:</strong> {l.whyThisWon}</>
+        )} />
+
+        <H3>فرضیات سناریو</H3>
+        <PTag>اینکه پیش‌بینی تحت کدام مجموعه قوانین مالیاتی/سیاستی اجرا شود.</PTag>
+        <Table rows={Object.values(ASSUMPTION_LABELS).map(a =>
+          [`${a.simple}\n(${a.advanced})`, a.plainEnglish] as [string, string],
+        )} />
+        <BeginnerAdvanced advancedLabel="نمایش جزئیات هر فرضیه" hideLabel="پنهان کردن جزئیات">
+          {Object.values(ASSUMPTION_LABELS).map((a, i) => (
+            <div key={i} className="mb-2">
+              <strong className="text-foreground">{a.simple}:</strong> {a.whatChanges}
+              <br />
+              <em>چه زمانی مناسب است:</em> {a.whenToUse}
+            </div>
+          ))}
+        </BeginnerAdvanced>
+
+        <H3>حالت‌های کنترل ریسک</H3>
+        <PTag>اینکه موتور هنگام فیلتر کردن مسیرها چقدر سخت‌گیر باشد.</PTag>
+        <Table rows={Object.values(RISK_MODE_LABELS).map(r =>
+          [`${r.simple}\n(${r.advanced})`, r.plainEnglish] as [string, string],
+        )} />
+        <BeginnerAdvanced advancedLabel="نمایش آستانه‌های دقیق هر حالت" hideLabel="پنهان کردن آستانه‌ها">
+          {Object.values(RISK_MODE_LABELS).map((r, i) => (
+            <div key={i} className="mb-2">
+              <strong className="text-foreground">{r.simple}:</strong> {r.whatChanges}
+            </div>
+          ))}
+        </BeginnerAdvanced>
+
+        <Callout type="tip">
+          روی هر مقدار در رابط موتور تصمیم‌گیری اشاره کنید تا نام فنی آن نمایش داده شود. روی علامت (؟) کنار هر برچسب کلیک کنید تا مستقیماً به همین مرکز راهنما برگردید.
+        </Callout>
+      </div>
+    ),
+  },
+};
+
 export const decisionEngineSections: SectionDef[] = [
   overview,
   simpleVsAdvanced,
+  plainEnglishGlossary,
   recommendationLogic,
   scenarioAssumptions,
   riskMetrics,
