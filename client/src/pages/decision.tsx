@@ -36,6 +36,7 @@ import { Separator } from "@/components/ui/separator";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SmartNumInput } from "@/components/ui/smart-num-input";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { HelpLink, HELP_TOPICS } from "@/components/help";
 import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
   Trophy, Shield, Droplet, TrendingDown, Target, Info, Eye, EyeOff, ShieldAlert,
@@ -331,6 +332,7 @@ function QuickDecisionTab() {
               <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
                 <Sparkles className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
                 Quick Decision
+                <HelpLink topic={HELP_TOPICS.recommendationLogic} variant="icon" ariaLabel="How recommendations are ranked" />
               </CardTitle>
               <CardDescription>
                 Pick a question, set your capital and horizon — the engine ranks 15+ paths
@@ -617,6 +619,7 @@ function QuickDecisionTab() {
                 value={pct(winner.trace.scoreDerivation.find(s => s.axis === "survivalProbability")?.rawValue ?? 0, 0)}
                 tone="emerald"
                 infoTerm="Survival probability"
+                helpTopic={HELP_TOPICS.survivalProbability}
               />
               <MetricTile
                 icon={<Droplet className="h-3 w-3" />}
@@ -624,6 +627,7 @@ function QuickDecisionTab() {
                 value={(winner.trace.scoreDerivation.find(s => s.axis === "liquidityFactor")?.rawValue ?? 0).toFixed(2)}
                 tone="sky"
                 infoTerm="Liquidity factor"
+                helpTopic={HELP_TOPICS.liquidityFactor}
               />
               <MetricTile
                 icon={<TrendingDown className="h-3 w-3" />}
@@ -631,6 +635,7 @@ function QuickDecisionTab() {
                 value={pct(winner.trace.scoreDerivation.find(s => s.axis === "riskAdjustedReturn")?.rawValue ?? 0, 1)}
                 tone="indigo"
                 infoTerm="Risk-adjusted return"
+                helpTopic={HELP_TOPICS.riskAdjustedCagr}
               />
               <MetricTile
                 icon={<Target className="h-3 w-3" />}
@@ -638,6 +643,7 @@ function QuickDecisionTab() {
                 value={fmt$M(winner.trace.scoreDerivation.find(s => s.axis === "terminalNetWorth")?.rawValue ?? 0)}
                 tone="amber"
                 infoTerm="P50"
+                helpTopic={HELP_TOPICS.terminalNetWorth}
               />
             </div>
 
@@ -765,6 +771,7 @@ function QuickDecisionTab() {
             <CardTitle className="flex items-center gap-2 text-base">
               <ListChecks className="h-5 w-5" />
               All ranked paths ({ranked.length})
+              <HelpLink topic={HELP_TOPICS.rankingWeights} variant="icon" ariaLabel="How paths are ranked" />
             </CardTitle>
             <CardDescription>
               Each path is an investment-committee–style explanation with trade-offs, baseline delta, stress, and a deep-dive sheet.
@@ -880,6 +887,7 @@ function RiskControlsPanel({
         <Gauge className="h-3.5 w-3.5 text-[hsl(var(--intelligence))]" />
         <Label className="text-xs font-medium">Risk control mode</Label>
         <InfoTooltip term="Risk control mode" />
+        <HelpLink topic={HELP_TOPICS.scenarioAssumptions} variant="icon" ariaLabel="Learn about risk control modes" />
         <span className="text-[10px] text-foreground/70 hidden sm:inline">decides which soft warnings discard vs. show as high-risk</span>
         <button
           onClick={onToggleExpanded}
@@ -1038,6 +1046,7 @@ function MultiWinnerPanel({ output }: { output: QuickDecisionOutput }) {
         <CardTitle className="flex items-center gap-2 text-base">
           <Layers className="h-5 w-5" />
           Multi-winner lenses
+          <HelpLink topic={HELP_TOPICS.decisionLenses} variant="icon" ariaLabel="Why lenses differ" />
         </CardTitle>
         <CardDescription>
           Same candidate set, re-scored under four different priorities. The engine doesn’t force one universal winner.
@@ -1317,7 +1326,7 @@ function ReadoutTile({ label, value }: { label: string; value: string }) {
 }
 
 function MetricTile({
-  icon, label, value, tone, infoTerm,
+  icon, label, value, tone, infoTerm, helpTopic,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -1325,6 +1334,8 @@ function MetricTile({
   tone: "emerald" | "sky" | "indigo" | "amber";
   /** Glossary key to attach an <InfoTooltip /> next to the label. */
   infoTerm?: string;
+  /** Optional Help Center topic id — adds a deep-link to the full explanation. */
+  helpTopic?: string;
 }) {
   // Semantic-token tile shells so contrast is correct in both light and dark.
   // We pair a low-saturation surface with the tone-specific accent text — and
@@ -1348,6 +1359,7 @@ function MetricTile({
         {icon}
         <span className="truncate">{label}</span>
         {infoTerm && <InfoTooltip term={infoTerm} size={11} />}
+        {helpTopic && <HelpLink topic={helpTopic} variant="icon" ariaLabel={`Learn more about ${label}`} />}
       </div>
       <div className="text-base sm:text-lg font-bold tabular-nums mt-0.5 text-foreground">{value}</div>
     </div>
@@ -1582,11 +1594,17 @@ export default function DecisionPage() {
   return (
     <div className="p-3 sm:p-6 max-w-7xl mx-auto space-y-4">
       <div className="space-y-1">
-        <h1 className="text-xl sm:text-2xl font-bold">Decision Engine</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-bold">Decision Engine</h1>
+          <HelpLink topic={HELP_TOPICS.decisionEngineOverview} variant="icon" ariaLabel="How the Decision Engine works" />
+        </div>
         <p className="text-xs sm:text-sm text-muted-foreground">
           One engine, two interfaces. Quick Decision auto-ranks the best paths;
           Advanced Builder lets you author scenarios event-by-event.
         </p>
+        <div className="pt-0.5">
+          <HelpLink topic={HELP_TOPICS.simpleVsAdvanced} variant="learn-more" label="Simple vs Advanced — which one should I use?" />
+        </div>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as "quick" | "advanced")}>
