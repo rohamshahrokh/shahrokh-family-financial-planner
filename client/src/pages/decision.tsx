@@ -90,6 +90,8 @@ import { StrategyCard } from "@/components/decisionEngine/StrategyCard";
 // Embedded power-user tab — re-uses every line of premium Scenario Lab UX.
 import ScenarioCompareV2Page from "./scenario-compare-v2";
 import AssumptionsPanel from "@/components/AssumptionsPanel";
+import { AdvancedWorkspace } from "@/components/advancedWorkspace";
+import { useDashboardInputs } from "@/components/advancedWorkspace/useDashboardInputs";
 
 // ─── Formatting helpers (mask-aware) ─────────────────────────────────────────
 
@@ -1603,7 +1605,61 @@ function CandidateRow({
   );
 }
 
-// ─── Page (tabs) ─────────────────────────────────────────────────────────────
+// ─── Advanced Mode Tab ──────────────────────────────────────────────────────
+//
+// Advanced Mode is a two-tier surface intentionally separated from Quick:
+//   1. Analysis Workspace  — institutional 3-panel analytical workspace (V1)
+//   2. Scenario Builder    — legacy event-timeline composer (preserved)
+//
+// They share the same engine but feel like two different products.
+
+function AdvancedModeTab() {
+  const [innerTab, setInnerTab] = useState<"workspace" | "builder">(() => {
+    if (typeof window === "undefined") return "workspace";
+    const hash = window.location.hash.replace("#", "");
+    return hash === "advanced/builder" ? "builder" : "workspace";
+  });
+
+  useEffect(() => {
+    window.location.hash = innerTab === "builder" ? "advanced/builder" : "advanced";
+  }, [innerTab]);
+
+  // Shared engine inputs + format helpers for the workspace.
+  const { dashboardInputs, liveReadouts } = useDashboardInputs();
+  const { privacyMode } = useAppStore();
+  const fmtSet = useMaskFmt(privacyMode);
+
+  return (
+    <div className="space-y-3">
+      <Tabs value={innerTab} onValueChange={(v) => setInnerTab(v as "workspace" | "builder")}>
+        <TabsList className="grid w-full grid-cols-2 sm:w-auto sm:inline-flex">
+          <TabsTrigger value="workspace" className="text-xs sm:text-sm h-10 sm:h-9" data-testid="advanced-subtab-workspace">
+            Analysis Workspace
+          </TabsTrigger>
+          <TabsTrigger value="builder" className="text-xs sm:text-sm h-10 sm:h-9" data-testid="advanced-subtab-builder">
+            Scenario Builder
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="workspace" className="mt-4">
+          <AdvancedWorkspace
+            dashboardInputs={dashboardInputs}
+            liveReadouts={liveReadouts}
+            fmt={fmtSet}
+            privacyMode={privacyMode}
+          />
+        </TabsContent>
+
+        <TabsContent value="builder" className="mt-4">
+          {/* Legacy event-timeline UX, preserved unchanged. */}
+          <ScenarioCompareV2Page />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+// ─── Page (tabs) ──────────────────────────────────────────────────────────────
 
 export default function DecisionPage() {
   const [tab, setTab] = useState<"quick" | "advanced">("quick");
@@ -1627,7 +1683,8 @@ export default function DecisionPage() {
         </div>
         <p className="text-xs sm:text-sm text-muted-foreground">
           One engine, two interfaces. Quick Decision auto-ranks the best paths;
-          Advanced Builder lets you author scenarios event-by-event.
+          Advanced Mode opens a full analytical workspace with comparison, stress,
+          and execution tools plus the legacy scenario builder.
         </p>
         <div className="pt-0.5">
           <HelpLink topic={HELP_TOPICS.simpleVsAdvanced} variant="learn-more" label="Simple vs Advanced — which one should I use?" />
@@ -1642,7 +1699,7 @@ export default function DecisionPage() {
           </TabsTrigger>
           <TabsTrigger value="advanced" className="text-xs sm:text-sm h-11 sm:h-9">
             <Beaker className="h-3.5 w-3.5 mr-1.5" />
-            Advanced Builder
+            Advanced Mode
           </TabsTrigger>
         </TabsList>
 
@@ -1651,9 +1708,7 @@ export default function DecisionPage() {
         </TabsContent>
 
         <TabsContent value="advanced" className="mt-4">
-          {/* The legacy event-timeline UX, but rendered without page-level header
-              chrome since we're already inside a Layout. */}
-          <ScenarioCompareV2Page />
+          <AdvancedModeTab />
         </TabsContent>
       </Tabs>
 
