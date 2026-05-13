@@ -37,6 +37,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { SmartNumInput } from "@/components/ui/smart-num-input";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { HelpLink, HELP_TOPICS } from "@/components/help";
+import { PlainMetric } from "@/components/decisionEngine/PlainMetric";
+import { AdvancedAnalysisSection } from "@/components/decisionEngine/AdvancedAnalysisSection";
+import { METRIC_LABELS, LENS_LABELS, RISK_MODE_LABELS } from "@/lib/decisionEngineLabels";
 import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
   Trophy, Shield, Droplet, TrendingDown, Target, Info, Eye, EyeOff, ShieldAlert,
@@ -473,15 +476,16 @@ function QuickDecisionTab() {
             </label>
           </div>
 
-          {/* Investor profile selector (Phase 2.1) */}
+          {/* Investor profile selector (Phase 2.1) — plain-English heading */}
           <div className="space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
               <SlidersHorizontal className="h-3.5 w-3.5 text-[hsl(var(--intelligence))]" />
-              <Label className="text-xs font-medium">Investor profile</Label>
-              <span className="text-[10px] text-muted-foreground">
-                re-weights ranking · raw math unchanged
-              </span>
+              <Label className="text-xs font-medium">What kind of investor are you?</Label>
+              <HelpLink topic={HELP_TOPICS.recommendationLogic} variant="icon" ariaLabel="How investor profile changes ranking" />
             </div>
+            <p className="text-[11px] text-foreground/70 leading-snug">
+              Picks which trade-offs the ranking favours. The math doesn’t change — just which path bubbles to the top.
+            </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2" data-testid="investor-profile-grid">
               {listInvestorProfiles().map(p => (
                 <button
@@ -506,7 +510,8 @@ function QuickDecisionTab() {
             </div>
           </div>
 
-          {/* Phase 2.8 — Risk Control Mode panel */}
+          {/* Risk control mode — 4 plain-English presets with obvious selected state
+              and "what changes" subtitle for each option. Engine logic untouched. */}
           <RiskControlsPanel
             mode={riskMode}
             onModeChange={setRiskMode}
@@ -613,33 +618,33 @@ function QuickDecisionTab() {
 
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MetricTile
+              <PlainMetric
                 icon={<Shield className="h-3 w-3" />}
-                label="Survival"
+                label={METRIC_LABELS.survivalProbability}
                 value={pct(winner.trace.scoreDerivation.find(s => s.axis === "survivalProbability")?.rawValue ?? 0, 0)}
                 tone="emerald"
                 infoTerm="Survival probability"
                 helpTopic={HELP_TOPICS.survivalProbability}
               />
-              <MetricTile
+              <PlainMetric
                 icon={<Droplet className="h-3 w-3" />}
-                label="Liquidity factor"
+                label={METRIC_LABELS.liquidityFactor}
                 value={(winner.trace.scoreDerivation.find(s => s.axis === "liquidityFactor")?.rawValue ?? 0).toFixed(2)}
                 tone="sky"
                 infoTerm="Liquidity factor"
                 helpTopic={HELP_TOPICS.liquidityFactor}
               />
-              <MetricTile
+              <PlainMetric
                 icon={<TrendingDown className="h-3 w-3" />}
-                label="Risk-adj CAGR"
+                label={METRIC_LABELS.riskAdjustedReturn}
                 value={pct(winner.trace.scoreDerivation.find(s => s.axis === "riskAdjustedReturn")?.rawValue ?? 0, 1)}
                 tone="indigo"
                 infoTerm="Risk-adjusted return"
                 helpTopic={HELP_TOPICS.riskAdjustedCagr}
               />
-              <MetricTile
+              <PlainMetric
                 icon={<Target className="h-3 w-3" />}
-                label="Terminal NW (P50)"
+                label={METRIC_LABELS.terminalNetWorth}
                 value={fmt$M(winner.trace.scoreDerivation.find(s => s.axis === "terminalNetWorth")?.rawValue ?? 0)}
                 tone="amber"
                 infoTerm="P50"
@@ -692,8 +697,9 @@ function QuickDecisionTab() {
               </div>
             )}
 
-            {/* Phase 2.2: Wealth-path fan chart */}
-            <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+            {/* Wealth-path fan chart stays visible by default — it's the
+                most intuitive view ("where could my wealth go?"). */}
+            <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3 sm:p-4">
               <FanChart
                 fan={winner.result.netWorthFan}
                 fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
@@ -702,37 +708,39 @@ function QuickDecisionTab() {
               />
             </div>
 
-            {/* Phase 2.2: Tail-risk profile */}
-            <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
-              <TailRiskCard
-                result={winner.result}
-                fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
-              />
-            </div>
-
-            {/* Phase 2.2: Terminal NW distribution + VaR/CVaR markers */}
-            <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
-              <DistributionHistogram
-                terminalNwSorted={winner.result.terminalNwSorted}
-                initialNetWorth={winner.result.initialNetWorth}
-                varDollars95={winner.result.riskMetrics.varDollars95}
-                cvarDollars95={winner.result.riskMetrics.cvarDollars95}
-                fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
-                hidden={privacyMode}
-              />
-            </div>
-
-            {/* Phase 2.3: Score waterfall */}
-            <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
-              <ScoreWaterfall candidate={winner} fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }} />
-            </div>
-
-            {/* Phase 2.3: Winner vs runner-up */}
-            {output && output.ranked.length >= 2 && (
+            {/* Everything else — quant-grade charts and bad-tail analysis —
+                tucked into progressive disclosure so beginners don't drown. */}
+            <AdvancedAnalysisSection
+              title="Advanced analysis"
+              hint="Tail risk, score breakdown, runner-up comparison"
+              helpTopic={HELP_TOPICS.chartGuides}
+              dataTestid="winner-advanced-analysis"
+            >
               <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
-                <WinnerVsRunnerUp output={output} fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }} />
+                <TailRiskCard
+                  result={winner.result}
+                  fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
+                />
               </div>
-            )}
+              <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+                <DistributionHistogram
+                  terminalNwSorted={winner.result.terminalNwSorted}
+                  initialNetWorth={winner.result.initialNetWorth}
+                  varDollars95={winner.result.riskMetrics.varDollars95}
+                  cvarDollars95={winner.result.riskMetrics.cvarDollars95}
+                  fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }}
+                  hidden={privacyMode}
+                />
+              </div>
+              <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+                <ScoreWaterfall candidate={winner} fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }} />
+              </div>
+              {output && output.ranked.length >= 2 && (
+                <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+                  <WinnerVsRunnerUp output={output} fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }} />
+                </div>
+              )}
+            </AdvancedAnalysisSection>
 
             {/* Phase 2.3: Invalidation engine */}
             {output && (
@@ -873,11 +881,13 @@ function RiskControlsPanel({
   expanded: boolean;
   onToggleExpanded: () => void;
 }) {
-  const modes: { id: RiskControlMode; label: string; tone: string; desc: string; icon: React.ReactNode }[] = [
-    { id: "conservative", label: "Conservative", tone: "emerald", icon: <Shield className="h-3 w-3" />, desc: "Tight LVR ≤ 75%, NSR ≥ 1.00, default ≤ 10%. No high-risk paths." },
-    { id: "balanced",     label: "Balanced",     tone: "sky",     icon: <Gauge className="h-3 w-3" />,  desc: "Engine default — LVR ≤ 85%, NSR ≥ 0.85, default ≤ 20%." },
-    { id: "aggressive",   label: "Aggressive",   tone: "amber",   icon: <Flame className="h-3 w-3" />,  desc: "NSR ≥ 0.75, default ≤ 30%, crypto up to 50%. Surfaces high-risk paths." },
-    { id: "custom",       label: "Custom",       tone: "violet",  icon: <SlidersHorizontal className="h-3 w-3" />, desc: "Set explicit thresholds. Hard floors still enforced." },
+  // Plain-English risk-mode labels with "what changes" copy sourced from
+  // the central labels module. Engine receives identical mode keys.
+  const modes: { id: RiskControlMode; tone: string; icon: React.ReactNode; def: typeof RISK_MODE_LABELS[string] }[] = [
+    { id: "conservative", tone: "emerald", icon: <Shield className="h-3 w-3" />,            def: RISK_MODE_LABELS.conservative },
+    { id: "balanced",     tone: "sky",     icon: <Gauge className="h-3 w-3" />,             def: RISK_MODE_LABELS.balanced },
+    { id: "aggressive",   tone: "amber",   icon: <Flame className="h-3 w-3" />,             def: RISK_MODE_LABELS.aggressive },
+    { id: "custom",       tone: "violet",  icon: <SlidersHorizontal className="h-3 w-3" />, def: RISK_MODE_LABELS.custom },
   ];
   const resolved = resolveRiskControls(mode, mode === "custom" ? customControls : undefined);
 
@@ -885,10 +895,9 @@ function RiskControlsPanel({
     <div className="space-y-2 rounded-lg border border-border bg-card/60 p-3">
       <div className="flex items-center gap-2 flex-wrap">
         <Gauge className="h-3.5 w-3.5 text-[hsl(var(--intelligence))]" />
-        <Label className="text-xs font-medium">Risk control mode</Label>
+        <Label className="text-xs font-medium">How aggressive should the engine be?</Label>
         <InfoTooltip term="Risk control mode" />
         <HelpLink topic={HELP_TOPICS.scenarioAssumptions} variant="icon" ariaLabel="Learn about risk control modes" />
-        <span className="text-[10px] text-foreground/70 hidden sm:inline">decides which soft warnings discard vs. show as high-risk</span>
         <button
           onClick={onToggleExpanded}
           aria-expanded={expanded}
@@ -897,9 +906,10 @@ function RiskControlsPanel({
           {expanded ? "Hide details" : "Show details"}
         </button>
       </div>
-      {/* Helper line on mobile (full-width row, readable contrast) */}
-      <p className="text-[10px] text-foreground/70 sm:hidden">decides which soft warnings discard vs. show as high-risk</p>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" data-testid="risk-mode-grid">
+      <p className="text-[11px] text-foreground/70 leading-snug">
+        Controls how strict the engine is about filtering risky paths. Doesn’t change the math — just what you see.
+      </p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5" data-testid="risk-mode-grid">
         {modes.map((m) => (
           <button
             key={m.id}
@@ -908,16 +918,22 @@ function RiskControlsPanel({
             data-testid={`risk-mode-${m.id}`}
             className={
               mode === m.id
-                ? "de-selectable-card selected text-left rounded-md p-2 transition-all min-h-[58px]"
-                : "de-selectable-card text-left rounded-md border border-border bg-card p-2 transition-all min-h-[58px] hover:bg-muted/50"
+                ? "de-selectable-card selected text-left rounded-lg p-3 transition-all min-h-[78px] ring-2 ring-[hsl(var(--intelligence)/0.35)] shadow-sm"
+                : "de-selectable-card text-left rounded-lg border border-border bg-card p-3 transition-all min-h-[78px] hover:bg-muted/40 hover:border-border/80"
             }
           >
             <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
               {m.icon}
-              <span className="truncate">{m.label}</span>
+              <span className="truncate">{m.def.simple}</span>
+              {mode === m.id && (
+                <span className="ml-auto text-[9px] uppercase tracking-wide font-bold text-[hsl(var(--intelligence-light))]">●</span>
+              )}
             </div>
-            <div className="text-[10px] text-foreground/70 mt-0.5 leading-snug line-clamp-2">
-              {m.desc}
+            <div className="text-[10px] text-foreground/70 mt-1 leading-snug line-clamp-2">
+              {m.def.subtitle}
+            </div>
+            <div className="text-[9px] text-foreground/55 italic mt-1.5 leading-snug line-clamp-2">
+              {m.def.whatChanges}
             </div>
           </button>
         ))}
@@ -1028,49 +1044,60 @@ function MultiWinnerPanel({ output }: { output: QuickDecisionOutput }) {
     if (!id) return "—";
     return allRanked.find((c) => c.id === id)?.shortLabel ?? id;
   };
-  const lenses: { key: keyof typeof w; label: string; icon: React.ReactNode; tone: string; desc: string }[] = [
-    { key: "balanced",     label: "Best balanced",      icon: <Gauge className="h-3.5 w-3.5" />,   tone: "sky",     desc: "Best under engine defaults" },
-    { key: "wealthMax",    label: "Best wealth-max",    icon: <Crown className="h-3.5 w-3.5" />,   tone: "amber",   desc: "Best for terminal net worth" },
-    { key: "cashflowSafe", label: "Best cashflow-safe", icon: <Heart className="h-3.5 w-3.5" />,   tone: "emerald", desc: "Best for serviceability + liquidity" },
-    { key: "highRisk",     label: "Best high-risk",     icon: <Flame className="h-3.5 w-3.5" />,   tone: "rose",    desc: "Best under aggressive lens" },
+  // Plain-English lens definitions sourced from the central labels module.
+  // The engine still uses internal keys ("balanced", "wealthMax", etc.) —
+  // we just re-label them at the UI layer for non-financial users.
+  const lenses: { key: keyof typeof w; icon: React.ReactNode; tone: string; def: typeof LENS_LABELS[string] }[] = [
+    { key: "balanced",     icon: <Gauge className="h-3.5 w-3.5" />, tone: "sky",     def: LENS_LABELS.balanced },
+    { key: "wealthMax",    icon: <Crown className="h-3.5 w-3.5" />, tone: "amber",   def: LENS_LABELS.wealthMax },
+    { key: "cashflowSafe", icon: <Heart className="h-3.5 w-3.5" />, tone: "emerald", def: LENS_LABELS.cashflowSafe },
+    { key: "highRisk",     icon: <Flame className="h-3.5 w-3.5" />, tone: "rose",    def: LENS_LABELS.highRisk },
   ];
+  // Softer tones — lower-saturation surfaces, less harsh dark-mode contrast.
+  // Premium-fintech look: calm tints, no neon, easy on the eye over long sessions.
   const tones: Record<string, string> = {
-    sky:     "border-sky-300 bg-sky-50 dark:bg-sky-950/30 dark:border-sky-900 text-sky-800 dark:text-sky-300",
-    amber:   "border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 text-amber-800 dark:text-amber-300",
-    emerald: "border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-900 text-emerald-800 dark:text-emerald-300",
-    rose:    "border-rose-300 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-900 text-rose-800 dark:text-rose-300",
+    sky:     "border-sky-300/50 bg-sky-50/60 dark:bg-sky-950/20 dark:border-sky-900/50 text-sky-800 dark:text-sky-300",
+    amber:   "border-amber-300/50 bg-amber-50/60 dark:bg-amber-950/20 dark:border-amber-900/50 text-amber-800 dark:text-amber-300",
+    emerald: "border-emerald-300/50 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-900/50 text-emerald-800 dark:text-emerald-300",
+    rose:    "border-rose-300/50 bg-rose-50/60 dark:bg-rose-950/20 dark:border-rose-900/50 text-rose-800 dark:text-rose-300",
   };
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Layers className="h-5 w-5" />
-          Multi-winner lenses
+          Different ways to read “best”
           <HelpLink topic={HELP_TOPICS.decisionLenses} variant="icon" ariaLabel="Why lenses differ" />
         </CardTitle>
         <CardDescription>
-          Same candidate set, re-scored under four different priorities. The engine doesn’t force one universal winner.
+          The same paths, re-scored four different ways. “Best” depends on what matters most to you — growth, safety, or balance.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2" data-testid="multi-winner-grid">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" data-testid="multi-winner-grid">
           {lenses.map((lens) => {
             const v = w[lens.key];
             return (
               <div
                 key={lens.key}
-                className={`rounded-md border p-3 ${tones[lens.tone]}`}
+                className={`rounded-lg border p-3.5 ${tones[lens.tone]} space-y-1.5`}
                 data-testid={`multi-winner-${lens.key}`}
               >
-                <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold opacity-80">
+                <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold opacity-90">
                   {lens.icon}
-                  <span className="truncate">{lens.label}</span>
+                  <span className="truncate">{lens.def.simple}</span>
                 </div>
-                <div className="text-sm font-semibold mt-1 truncate">{findLabel(v?.id)}</div>
-                <div className="text-[10px] mt-0.5 opacity-80">
-                  {v ? `${v.score.toFixed(0)}/100` : "no candidate"}
+                <div className="text-sm font-semibold mt-0.5 truncate text-foreground">{findLabel(v?.id)}</div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-base font-bold tabular-nums">
+                    {v ? v.score.toFixed(0) : "—"}
+                  </span>
+                  <span className="text-[10px] opacity-70">{v ? "/100" : "no candidate"}</span>
                 </div>
-                <div className="text-[9px] italic mt-1 opacity-70">{lens.desc}</div>
+                <div className="text-[10px] leading-snug opacity-80">{lens.def.subtitle}</div>
+                <div className="text-[10px] italic opacity-70 leading-snug pt-1 border-t border-current/10">
+                  Why this wins: {lens.def.whyThisWon}
+                </div>
               </div>
             );
           })}
