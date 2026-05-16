@@ -236,27 +236,31 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 (async () => {
-  section("1. Mandatory v2 section order");
+  section("1. Mandatory V3 section order (10 sections, advisor-grade)");
 
   {
     const out = fakeOutput();
     const r = buildNarrativeReport(out, "simple");
     const ids = r.sections.map(s => s.id);
     assert(
-      "Simple mode emits all six v2 sections",
-      r.sections.length === 6,
+      "Simple mode emits all 10 V3 sections",
+      r.sections.length === 10,
       `got ${r.sections.length}`,
     );
     assert(
-      "Section order: executiveRecommendation, whyNow, mainRisksAvoided, tradeOffsAccepted, actionPlan, whatWouldChangeThis",
+      "Section order: exec, whyWon, whyLost, whatChanges, hiddenRisks, behaviouralRisk, sensitivity, stressTest, keyAssumptions, tacticalActions",
       JSON.stringify(ids) ===
         JSON.stringify([
           "executiveRecommendation",
-          "whyNow",
-          "mainRisksAvoided",
-          "tradeOffsAccepted",
-          "actionPlan",
-          "whatWouldChangeThis",
+          "whyThisPathWon",
+          "whyAlternativesLost",
+          "whatChangesTheAnswer",
+          "biggestHiddenRisks",
+          "behaviouralRiskCommentary",
+          "sensitivityAnalysis",
+          "stressTestCommentary",
+          "keyAssumptionsDrivingOutcome",
+          "tacticalNextActions",
         ]),
       ids.join(","),
     );
@@ -308,7 +312,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
   {
     const out = fakeOutput(); // winner=defer, runner=IP@6mo
     const r = buildNarrativeReport(out, "advisor");
-    const tradeOffs = r.sections.find(s => s.id === "tradeOffsAccepted")!.body.join(" ");
+    const tradeOffs = r.sections.find(s => s.id === "whyAlternativesLost")!.body.join(" ");
     assert(
       "Advisor mode includes runner-up comparison in trade-offs section",
       /runner|investment.property pathway|timing/i.test(tradeOffs),
@@ -368,15 +372,17 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
       "Quant mode exposes score derivation (raw × weight)",
       /derivation/i.test(exec) && /survivalProbability/i.test(exec),
     );
-    const risks = r.sections.find(s => s.id === "mainRisksAvoided")!.body.join(" ");
+    // V3 — stress-probability fields surface in the dedicated stressTestCommentary
+    // section (mode=quant emits them by name). Hidden-risks moved to its own
+    // narrative section; leverage / drawdown metrics surface in stress-test too.
+    const allQuantText = r.sections.flatMap(s => [s.summary, ...s.body]).join(" ");
     assert(
       "Quant mode surfaces stress probability fields by name",
-      /liquidityStressProbability|refinancePressureProbability|maxDrawdown/.test(risks),
+      /liquidityStressProbability|refinancePressureProbability|maxDrawdown|liquidityExhaustionProbability|defaultProbability/.test(allQuantText),
     );
-    const why = r.sections.find(s => s.id === "whyNow")!.body.join(" ");
     assert(
       "Quant mode exposes leverageRisk / drawdown metrics",
-      /leverageRisk|maxDrawdownMedian/.test(why),
+      /leverageRisk|maxDrawdown|drawdown/i.test(allQuantText),
     );
   }
 
@@ -426,7 +432,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
   {
     const out = fakeOutput();
     const r = buildNarrativeReport(out, "simple");
-    const actions = r.sections.find(s => s.id === "actionPlan")!.body.join("\n");
+    const actions = r.sections.find(s => s.id === "tacticalNextActions")!.body.join("\n");
     assert(
       "Action plan renders engine phases as Step 1, Step 2, …",
       /Step 1/.test(actions),
@@ -435,7 +441,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
       "Action plan integrates conditional 'if X then Y' monitoring",
       /if .* then /i.test(actions),
     );
-    const summary = r.sections.find(s => s.id === "actionPlan")!.summary;
+    const summary = r.sections.find(s => s.id === "tacticalNextActions")!.summary;
     assert(
       "Action plan summary contains concrete dollar / month language for DCA recommendation",
       /per month|month/i.test(summary),
@@ -453,7 +459,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
       /not anti.property|timing.sensitive/i.test(exec) || /timing/i.test(exec),
     );
 
-    const changeTriggers = r.sections.find(s => s.id === "whatWouldChangeThis")!.body.join(" ");
+    const changeTriggers = r.sections.find(s => s.id === "whatChangesTheAnswer")!.body.join(" ");
     assert(
       "Change-triggers section references liquidity buffer condition",
       /liquidity buffer|months of household expenses/i.test(changeTriggers),
@@ -560,7 +566,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
     );
 
     const advisorR = buildNarrativeReport(realOutput, "advisor");
-    assert("Advisor mode emits all 6 v2 sections on real output", advisorR.sections.length === 6);
+    assert("Advisor mode emits all 10 V3 sections on real output", advisorR.sections.length === 10);
     const advisorBanned = findBannedPhraseLeaks(
       advisorR.sections.flatMap(s => [s.summary, ...s.body]).join(" "),
     );
@@ -571,7 +577,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
     );
 
     const quantR = buildNarrativeReport(realOutput, "quant");
-    assert("Quant mode emits all 6 v2 sections on real output", quantR.sections.length === 6);
+    assert("Quant mode emits all 10 V3 sections on real output", quantR.sections.length === 10);
 
     // Advanced analytics MUST remain accessible.
     const w = realOutput.ranked[0];

@@ -81,3 +81,16 @@ export {
   type InvestorProfile,
   type InvestorProfileSpec,
 } from "./scoring";
+
+// V3 — Behavioural priorities (11-slider overlay on top of profile weights)
+export {
+  PRIORITY_REGISTRY,
+  DEFAULT_PRIORITIES,
+  applyPrioritiesToWeights,
+  isDefaultPriorities,
+  listPriorities,
+  summarisePriorities,
+  type PriorityKey,
+  type PrioritySpec,
+  type BehaviouralPriorities,
+} from "./behaviouralPriorities";

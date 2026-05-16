@@ -40,6 +40,10 @@ import { HelpLink, HELP_TOPICS } from "@/components/help";
 import { PlainMetric } from "@/components/decisionEngine/PlainMetric";
 import { AdvancedAnalysisSection } from "@/components/decisionEngine/AdvancedAnalysisSection";
 import { IntelligenceSection } from "@/components/decisionEngine/intelligence/IntelligenceSection";
+import { AutonomousSection } from "@/components/decisionEngine/autonomous/AutonomousSection";
+import { buildFinancialIntelligence } from "@/lib/scenarioV2";
+import { DEFAULT_ASSUMPTIONS } from "@/lib/scenarioV2/basePlan";
+import { useLedgerHistory, useStrategicMemory } from "@/lib/autonomousMemoryStore";
 import { METRIC_LABELS, LENS_LABELS, RISK_MODE_LABELS } from "@/lib/decisionEngineLabels";
 import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
@@ -69,8 +73,18 @@ import {
 import {
   listInvestorProfiles,
   PROFILE_REGISTRY,
+  DEFAULT_PRIORITIES,
   type InvestorProfile,
+  type BehaviouralPriorities,
 } from "@/lib/scenarioV2/registry";
+import { BehaviouralPrioritiesPanel } from "@/components/decisionEngine/BehaviouralPrioritiesPanel";
+import { QuestionFramework } from "@/components/decisionEngine/QuestionFramework";
+import {
+  AdvancedAssumptionCapture,
+  DEFAULT_ADVANCED_ASSUMPTIONS,
+  type AdvancedAssumptions,
+} from "@/components/decisionEngine/AdvancedAssumptionCapture";
+import { RiskFieldExplainer } from "@/components/decisionEngine/RiskFieldExplainer";
 import { generateQuickDecisionPdf } from "@/lib/scenarioV2/quickDecisionPdf";
 import {
   FanChart,
@@ -185,6 +199,12 @@ function QuickDecisionTab() {
   const { privacyMode, togglePrivacy } = useAppStore();
   const { fmt$, fmt$k, fmt$M, pct, sentence } = useMaskFmt(privacyMode);
 
+  // ── Autonomous OS in-session memory (no browser storage) ──────────────────
+  // History + memory live in a module-level singleton for the current
+  // session only. They reset on reload — the UI is explicit about that.
+  const autonomousHistory = useLedgerHistory();
+  const autonomousMemory = useStrategicMemory();
+
   // ── User question input ────────────────────────────────────────────────────
   const [question, setQuestion] = useState<QuickDecisionQuestionKind>(DEFAULT_QUESTION);
   const [capital, setCapital] = useState<number>(DEFAULT_PRESET.defaults.capital);
@@ -204,6 +224,17 @@ function QuickDecisionTab() {
   const [customControls, setCustomControls] = useState<Partial<RiskControlOverrides>>({});
   const [expandedDiscardId, setExpandedDiscardId] = useState<string | null>(null);
   const [showRiskControls, setShowRiskControls] = useState(false);
+
+  // ── V3: Behavioural priorities (11-slider overlay) ────────────────────────
+  // Defaults are all 5 (neutral). The engine treats this as a no-op so
+  // existing users see no behaviour change unless they configure priorities.
+  const [priorities, setPriorities] = useState<BehaviouralPriorities>({ ...DEFAULT_PRIORITIES });
+
+  // ── V3: Advanced assumption capture (household / income / debt / property
+  // / investing context). Client-side only — engine reads `dependants` and
+  // `incomeVolatility` directly; the rest informs narrative tone and PDF.
+  const [advancedAssumptions, setAdvancedAssumptions] =
+    useState<AdvancedAssumptions>(DEFAULT_ADVANCED_ASSUMPTIONS);
 
   // ── Output state ───────────────────────────────────────────────────────────
   const [output, setOutput] = useState<QuickDecisionOutput | null>(null);
@@ -257,6 +288,13 @@ function QuickDecisionTab() {
     setExpandedDiscardId(null);
   }, [riskMode]);
 
+  // V3 — changing behavioural priorities re-shapes the scoring weights, so
+  // the cached output is no longer comparable. Invalidate to force a re-run.
+  useEffect(() => {
+    setOutput(null);
+    setExpandedCandidateId(null);
+  }, [priorities]);
+
   // ── Run-button validity ────────────────────────────────────────────────────
   // Button is disabled ONLY when inputs are invalid or a run is in flight.
   // Anything that resets state above also restores validity, so the button can
@@ -286,11 +324,19 @@ function QuickDecisionTab() {
     setExpandedCandidateId(null);
     try {
       const annualGrossIncome = (liveReadouts?.income ?? 0) * 12;
+      // V3 — prefer values from the Advanced Assumption Capture panel when the
+      // user has touched them. Fall back to the inline secondary inputs.
+      const effectiveDependants = advancedAssumptions.household.dependants !== 0
+        ? advancedAssumptions.household.dependants
+        : dependants;
+      const effectiveIncomeVol = advancedAssumptions.income.expectedIncomeVolatility !== 0.15
+        ? advancedAssumptions.income.expectedIncomeVolatility
+        : incomeVolatility;
       const out = await generateQuickDecisionCandidates({
         dashboardInputs,
         question: { kind: question, capital },
         horizonYears,
-        household: { dependants, incomeVolatility },
+        household: { dependants: effectiveDependants, incomeVolatility: effectiveIncomeVol },
         investorProfile,
         simulationCount: 300,    // good balance of speed + signal for UX
         taxContext: {
@@ -300,6 +346,7 @@ function QuickDecisionTab() {
         },
         riskMode,
         riskControls: riskMode === "custom" ? customControls : undefined,
+        behaviouralPriorities: priorities,
       });
       setOutput(out);
       if (out.ranked.length > 0) setExpandedCandidateId(out.ranked[0].id);
@@ -368,29 +415,10 @@ function QuickDecisionTab() {
         </CardHeader>
 
         <CardContent className="space-y-5">
-          {/* Question pills */}
-          <div className="space-y-2">
-            <Label className="text-xs font-medium">Question</Label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {QUESTION_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => setQuestion(opt.value)}
-                  // Premium fintech dark mode: selected = subtle blue tint +
-                  // 1px primary border. No bright ring. Hierarchy reads via
-                  // --surface-2 → --surface-3, not via accent borders.
-                  className={`text-left rounded-lg border p-3 transition-all min-h-[64px]
-                    ${question === opt.value
-                      ? "border-primary/60 bg-[hsl(var(--intelligence-surface))] shadow-[var(--shadow-sm)]"
-                      : "border-border bg-[hsl(var(--surface-2))] hover:bg-[hsl(var(--surface-3))]"}`}
-                  aria-pressed={question === opt.value}
-                >
-                  <div className="text-xs font-semibold text-foreground">{opt.label}</div>
-                  <div className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{opt.sub}</div>
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* V3 — Grouped strategic-question framework. Replaces the flat
+              pill grid with category-grouped sections so the 30+ questions
+              fit on mobile without burying the Run button. */}
+          <QuestionFramework value={question} onChange={setQuestion} />
 
           {/* Mobile-only collapsible trigger (audit P1-6). Hidden on md+. */}
           <div className="md:hidden">
@@ -533,6 +561,17 @@ function QuickDecisionTab() {
             expanded={showRiskControls}
             onToggleExpanded={() => setShowRiskControls((v) => !v)}
           />
+
+          {/* V3 — Investor behaviour & priorities. Collapsed by default so it
+              does not crowd the mobile flow; expanding reveals 11 sliders
+              that re-weight the composite score deterministically. */}
+          <BehaviouralPrioritiesPanel value={priorities} onChange={setPriorities} />
+
+          {/* V3 — Advanced assumption capture (household / income / debt /
+              property / investing). Optional, collapsible. The engine reads
+              dependants + income volatility directly; the rest informs
+              narrative tone and PDF context. */}
+          <AdvancedAssumptionCapture value={advancedAssumptions} onChange={setAdvancedAssumptions} />
           </div>{/* /Mobile collapsible inputs block (audit P1-6) */}
 
           {liveReadouts && (
@@ -686,6 +725,24 @@ function QuickDecisionTab() {
                 Engine math untouched. */}
             {output && (
               <IntelligenceSection output={output} prior={null} />
+            )}
+
+            {/* ── Autonomous Financial OS (Phase 3) ───────────────────────
+                Deterministic proactive layer composed on top of the
+                Financial Intelligence Layer. Adds continuous monitoring,
+                recommendation evolution, regime awareness, opportunity
+                detection, drift, dynamic priorities, autonomous alerts,
+                rebalancing, life-event simulation, longitudinal comparison,
+                rolling roadmap, strategic memory, and visual modules.
+                Engine math untouched. */}
+            {output && (
+              <AutonomousSection
+                output={output}
+                intelligence={buildFinancialIntelligence({ output, prior: null })}
+                assumptions={DEFAULT_ASSUMPTIONS}
+                history={autonomousHistory}
+                memory={autonomousMemory}
+              />
             )}
 
             {/* Legacy "why-won / what-could-invalidate" block — Quant mode only,
@@ -1000,6 +1057,7 @@ function RiskControlsPanel({
           <div className="text-[10px] uppercase tracking-wide font-semibold text-violet-700 dark:text-violet-300">Custom thresholds</div>
           <CustomSlider
             label="Max LVR"
+            explainerId="maxLvr"
             value={customControls.maxLvr ?? RISK_MODE_DEFAULTS.custom.maxLvr}
             min={0.50} max={0.85} step={0.01}
             format={(v) => `${(v * 100).toFixed(0)}%`}
@@ -1007,6 +1065,7 @@ function RiskControlsPanel({
           />
           <CustomSlider
             label="Min buffered NSR"
+            explainerId="minNsrBuffered"
             value={customControls.minNsrBuffered ?? RISK_MODE_DEFAULTS.custom.minNsrBuffered}
             min={0.70} max={1.20} step={0.01}
             format={(v) => v.toFixed(2)}
@@ -1014,6 +1073,7 @@ function RiskControlsPanel({
           />
           <CustomSlider
             label="Max default probability"
+            explainerId="maxDefaultProbability"
             value={customControls.maxDefaultProbability ?? RISK_MODE_DEFAULTS.custom.maxDefaultProbability}
             min={0.05} max={0.40} step={0.01}
             format={(v) => `${(v * 100).toFixed(0)}%`}
@@ -1021,6 +1081,7 @@ function RiskControlsPanel({
           />
           <CustomSlider
             label="Max crypto share"
+            explainerId="maxCryptoSharePct"
             value={customControls.maxCryptoSharePct ?? RISK_MODE_DEFAULTS.custom.maxCryptoSharePct}
             min={0.00} max={1.00} step={0.05}
             format={(v) => `${(v * 100).toFixed(0)}%`}
@@ -1057,7 +1118,7 @@ function ControlReadout({ label, value, hint }: { label: string; value: string; 
 }
 
 function CustomSlider({
-  label, value, min, max, step, format, onChange,
+  label, value, min, max, step, format, onChange, explainerId,
 }: {
   label: string;
   value: number;
@@ -1066,11 +1127,17 @@ function CustomSlider({
   step: number;
   format: (v: number) => string;
   onChange: (v: number) => void;
+  /** Optional risk-explainability metadata id. Adds a popover with plain-English
+   *  explanation, recommended range, and what raising/lowering does. */
+  explainerId?: string;
 }) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-[11px]">
-        <Label className="text-[11px]">{label}</Label>
+        <Label className="text-[11px] flex items-center gap-1">
+          {label}
+          {explainerId && <RiskFieldExplainer fieldId={explainerId} />}
+        </Label>
         <span className="font-semibold tabular-nums">{format(value)}</span>
       </div>
       <Slider
