@@ -165,3 +165,43 @@ export {
   pdfSafe,
   type QuickDecisionPdfData,
 } from "./quickDecisionPdf";
+
+// Financial Intelligence Layer V1
+export {
+  buildFinancialIntelligence,
+  detectTurningPoints,
+  scanFragility,
+  rankAssumptionDependencies,
+  detectWeakestLink,
+  detectRegimeDependency,
+  assessBehaviouralSurvivability,
+  scorePathRobustness,
+  buildRecommendationDelta,
+  detectDrift,
+  buildExplainability,
+  buildInsightCards,
+  selectCriticalFindings,
+} from "./intelligence";
+export type {
+  FinancialIntelligenceReport,
+  TurningPoint,
+  FragilityFinding,
+  AssumptionImpact,
+  AssumptionKey,
+  WeakestLink,
+  RegimeDependency,
+  Regime,
+  BehaviouralFinding,
+  BehaviouralAxis,
+  PathRobustness,
+  RecommendationDelta,
+  DriftFinding,
+  ExplainabilityAnswers,
+  InsightCard,
+  InsightKind,
+  InsightCategory,
+  InsightSeverity,
+  InsightConfidence,
+  InsightThreshold,
+  PriorContext,
+} from "./intelligence";
