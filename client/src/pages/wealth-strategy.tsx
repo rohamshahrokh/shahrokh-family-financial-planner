@@ -1,7 +1,23 @@
 /**
  * wealth-strategy.tsx
  * Shahrokh Family Financial Planner — Wealth Strategy Hub
- * 10 fully-functional calculation modules in a tabbed interface.
+ *
+ * Orchestration + summary + action guidance. NOT a calculator strip.
+ *
+ * Grouped sections (mobile-first, labelled, every card answers "what is this,
+ * why does it matter, what should I do next, where can I go deeper"):
+ *   1. Executive Overview      — net position, top 3 priorities, next best action
+ *   2. Financial Stability     — emergency buffer, cashflow, debt pressure + Risk Radar
+ *   3. Financial Freedom Plan  — combined FIRE + Retirement (single home)
+ *   4. Wealth Building         — property / investment / decision engine summary
+ *   5. Optimisation            — tax, debt optimisation, scenario readiness
+ *   6. Advanced Analytics      — Monte Carlo / Forecast / CGT / full scenarios (collapsed)
+ *
+ * Source-of-truth engines (Risk Radar, FIRE Path, Decision Engine, etc.) remain
+ * untouched on their dedicated pages and are reachable via deep links.
+ * Calculators that were previously in standalone tabs (FIRE Tracker, Retirement
+ * Predictor, Emergency Score, Debt Killer, …) are now embedded under the relevant
+ * parent module as "Full breakdown" sections — no functionality removed.
  */
 
 import SaveButton from "@/components/SaveButton";
@@ -9,7 +25,8 @@ import AssumptionsPanel from "@/components/AssumptionsPanel";
 import RiskRadarPage from "./risk-radar";
 import FIREPathPage from "./fire-path";
 import MonteCarloDashboard from "@/components/MonteCarloDashboard";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { Link } from "wouter";
 import html2canvas from 'html2canvas';
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -45,9 +62,12 @@ import {
   Search,
   Brain,
   ChevronRight,
+  ChevronDown,
+  ArrowRight,
   Info,
   AlertTriangle,
   CheckCircle,
+  CheckCircle2,
   Zap,
   Target,
   DollarSign,
@@ -58,6 +78,18 @@ import {
   FileDown,
   Bookmark,
   Atom,
+  Sparkles,
+  Layers,
+  Home,
+  HeartPulse,
+  Sigma,
+  CreditCard,
+  Wallet,
+  ClipboardList,
+  Activity,
+  PiggyBank,
+  LineChart as LineChartIcon,
+  BarChart2,
 } from "lucide-react";
 import {
   LineChart,
@@ -209,24 +241,32 @@ function InputRow({
   );
 }
 
-// ─── Tab definitions ──────────────────────────────────────────────────────────
+// ─── Sub-module registry ──────────────────────────────────────────────────────
+// Each entry powers a "Full breakdown" disclosure section under a parent module.
+// The icon-only horizontal tab strip is gone (audit feedback: fragmented, mystery
+// icons). Sub-modules now live under labelled parent sections.
 
-const TABS = [
-  { id: "fire", label: "FIRE Tracker", icon: Flame },
-  { id: "debt", label: "Debt Killer", icon: Sword },
-  { id: "networth", label: "Net Worth", icon: BarChart3 },
-  { id: "lifestyle", label: "Lifestyle", icon: TrendingUp },
-  { id: "emergency", label: "Emergency", icon: Shield },
-  { id: "tax", label: "Tax Optimizer", icon: Calculator },
-  { id: "property", label: "Property Engine", icon: Building2 },
-  { id: "retirement", label: "Retirement", icon: Clock },
-  { id: "hidden", label: "Hidden Money", icon: Search },
-  { id: "coach", label: "AI Coach", icon: Brain },
-  { id: "action-plan", label: "Action Plan", icon: Zap },
-  { id: "risk-radar",  label: "Risk Radar",   icon: Shield },
-  { id: "fire-path",   label: "FIRE Path",     icon: Flame  },
-  { id: "monte-carlo", label: "Monte Carlo",   icon: Atom   },
-];
+type SubModuleId =
+  | "fire" | "debt" | "networth" | "lifestyle" | "emergency"
+  | "tax" | "property" | "retirement" | "hidden" | "coach"
+  | "action-plan" | "risk-radar" | "fire-path" | "monte-carlo";
+
+const SUB_MODULE_LABEL: Record<SubModuleId, string> = {
+  "fire":         "FIRE Tracker",
+  "debt":         "Debt Killer",
+  "networth":     "Net Worth Simulator",
+  "lifestyle":    "Lifestyle Inflation",
+  "emergency":    "Emergency Score",
+  "tax":          "Tax Optimizer",
+  "property":     "Property Engine",
+  "retirement":   "Retirement Predictor",
+  "hidden":       "Hidden Money",
+  "coach":        "AI Coach",
+  "action-plan":  "Personalised Action Plan",
+  "risk-radar":   "Risk Radar (Full)",
+  "fire-path":    "FIRE Path Optimizer",
+  "monte-carlo":  "Monte Carlo Dashboard",
+};
 
 // ─── FIRE months helper (delegates to shared util) ───────────────────────────
 function monthsToFIRE(startBalance: number, monthlyContrib: number, monthlyRate: number, target: number): number {
@@ -2541,13 +2581,259 @@ function generateActionPlan(snap: any, properties: any[], expenses: any[]): Arra
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
+// ─── Orchestration status types (calm advisor tone, no panic wording) ─────────
+
+type StabilityStatus = "good" | "watch" | "act" | "neutral";
+
+const STATUS_TONE: Record<StabilityStatus, { dot: string; chip: string; label: string }> = {
+  good:    { dot: "bg-emerald-500", chip: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30", label: "On track" },
+  watch:   { dot: "bg-amber-500",   chip: "bg-amber-500/10 text-amber-500 border-amber-500/30",     label: "Watch closely" },
+  act:     { dot: "bg-rose-500",    chip: "bg-rose-500/10 text-rose-500 border-rose-500/30",         label: "Take action" },
+  neutral: { dot: "bg-muted-foreground/50", chip: "bg-muted/40 text-muted-foreground border-border", label: "Informational" },
+};
+
+function StatusChip({ status }: { status: StabilityStatus }) {
+  const tone = STATUS_TONE[status];
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full border ${tone.chip}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+      {tone.label}
+    </span>
+  );
+}
+
+function SignalTile({ label, value, tone }: { label: string; value: string; tone: StabilityStatus }) {
+  const t = STATUS_TONE[tone];
+  return (
+    <div className="rounded-xl border border-border bg-background/40 p-3">
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className={`w-1.5 h-1.5 rounded-full ${t.dot}`} />
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground/80">{label}</span>
+      </div>
+      <div className="text-base sm:text-lg font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function SectionHeader({ step, title, intent, rationale }: {
+  step: string; title: string; intent: string; rationale?: string;
+}) {
+  return (
+    <header className="mb-4 sm:mb-5">
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-primary/80">{step}</span>
+        <h2 className="text-lg sm:text-xl font-bold text-foreground">{title}</h2>
+      </div>
+      <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{intent}</p>
+      {rationale && (
+        <p className="text-xs text-muted-foreground/80 mt-1 leading-relaxed">{rationale}</p>
+      )}
+    </header>
+  );
+}
+
+// Summary card with calm advisor narrative + deep link to source-of-truth page.
+function HubCard({
+  icon: Icon, title, status, keyMetric, metricLabel, narrative, action,
+  href, ctaLabel,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  status: StabilityStatus;
+  keyMetric: string;
+  metricLabel: string;
+  narrative: string;
+  action?: string;
+  href: string;
+  ctaLabel: string;
+}) {
+  return (
+    <div className="bg-card border border-border rounded-2xl p-4 sm:p-5 flex flex-col gap-3 hover:border-primary/40 transition-colors">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="shrink-0 w-8 h-8 rounded-lg bg-primary/10 text-primary inline-flex items-center justify-center">
+            <Icon className="w-4 h-4" />
+          </span>
+          <h3 className="text-sm sm:text-[15px] font-semibold text-foreground truncate">{title}</h3>
+        </div>
+        <StatusChip status={status} />
+      </div>
+
+      <div>
+        <div className="text-xl sm:text-2xl font-bold text-foreground leading-tight">{keyMetric}</div>
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground/80 mt-0.5">{metricLabel}</div>
+      </div>
+
+      <p className="text-[13px] text-muted-foreground leading-relaxed flex-1">{narrative}</p>
+
+      {action && (
+        <div className="rounded-lg bg-primary/5 border border-primary/15 px-3 py-2 text-[12px] text-foreground/90 leading-relaxed">
+          <span className="font-medium text-primary/90">What to do next:</span> {action}
+        </div>
+      )}
+
+      <Link href={href}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full justify-between text-xs h-9 border-border hover:border-primary/40 hover:bg-primary/5"
+        >
+          <span className="truncate">{ctaLabel}</span>
+          <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+        </Button>
+      </Link>
+    </div>
+  );
+}
+
+// Collapsible "Full breakdown" disclosure — wraps an existing sub-module so the
+// rich calculator content remains available without forcing it on by default.
+function Disclosure({
+  id, title, description, children, defaultOpen,
+}: {
+  id: string;
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div className="bg-card border border-border rounded-2xl overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={`disclosure-${id}`}
+        className="w-full flex items-center justify-between gap-3 p-4 sm:p-5 text-left hover:bg-primary/5 transition-colors"
+      >
+        <div className="min-w-0">
+          <div className="text-sm sm:text-base font-semibold text-foreground">{title}</div>
+          {description && (
+            <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{description}</div>
+          )}
+        </div>
+        {open
+          ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+          : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+      </button>
+      {open && (
+        <div id={`disclosure-${id}`} className="border-t border-border p-4 sm:p-5">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PriorityRow({ rank, title, reason, impact, urgency, href, ctaLabel }: {
+  rank: number;
+  title: string;
+  reason: string;
+  impact: string;
+  urgency: StabilityStatus;
+  href: string;
+  ctaLabel: string;
+}) {
+  const tone = STATUS_TONE[urgency];
+  const Icon = urgency === "act" ? AlertTriangle : urgency === "watch" ? Info : CheckCircle2;
+  return (
+    <div className="rounded-xl border border-border bg-background/40 p-4 flex flex-col sm:flex-row sm:items-start gap-3">
+      <div className="flex items-start gap-3 flex-1 min-w-0">
+        <div className="shrink-0 w-7 h-7 rounded-full bg-muted/40 text-foreground inline-flex items-center justify-center text-xs font-bold">
+          {rank}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <h4 className="text-sm font-semibold text-foreground">{title}</h4>
+            <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${tone.chip}`}>
+              <Icon className="w-3 h-3" />
+              {tone.label}
+            </span>
+          </div>
+          <p className="text-[13px] text-muted-foreground leading-relaxed mb-1">{reason}</p>
+          <p className="text-[12px] text-muted-foreground/80 leading-relaxed">
+            <span className="font-medium text-foreground/70">Why it matters:</span> {impact}
+          </p>
+        </div>
+      </div>
+      <Link href={href}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full sm:w-auto shrink-0 text-xs h-8 border-border hover:border-primary/40 hover:bg-primary/5"
+        >
+          {ctaLabel}
+          <ArrowRight className="w-3 h-3 ml-1" />
+        </Button>
+      </Link>
+    </div>
+  );
+}
+
+function AdvancedLink({ href, icon: Icon, title, description }: {
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Link href={href}>
+      <div className="bg-card border border-border rounded-xl p-4 flex items-start gap-3 hover:border-primary/40 transition-colors cursor-pointer">
+        <span className="shrink-0 w-9 h-9 rounded-lg bg-primary/10 text-primary inline-flex items-center justify-center">
+          <Icon className="w-4 h-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-foreground mb-0.5">{title}</div>
+          <div className="text-[12px] text-muted-foreground leading-relaxed">{description}</div>
+        </div>
+        <ArrowRight className="w-4 h-4 text-muted-foreground/60 shrink-0 mt-1" />
+      </div>
+    </Link>
+  );
+}
+
+const fmtAUD0 = (v: number) =>
+  new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(v);
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 export default function WealthStrategyPage() {
-  const [activeTab, setActiveTab] = useState(() => {
-    // Check if a deep-link signal was set (e.g. from FIREPathCard or RiskRadarCard)
-    const signal = sessionStorage.getItem('wealth-strategy-tab');
-    if (signal) { sessionStorage.removeItem('wealth-strategy-tab'); return signal; }
-    return "fire";
-  });
+  // Honour legacy deep-link signals (FIREPathCard, RiskRadarCard set
+  // sessionStorage.wealth-strategy-tab). We map them to the new section
+  // architecture and auto-open the matching disclosure on load.
+  const [initialOpen, setInitialOpen] = useState<string | null>(null);
+  useEffect(() => {
+    const signal = sessionStorage.getItem("wealth-strategy-tab");
+    if (!signal) return;
+    sessionStorage.removeItem("wealth-strategy-tab");
+    // Map legacy tab ids → disclosure ids in this page
+    const map: Record<string, string> = {
+      "fire": "freedom-full",
+      "fire-path": "freedom-full",
+      "retirement": "freedom-retirement",
+      "risk-radar": "stability-risk",
+      "emergency": "stability-emergency",
+      "debt": "optimisation-debt",
+      "tax": "optimisation-tax",
+      "monte-carlo": "advanced-mc",
+      "action-plan": "exec-action-plan",
+      "hidden": "optimisation-hidden",
+      "coach": "advanced-coach",
+      "lifestyle": "stability-lifestyle",
+      "networth": "wealth-networth",
+      "property": "wealth-property",
+    };
+    const target = map[signal];
+    if (target) {
+      setInitialOpen(target);
+      // Smooth scroll to the disclosure on next frame
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`anchor-${target}`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }, []);
 
   const { data: snapRaw } = useQuery({ queryKey: ["/api/snapshot"] });
   const { data: expensesRaw } = useQuery({ queryKey: ["/api/expenses"] });
@@ -2680,169 +2966,911 @@ export default function WealthStrategyPage() {
     }
   }, [snapRaw]);
 
-  const renderTab = () => {
-    switch (activeTab) {
-      case "fire":
-        return <FireTracker snap={snap} stocks={stocks} crypto={crypto} />;
-      case "debt":
-        return <DebtKiller snap={snap} />;
-      case "networth":
-        return <NetWorthSimulator snap={snap} />;
-      case "lifestyle":
-        return <LifestyleInflation expenses={expenses} />;
-      case "emergency":
-        return <EmergencyScore snap={snap} />;
-      case "tax":
-        return <TaxOptimizer snap={snap} properties={properties} />;
-      case "property":
-        return <PropertyExpansion snap={snap} />;
-      case "retirement":
-        return <RetirementPredictor snap={snap} stocks={stocks} crypto={crypto} />;
-      case "hidden":
-        return <HiddenMoney snap={snap} expenses={expenses} />;
-      case "coach":
-        return <AICoach snap={snap} expenses={expenses} properties={properties} stocks={stocks} crypto={crypto} />;
-      case "action-plan": {
-        const actionPlan = generateActionPlan(snap, properties, expenses);
-        return (
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-lg font-bold">Personalised Action Plan</h2>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                {actionPlan.length} actions ranked by impact · Based on your live financial data
-              </p>
-            </div>
+  // ─── Derived household signals (read-only — no new formulas) ───────────────
+  const derived = useMemo(() => {
+    const totalAssets =
+      snap.ppor + snap.cash + snap.offset_balance + snap.super_balance +
+      snap.stocks + snap.crypto + snap.cars + snap.iran_property;
+    const totalDebt = snap.mortgage + snap.other_debts;
+    const netWorth = totalAssets - totalDebt;
 
-            {actionPlan.length === 0 && (
-              <div className="text-center py-12 text-muted-foreground">
-                <Zap className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                <p>No actions needed — your finances look healthy!</p>
-              </div>
-            )}
+    const monthlyIncome   = snap.monthly_income;
+    const monthlyExpenses = snap.monthly_expenses;
+    const monthlySurplus  = monthlyIncome - monthlyExpenses;
+    const savingsRate     = monthlyIncome > 0 ? (monthlySurplus / monthlyIncome) * 100 : 0;
 
-            <div className="space-y-3">
-              {actionPlan.map(action => (
-                <div key={action.rank} className={`bg-card border rounded-2xl p-5 ${
-                  action.priority === 'High' ? 'border-red-800/40' :
-                  action.priority === 'Medium' ? 'border-yellow-800/40' : 'border-border'
-                }`}>
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl font-black text-muted-foreground/30 w-8 shrink-0">#{action.rank}</span>
-                      <div>
-                        <h3 className="text-sm font-bold">{action.title}</h3>
-                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{action.description}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                        action.priority === 'High' ? 'bg-red-900/30 text-red-400' :
-                        action.priority === 'Medium' ? 'bg-yellow-900/30 text-yellow-400' :
-                        'bg-green-900/30 text-green-400'
-                      }`}>{action.priority}</span>
-                      <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded">{action.category}</span>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 pt-3 border-t border-border/50">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Estimated Impact</p>
-                      <p className="text-xs font-semibold text-primary mt-0.5">{action.impact}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Suggested Start</p>
-                      <p className="text-xs font-semibold mt-0.5">{action.suggestedDate}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+    const liquidity        = snap.cash + snap.offset_balance;
+    const monthsBuffer     = monthlyExpenses > 0 ? liquidity / monthlyExpenses : 0;
+    const bufferTargetMo   = 6;
 
-            <div className="text-xs text-muted-foreground/60 text-center pt-2">
-              General information only — not financial, tax, or legal advice. Actions are generated from your data using deterministic rules.
-            </div>
-          </div>
-        );
-      }
-      case "risk-radar":
-        return <RiskRadarPage />;
-      case "fire-path":
-        return <FIREPathPage />;
-      case "monte-carlo":
-        return <MonteCarloDashboard />;
-      default:
-        return null;
+    // FIRE target — 4% rule on current monthly expenses (advisor heuristic).
+    const annualExpenses   = monthlyExpenses * 12;
+    const requiredFIRE     = annualExpenses > 0 ? annualExpenses / 0.04 : 0;
+    const investable       = snap.cash + snap.offset_balance + snap.super_balance + snap.stocks + snap.crypto;
+    const fireProgressPct  = requiredFIRE > 0 ? Math.min(100, (investable / requiredFIRE) * 100) : 0;
+    const fireGap          = Math.max(0, requiredFIRE - investable);
+
+    // Monthly investment required to retire at age 55 (assume 36 → 55 = 19y, 7% return).
+    const yearsToTarget    = 19;
+    const r                = 0.07 / 12;
+    const n                = yearsToTarget * 12;
+    const fvCurrent        = investable * Math.pow(1 + r, n);
+    const remainder        = Math.max(0, requiredFIRE - fvCurrent);
+    const annuityFactor    = r === 0 ? n : (Math.pow(1 + r, n) - 1) / r;
+    const requiredMonthly  = annuityFactor > 0 ? remainder / annuityFactor : 0;
+
+    // Projected FIRE year (months until investable + surplus crosses target)
+    let bal = investable;
+    let monthsToFire = 0;
+    const cap = 600; // 50y safety cap
+    const surplusContrib = Math.max(0, monthlySurplus);
+    for (let m = 1; m <= cap; m++) {
+      bal = bal * (1 + r) + surplusContrib;
+      if (bal >= requiredFIRE) { monthsToFire = m; break; }
+      if (m === cap) monthsToFire = cap;
     }
-  };
+    const fireYear = new Date().getFullYear() + Math.ceil(monthsToFire / 12);
+    const semiFireYear = (() => {
+      let b = investable;
+      const tgt = requiredFIRE * 0.5;
+      for (let m = 1; m <= cap; m++) {
+        b = b * (1 + r) + surplusContrib;
+        if (b >= tgt) return new Date().getFullYear() + Math.ceil(m / 12);
+      }
+      return new Date().getFullYear() + 50;
+    })();
 
-  const activeTabDef = TABS.find((t) => t.id === activeTab);
+    const expensiveDebt        = snap.other_debts;
+    const hasHighInterestDebt  = expensiveDebt > 0;
+    const debtToAsset          = totalAssets > 0 ? (totalDebt / totalAssets) * 100 : 0;
+
+    const propertyValue = properties.reduce(
+      (sum, p) => sum + safeNum(p.current_value ?? p.purchase_price ?? 0),
+      0,
+    ) + snap.ppor + snap.iran_property;
+
+    const investmentValue = snap.stocks + snap.crypto +
+      stocks.reduce((s, p) => s + safeNum(p.current_value ?? p.units * (p.current_price ?? 0)), 0) +
+      crypto.reduce((s, c) => s + safeNum(c.current_value ?? c.units * (c.current_price ?? 0)), 0);
+
+    return {
+      totalAssets, totalDebt, netWorth,
+      monthlyIncome, monthlyExpenses, monthlySurplus, savingsRate,
+      liquidity, monthsBuffer, bufferTargetMo,
+      requiredFIRE, investable, fireProgressPct, fireGap,
+      requiredMonthly, fireYear, semiFireYear,
+      expensiveDebt, hasHighInterestDebt, debtToAsset,
+      propertyValue, investmentValue,
+    };
+  }, [snap, properties, stocks, crypto]);
+
+  // ─── Status classifications (calm advisor tone) ────────────────────────────
+  const emergencyStatus: StabilityStatus =
+    derived.monthsBuffer >= derived.bufferTargetMo ? "good"
+    : derived.monthsBuffer >= 3 ? "watch"
+    : "act";
+
+  const debtStatus: StabilityStatus =
+    derived.debtToAsset === 0 ? "neutral"
+    : derived.debtToAsset < 40 ? "good"
+    : derived.debtToAsset < 70 ? "watch"
+    : "act";
+
+  const cashflowStatus: StabilityStatus =
+    derived.monthlyIncome === 0 ? "neutral"
+    : derived.savingsRate >= 20 ? "good"
+    : derived.savingsRate >= 10 ? "watch"
+    : "act";
+
+  const fireStatus: StabilityStatus =
+    derived.fireProgressPct >= 70 ? "good"
+    : derived.fireProgressPct >= 30 ? "watch"
+    : "neutral";
+
+  const propertyStatus: StabilityStatus =
+    properties.length > 0 || snap.ppor > 0 ? "good" : "neutral";
+
+  const investmentStatus: StabilityStatus =
+    derived.investmentValue > 0 ? "good" : "neutral";
+
+  // Rolled-up household status
+  const overallStatus: StabilityStatus = useMemo(() => {
+    const ranks: Record<StabilityStatus, number> = { act: 3, watch: 2, good: 1, neutral: 0 };
+    const list: StabilityStatus[] = [emergencyStatus, debtStatus, cashflowStatus];
+    return list.reduce((worst, s) => (ranks[s] > ranks[worst] ? s : worst), "good" as StabilityStatus);
+  }, [emergencyStatus, debtStatus, cashflowStatus]);
+
+  const overallNarrative = useMemo(() => {
+    if (overallStatus === "good") {
+      return "Your balance sheet looks growth-capable with no critical gaps. Continue with the existing plan and revisit assumptions periodically in the Forecast Engine.";
+    }
+    if (overallStatus === "watch") {
+      return "Your balance sheet is growth-capable, but liquidity or cashflow should remain the first constraint before adding new leverage or risk.";
+    }
+    if (overallStatus === "act") {
+      return "Your household has at least one structural pressure point that is worth addressing before any new investment or property decision.";
+    }
+    return "Add more data in Snapshot and Data Health so the Hub can give a clearer read on your position.";
+  }, [overallStatus]);
+
+  // ─── Top 3 priorities (impact ranked) ──────────────────────────────────────
+  type Priority = {
+    rank: 1 | 2 | 3;
+    title: string;
+    reason: string;
+    impact: string;
+    urgency: StabilityStatus;
+    href: string;
+    ctaLabel: string;
+  };
+  const priorities = useMemo<Priority[]>(() => {
+    const out: Priority[] = [];
+    if (derived.monthsBuffer < derived.bufferTargetMo) {
+      out.push({
+        rank: (out.length + 1) as 1 | 2 | 3,
+        title: "Strengthen emergency liquidity",
+        reason: `Cash buffer currently covers ${derived.monthsBuffer.toFixed(1)} months of expenses — target is ${derived.bufferTargetMo} months.`,
+        impact: "Liquidity should be the first constraint before any new leverage. It absorbs income shocks without forcing asset sales.",
+        urgency: derived.monthsBuffer < 3 ? "act" : "watch",
+        href: "/dashboard",
+        ctaLabel: "Open Snapshot",
+      });
+    }
+    if (derived.hasHighInterestDebt) {
+      out.push({
+        rank: (out.length + 1) as 1 | 2 | 3,
+        title: "Reduce expensive debt exposure",
+        reason: "Non-mortgage / high-rate debt drags compounding power on the asset side.",
+        impact: "Each dollar redirected from expensive debt typically beats market returns risk-free.",
+        urgency: "watch",
+        href: "/debt-strategy",
+        ctaLabel: "Review Debt Strategy",
+      });
+    }
+    if (derived.savingsRate < 15) {
+      out.push({
+        rank: (out.length + 1) as 1 | 2 | 3,
+        title: "Lift household savings rate",
+        reason: `Savings rate is ${derived.savingsRate.toFixed(0)}% of income — sustainable growth typically needs 20%+.`,
+        impact: "Improves Forecast Engine outputs and unlocks investment optionality.",
+        urgency: derived.savingsRate < 5 ? "act" : "watch",
+        href: "/budget",
+        ctaLabel: "Open Cashflow Plan",
+      });
+    }
+    if (out.length < 3 && derived.fireProgressPct < 40) {
+      out.push({
+        rank: (out.length + 1) as 1 | 2 | 3,
+        title: "Accelerate financial freedom path",
+        reason: `Freedom progress is ${derived.fireProgressPct.toFixed(0)}% — increased monthly contributions compound quickly over the remaining horizon.`,
+        impact: "Brings the freedom timeline forward without taking on additional risk.",
+        urgency: "neutral",
+        href: "/financial-plan",
+        ctaLabel: "Open Financial Plan",
+      });
+    }
+    if (out.length < 3) {
+      out.push({
+        rank: (out.length + 1) as 1 | 2 | 3,
+        title: "Pressure-test the plan before the next big move",
+        reason: "No high-priority gap detected — use the Decision Engine to rank scenarios against your live data.",
+        impact: "Catches second-order risks before committing to property, leverage or asset shifts.",
+        urgency: "neutral",
+        href: "/decision",
+        ctaLabel: "Run Decision Engine",
+      });
+    }
+    if (out.length < 3) {
+      out.push({
+        rank: (out.length + 1) as 1 | 2 | 3,
+        title: "Review tax position",
+        reason: "Tax structure typically improves outcomes more reliably than asset selection.",
+        impact: "Higher after-tax compounding without changing risk profile.",
+        urgency: "neutral",
+        href: "/tax",
+        ctaLabel: "Review Tax Strategy",
+      });
+    }
+    return out.slice(0, 3);
+  }, [derived]);
+
+  const nextBestAction = useMemo(() => {
+    if (priorities.length === 0) {
+      return "Your strongest next move is to run the Decision Engine against your live data to confirm the plan still holds.";
+    }
+    const top = priorities[0];
+    if (top.title.includes("liquidity")) return "Your strongest next move is to strengthen liquidity before adding new leverage.";
+    if (top.title.includes("expensive debt")) return "Your strongest next move is to reduce expensive debt — it compounds against you faster than any current investment.";
+    if (top.title.includes("savings rate")) return "Your strongest next move is to widen the gap between income and expenses — that gap is the engine for every other goal.";
+    if (top.title.includes("freedom")) return "Your strongest next move is to formalise the path to financial freedom and lock in monthly contributions.";
+    return `Your strongest next move: ${top.title.toLowerCase()}.`;
+  }, [priorities]);
+
+  // Pre-compute the action plan (used inside Executive Overview disclosure)
+  const actionPlan = useMemo(
+    () => generateActionPlan(snap, properties, expenses),
+    [snap, properties, expenses],
+  );
+
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   return (
-    <div className="min-h-screen bg-background px-4 py-6 max-w-7xl mx-auto">
-      {/* Page header */}
-      <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Target className="w-6 h-6 text-yellow-400" />
-            Wealth Strategy Hub
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            11 deterministic calculation modules for the Shahrokh Family Financial Plan
+    <div className="min-h-screen bg-background">
+      <div className="px-4 sm:px-6 py-5 sm:py-7 max-w-6xl mx-auto">
+
+        {/* ─── Page header ────────────────────────────────────────────────── */}
+        <header className="mb-6 sm:mb-8 flex items-start justify-between gap-4 flex-wrap">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <Target className="w-5 h-5 text-primary" />
+              <h1 className="text-xl sm:text-2xl font-bold text-foreground">Wealth Strategy Hub</h1>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed max-w-2xl">
+              Your household command centre. This hub summarises position and priorities,
+              then links you to the source-of-truth pages for full calculation and editing.
+            </p>
+          </div>
+          <Button
+            onClick={handleExportPDF}
+            variant="outline"
+            size="sm"
+            className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
+          >
+            <FileDown className="w-3.5 h-3.5" />
+            Export PDF Report
+          </Button>
+        </header>
+
+        {/* ─── 1. EXECUTIVE OVERVIEW ──────────────────────────────────────── */}
+        <section className="mb-8 sm:mb-10">
+          <SectionHeader
+            step="01"
+            title="Executive Overview"
+            intent="Where the household stands today and where to focus this month."
+          />
+
+          {/* Status card */}
+          <div className="bg-card border border-border rounded-2xl p-5 sm:p-6 mb-4">
+            <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground/80 mb-1">
+                  Household financial status
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-2xl sm:text-3xl font-bold text-foreground">
+                    {fmtAUD0(derived.netWorth)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">net position</span>
+                </div>
+              </div>
+              <StatusChip status={overallStatus} />
+            </div>
+
+            <p className="text-sm text-muted-foreground leading-relaxed mb-5">
+              {overallNarrative}
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+              <SignalTile label="Cash buffer"        value={`${derived.monthsBuffer.toFixed(1)} mo`}  tone={emergencyStatus} />
+              <SignalTile label="Savings rate"       value={`${derived.savingsRate.toFixed(0)}%`}     tone={cashflowStatus} />
+              <SignalTile label="Debt / assets"      value={`${derived.debtToAsset.toFixed(0)}%`}     tone={debtStatus} />
+              <SignalTile label="Freedom progress"   value={`${derived.fireProgressPct.toFixed(0)}%`} tone={fireStatus} />
+            </div>
+
+            <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 flex items-start gap-3">
+              <Sparkles className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wider text-primary/80 mb-1 font-medium">
+                  Next best action
+                </div>
+                <p className="text-sm text-foreground leading-relaxed">{nextBestAction}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Top 3 priorities */}
+          <div className="bg-card border border-border rounded-2xl p-5 sm:p-6 mb-4">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h3 className="text-sm sm:text-base font-semibold text-foreground">
+                Top 3 priorities this month
+              </h3>
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground/80">
+                Ranked by impact
+              </span>
+            </div>
+            <div className="space-y-3">
+              {priorities.map((p) => (
+                <PriorityRow key={p.rank} {...p} />
+              ))}
+              {priorities.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No critical priorities detected. Use the Decision Engine to pressure-test the plan.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Full Personalised Action Plan (deterministic rules, ranked) */}
+          <div id="anchor-exec-action-plan">
+            <Disclosure
+              id="exec-action-plan"
+              title="Personalised Action Plan"
+              description={`${actionPlan.length} deterministic actions ranked by impact — generated from your live financial data.`}
+              defaultOpen={initialOpen === "exec-action-plan"}
+            >
+              {actionPlan.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Zap className="w-8 h-8 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">No further actions needed — your finances look healthy.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {actionPlan.map(action => (
+                    <div key={action.rank} className={`bg-background/40 border rounded-2xl p-4 ${
+                      action.priority === 'High' ? 'border-rose-500/30' :
+                      action.priority === 'Medium' ? 'border-amber-500/30' : 'border-border'
+                    }`}>
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="flex items-start gap-2 flex-1 min-w-0">
+                          <span className="text-xl font-black text-muted-foreground/30 w-7 shrink-0">#{action.rank}</span>
+                          <div className="min-w-0">
+                            <h4 className="text-sm font-semibold">{action.title}</h4>
+                            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{action.description}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                            action.priority === 'High' ? STATUS_TONE.act.chip :
+                            action.priority === 'Medium' ? STATUS_TONE.watch.chip :
+                            STATUS_TONE.good.chip
+                          }`}>{action.priority}</span>
+                          <span className="text-[10px] text-muted-foreground bg-secondary/40 px-2 py-0.5 rounded">{action.category}</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 pt-3 border-t border-border/50">
+                        <div>
+                          <p className="text-[11px] text-muted-foreground uppercase tracking-wider">Estimated impact</p>
+                          <p className="text-xs font-medium text-primary mt-0.5">{action.impact}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] text-muted-foreground uppercase tracking-wider">Suggested start</p>
+                          <p className="text-xs font-medium mt-0.5">{action.suggestedDate}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Disclosure>
+          </div>
+        </section>
+
+        {/* ─── 2. FINANCIAL STABILITY ─────────────────────────────────────── */}
+        <section className="mb-8 sm:mb-10">
+          <SectionHeader
+            step="02"
+            title="Financial Stability"
+            intent="The pressure points that decide whether the household can take additional risk — emergency buffer, cashflow, debt and risk radar in one place."
+            rationale="Each card summarises a different signal. Open the full Risk Radar at the bottom of the section for the deterministic deep-dive."
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <HubCard
+              icon={Shield}
+              title="Emergency Buffer"
+              status={emergencyStatus}
+              keyMetric={`${derived.monthsBuffer.toFixed(1)} months`}
+              metricLabel={`of expenses · target ${derived.bufferTargetMo} mo`}
+              narrative={
+                emergencyStatus === "good"
+                  ? "Your emergency buffer is within target. Maintain it as a non-negotiable line item before any new leverage."
+                  : emergencyStatus === "watch"
+                  ? "Your emergency buffer is approaching target. Build the remaining months before adding new leverage."
+                  : "Your emergency buffer is below target. Liquidity is the first constraint to address — build it before taking on new commitments."
+              }
+              action={
+                emergencyStatus === "good"
+                  ? "Keep automating top-up transfers; redirect any excess above target into the freedom path."
+                  : `Set aside ${fmtAUD0(Math.max(0, derived.monthlyExpenses * derived.bufferTargetMo - derived.liquidity) / 6)} / month in a high-interest account for the next 6 months to close the gap.`
+              }
+              href="/dashboard"
+              ctaLabel="Open Snapshot"
+            />
+
+            <HubCard
+              icon={Wallet}
+              title="Cashflow Resilience"
+              status={cashflowStatus}
+              keyMetric={fmtAUD0(derived.monthlySurplus)}
+              metricLabel={`monthly surplus · ${derived.savingsRate.toFixed(0)}% savings rate`}
+              narrative={
+                cashflowStatus === "good"
+                  ? "Your savings rate is at a sustainable level. Direct the surplus into the highest-impact lever (debt, super, or investment)."
+                  : cashflowStatus === "watch"
+                  ? "Savings rate is improving but below the 20% benchmark. Tightening one or two expense categories will compound quickly."
+                  : "Cashflow is the main pressure point in your balance sheet — review the budget and recurring bills before adding leverage."
+              }
+              action="Open the Monthly Budget to identify the largest two expense categories to tune."
+              href="/budget"
+              ctaLabel="Open Cashflow Plan"
+            />
+
+            <HubCard
+              icon={CreditCard}
+              title="Debt Pressure"
+              status={debtStatus}
+              keyMetric={fmtAUD0(derived.totalDebt)}
+              metricLabel={`debt-to-asset ${derived.debtToAsset.toFixed(0)}%`}
+              narrative={
+                derived.totalDebt === 0
+                  ? "No household debt recorded. Review Debt Strategy to confirm and to model future leverage."
+                  : derived.hasHighInterestDebt
+                  ? "Debt level is currently the main pressure point in your balance sheet — non-mortgage balances are dragging compounding on the asset side."
+                  : "Debt is mortgage-weighted with no expensive consumer balances. Continue with the existing payoff strategy."
+              }
+              action={
+                derived.hasHighInterestDebt
+                  ? "Prioritise paying down non-mortgage balances using the avalanche order in Debt Strategy."
+                  : "Model refinance and offset scenarios in Debt Strategy when rates move."
+              }
+              href="/debt-strategy"
+              ctaLabel="Review Debt Strategy"
+            />
+
+            <HubCard
+              icon={HeartPulse}
+              title="Risk Radar Summary"
+              status={
+                emergencyStatus === "act" || cashflowStatus === "act" || debtStatus === "act" ? "act"
+                : emergencyStatus === "watch" || cashflowStatus === "watch" || debtStatus === "watch" ? "watch"
+                : "good"
+              }
+              keyMetric={`${[emergencyStatus, cashflowStatus, debtStatus].filter(s => s !== "good" && s !== "neutral").length} pressure points`}
+              metricLabel="liquidity · cashflow · leverage"
+              narrative="Risk Radar reads liquidity, leverage, income-shock and refinance pressure against industry benchmarks. The full deterministic breakdown is below."
+              action="Expand the Full Risk Radar Breakdown to see category scores, top 3 risks and what to do next."
+              href="/dashboard"
+              ctaLabel="Open Snapshot"
+            />
+          </div>
+
+          {/* Full Risk Radar — embedded, calm presentation */}
+          <div id="anchor-stability-risk">
+            <Disclosure
+              id="stability-risk"
+              title="Full Risk Radar Breakdown"
+              description="Liquidity, leverage, cashflow and income-shock scoring with category-level detail and concrete next actions."
+              defaultOpen={initialOpen === "stability-risk"}
+            >
+              <RiskRadarPage />
+            </Disclosure>
+          </div>
+
+          {/* Emergency Buffer engine — interactive, full breakdown */}
+          <div id="anchor-stability-emergency" className="mt-3">
+            <Disclosure
+              id="stability-emergency"
+              title="Emergency Buffer Engine"
+              description="Detailed buffer score, what-if scenarios and recommended top-up cadence."
+              defaultOpen={initialOpen === "stability-emergency"}
+            >
+              <EmergencyScore snap={snap} />
+            </Disclosure>
+          </div>
+
+          {/* Lifestyle inflation tracker (cashflow resilience lever) */}
+          <div id="anchor-stability-lifestyle" className="mt-3">
+            <Disclosure
+              id="stability-lifestyle"
+              title="Lifestyle Inflation Tracker"
+              description="Spot expense categories that are creeping up faster than income — the quickest way to lift the savings rate."
+              defaultOpen={initialOpen === "stability-lifestyle"}
+            >
+              <LifestyleInflation expenses={expenses} />
+            </Disclosure>
+          </div>
+        </section>
+
+        {/* ─── 3. FINANCIAL FREEDOM PLAN ──────────────────────────────────── */}
+        <section className="mb-8 sm:mb-10">
+          <SectionHeader
+            step="03"
+            title="Financial Freedom Plan"
+            intent="Single home for retirement and FIRE planning — current progress, target capital, required contributions and timeline."
+            rationale="Reuses the FIRE Path engine and Retirement Predictor — no duplicate calculators. Deep-link to the My Financial Plan page for full editing."
+          />
+
+          {/* Headline summary card — current age, target age, required income, FIRE target */}
+          <div className="bg-card border border-border rounded-2xl p-5 sm:p-6 mb-4">
+            <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground/80 mb-1">
+                  Path to financial freedom
+                </div>
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="text-2xl sm:text-3xl font-bold text-foreground">
+                    {derived.fireProgressPct.toFixed(0)}%
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    of {fmtAUD0(derived.requiredFIRE)} target capital
+                  </span>
+                </div>
+              </div>
+              <StatusChip status={fireStatus} />
+            </div>
+
+            {/* Progress bar */}
+            <div className="h-2 rounded-full bg-secondary overflow-hidden mb-5">
+              <div
+                className="h-full rounded-full transition-all duration-700"
+                style={{
+                  width: `${derived.fireProgressPct}%`,
+                  background: "linear-gradient(90deg, hsl(43,85%,55%), hsl(20,80%,55%))",
+                }}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
+              <SignalTile label="Current age"          value="36"                              tone="neutral" />
+              <SignalTile label="Target FIRE age"      value="55"                              tone="neutral" />
+              <SignalTile label="Desired passive / mo" value={fmtAUD0(derived.monthlyExpenses)} tone="neutral" />
+              <SignalTile label="FIRE target capital"  value={fmtAUD0(derived.requiredFIRE)}    tone="neutral" />
+              <SignalTile label="Capital gap"          value={fmtAUD0(derived.fireGap)}         tone={fireStatus} />
+              <SignalTile label="Investable now"       value={fmtAUD0(derived.investable)}      tone="neutral" />
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3">
+              <SignalTile label="Monthly required (to age 55)" value={fmtAUD0(derived.requiredMonthly)} tone={derived.monthlySurplus >= derived.requiredMonthly ? "good" : "watch"} />
+              <SignalTile label="Projected FIRE year"          value={String(derived.fireYear)}        tone={fireStatus} />
+              <SignalTile label="Semi-FIRE year (50% target)"  value={String(derived.semiFireYear)}    tone="neutral" />
+            </div>
+
+            <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 mt-5 flex items-start gap-3">
+              <Sparkles className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wider text-primary/80 mb-1 font-medium">
+                  Advisor read
+                </div>
+                <p className="text-sm text-foreground leading-relaxed">
+                  {derived.fireProgressPct === 0
+                    ? "Set the freedom plan up so today's surplus turns into a target year. The FIRE Path engine ranks four investment routes once you do."
+                    : derived.monthlySurplus >= derived.requiredMonthly
+                      ? `Your current surplus of ${fmtAUD0(derived.monthlySurplus)}/mo exceeds the ${fmtAUD0(derived.requiredMonthly)}/mo required to reach the target at 55 — lock in the cadence and avoid lifestyle drift.`
+                      : `Surplus of ${fmtAUD0(derived.monthlySurplus)}/mo is below the ${fmtAUD0(derived.requiredMonthly)}/mo needed to hit the target at 55. Lifting the savings rate or revising the target age are the two levers.`}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-5">
+              <Link href="/financial-plan">
+                <Button variant="outline" size="sm" className="w-full justify-between text-xs h-9 border-border hover:border-primary/40 hover:bg-primary/5">
+                  My Financial Plan
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Button>
+              </Link>
+              <Link href="/decision">
+                <Button variant="outline" size="sm" className="w-full justify-between text-xs h-9 border-border hover:border-primary/40 hover:bg-primary/5">
+                  Compare scenarios
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Button>
+              </Link>
+              <Link href="/ai-forecast-engine">
+                <Button variant="outline" size="sm" className="w-full justify-between text-xs h-9 border-border hover:border-primary/40 hover:bg-primary/5">
+                  Forecast Engine
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Button>
+              </Link>
+            </div>
+          </div>
+
+          {/* FIRE Path full optimizer (4 scenarios, sensitivity, timeline) */}
+          <div id="anchor-freedom-full">
+            <Disclosure
+              id="freedom-full"
+              title="FIRE Path Optimizer — Full Breakdown"
+              description="A/B/C/D scenarios, sensitivity analysis, timeline chart and milestones."
+              defaultOpen={initialOpen === "freedom-full"}
+            >
+              <FIREPathPage />
+            </Disclosure>
+          </div>
+
+          {/* FIRE Tracker — interactive scenarios */}
+          <div id="anchor-freedom-tracker" className="mt-3">
+            <Disclosure
+              id="freedom-tracker"
+              title="FIRE Tracker — Interactive Scenarios"
+              description="Tune SWR, expected return, extra contributions and IP income — see the impact on years-to-FIRE in real time."
+            >
+              <FireTracker snap={snap} stocks={stocks} crypto={crypto} />
+            </Disclosure>
+          </div>
+
+          {/* Retirement Predictor — 5 scenarios to age 80 */}
+          <div id="anchor-freedom-retirement" className="mt-3">
+            <Disclosure
+              id="freedom-retirement"
+              title="Retirement Predictor"
+              description="Compare current path vs. aggressive contributions, property leverage and stocks-focused approaches over your full horizon."
+              defaultOpen={initialOpen === "freedom-retirement"}
+            >
+              <RetirementPredictor snap={snap} stocks={stocks} crypto={crypto} />
+            </Disclosure>
+          </div>
+        </section>
+
+        {/* ─── 4. WEALTH BUILDING ─────────────────────────────────────────── */}
+        <section className="mb-8 sm:mb-10">
+          <SectionHeader
+            step="04"
+            title="Wealth Building"
+            intent="Where compounding gets done — property, investment and decision engine."
+          />
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <HubCard
+              icon={Home}
+              title="Property Strategy"
+              status={propertyStatus}
+              keyMetric={fmtAUD0(derived.propertyValue)}
+              metricLabel={`${properties.length} investment ${properties.length === 1 ? "property" : "properties"}`}
+              narrative={
+                emergencyStatus !== "good"
+                  ? "Property remains viable, but the Decision Engine currently prefers waiting until liquidity improves."
+                  : derived.hasHighInterestDebt
+                  ? "Resolve expensive debt before adding leveraged property — the after-tax maths favours that order."
+                  : "Use the Property Plan to model LVR, deposit, borrowing power and after-tax cashflow before committing."
+              }
+              action="Run a stress scenario in the Decision Engine before signing a deposit."
+              href="/property"
+              ctaLabel="Open Property Plan"
+            />
+
+            <HubCard
+              icon={TrendingUp}
+              title="Investment Strategy"
+              status={investmentStatus}
+              keyMetric={fmtAUD0(derived.investmentValue)}
+              metricLabel="stocks + crypto + super"
+              narrative={
+                derived.investmentValue === 0
+                  ? "No investment portfolio yet. Start with the Stocks Plan to set a DCA cadence aligned to monthly surplus."
+                  : "Asset mix and DCA cadence are the levers. Use Stocks / Crypto plans to set rules, and Decision Engine to compare scenarios."
+              }
+              action="Set a fixed payday DCA into broad-market ETFs to avoid behavioural drift."
+              href="/stocks"
+              ctaLabel="Open Stocks Plan"
+            />
+
+            <HubCard
+              icon={Sparkles}
+              title="Decision Engine"
+              status="neutral"
+              keyMetric={`${priorities.length}`}
+              metricLabel="open priorities to pressure-test"
+              narrative="Before any property, leverage or major asset shift — run the move through the Decision Engine. It ranks scenarios using the same engines as the Hub."
+              action="Open the Decision Engine and load your live snapshot for a senior-advisor read."
+              href="/decision"
+              ctaLabel="Run Decision Engine"
+            />
+          </div>
+
+          {/* Net worth simulator — what-if balance-sheet engine */}
+          <div id="anchor-wealth-networth">
+            <Disclosure
+              id="wealth-networth"
+              title="Net Worth Simulator"
+              description="Model how growth, contributions and asset shifts move the balance sheet over time."
+              defaultOpen={initialOpen === "wealth-networth"}
+            >
+              <NetWorthSimulator snap={snap} />
+            </Disclosure>
+          </div>
+
+          {/* Property expansion engine */}
+          <div id="anchor-wealth-property" className="mt-3">
+            <Disclosure
+              id="wealth-property"
+              title="Property Expansion Engine"
+              description="Borrowing capacity, deposit + stamp duty maths, and after-tax cashflow for the next IP."
+              defaultOpen={initialOpen === "wealth-property"}
+            >
+              <PropertyExpansion snap={snap} />
+            </Disclosure>
+          </div>
+        </section>
+
+        {/* ─── 5. OPTIMISATION ────────────────────────────────────────────── */}
+        <section className="mb-8 sm:mb-10">
+          <SectionHeader
+            step="05"
+            title="Optimisation"
+            intent="Squeeze more out of the existing plan without adding new risk."
+          />
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <HubCard
+              icon={Calculator}
+              title="Tax Position"
+              status="neutral"
+              keyMetric={fmtAUD0(derived.monthlyIncome * 12)}
+              metricLabel="annualised income · structure matters"
+              narrative="Tax structure typically improves after-tax returns more reliably than picking assets. Review negative gearing, super contributions and offset strategy on the Tax Strategy page."
+              action="Review your taxable income and super contribution cap utilisation each quarter."
+              href="/tax"
+              ctaLabel="Review Tax Strategy"
+            />
+
+            <HubCard
+              icon={Layers}
+              title="Debt Optimisation"
+              status={derived.hasHighInterestDebt ? "watch" : "neutral"}
+              keyMetric={fmtAUD0(derived.totalDebt)}
+              metricLabel="payoff order + refinance levers"
+              narrative={
+                derived.hasHighInterestDebt
+                  ? "Expensive balances are dragging the plan. The avalanche order in Debt Strategy will minimise interest paid."
+                  : "Debt is well-structured. Use Debt Strategy to model refinance scenarios when rates move."
+              }
+              action="Open Debt Strategy to compare avalanche vs. snowball + offset scenarios."
+              href="/debt-strategy"
+              ctaLabel="Open Debt Strategy"
+            />
+
+            <HubCard
+              icon={Sparkles}
+              title="Scenario Readiness"
+              status={overallStatus === "good" ? "good" : "watch"}
+              keyMetric={priorities.length.toString()}
+              metricLabel="open priorities to pressure-test"
+              narrative="Before any property, leverage or major asset shift — run the move through the Decision Engine. It ranks scenarios using the same engines as the Hub."
+              action="Pressure-test the move alongside two alternatives before committing."
+              href="/decision"
+              ctaLabel="Run Decision Engine"
+            />
+          </div>
+
+          {/* Tax Optimizer (Australian tax engine) */}
+          <div id="anchor-optimisation-tax">
+            <Disclosure
+              id="optimisation-tax"
+              title="Tax Optimiser"
+              description="Income tax, negative gearing and super-contribution scenarios using current FY tax brackets."
+              defaultOpen={initialOpen === "optimisation-tax"}
+            >
+              <TaxOptimizer snap={snap} properties={properties} />
+            </Disclosure>
+          </div>
+
+          {/* Debt Killer (avalanche / snowball waterfall) */}
+          <div id="anchor-optimisation-debt" className="mt-3">
+            <Disclosure
+              id="optimisation-debt"
+              title="Debt Killer"
+              description="Avalanche, snowball and custom payoff orders with month-by-month interest savings."
+              defaultOpen={initialOpen === "optimisation-debt"}
+            >
+              <DebtKiller snap={snap} />
+            </Disclosure>
+          </div>
+
+          {/* Hidden Money Detector (expense leak finder) */}
+          <div id="anchor-optimisation-hidden" className="mt-3">
+            <Disclosure
+              id="optimisation-hidden"
+              title="Hidden Money Detector"
+              description="Spot recurring expense leaks and translate them into annualised savings."
+              defaultOpen={initialOpen === "optimisation-hidden"}
+            >
+              <HiddenMoney snap={snap} expenses={expenses} />
+            </Disclosure>
+          </div>
+        </section>
+
+        {/* ─── 6. ADVANCED ANALYTICS (collapsed) ──────────────────────────── */}
+        <section className="mb-6">
+          <button
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="w-full bg-card border border-border rounded-2xl p-4 sm:p-5 flex items-center justify-between gap-3 hover:border-primary/40 transition-colors"
+            aria-expanded={showAdvanced}
+          >
+            <div className="flex items-center gap-3 text-left min-w-0">
+              <span className="shrink-0 w-9 h-9 rounded-lg bg-primary/10 text-primary inline-flex items-center justify-center">
+                <BarChart2 className="w-4 h-4" />
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm sm:text-base font-semibold text-foreground">Advanced Analytics</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Monte Carlo · Forecast Engine · CGT · full scenario analytics
+                </div>
+              </div>
+            </div>
+            {showAdvanced
+              ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+              : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+          </button>
+
+          {showAdvanced && (
+            <>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <AdvancedLink
+                  href="/ai-forecast-engine"
+                  icon={Sigma}
+                  title="Forecast Engine"
+                  description="Year-by-year deterministic forecast, stress testing and projection outputs."
+                />
+                <AdvancedLink
+                  href="/ai-forecast-engine"
+                  icon={Atom}
+                  title="Monte Carlo (in Forecast Engine)"
+                  description="Probabilistic forecast across thousands of paths — runs inside the Forecast Engine."
+                />
+                <AdvancedLink
+                  href="/decision"
+                  icon={Sparkles}
+                  title="Decision Engine"
+                  description="Scenario ranking, investment allocation recommendations and the Advanced Builder."
+                />
+                <AdvancedLink
+                  href="/cgt-simulator"
+                  icon={LineChartIcon}
+                  title="CGT Simulator"
+                  description="Model capital gains tax outcomes against the current portfolio."
+                />
+                <AdvancedLink
+                  href="/timeline"
+                  icon={TrendingUp}
+                  title="Net Worth Timeline"
+                  description="History of net worth movements with snapshot-level drill-down."
+                />
+                <AdvancedLink
+                  href="/data-health"
+                  icon={HeartPulse}
+                  title="Data Health"
+                  description="Freshness and completeness checks on every input the engines depend on."
+                />
+              </div>
+
+              {/* Inline Monte Carlo (embedded engine — same source-of-truth) */}
+              <div id="anchor-advanced-mc">
+                <Disclosure
+                  id="advanced-mc"
+                  title="Monte Carlo — Inline Dashboard"
+                  description="Probabilistic outcome distribution against your current plan."
+                  defaultOpen={initialOpen === "advanced-mc"}
+                >
+                  <MonteCarloDashboard />
+                </Disclosure>
+              </div>
+
+              {/* AI Coach (LLM narrative) */}
+              <div id="anchor-advanced-coach" className="mt-3">
+                <Disclosure
+                  id="advanced-coach"
+                  title="AI Coach"
+                  description="Personalised narrative coaching from your live financial data."
+                  defaultOpen={initialOpen === "advanced-coach"}
+                >
+                  <AICoach snap={snap} expenses={expenses} properties={properties} stocks={stocks} crypto={crypto} />
+                </Disclosure>
+              </div>
+            </>
+          )}
+        </section>
+
+        {/* ─── Footer + Assumptions ──────────────────────────────────────── */}
+        <div className="flex items-start gap-2 text-xs text-muted-foreground/80 pt-4 mt-4 border-t border-border">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <p className="leading-relaxed">
+            The Hub summarises and orchestrates — every number here is derived from the
+            source-of-truth engines, not calculated independently. General information only,
+            not financial, tax or legal advice. Consult a licensed Australian financial adviser
+            before making decisions.
           </p>
         </div>
-        <Button
-          onClick={handleExportPDF}
-          variant="outline"
-          size="sm"
-          className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
-        >
-          <FileDown className="w-3.5 h-3.5" />
-          Export PDF Report
-        </Button>
-      </div>
 
-      {/* Tab bar — at tablet portrait (~768px) the 9 tabs overflow. We use
-          a horizontal scroller with a right-edge gradient fade to make the
-          overflow legible and reachable (audit P1-7). */}
-      <div className="bg-card border border-border rounded-2xl mb-6 overflow-hidden relative">
-        <div className="overflow-x-auto scrollbar-thin">
-          <div className="flex min-w-max px-2 py-2 gap-1">
-            {TABS.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all"
-                  style={{
-                    background: isActive ? "hsl(43,85%,55%)" : "transparent",
-                    color: isActive ? "hsl(0,0%,10%)" : "hsl(0,0%,60%)",
-                  }}
-                >
-                  <Icon className="w-3.5 h-3.5 shrink-0" />
-                  <span className="hidden sm:inline">{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        {/* Right-edge gradient fade so users know more tabs are off-screen. */}
-        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-card to-transparent" />
+        <AssumptionsPanel mode="compact" />
       </div>
-
-      {/* Active module */}
-      <div className="bg-card border border-border rounded-2xl p-6">
-        {activeTabDef && (
-          <div className="flex items-center gap-2 mb-5 pb-4 border-b border-border">
-            <activeTabDef.icon className="w-5 h-5 text-yellow-400" />
-            <h2 className="text-lg font-bold">{activeTabDef.label}</h2>
-          </div>
-        )}
-        {renderTab()}
-      </div>
-
-      {/* Audit fix P1.4: assumption transparency on every strategy surface. */}
-      <AssumptionsPanel mode="compact" />
     </div>
   );
 }
