@@ -38,6 +38,8 @@ import {
   summariseMCReconciliation,
   type CanonicalMCReconciliation,
 } from "@/lib/monteCarloCanonical";
+import { runMonteCarloV4, type MonteCarloV4Extras } from "@/lib/monteCarloV4";
+import MonteCarloV4Panel from "@/components/MonteCarloV4Panel";
 import {
   ComposedChart, Area, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer,
@@ -259,6 +261,12 @@ export default function AIForecastEnginePage() {
   // the same NW the Dashboard shows).
   const [mcReconciliation, setMcReconciliation] = useState<CanonicalMCReconciliation | null>(null);
 
+  // V4 institutional engine toggle. Enabled by default — produces the V3
+  // canonical result PLUS the V4 extras (regimes, advanced risk, recs,
+  // narratives). Users can disable to run pure V3.
+  const [useV4Engine, setUseV4Engine] = useState<boolean>(true);
+  const [v4Extras, setV4Extras] = useState<MonteCarloV4Extras | null>(null);
+
   // ── Run Monte Carlo ──────────────────────────────────────────────────────────
   // Build the engine input via the canonical mapper so every starting balance
   // (cash, super, stocks, crypto, income, expenses) routes through the same
@@ -300,10 +308,17 @@ export default function AIForecastEnginePage() {
             variant: 'destructive',
           });
         }
-        const result = runMonteCarlo(input);
+        const result = useV4Engine
+          ? runMonteCarloV4(input, { seed: `fwl-${new Date().getFullYear()}` })
+          : runMonteCarlo(input);
         setMonteCarloResult(result);
+        if ((result as any).v4) setV4Extras((result as any).v4 as MonteCarloV4Extras);
+        else setV4Extras(null);
         sbSaveMCResult(result).catch(() => {});
-        toast({ title: 'Simulation Complete', description: `1,000 paths. Median 2035: ${fmtM(result.median)}` });
+        toast({
+          title: useV4Engine ? 'V4 Institutional Simulation Complete' : 'Simulation Complete',
+          description: `1,000 paths. Median 2035: ${fmtM(result.median)}`,
+        });
       } catch (err) {
         toast({ title: 'Simulation Error', description: String(err), variant: 'destructive' });
       } finally {
@@ -312,7 +327,7 @@ export default function AIForecastEnginePage() {
     }, 50);
   }, [isRunningMC, snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expensesRows,
       stockTx, cryptoTx, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, yearlyAssumptions,
-      mcVolatility, setIsRunningMC, setMonteCarloResult, toast]);
+      mcVolatility, setIsRunningMC, setMonteCarloResult, toast, useV4Engine]);
 
   // Live preview of the canonical reconciliation — even before the user
   // presses Run, the UI shows the starting NW the simulation WILL use.
@@ -772,6 +787,17 @@ export default function AIForecastEnginePage() {
                 <><Sparkles className="w-4 h-4 mr-2" />Run 1,000 Monte Carlo Simulations</>
               )}
             </Button>
+            <label className="flex items-center gap-2 text-xs cursor-pointer select-none px-3 py-2 rounded border border-amber-500/30 bg-amber-500/10">
+              <input
+                type="checkbox"
+                checked={useV4Engine}
+                onChange={(e) => setUseV4Engine(e.target.checked)}
+                className="accent-amber-400"
+                data-testid="toggle-v4-engine"
+              />
+              <span className="font-semibold text-amber-300">V4 Institutional Engine</span>
+              <span className="text-muted-foreground">— regimes · advanced risk · advisor narratives</span>
+            </label>
             <div className="flex flex-col gap-1">
               {mc && (
                 <>
@@ -942,6 +968,21 @@ export default function AIForecastEnginePage() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── 8.5. V4 Institutional Wealth Terminal ──────────────────────────────── */}
+      {mc && v4Extras && forecastMode === 'monte-carlo' && (
+        <div className="rounded-xl border border-amber-500/30 bg-card p-5">
+          <MonteCarloV4Panel
+            v4={v4Extras}
+            startYear={yearlyAssumptions[0]?.year ?? new Date().getFullYear()}
+            endYear={yearlyAssumptions[yearlyAssumptions.length - 1]?.year ?? new Date().getFullYear() + 9}
+            median={mc.median}
+            p10={mc.p10}
+            p90={mc.p90}
+            probFf={mc.prob_ff}
+          />
         </div>
       )}
 
