@@ -16,7 +16,7 @@
  * 11. AI Insights card
  */
 
-import { useEffect, useCallback, useRef, useState } from "react";
+import { useEffect, useCallback, useRef, useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAppStore } from "@/lib/store";
@@ -33,6 +33,11 @@ import {
   type MCVolatilityParams,
 } from "@/lib/forecastStore";
 import { runMonteCarlo } from "@/lib/monteCarloEngine";
+import {
+  buildCanonicalMonteCarloInput,
+  summariseMCReconciliation,
+  type CanonicalMCReconciliation,
+} from "@/lib/monteCarloCanonical";
 import {
   ComposedChart, Area, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer,
@@ -242,30 +247,60 @@ export default function AIForecastEnginePage() {
   const { data: cryptoDCA = [] }      = useQuery<any[]>({ queryKey: ['/api/crypto-dca'],          queryFn: () => apiRequest('GET', '/api/crypto-dca').then(r => r.json()) });
   const { data: plannedStock = [] }   = useQuery<any[]>({ queryKey: ['/api/planned-investments', 'stock'],  queryFn: () => apiRequest('GET', '/api/planned-investments?module=stock').then(r => r.json()) });
   const { data: plannedCrypto = [] }  = useQuery<any[]>({ queryKey: ['/api/planned-investments', 'crypto'], queryFn: () => apiRequest('GET', '/api/planned-investments?module=crypto').then(r => r.json()) });
+  // Holdings / income / expenses — required for the canonical mapper so the
+  // Monte Carlo starting position uses the same source-of-truth selectors as
+  // Dashboard / Net Worth / Decision Engine.
+  const { data: holdingsRaw = [] }    = useQuery<any[]>({ queryKey: ['/api/holdings'],            queryFn: () => apiRequest('GET', '/api/holdings').then(r => r.json()).catch(() => []) });
+  const { data: incomeRecords = [] }  = useQuery<any[]>({ queryKey: ['/api/income'],              queryFn: () => apiRequest('GET', '/api/income').then(r => r.json()).catch(() => []) });
+  const { data: expensesRows = [] }   = useQuery<any[]>({ queryKey: ['/api/expenses'],            queryFn: () => apiRequest('GET', '/api/expenses').then(r => r.json()).catch(() => []) });
+
+  // Track the last reconciliation diagnostic so the UI can display it next to
+  // the MC results (or before running, to prove the simulation will start from
+  // the same NW the Dashboard shows).
+  const [mcReconciliation, setMcReconciliation] = useState<CanonicalMCReconciliation | null>(null);
 
   // ── Run Monte Carlo ──────────────────────────────────────────────────────────
+  // Build the engine input via the canonical mapper so every starting balance
+  // (cash, super, stocks, crypto, income, expenses) routes through the same
+  // SoT selectors used by Dashboard / Net Worth.
   const handleRunMC = useCallback(() => {
     if (isRunningMC) return;
     setIsRunningMC(true);
     setTimeout(() => {
       try {
-        const snap = snapshot ?? {};
-        const result = runMonteCarlo({
-          snapshot: {
-            ppor: safeNum(snap.ppor), cash: safeNum(snap.cash),
-            super_balance: safeNum(snap.super_balance), stocks: safeNum(snap.stocks),
-            crypto: safeNum(snap.crypto), cars: safeNum(snap.cars),
-            iran_property: safeNum(snap.iran_property), mortgage: safeNum(snap.mortgage),
-            other_debts: safeNum(snap.other_debts), monthly_income: safeNum(snap.monthly_income),
-            monthly_expenses: safeNum(snap.monthly_expenses),
+        const { input, reconciliation } = buildCanonicalMonteCarloInput(
+          {
+            snapshot: snapshot ?? null,
+            properties,
+            stocks,
+            cryptos,
+            holdingsRaw,
+            incomeRecords,
+            expenses: expensesRows,
           },
-          properties, stocks, cryptos,
-          stockTransactions: stockTx, cryptoTransactions: cryptoTx,
-          stockDCASchedules: stockDCA, cryptoDCASchedules: cryptoDCA,
-          plannedStockOrders: plannedStock, plannedCryptoOrders: plannedCrypto,
-          bills, yearlyAssumptions, simulations: 1000,
-          volatilityParams: mcVolatility,
-        });
+          {
+            yearlyAssumptions,
+            volatilityParams: mcVolatility,
+            stockTransactions: stockTx,
+            cryptoTransactions: cryptoTx,
+            stockDCASchedules: stockDCA,
+            cryptoDCASchedules: cryptoDCA,
+            plannedStockOrders: plannedStock,
+            plannedCryptoOrders: plannedCrypto,
+            bills,
+            simulations: 1000,
+          },
+        );
+        setMcReconciliation(reconciliation);
+        if (reconciliation.status === 'FAIL') {
+          // Surface, but do not block — engine still runs with canonical inputs.
+          toast({
+            title: 'Source-of-truth drift detected',
+            description: summariseMCReconciliation(reconciliation),
+            variant: 'destructive',
+          });
+        }
+        const result = runMonteCarlo(input);
         setMonteCarloResult(result);
         sbSaveMCResult(result).catch(() => {});
         toast({ title: 'Simulation Complete', description: `1,000 paths. Median 2035: ${fmtM(result.median)}` });
@@ -275,8 +310,43 @@ export default function AIForecastEnginePage() {
         setIsRunningMC(false);
       }
     }, 50);
-  }, [isRunningMC, snapshot, properties, stocks, cryptos, stockTx, cryptoTx, stockDCA, cryptoDCA,
-      plannedStock, plannedCrypto, bills, yearlyAssumptions, mcVolatility, setIsRunningMC, setMonteCarloResult, toast]);
+  }, [isRunningMC, snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expensesRows,
+      stockTx, cryptoTx, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, yearlyAssumptions,
+      mcVolatility, setIsRunningMC, setMonteCarloResult, toast]);
+
+  // Live preview of the canonical reconciliation — even before the user
+  // presses Run, the UI shows the starting NW the simulation WILL use.
+  const livePreviewRecon = useMemo<CanonicalMCReconciliation | null>(() => {
+    if (!snapshot) return null;
+    try {
+      const { reconciliation } = buildCanonicalMonteCarloInput(
+        {
+          snapshot,
+          properties,
+          stocks,
+          cryptos,
+          holdingsRaw,
+          incomeRecords,
+          expenses: expensesRows,
+        },
+        {
+          yearlyAssumptions,
+          volatilityParams: mcVolatility,
+          stockTransactions: stockTx,
+          cryptoTransactions: cryptoTx,
+          stockDCASchedules: stockDCA,
+          cryptoDCASchedules: cryptoDCA,
+          plannedStockOrders: plannedStock,
+          plannedCryptoOrders: plannedCrypto,
+          bills,
+        },
+      );
+      return reconciliation;
+    } catch {
+      return null;
+    }
+  }, [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expensesRows,
+      stockTx, cryptoTx, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, yearlyAssumptions, mcVolatility]);
 
   const handleSave = useCallback(async () => {
     await saveToSupabase();
@@ -354,16 +424,32 @@ export default function AIForecastEnginePage() {
             <Save className="w-3 h-3" />Mode saved automatically
           </span>
         </div>
+        {/* Product philosophy banner — clarifies what each mode answers. */}
+        <div className="mb-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+          <div className="rounded-lg border border-border bg-background/40 px-3 py-2">
+            <span className="font-semibold text-blue-300">Simple Forecast</span>
+            <span className="text-muted-foreground"> — “What happens if my assumptions play out exactly?”</span>
+          </div>
+          <div className="rounded-lg border border-primary/40 bg-primary/5 px-3 py-2">
+            <span className="font-semibold text-primary">Monte Carlo (Recommended)</span>
+            <span className="text-muted-foreground"> — “What could happen across thousands of realistic futures?”</span>
+          </div>
+          <div className="rounded-lg border border-border bg-background/40 px-3 py-2">
+            <span className="font-semibold text-sky-300">Year-by-Year</span>
+            <span className="text-muted-foreground"> — “Let me manually override the future.”</span>
+          </div>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Order: Simple → Monte Carlo (primary) → Year-by-Year */}
           <ModeCard active={forecastMode === 'profile'} onClick={() => setForecastMode('profile')}
-            icon={<Layers className="w-full h-full" />} title="Profile Mode" badge="Preset"
-            description="Use Conservative, Moderate, or Aggressive return presets across all asset classes." />
-          <ModeCard active={forecastMode === 'year-by-year'} onClick={() => setForecastMode('year-by-year')}
-            icon={<BarChart3 className="w-full h-full" />} title="Year-by-Year Mode" badge="Advanced"
-            description="Set custom % for each year 2026–2035 across every asset class and economic variable." />
+            icon={<Layers className="w-full h-full" />} title="Simple Forecast" badge="Quick estimate"
+            description="Deterministic preset returns (Conservative / Moderate / Aggressive) — single straight-line answer." />
           <ModeCard active={forecastMode === 'monte-carlo'} onClick={() => setForecastMode('monte-carlo')}
-            icon={<Activity className="w-full h-full" />} title="Monte Carlo" badge="Simulation"
-            description="1,000 probability simulations with realistic crash/bull events, vacancy, rate shocks. Fan chart + probabilities." />
+            icon={<Activity className="w-full h-full" />} title="Monte Carlo Forecast" badge="Recommended"
+            description="Primary projection. 1,000 simulations with realistic regime shifts, crashes, vacancy, rate shocks. Outputs P5–P95 fan, FIRE probability, liquidity risk." />
+          <ModeCard active={forecastMode === 'year-by-year'} onClick={() => setForecastMode('year-by-year')}
+            icon={<BarChart3 className="w-full h-full" />} title="Year-by-Year Plan" badge="Advanced override"
+            description="Set custom % for each year 2026–2035 across every asset class and economic variable. Use only when you want to hand-tune the future." />
         </div>
 
         {forecastMode === 'profile' && (
@@ -453,6 +539,53 @@ export default function AIForecastEnginePage() {
             <Zap className="w-3 h-3 text-primary" />
             Values commit on blur and instantly update all forecast pages.
           </p>
+        </div>
+      )}
+
+      {/* ── 4a. SOURCE-OF-TRUTH RECONCILIATION (Monte Carlo only) ─────────────── */}
+      {forecastMode === 'monte-carlo' && livePreviewRecon && (
+        <div className={`rounded-xl border p-5 ${livePreviewRecon.status === 'PASS' ? 'border-emerald-700/40 bg-emerald-900/10' : 'border-red-700/40 bg-red-900/10'}`}>
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <Sparkles className={`w-4 h-4 ${livePreviewRecon.status === 'PASS' ? 'text-emerald-300' : 'text-red-300'}`} />
+            <h2 className="text-sm font-bold text-foreground">Starting position — single source of truth</h2>
+            <span className={`ml-auto px-2 py-0.5 rounded-full text-xs font-semibold ${livePreviewRecon.status === 'PASS' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>
+              {livePreviewRecon.status === 'PASS' ? 'Reconciled with Dashboard' : 'Drift detected'}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+            Monte Carlo reads the same canonical snapshot as Dashboard / Net Worth / Decision Engine / Wealth Strategy / Reports.
+            Income is the ledger 6-month average; cash includes offset + savings + emergency; super is roham + fara; stocks / crypto
+            use live holdings then per-ticker price × quantity then manual override. {summariseMCReconciliation(livePreviewRecon)}
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 text-xs">
+            {[
+              { label: 'Dashboard NW',  value: livePreviewRecon.dashboardNetWorth },
+              { label: 'Engine NW',     value: livePreviewRecon.engineStartingNetWorth },
+              { label: 'PPOR',          value: livePreviewRecon.components.ppor },
+              { label: 'Cash + offset', value: livePreviewRecon.components.cash },
+              { label: 'Super',         value: livePreviewRecon.components.super_balance },
+              { label: 'Stocks',        value: livePreviewRecon.components.stocks },
+              { label: 'Crypto',        value: livePreviewRecon.components.crypto },
+              { label: 'Mortgage',      value: -livePreviewRecon.components.mortgage },
+              { label: 'Other debts',   value: -livePreviewRecon.components.other_debts },
+              { label: 'Monthly income (engine)',   value: livePreviewRecon.components.monthly_income },
+              { label: 'Monthly expenses (engine)', value: livePreviewRecon.components.monthly_expenses },
+              { label: 'Income source', value: livePreviewRecon.incomeSource },
+            ].map(({ label, value }) => (
+              <div key={label} className="rounded-lg bg-background/50 border border-border p-2">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</p>
+                <p className="text-sm font-bold text-foreground num-display mt-0.5">
+                  {typeof value === 'number' ? fmtM(value) : value}
+                </p>
+              </div>
+            ))}
+          </div>
+          {livePreviewRecon.expensesIncludesDebt && (
+            <p className="text-[11px] text-muted-foreground mt-3 leading-snug">
+              Note: ledger expenses already include mortgage/debt rows — the engine subtracts debt service so the simulation
+              does not double-count debt against amortisation.
+            </p>
+          )}
         </div>
       )}
 
@@ -567,6 +700,57 @@ export default function AIForecastEnginePage() {
                 hint="Additional rate % added on shock year" />
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ── 4b. ASSUMPTIONS USED (full inventory) ──────────────────────────────── */}
+      {forecastMode === 'monte-carlo' && (
+        <div className="rounded-xl border border-border bg-card p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Info className="w-4 h-4 text-primary" />
+            <h2 className="text-sm font-bold text-foreground">Assumptions used by this simulation</h2>
+            <span className="ml-auto text-xs text-muted-foreground">No hidden assumptions</span>
+          </div>
+          <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
+            Every model parameter the engine touches is listed here. Update any of them above (or in the
+            Year-by-Year table) and re-run to see the impact.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div className="rounded-lg border border-border bg-background/50 p-3">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-2">Inflation &amp; rates</p>
+              <ExplainRow label="Inflation model" detail={`Year-by-year mean from assumptions table, plus stochastic ±${mcVolatility.inflation_volatility}% std-dev monthly shock. Covers normal / high / falling / sticky / stagflation regimes.`} />
+              <ExplainRow label="Interest rate model" detail={`Base rate from assumptions table. ${mcVolatility.rate_shock_prob}% annual probability of +${mcVolatility.rate_shock_size}% rate shock (covers falling / stable / rising / rate-shock / mean-reversion regimes).`} />
+              <ExplainRow label="Cash interest" detail={`${mcVolatility.cash_interest_rate}% p.a. credited monthly on positive cash balances.`} />
+            </div>
+            <div className="rounded-lg border border-border bg-background/50 p-3">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-2">Expected returns &amp; volatility</p>
+              <ExplainRow label="Property" detail={`${yearlyAssumptions[0]?.property_growth ?? 6}% mean / ${mcVolatility.prop_volatility}% std-dev. ${mcVolatility.prop_vacancy_rate}% vacancy, ${mcVolatility.prop_maintenance_pct}% maintenance.`} />
+              <ExplainRow label="Stocks" detail={`${yearlyAssumptions[0]?.stocks_return ?? 10}% mean / ${mcVolatility.stock_volatility}% std-dev. ${mcVolatility.stock_correction_prob}% chance of ${mcVolatility.stock_correction_size}% correction per year.`} />
+              <ExplainRow label="Crypto" detail={`${yearlyAssumptions[0]?.crypto_return ?? 20}% mean / ${mcVolatility.crypto_volatility}% std-dev. ${mcVolatility.crypto_crash_prob}% crash (~${mcVolatility.crypto_crash_size}%), ${mcVolatility.crypto_bull_prob}% bull run (~${mcVolatility.crypto_bull_upside}%).`} />
+              <ExplainRow label="Super" detail={`${yearlyAssumptions[0]?.super_return ?? 10}% mean / 10% std-dev. Compounds monthly.`} />
+            </div>
+            <div className="rounded-lg border border-border bg-background/50 p-3">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-2">Correlations &amp; fat tails</p>
+              <ExplainRow label="Stocks ↔ Crypto" detail="Independently drawn each month but share annual market-correction triggers — captures observed risk-on/risk-off behaviour without over-fitting." />
+              <ExplainRow label="Rates ↔ property" detail="Each settled IP's repayment is recomputed with the effective rate every year, so rate shocks pressure serviceability." />
+              <ExplainRow label="Inflation ↔ expenses" detail="Monthly expense growth = (expense_growth + inflation shock) / 12." />
+              <ExplainRow label="Fat-tail events" detail={`Market correction (${mcVolatility.stock_correction_prob}% / yr), crypto crash (${mcVolatility.crypto_crash_prob}% / yr), rate shock (${mcVolatility.rate_shock_prob}% / yr), stochastic property vacancy each month.`} />
+            </div>
+            <div className="rounded-lg border border-border bg-background/50 p-3">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-2">Household &amp; tax</p>
+              <ExplainRow label="Income" detail={`Ledger 6-month average — falls back to per-person snapshot fields, then manual master override.${livePreviewRecon ? ` (Source: ${livePreviewRecon.incomeSource})` : ''}`} />
+              <ExplainRow label="Expenses" detail={`Ledger 6-month average — falls back to manual override. Debt service ${livePreviewRecon?.expensesIncludesDebt ? 'is already in ledger; engine nets it out so amortisation is not double-counted' : 'is added separately by the engine'}.`} />
+              <ExplainRow label="Negative gearing" detail="If enabled on the dashboard, NG refund is injected as either annual lump-sum in August or monthly PAYG cashflow." />
+              <ExplainRow label="Emergency buffer" detail={`Cash floor $${(mcVolatility.emergency_buffer / 1000).toFixed(0)}k. Simulations falling below this contribute to the Cash Shortfall probability.`} />
+            </div>
+            <div className="rounded-lg border border-border bg-background/50 p-3 md:col-span-2">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-2">Simulation config</p>
+              <ExplainRow label="Number of simulations" detail="1,000 paths per run (monthly time steps, 120 months default)." />
+              <ExplainRow label="Confidence bands" detail="P5 / P10 / P25 / P50 (median) / P75 / P90 / P95 reported across NW, cash, property equity, super, and debt." />
+              <ExplainRow label="FIRE threshold" detail="$120k/yr passive income default (overridable via fire_settings.target_passive_monthly)." />
+              <ExplainRow label="Horizon" detail="2026 → 2035 (10 years) unless start/end overrides are supplied via the engine API." />
+            </div>
           </div>
         </div>
       )}
