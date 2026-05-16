@@ -40,6 +40,8 @@ import {
 } from "@/lib/monteCarloCanonical";
 import { runMonteCarloV4, type MonteCarloV4Extras } from "@/lib/monteCarloV4";
 import MonteCarloV4Panel from "@/components/MonteCarloV4Panel";
+import { runMonteCarloV5, type MonteCarloV5Extras } from "@/lib/monteCarloV5";
+import MonteCarloV5Panel from "@/components/MonteCarloV5Panel";
 import {
   ComposedChart, Area, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer,
@@ -266,6 +268,9 @@ export default function AIForecastEnginePage() {
   // narratives). Users can disable to run pure V3.
   const [useV4Engine, setUseV4Engine] = useState<boolean>(true);
   const [v4Extras, setV4Extras] = useState<MonteCarloV4Extras | null>(null);
+  // V5 realism + advisor intelligence (additive). Defaults OFF to preserve V4 UX.
+  const [useV5Engine, setUseV5Engine] = useState<boolean>(false);
+  const [v5Extras, setV5Extras] = useState<MonteCarloV5Extras | null>(null);
 
   // ── Run Monte Carlo ──────────────────────────────────────────────────────────
   // Build the engine input via the canonical mapper so every starting balance
@@ -308,12 +313,16 @@ export default function AIForecastEnginePage() {
             variant: 'destructive',
           });
         }
-        const result = useV4Engine
-          ? runMonteCarloV4(input, { seed: `fwl-${new Date().getFullYear()}` })
-          : runMonteCarlo(input);
+        const result = useV5Engine
+          ? runMonteCarloV5(input, { seed: `fwl-${new Date().getFullYear()}` })
+          : useV4Engine
+            ? runMonteCarloV4(input, { seed: `fwl-${new Date().getFullYear()}` })
+            : runMonteCarlo(input);
         setMonteCarloResult(result);
         if ((result as any).v4) setV4Extras((result as any).v4 as MonteCarloV4Extras);
         else setV4Extras(null);
+        if ((result as any).v5) setV5Extras((result as any).v5 as MonteCarloV5Extras);
+        else setV5Extras(null);
         sbSaveMCResult(result).catch(() => {});
         toast({
           title: useV4Engine ? 'V4 Institutional Simulation Complete' : 'Simulation Complete',
@@ -327,7 +336,7 @@ export default function AIForecastEnginePage() {
     }, 50);
   }, [isRunningMC, snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expensesRows,
       stockTx, cryptoTx, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, yearlyAssumptions,
-      mcVolatility, setIsRunningMC, setMonteCarloResult, toast, useV4Engine]);
+      mcVolatility, setIsRunningMC, setMonteCarloResult, toast, useV4Engine, useV5Engine]);
 
   // Live preview of the canonical reconciliation — even before the user
   // presses Run, the UI shows the starting NW the simulation WILL use.
@@ -798,6 +807,17 @@ export default function AIForecastEnginePage() {
               <span className="font-semibold text-amber-300">V4 Institutional Engine</span>
               <span className="text-muted-foreground">— regimes · advanced risk · advisor narratives</span>
             </label>
+            <label className="flex items-center gap-2 text-xs cursor-pointer select-none px-3 py-2 rounded border border-indigo-500/30 bg-indigo-500/10">
+              <input
+                type="checkbox"
+                checked={useV5Engine}
+                onChange={(e) => setUseV5Engine(e.target.checked)}
+                className="accent-indigo-400"
+                data-testid="toggle-v5-engine"
+              />
+              <span className="font-semibold text-indigo-300">V5 Realism &amp; Advisor Intelligence</span>
+              <span className="text-muted-foreground">— life-cycle · correlated shocks · FIRE V2</span>
+            </label>
             <div className="flex flex-col gap-1">
               {mc && (
                 <>
@@ -982,6 +1002,17 @@ export default function AIForecastEnginePage() {
             p10={mc.p10}
             p90={mc.p90}
             probFf={mc.prob_ff}
+          />
+        </div>
+      )}
+
+      {/* ── 8.6. V5 Realism + Advisor Intelligence (additive, opt-in) ──────────── */}
+      {mc && v5Extras && forecastMode === 'monte-carlo' && (
+        <div className="rounded-xl border border-indigo-500/30 bg-card p-5">
+          <MonteCarloV5Panel
+            v5={v5Extras}
+            startYear={yearlyAssumptions[0]?.year ?? new Date().getFullYear()}
+            endYear={yearlyAssumptions[yearlyAssumptions.length - 1]?.year ?? new Date().getFullYear() + 9}
           />
         </div>
       )}
