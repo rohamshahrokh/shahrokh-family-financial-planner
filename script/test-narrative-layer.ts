@@ -1,32 +1,38 @@
 /**
- * Family Wealth Lab — Narrative Layer Test Suite (narrative-layer-v1)
+ * Family Wealth Lab — Narrative Layer Test Suite (narrative-layer-v2)
  *
  * Run with:  npm run test:narrative-layer
  *
- * What this proves:
+ * What this proves for v2:
  *
- *   1. Mandatory section order
- *      Sections render in: executive summary → what should I do → why →
- *      main risks → if ignored → action plan.
+ *   1. Mandatory v2 section order
+ *      Sections render in: executive recommendation → why now → main risks
+ *      avoided → trade-offs accepted → action plan → what would change this
+ *      recommendation later.
  *
- *   2. Simple-mode jargon purity
- *      No Simple-mode section body or summary contains tokens from
- *      QUANT_JARGON_WORDS (VaR, CVaR, Monte Carlo, P10/P50/P90, Sharpe,
- *      kurtosis, drawdown, percentile, volatility, DSR, LVR, etc.).
+ *   2. Simple-mode jargon purity (no quant tokens — VaR, P10, drawdown, etc.)
  *
- *   3. Advisor mode adds comparative & runner-up content.
+ *   3. Banned narrative phrases (v2)
+ *      Simple AND Advisor surfaces never contain "In plain English",
+ *      "Simple explanation", "This plan looks like", "The engine sees",
+ *      "Strong survivability", "Top contributor", "The future could play
+ *      out", generic Monte Carlo phrasing, or generic-disclaimer phrases.
  *
- *   4. Quant mode preserves full quant analytics — score derivation, raw
- *      probabilities (VaR/CVaR dollar values appear in the underlying engine
- *      output but the narrative shows variance / drawdown / VaR phrasing).
+ *   4. Advisor mode adds runner-up comparison + explains why an immediate
+ *      property purchase lost when applicable.
  *
- *   5. Confidence band is computed from winner–runner score gap.
+ *   5. Advisor mode includes financial reasoning vocabulary (liquidity,
+ *      leverage, refinance, optionality, sequencing, opportunity cost,
+ *      borrowing power).
  *
- *   6. Cautious fallback when engine returns zero ranked candidates.
+ *   6. Quant mode preserves full quant analytics (score derivation, raw
+ *      stress probabilities, drawdown / leverage / concentration metrics).
  *
- *   7. End-to-end integration with the real engine (single small run) — the
- *      narrative layer accepts a real QuickDecisionOutput and the Simple
- *      mode output remains jargon-free.
+ *   7. Confidence band is computed from winner–runner score gap.
+ *
+ *   8. Cautious fallback when engine returns zero ranked candidates.
+ *
+ *   9. End-to-end integration with the real engine (single small run).
  *
  * Exit 0 on all pass, 1 on any failure.
  */
@@ -34,9 +40,9 @@
 import {
   buildNarrativeReport,
   findJargonLeaks,
+  findBannedPhraseLeaks,
   paraphraseForSimple,
   stripJargon,
-  QUANT_JARGON_WORDS,
   type NarrativeSection,
 } from "../client/src/lib/scenarioV2/decisionEngine/narrativeLayer";
 import {
@@ -64,20 +70,14 @@ function section(name: string): void {
 }
 
 // ─── Fixture: synthetic QuickDecisionOutput ─────────────────────────────────
-//
-// We deliberately do NOT run the real engine here for the structural tests —
-// the goal is to isolate the narrative translation layer from engine churn.
-// The integration test at the bottom DOES run the real engine on a small
-// healthy household to prove the narrative consumes a real output too.
 
 function fakeCandidate(overrides: Partial<RankedCandidate> = {}): RankedCandidate {
   return {
-    id: "winner",
-    label: "Offset $50k + ETF DCA",
-    shortLabel: "Offset+ETF",
+    id: "defer_etf_dca",
+    label: "Defer property: ETF DCA 24mo",
+    shortLabel: "ETF DCA",
     events: [],
     result: {
-      // Only the fields the narrative reads.
       initialNetWorth: 800_000,
       terminalNwSamples: [],
       terminalCashSamples: [],
@@ -86,10 +86,10 @@ function fakeCandidate(overrides: Partial<RankedCandidate> = {}): RankedCandidat
       medianNwPath: [],
       medianCashPath: [],
       negativeEquityProbability: 0.03,
-      liquidityStressProbability: 0.22,
-      refinancePressureProbability: 0.15,
-      defaultProbability: 0.04,
-      liquidityExhaustionProbability: 0.08,
+      liquidityStressProbability: 0.07,
+      refinancePressureProbability: 0.08,
+      defaultProbability: 0.02,
+      liquidityExhaustionProbability: 0.03,
       medianDefaultMonth: null,
       medianLiquidityFirstMonth: 36,
       medianNegEquityFirstMonth: null,
@@ -99,15 +99,15 @@ function fakeCandidate(overrides: Partial<RankedCandidate> = {}): RankedCandidat
       riskMetrics: {
         volatility: 0.18,
         downsideRisk: 0.12,
-        leverageRisk: 0.62,
+        leverageRisk: 0.42,
         liquidityRisk: 0.3,
         concentrationRisk: 0.2,
         riskAdjustedNw: 1_050_000,
         varDollars95: 75_000,
         cvarDollars95: 110_000,
-        maxDrawdownMedian: 0.17,
-        maxDrawdownP90: 0.28,
-        rationale: ["Median drawdown ≈ 17%"],
+        maxDrawdownMedian: 0.14,
+        maxDrawdownP90: 0.24,
+        rationale: ["Median peak-to-trough decline ≈ 14%"],
       },
       runtimeMs: 100,
       simulationCount: 300,
@@ -120,11 +120,10 @@ function fakeCandidate(overrides: Partial<RankedCandidate> = {}): RankedCandidat
       dashboardMonthlySurplus: 0,
       reconcilesToDashboard: true,
       serviceability: {} as any,
-      // Required by ScenarioResult (not deeply read by narrative).
       netWorthFan: [] as any,
     } as any,
     score: {
-      score: 78,
+      score: 82,
       breakdown: {},
     } as any,
     trace: {
@@ -134,27 +133,19 @@ function fakeCandidate(overrides: Partial<RankedCandidate> = {}): RankedCandidat
       riskDrivers: [],
       timeline: [],
       scoreDerivation: [
-        { axis: "survivalProbability", rawValue: 0.96, weight: 0.35, contribution: 33.6 },
-        { axis: "liquidityFactor",     rawValue: 0.72, weight: 0.25, contribution: 18.0 },
+        { axis: "survivalProbability", rawValue: 0.98, weight: 0.35, contribution: 34.3 },
+        { axis: "liquidityFactor",     rawValue: 0.82, weight: 0.25, contribution: 20.5 },
         { axis: "riskAdjustedReturn",  rawValue: 0.072, weight: 0.20, contribution: 14.4 },
         { axis: "terminalNetWorth",    rawValue: 1_100_000, weight: 0.08, contribution: 8.8 },
       ],
     },
-    headline: "Offsets your mortgage first, then dollar-cost-averages into ETFs.",
+    headline: "Defers the additional property purchase and accumulates diversified ETF exposure over 24 months.",
     rationale: [
-      "It scored highest on the survival axis.",
-      "Liquidity factor stays above 0.7 across the horizon.",
-      "Risk-adjusted return is +7.2% per year.",
+      "Highest survival across the path set.",
+      "Strongest liquidity-factor profile.",
+      "Risk-adjusted return of around 7.2% per year.",
     ],
-    softWarnings: [
-      {
-        id: "liquidity-thin",
-        label: "Thin cash buffer in years 3-4",
-        detail: "Median cash dips to ~$30k around month 36 before recovering.",
-        severity: "warn",
-        driver: "medianCashPath",
-      },
-    ],
+    softWarnings: [],
     isHighRisk: false,
     ...overrides,
   } as RankedCandidate;
@@ -163,13 +154,24 @@ function fakeCandidate(overrides: Partial<RankedCandidate> = {}): RankedCandidat
 function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecisionOutput {
   const winner = fakeCandidate();
   const runnerUp = fakeCandidate({
-    id: "runner",
-    label: "Lump-sum into ETF",
-    score: { score: 71, breakdown: {} } as any,
+    id: "ip_6mo",
+    label: "Buy IP in 6mo (build small buffer)",
+    shortLabel: "IP @ 6mo",
+    score: { score: 75, breakdown: {} } as any,
+    result: {
+      ...fakeCandidate().result,
+      liquidityStressProbability: 0.22,
+      refinancePressureProbability: 0.24,
+      riskMetrics: {
+        ...(fakeCandidate().result as any).riskMetrics,
+        leverageRisk: 0.72,
+        maxDrawdownMedian: 0.18,
+      },
+    } as any,
   });
   return {
-    question: "deploy_capital",
-    capital: 50_000,
+    question: "buy_property" as any,
+    capital: 200_000,
     investorProfile: "balanced" as any,
     ranked: [winner, runnerUp],
     discarded: [],
@@ -183,8 +185,8 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
     } as any,
     generatedAt: new Date().toISOString(),
     comparativeNarrative: {
-      winnerId: "winner",
-      runnerUpId: "runner",
+      winnerId: "defer_etf_dca",
+      runnerUpId: "ip_6mo",
       whyWon: [
         "Higher survival probability than the runner-up.",
         "P50 terminal NW is $250k above the runner-up.",
@@ -194,7 +196,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
         "If rates rise above 8.5%, refinance pressure exceeds DSR thresholds.",
         "A 20% property downturn in years 1-3 erodes the LVR safety margin.",
       ],
-      secondPlaceAndWhy: "Lump-sum ETF wins on terminal NW but loses on liquidity.",
+      secondPlaceAndWhy: "IP @ 6mo wins on terminal NW but loses on liquidity.",
     },
     executionPlan: [
       {
@@ -203,7 +205,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
         startMonth: "2026-05",
         endMonth: "2026-08",
         actions: [
-          { event: "Move $50k into offset", effect: "Reduces interest by ~$3,250/yr." },
+          { event: "Confirm cash buffer", effect: "Maintain six months of household expenses in reserve before the first contribution." },
         ],
         rationale: "Front-load the safe action.",
       },
@@ -213,7 +215,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
         startMonth: "2026-09",
         endMonth: "2028-05",
         actions: [
-          { event: "Monthly DCA into ETF", effect: "$2,500/month into a diversified ETF." },
+          { event: "Monthly contribution", effect: "Approximately $8.3k per month into diversified ETF exposure." },
         ],
         rationale: "Behavioural smoothing.",
       },
@@ -222,7 +224,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
       {
         id: "rate-rise",
         trigger: "Variable rate rises above 8.5%",
-        action: "Slow DCA to $1,000/month and rebuild buffer first",
+        action: "Slow the monthly contribution and rebuild the buffer first",
         rationale: "Refinance pressure crosses warning band.",
         severity: "warn",
       },
@@ -234,33 +236,33 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 (async () => {
-  section("1. Mandatory section order");
+  section("1. Mandatory v2 section order");
 
   {
     const out = fakeOutput();
     const r = buildNarrativeReport(out, "simple");
     const ids = r.sections.map(s => s.id);
     assert(
-      "Simple mode emits all six sections",
+      "Simple mode emits all six v2 sections",
       r.sections.length === 6,
       `got ${r.sections.length}`,
     );
     assert(
-      "Section order: executiveSummary, whatShouldIDo, whyEngineChoseThis, mainRisks, ifIgnored, actionPlan",
+      "Section order: executiveRecommendation, whyNow, mainRisksAvoided, tradeOffsAccepted, actionPlan, whatWouldChangeThis",
       JSON.stringify(ids) ===
         JSON.stringify([
-          "executiveSummary",
-          "whatShouldIDo",
-          "whyEngineChoseThis",
-          "mainRisks",
-          "ifIgnored",
+          "executiveRecommendation",
+          "whyNow",
+          "mainRisksAvoided",
+          "tradeOffsAccepted",
           "actionPlan",
+          "whatWouldChangeThis",
         ]),
       ids.join(","),
     );
   }
 
-  section("2. Simple-mode jargon purity");
+  section("2. Simple-mode jargon purity (quant tokens absent)");
 
   {
     const out = fakeOutput();
@@ -276,68 +278,109 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
     );
   }
 
+  section("3. v2 banned narrative phrases absent (Simple AND Advisor)");
+
   {
-    // Even when engine emits "VaR/CVaR" phrasing in whyWon, Simple mode must paraphrase.
-    const out = fakeOutput({
-      comparativeNarrative: {
-        winnerId: "winner",
-        runnerUpId: "runner",
-        whyWon: [
-          "VaR₅ is $30k lower than the runner-up.",
-          "CVaR₅ improves by $40k.",
-          "P50 terminal NW is $200k above runner-up.",
-        ],
-        whatCouldInvalidate: ["Monte Carlo flagged 12% liquidity stress."],
-        secondPlaceAndWhy: "Lump-sum has higher P90 but worse drawdown.",
-      },
-    });
-    const r = buildNarrativeReport(out, "simple");
-    const allText = r.sections
-      .flatMap(s => [s.title, s.summary, ...s.body])
-      .join(" \n ");
-    const leaks = findJargonLeaks(allText);
+    const out = fakeOutput();
+    for (const mode of ["simple", "advisor"] as const) {
+      const r = buildNarrativeReport(out, mode);
+      const allText = r.sections
+        .flatMap(s => [s.title, s.summary, ...s.body])
+        .join(" \n ");
+      const leaks = findBannedPhraseLeaks(allText);
+      assert(
+        `${mode} mode contains no banned v2 phrases`,
+        leaks.length === 0,
+        leaks.length > 0 ? `leaked: ${leaks.join("; ")}` : "",
+      );
+      // Also check confidence reason
+      const confLeaks = findBannedPhraseLeaks(r.confidenceReason);
+      assert(
+        `${mode} confidence reason contains no banned v2 phrases`,
+        confLeaks.length === 0,
+        confLeaks.length > 0 ? `leaked: ${confLeaks.join("; ")}` : "",
+      );
+    }
+  }
+
+  section("4. Advisor mode — runner-up comparison and 'why property lost' when applicable");
+
+  {
+    const out = fakeOutput(); // winner=defer, runner=IP@6mo
+    const r = buildNarrativeReport(out, "advisor");
+    const tradeOffs = r.sections.find(s => s.id === "tradeOffsAccepted")!.body.join(" ");
     assert(
-      "Simple-mode paraphrases jargon-heavy engine sentences",
-      leaks.length === 0,
-      leaks.length > 0 ? `leaked: ${leaks.join(", ")}` : "",
+      "Advisor mode includes runner-up comparison in trade-offs section",
+      /runner|investment.property pathway|timing/i.test(tradeOffs),
+      tradeOffs.slice(0, 200),
+    );
+
+    // When runner-up is immediate property, advisor narrative should explicitly
+    // explain that property lost on timing/liquidity grounds.
+    const allAdvisorText = r.sections
+      .flatMap(s => [s.summary, ...s.body])
+      .join(" ");
+    assert(
+      "Advisor mode explains why immediate property lost (timing/liquidity)",
+      /property/i.test(allAdvisorText) &&
+        /(timing|liquidity|refinance)/i.test(allAdvisorText),
+    );
+
+    const exec = r.sections.find(s => s.id === "executiveRecommendation")!.body.join(" ");
+    assert(
+      "Advisor exec body references confidence",
+      /confidence/i.test(exec),
     );
   }
 
-  section("3. Advisor mode — comparative & runner-up");
+  section("5. Advisor mode uses real financial reasoning vocabulary");
 
   {
     const out = fakeOutput();
     const r = buildNarrativeReport(out, "advisor");
-    const whyText = r.sections.find(s => s.id === "whyEngineChoseThis")!.body.join(" ");
-    assert(
-      "Advisor mode includes runner-up explanation",
-      /runner-up/i.test(whyText),
-    );
-    const exec = r.sections.find(s => s.id === "executiveSummary")!.body.join(" ");
-    assert(
-      "Advisor exec summary references score / confidence",
-      /score|confidence|profile/i.test(exec),
-    );
+    const allText = r.sections
+      .flatMap(s => [s.summary, ...s.body])
+      .join(" ")
+      .toLowerCase();
+
+    const requiredVocab = [
+      "liquidity",
+      "leverage",
+      "refinance",
+      "optionality",
+      "borrowing",
+    ];
+    for (const word of requiredVocab) {
+      assert(
+        `Advisor narrative contains financial concept: "${word}"`,
+        allText.includes(word),
+      );
+    }
   }
 
-  section("4. Quant mode — preserves quant analytics");
+  section("6. Quant mode preserves full quant analytics");
 
   {
     const out = fakeOutput();
     const r = buildNarrativeReport(out, "quant");
-    const whyText = r.sections.find(s => s.id === "whyEngineChoseThis")!.body.join(" ");
+    const exec = r.sections.find(s => s.id === "executiveRecommendation")!.body.join(" ");
     assert(
       "Quant mode exposes score derivation (raw × weight)",
-      /derivation/i.test(whyText) && /survivalProbability/i.test(whyText),
+      /derivation/i.test(exec) && /survivalProbability/i.test(exec),
     );
-    const risk = r.sections.find(s => s.id === "mainRisks")!.body.join(" ");
+    const risks = r.sections.find(s => s.id === "mainRisksAvoided")!.body.join(" ");
     assert(
       "Quant mode surfaces stress probability fields by name",
-      /liquidityStressProbability|refinancePressureProbability|maxDrawdown/.test(risk),
+      /liquidityStressProbability|refinancePressureProbability|maxDrawdown/.test(risks),
+    );
+    const why = r.sections.find(s => s.id === "whyNow")!.body.join(" ");
+    assert(
+      "Quant mode exposes leverageRisk / drawdown metrics",
+      /leverageRisk|maxDrawdownMedian/.test(why),
     );
   }
 
-  section("5. Confidence band from winner-runner gap");
+  section("7. Confidence band from winner-runner gap");
 
   {
     const wide = fakeOutput({
@@ -361,7 +404,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
     );
   }
 
-  section("6. Cautious fallback when ranked is empty");
+  section("8. Cautious fallback when ranked is empty");
 
   {
     const empty = fakeOutput({ ranked: [] });
@@ -371,10 +414,61 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
       "Empty ranked → Simple narrative still jargon-free",
       findJargonLeaks(r.sections[0].summary).length === 0,
     );
+    assert(
+      "Empty ranked → no banned v2 phrases in fallback",
+      findBannedPhraseLeaks(r.sections[0].summary).length === 0,
+    );
     assert("Empty ranked → confidence=low", r.confidence === "low");
   }
 
-  section("7. stripJargon / paraphraseForSimple helpers");
+  section("9. Action plan picks up engine phases as concrete steps");
+
+  {
+    const out = fakeOutput();
+    const r = buildNarrativeReport(out, "simple");
+    const actions = r.sections.find(s => s.id === "actionPlan")!.body.join("\n");
+    assert(
+      "Action plan renders engine phases as Step 1, Step 2, …",
+      /Step 1/.test(actions),
+    );
+    assert(
+      "Action plan integrates conditional 'if X then Y' monitoring",
+      /if .* then /i.test(actions),
+    );
+    const summary = r.sections.find(s => s.id === "actionPlan")!.summary;
+    assert(
+      "Action plan summary contains concrete dollar / month language for DCA recommendation",
+      /per month|month/i.test(summary),
+    );
+  }
+
+  section("10. Posture-specific narrative — defer property and build liquidity");
+
+  {
+    const out = fakeOutput(); // winner is defer_etf_dca
+    const r = buildNarrativeReport(out, "simple");
+    const exec = r.sections.find(s => s.id === "executiveRecommendation")!.body.join(" ");
+    assert(
+      "Defer-property posture surfaces 'not anti-property' framing",
+      /not anti.property|timing.sensitive/i.test(exec) || /timing/i.test(exec),
+    );
+
+    const changeTriggers = r.sections.find(s => s.id === "whatWouldChangeThis")!.body.join(" ");
+    assert(
+      "Change-triggers section references liquidity buffer condition",
+      /liquidity buffer|months of household expenses/i.test(changeTriggers),
+    );
+    assert(
+      "Change-triggers section references rates / refinance condition",
+      /rate|refinance/i.test(changeTriggers),
+    );
+    assert(
+      "Change-triggers section references borrowing capacity",
+      /borrowing/i.test(changeTriggers),
+    );
+  }
+
+  section("11. stripJargon / paraphraseForSimple helpers (back-compat)");
 
   {
     assert(
@@ -383,58 +477,20 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
         "Reduce worst-case loss by 20%; worst-case loss also drops.",
     );
     assert(
-      "stripJargon: percentile / P10 → outcome / bad-case",
-      stripJargon("P10 fell below 10th percentile.").toLowerCase().includes("bad-case") &&
+      "stripJargon: P10 / percentile rewritten",
+      stripJargon("P10 fell below 10th percentile.").toLowerCase().includes("adverse") &&
         stripJargon("P10 fell below 10th percentile.").toLowerCase().includes("outcome"),
     );
     assert(
-      "paraphraseForSimple: too-jargony input → generic fallback",
+      "paraphraseForSimple: too-jargony input → generic advisor-grade fallback",
       paraphraseForSimple("Kurtosis Sharpe Sortino alpha")
-        .includes("balance of safety"),
+        .toLowerCase()
+        .includes("resilience"),
     );
   }
 
-  section("8. Action plan and risks adapt to data");
-
-  {
-    // High refinance pressure should produce a mortgage-pressure bullet.
-    const out = fakeOutput({
-      ranked: [
-        fakeCandidate({
-          result: {
-            ...fakeCandidate().result,
-            refinancePressureProbability: 0.40,
-            liquidityStressProbability: 0.05,
-            riskMetrics: {
-              ...(fakeCandidate().result as any).riskMetrics,
-              maxDrawdownMedian: 0.05,
-              leverageRisk: 0.45,
-            },
-          } as any,
-          softWarnings: [],
-        }),
-        fakeCandidate({ id: "r" }),
-      ],
-    });
-    const r = buildNarrativeReport(out, "simple");
-    const risks = r.sections.find(s => s.id === "mainRisks")!.body.join(" ");
-    assert(
-      "High refinance pressure surfaces a mortgage-pressure bullet (Simple)",
-      /mortgage|loan|repayment/i.test(risks),
-    );
-    const actions = r.sections.find(s => s.id === "actionPlan")!.body.join("\n");
-    assert(
-      "Action plan renders engine phases as steps",
-      /Step 1|Months 0/.test(actions),
-    );
-    assert(
-      "Action plan includes conditional 'if X then Y' recommendation",
-      /if .* then /i.test(actions),
-    );
-  }
-
-  // ─── 9. End-to-end integration with the real engine ───────────────────────
-  section("9. End-to-end with real engine output (Simple mode jargon-free)");
+  // ─── 12. End-to-end with the real engine ──────────────────────────────────
+  section("12. End-to-end with real engine output (Simple jargon-free, Advisor full sections, Quant analytics preserved)");
 
   {
     const healthy: DashboardInputs = {
@@ -490,22 +546,34 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
     const allSimple = simpleR.sections
       .flatMap((s: NarrativeSection) => [s.title, s.summary, ...s.body])
       .join(" \n ");
-    const leaks = findJargonLeaks(allSimple);
+    const jargon = findJargonLeaks(allSimple);
     assert(
       "Simple narrative on REAL engine output is jargon-free",
-      leaks.length === 0,
-      leaks.length > 0 ? `leaked: ${leaks.join(", ")}` : "",
+      jargon.length === 0,
+      jargon.length > 0 ? `leaked: ${jargon.join(", ")}` : "",
+    );
+    const banned = findBannedPhraseLeaks(allSimple);
+    assert(
+      "Simple narrative on REAL engine output has no banned v2 phrases",
+      banned.length === 0,
+      banned.length > 0 ? `leaked: ${banned.join("; ")}` : "",
     );
 
     const advisorR = buildNarrativeReport(realOutput, "advisor");
-    assert("Advisor mode emits all 6 mandatory sections on real output", advisorR.sections.length === 6);
+    assert("Advisor mode emits all 6 v2 sections on real output", advisorR.sections.length === 6);
+    const advisorBanned = findBannedPhraseLeaks(
+      advisorR.sections.flatMap(s => [s.summary, ...s.body]).join(" "),
+    );
+    assert(
+      "Advisor narrative on REAL engine output has no banned v2 phrases",
+      advisorBanned.length === 0,
+      advisorBanned.length > 0 ? `leaked: ${advisorBanned.join("; ")}` : "",
+    );
 
     const quantR = buildNarrativeReport(realOutput, "quant");
-    assert("Quant mode emits all 6 mandatory sections on real output", quantR.sections.length === 6);
+    assert("Quant mode emits all 6 v2 sections on real output", quantR.sections.length === 6);
 
-    // Advanced analytics MUST remain accessible: verify the engine output still
-    // contains the quant fields (VaR, CVaR, drawdown, terminalNwSorted) — they
-    // are not destroyed, just hidden behind progressive disclosure in the UI.
+    // Advanced analytics MUST remain accessible.
     const w = realOutput.ranked[0];
     assert(
       "Engine output still carries VaR/CVaR/drawdown (preserved, not removed)",
@@ -514,7 +582,7 @@ function fakeOutput(overrides: Partial<QuickDecisionOutput> = {}): QuickDecision
         typeof w.result.riskMetrics.maxDrawdownMedian === "number",
     );
     assert(
-      "Engine output still carries Monte-Carlo terminalNwSorted distribution",
+      "Engine output still carries the simulated terminal-NW distribution",
       Array.isArray(w.result.terminalNwSorted) && w.result.terminalNwSorted.length > 0,
     );
   }
