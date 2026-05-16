@@ -108,8 +108,9 @@ run("Decision Engine reconciles against same canonical NW (existing test guard p
 // ───────────────────────────────────────────────────────────────────────────
 section("4 — Dashboard projection table consumes MC outputs");
 
-run("Dashboard renders 'Projection source: Monte Carlo forecast' label",
-  fileContains("client/src/pages/dashboard.tsx", "Projection source: Monte Carlo forecast"),
+run("Dashboard labels canonical projection as Monte Carlo source-of-truth",
+  fileContains("client/src/pages/dashboard.tsx", "Canonical forecast · Monte Carlo")
+  && fileContains("client/src/pages/dashboard.tsx", "single source of truth"),
 );
 run("Dashboard reads monteCarloResult.fan_data for P10/P50/P90",
   fileContains("client/src/pages/dashboard.tsx", "monteCarloResult.fan_data"),

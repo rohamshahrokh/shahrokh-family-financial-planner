@@ -641,6 +641,11 @@ export default function DashboardPage() {
   const [maxRefinanceLVR, setMaxRefinanceLVR] = useState<number>(0.80);
   const [emergencyBuffer, setEmergencyBuffer] = useState<number>(30000);
   const [showLedgerAudit, setShowLedgerAudit] = useState(false);
+  // Deterministic year-by-year table is a secondary baseline view. It is
+  // collapsed by default so it does not visually compete with the canonical
+  // Monte Carlo projection above it. See PR: dashboard projection
+  // single-source-of-truth fix.
+  const [showDeterministicProjection, setShowDeterministicProjection] = useState(false);
   const cashFlowView = chartView;
 
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3058,18 +3063,26 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          MONTE CARLO WEALTH PROJECTION  (primary realistic forecast)
-          Rendered when a Monte Carlo run is available. Source of truth label
-          is shown explicitly so users never confuse this with the deterministic
-          year-by-year projection below.
+          WEALTH PROJECTION — CANONICAL (Monte Carlo)
+          The single primary Dashboard projection table. Sourced from the
+          canonical Monte Carlo engine (PR #24/#25). The deterministic
+          year-by-year table below is intentionally collapsed and labelled
+          as a secondary baseline so it never competes with this view.
           ═════════════════════════════════════════════════════════════════ */}
       {monteCarloResult && (monteCarloResult.fan_data?.length ?? 0) > 0 && (
         <div className="px-4 pb-4 db-section-monte-carlo">
+          <div
+            className="mb-2 rounded-xl border border-purple-500/30 bg-purple-500/[0.04] px-3 py-2 text-[11px] text-muted-foreground"
+            data-testid="dashboard-projection-sot-banner"
+          >
+            <span className="font-semibold text-foreground">This dashboard uses probabilistic Monte Carlo forecasting.</span>{" "}
+            Future wealth is shown as a range of outcomes (P10 bear · P50 median · P90 bull) with confidence bands and downside risk, not a single deterministic number. Monte Carlo is the canonical Family Wealth Lab forecast engine.
+          </div>
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <div>
-              <h2 className="text-base font-bold text-foreground">Wealth Projection — Monte Carlo</h2>
+              <h2 className="text-base font-bold text-foreground">Wealth Projection</h2>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                Projection source: Monte Carlo forecast · {monteCarloResult.simulations.toLocaleString()} simulations · single SoT shared with Forecast Engine, Decision Engine and Reports
+                Canonical forecast · Monte Carlo · {monteCarloResult.simulations.toLocaleString()} simulations · single source of truth shared with Forecast Engine, Decision Engine and Reports
               </p>
             </div>
             <Link href="/ai-forecast-engine">
@@ -3117,14 +3130,48 @@ export default function DashboardPage() {
       )}
 
       {/* ══════════════════════════════════════════════════════════════════
-          YEAR-BY-YEAR TABLE (deterministic — Simple Forecast / Year-by-Year)
+          YEAR-BY-YEAR TABLE (deterministic baseline — SECONDARY VIEW)
+          Collapsed by default. This is a deterministic straight-line view
+          and is NOT the official wealth forecast. The canonical Dashboard
+          projection is the Monte Carlo table above. Kept on Dashboard only
+          as an expandable advanced disclosure so users can sanity-check
+          assumptions and see year-level mechanics. Full deterministic
+          modelling lives in Forecast Engine (Simple Forecast /
+          Year-by-Year modes).
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4 db-section-year">
+      <div className="px-4 pb-4 db-section-year" data-testid="dashboard-deterministic-section">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowDeterministicProjection(v => !v)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              data-testid="dashboard-deterministic-toggle"
+              aria-expanded={showDeterministicProjection}
+            >
+              {showDeterministicProjection ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              <span className="text-sm font-semibold text-foreground">Deterministic baseline (advanced)</span>
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground/80 ml-1">not the official forecast</span>
+            </button>
+          </div>
+          <Link href="/ai-forecast-engine"><span className="text-xs text-primary hover:underline">Edit assumptions in Forecast Engine →</span></Link>
+        </div>
+        {!showDeterministicProjection && (
+          <div className="rounded-xl border border-dashed border-border bg-muted/10 px-3 py-2 text-[11px] text-muted-foreground">
+            A single straight-line year-by-year view is available for sanity-checking assumptions. It is <span className="font-semibold text-foreground">not</span> the canonical wealth forecast — use the Monte Carlo projection above as the source of truth. Expand to view the deterministic baseline, or open the Forecast Engine for full Simple Forecast / Year-by-Year modelling.
+          </div>
+        )}
+        {showDeterministicProjection && (
+        <>
+        <div className="mb-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.05] px-3 py-2 text-[11px] text-muted-foreground">
+          <span className="font-semibold text-amber-300">Deterministic baseline — not the official forecast.</span>{" "}
+          Single straight-line projection using {forecastMode === "monte-carlo" ? "Monte Carlo median-path assumptions" : forecastMode === "year-by-year" ? "Year-by-Year custom assumptions" : `Simple Forecast (${profile}) assumptions`}. Ignores volatility, sequence-of-returns risk and downside scenarios — values will not match the canonical Monte Carlo projection above. For the realistic forecast, use the Wealth Projection (Monte Carlo) table.
+        </div>
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h2 className="text-base font-bold text-foreground">Year-by-Year Projection (deterministic)</h2>
+            <h3 className="text-sm font-semibold text-foreground">Year-by-Year Projection (deterministic)</h3>
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              Projection source: {forecastMode === "monte-carlo" ? "Monte Carlo median path (see table above for P10/P90 bands)" : forecastMode === "year-by-year" ? "Year-by-Year custom assumptions" : `Simple Forecast (${profile})`} · single straight-line view
+              Secondary view · {forecastMode === "monte-carlo" ? "Monte Carlo median path (see canonical table above for P10/P90 bands)" : forecastMode === "year-by-year" ? "Year-by-Year custom assumptions" : `Simple Forecast (${profile})`} · single straight-line view
             </p>
           </div>
           <Link href="/timeline"><span className="text-xs text-primary hover:underline">Full Timeline →</span></Link>
@@ -3193,6 +3240,8 @@ export default function DashboardPage() {
             Growth % uses (End NW − Start NW) / Start NW × 100. Sanity check: Total Assets − Liabilities = End NW.
           </div>
         </div>
+        </>
+        )}
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
