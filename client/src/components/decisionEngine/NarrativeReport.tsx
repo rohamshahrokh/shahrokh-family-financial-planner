@@ -16,7 +16,7 @@
  * (QuickDecisionOutput) and translates them via narrativeLayer.ts.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Card,
   CardContent,
@@ -25,8 +25,8 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import {
-  CheckCircle2,
   Clock,
   ShieldCheck,
   Scale,
@@ -34,6 +34,12 @@ import {
   Sparkles,
   RefreshCw,
   TrendingUp,
+  Trophy,
+  AlertTriangle,
+  Brain,
+  Gauge,
+  Activity,
+  BookOpen,
 } from "lucide-react";
 import type { QuickDecisionOutput } from "@/lib/scenarioV2/decisionEngine/candidateGenerator";
 import {
@@ -42,22 +48,44 @@ import {
   type NarrativeSection,
 } from "@/lib/scenarioV2/decisionEngine/narrativeLayer";
 
+// V3 — ten-section icon + tone palette. Legacy v2 IDs fall back to the v2
+// rendering so any caller that still uses buildNarrativeReportV2 keeps working.
 const SECTION_ICON: Record<NarrativeSection["id"], React.ReactNode> = {
-  executiveRecommendation: <Sparkles className="h-4 w-4" />,
-  whyNow: <Clock className="h-4 w-4" />,
-  mainRisksAvoided: <ShieldCheck className="h-4 w-4" />,
-  tradeOffsAccepted: <Scale className="h-4 w-4" />,
-  actionPlan: <ListChecks className="h-4 w-4" />,
-  whatWouldChangeThis: <RefreshCw className="h-4 w-4" />,
+  executiveRecommendation:      <Sparkles className="h-4 w-4" />,
+  whyThisPathWon:               <Trophy className="h-4 w-4" />,
+  whyAlternativesLost:          <Scale className="h-4 w-4" />,
+  whatChangesTheAnswer:         <RefreshCw className="h-4 w-4" />,
+  biggestHiddenRisks:           <AlertTriangle className="h-4 w-4" />,
+  behaviouralRiskCommentary:    <Brain className="h-4 w-4" />,
+  sensitivityAnalysis:          <Gauge className="h-4 w-4" />,
+  stressTestCommentary:         <Activity className="h-4 w-4" />,
+  keyAssumptionsDrivingOutcome: <BookOpen className="h-4 w-4" />,
+  tacticalNextActions:          <ListChecks className="h-4 w-4" />,
+  // Legacy v2 fall-throughs
+  whyNow:                       <Clock className="h-4 w-4" />,
+  mainRisksAvoided:             <ShieldCheck className="h-4 w-4" />,
+  tradeOffsAccepted:            <Scale className="h-4 w-4" />,
+  actionPlan:                   <ListChecks className="h-4 w-4" />,
+  whatWouldChangeThis:          <RefreshCw className="h-4 w-4" />,
 };
 
 const SECTION_TONE: Record<NarrativeSection["id"], string> = {
-  executiveRecommendation: "border-[hsl(var(--intelligence)/0.30)]",
-  whyNow: "border-[hsl(var(--intelligence)/0.30)]",
-  mainRisksAvoided: "border-[hsl(var(--success)/0.30)]",
-  tradeOffsAccepted: "border-[hsl(var(--warning)/0.30)]",
-  actionPlan: "border-[hsl(var(--success)/0.30)]",
-  whatWouldChangeThis: "border-border",
+  executiveRecommendation:      "border-[hsl(var(--intelligence)/0.30)]",
+  whyThisPathWon:               "border-[hsl(var(--success)/0.30)]",
+  whyAlternativesLost:          "border-[hsl(var(--warning)/0.30)]",
+  whatChangesTheAnswer:         "border-border",
+  biggestHiddenRisks:           "border-[hsl(var(--warning)/0.30)]",
+  behaviouralRiskCommentary:    "border-[hsl(var(--intelligence)/0.30)]",
+  sensitivityAnalysis:          "border-border",
+  stressTestCommentary:         "border-[hsl(var(--warning)/0.30)]",
+  keyAssumptionsDrivingOutcome: "border-border",
+  tacticalNextActions:          "border-[hsl(var(--success)/0.30)]",
+  // Legacy v2 fall-throughs
+  whyNow:                       "border-[hsl(var(--intelligence)/0.30)]",
+  mainRisksAvoided:             "border-[hsl(var(--success)/0.30)]",
+  tradeOffsAccepted:            "border-[hsl(var(--warning)/0.30)]",
+  actionPlan:                   "border-[hsl(var(--success)/0.30)]",
+  whatWouldChangeThis:          "border-border",
 };
 
 export interface NarrativeReportProps {
@@ -90,39 +118,76 @@ export function NarrativeReport({ output, mode, advancedSlot }: NarrativeReportP
       </Card>
 
       {report.sections.map((section, idx) => (
-        <Card
+        <NarrativeSectionCard
           key={section.id}
-          className={SECTION_TONE[section.id]}
-          data-testid={`narrative-section-${section.id}`}
-          data-section-index={idx}
-        >
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm sm:text-base text-foreground">
-              <span className="text-[hsl(var(--intelligence-light))]">{SECTION_ICON[section.id]}</span>
-              <span>{section.title}</span>
-            </CardTitle>
-            <CardDescription className="text-xs sm:text-sm leading-relaxed text-foreground/85">
-              {section.summary}
-            </CardDescription>
-          </CardHeader>
-          {section.body.length > 0 && (
-            <CardContent className="pt-0">
-              <ul className="space-y-1.5 text-xs sm:text-sm text-foreground/85 leading-relaxed">
-                {section.body.map((line, i) => (
-                  <li key={i} className="whitespace-pre-wrap">
-                    {line}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          )}
-        </Card>
+          section={section}
+          idx={idx}
+          /* First three sections always open; rest collapsible on mobile for
+             progressive disclosure (V3 mobile UX rebuild). */
+          defaultOpen={idx < 3}
+        />
       ))}
 
       {report.showAdvanced && advancedSlot && (
         <div data-testid="narrative-advanced-slot">{advancedSlot}</div>
       )}
     </div>
+  );
+}
+
+function NarrativeSectionCard({
+  section,
+  idx,
+  defaultOpen,
+}: {
+  section: NarrativeSection;
+  idx: number;
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card
+      className={SECTION_TONE[section.id]}
+      data-testid={`narrative-section-${section.id}`}
+      data-section-index={idx}
+    >
+      <CardHeader className="pb-2">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={`narrative-body-${section.id}`}
+          className="w-full text-left flex items-start gap-2 group"
+        >
+          <span className="text-[hsl(var(--intelligence-light))] mt-1">{SECTION_ICON[section.id]}</span>
+          <div className="flex-1 min-w-0">
+            <CardTitle className="flex items-center gap-2 text-sm sm:text-base text-foreground">
+              <span>{section.title}</span>
+              <span className="ml-auto text-muted-foreground sm:hidden">
+                {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </span>
+            </CardTitle>
+            <CardDescription className="text-xs sm:text-sm leading-relaxed text-foreground/85 mt-0.5">
+              {section.summary}
+            </CardDescription>
+          </div>
+        </button>
+      </CardHeader>
+      {section.body.length > 0 && (open || true) && (
+        <CardContent
+          id={`narrative-body-${section.id}`}
+          className={`pt-0 ${open ? "block" : "hidden sm:block"}`}
+        >
+          <ul className="space-y-1.5 text-xs sm:text-sm text-foreground/85 leading-relaxed">
+            {section.body.map((line, i) => (
+              <li key={i} className="whitespace-pre-wrap">
+                {line}
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
