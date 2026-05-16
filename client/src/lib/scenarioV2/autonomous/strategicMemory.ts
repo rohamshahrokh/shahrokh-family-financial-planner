@@ -2,10 +2,12 @@
  * PART 12 — Strategic Memory.
  *
  * Reads the deterministic strategic-memory input the UI hands in. We do
- * NOT modify the production database here — persistence is the caller's
- * concern (localStorage today, server-side in a future schema-aware
- * release). The autonomous report echoes back the active preferences and
- * surfaces the constraints the engine should respect downstream.
+ * NOT modify the production database here, and we do NOT touch any
+ * browser-storage API (localStorage / sessionStorage / indexedDB / cookies).
+ * Persistence is the caller's concern; today it is an in-session-only
+ * module-level singleton, replaceable by a schema-aware server feed later.
+ * The autonomous report echoes back the active preferences and surfaces
+ * the constraints the engine should respect downstream.
  */
 
 import type { StrategicMemoryInput } from "./types";

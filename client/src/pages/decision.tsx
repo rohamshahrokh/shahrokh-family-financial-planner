@@ -43,7 +43,7 @@ import { IntelligenceSection } from "@/components/decisionEngine/intelligence/In
 import { AutonomousSection } from "@/components/decisionEngine/autonomous/AutonomousSection";
 import { buildFinancialIntelligence } from "@/lib/scenarioV2";
 import { DEFAULT_ASSUMPTIONS } from "@/lib/scenarioV2/basePlan";
-import { readLedgerHistory, readStrategicMemory } from "@/lib/autonomousMemoryStore";
+import { useLedgerHistory, useStrategicMemory } from "@/lib/autonomousMemoryStore";
 import { METRIC_LABELS, LENS_LABELS, RISK_MODE_LABELS } from "@/lib/decisionEngineLabels";
 import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
@@ -198,6 +198,12 @@ function QuickDecisionTab() {
   // ── Privacy mode ───────────────────────────────────────────────────────────
   const { privacyMode, togglePrivacy } = useAppStore();
   const { fmt$, fmt$k, fmt$M, pct, sentence } = useMaskFmt(privacyMode);
+
+  // ── Autonomous OS in-session memory (no browser storage) ──────────────────
+  // History + memory live in a module-level singleton for the current
+  // session only. They reset on reload — the UI is explicit about that.
+  const autonomousHistory = useLedgerHistory();
+  const autonomousMemory = useStrategicMemory();
 
   // ── User question input ────────────────────────────────────────────────────
   const [question, setQuestion] = useState<QuickDecisionQuestionKind>(DEFAULT_QUESTION);
@@ -729,20 +735,15 @@ function QuickDecisionTab() {
                 rebalancing, life-event simulation, longitudinal comparison,
                 rolling roadmap, strategic memory, and visual modules.
                 Engine math untouched. */}
-            {output && (() => {
-              const intelligence = buildFinancialIntelligence({ output, prior: null });
-              const history = readLedgerHistory();
-              const memory = readStrategicMemory();
-              return (
-                <AutonomousSection
-                  output={output}
-                  intelligence={intelligence}
-                  assumptions={DEFAULT_ASSUMPTIONS}
-                  history={history}
-                  memory={memory}
-                />
-              );
-            })()}
+            {output && (
+              <AutonomousSection
+                output={output}
+                intelligence={buildFinancialIntelligence({ output, prior: null })}
+                assumptions={DEFAULT_ASSUMPTIONS}
+                history={autonomousHistory}
+                memory={autonomousMemory}
+              />
+            )}
 
             {/* Legacy "why-won / what-could-invalidate" block — Quant mode only,
                 since Simple/Advisor narratives already cover this. Kept so quant

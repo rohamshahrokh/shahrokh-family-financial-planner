@@ -1,72 +1,128 @@
 /**
- * Autonomous Financial OS — Strategic Memory + Ledger History store.
+ * Autonomous Financial OS — in-memory Strategic Memory + Ledger History.
  *
- * Pure client-side persistence so the Autonomous Layer can be deterministic
- * across sessions WITHOUT touching the production database. When schema
- * support arrives, the same shape can move to Supabase without UI changes.
+ * IMPORTANT — runtime constraints:
+ *   • No localStorage / sessionStorage / indexedDB / cookies. These can be
+ *     blocked in the deployed iframe environment and would crash the page.
+ *   • No production DB writes (Phase 3 explicitly forbids schema changes).
  *
- * Two namespaces:
- *   • fwl.autonomous.memory.v1   — StrategicMemoryInput
- *   • fwl.autonomous.history.v1  — LedgerSnapshot[]
+ * What this module is:
+ *   A small module-level singleton holding the current session's strategic
+ *   memory + ledger history. Nothing persists across reloads — the UI is
+ *   explicit about that. Subscribers are notified on update so React
+ *   components can re-render without external state libraries.
+ *
+ * What this module is NOT:
+ *   • Not persisted to disk, cookies, or any storage API.
+ *   • Not a substitute for a real longitudinal history feed — that would
+ *     require server-side schema support which is out of scope for Phase 3.
+ *
+ * Future replacement:
+ *   When schema-aware persistence arrives, swap the in-memory ref with a
+ *   query against the new table — the shape of `StrategicMemoryInput` and
+ *   `LedgerSnapshot[]` is stable.
  */
 
-import type { LedgerSnapshot, StrategicMemoryInput } from "./scenarioV2/autonomous/types";
+import { useEffect, useState } from "react";
+import type {
+  LedgerSnapshot,
+  StrategicMemoryInput,
+} from "./scenarioV2/autonomous/types";
 
-const MEMORY_KEY = "fwl.autonomous.memory.v1";
-const HISTORY_KEY = "fwl.autonomous.history.v1";
+type Listener = () => void;
 
-function safeRead<T>(key: string): T | null {
-  try {
-    if (typeof window === "undefined" || !window.localStorage) return null;
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return null;
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
+interface AutonomousState {
+  memory: StrategicMemoryInput | null;
+  history: LedgerSnapshot[];
 }
 
-function safeWrite<T>(key: string, value: T): void {
-  try {
-    if (typeof window === "undefined" || !window.localStorage) return;
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* noop */
-  }
+const state: AutonomousState = {
+  memory: null,
+  history: [],
+};
+
+const listeners: Listener[] = [];
+
+function notify(): void {
+  // Snapshot to avoid mutation-during-iteration if a listener unsubscribes.
+  const snapshot = listeners.slice();
+  for (let i = 0; i < snapshot.length; i++) snapshot[i]();
 }
+
+function subscribe(l: Listener): () => void {
+  listeners.push(l);
+  return () => {
+    const idx = listeners.indexOf(l);
+    if (idx >= 0) listeners.splice(idx, 1);
+  };
+}
+
+// ─── Strategic memory ────────────────────────────────────────────────────────
 
 export function readStrategicMemory(): StrategicMemoryInput | null {
-  return safeRead<StrategicMemoryInput>(MEMORY_KEY);
+  return state.memory;
 }
 
 export function writeStrategicMemory(memory: StrategicMemoryInput): void {
-  safeWrite(MEMORY_KEY, memory);
+  state.memory = { ...memory };
+  notify();
 }
 
 export function clearStrategicMemory(): void {
-  try {
-    if (typeof window === "undefined" || !window.localStorage) return;
-    window.localStorage.removeItem(MEMORY_KEY);
-  } catch {
-    /* noop */
-  }
+  state.memory = null;
+  notify();
 }
 
+// ─── Ledger history ──────────────────────────────────────────────────────────
+
 export function readLedgerHistory(): LedgerSnapshot[] {
-  return safeRead<LedgerSnapshot[]>(HISTORY_KEY) ?? [];
+  // Return a defensive shallow copy so consumers can't mutate the source.
+  return state.history.slice();
 }
 
 export function writeLedgerHistory(history: LedgerSnapshot[]): void {
-  // Sort chronologically and dedupe by month (latest wins).
   const map = new Map<string, LedgerSnapshot>();
   for (const h of history) map.set(h.month, h);
-  const cleaned = Array.from(map.values()).sort((a, b) => a.month.localeCompare(b.month));
-  safeWrite(HISTORY_KEY, cleaned);
+  state.history = Array.from(map.values()).sort((a, b) =>
+    a.month.localeCompare(b.month),
+  );
+  notify();
 }
 
 export function appendLedgerSnapshot(snapshot: LedgerSnapshot): LedgerSnapshot[] {
-  const existing = readLedgerHistory();
-  const next = [...existing.filter((s) => s.month !== snapshot.month), snapshot];
+  const next = [
+    ...state.history.filter((s) => s.month !== snapshot.month),
+    snapshot,
+  ];
   writeLedgerHistory(next);
   return readLedgerHistory();
+}
+
+export function clearLedgerHistory(): void {
+  state.history = [];
+  notify();
+}
+
+// ─── React hooks (no external state lib needed) ──────────────────────────────
+
+export function useStrategicMemory(): StrategicMemoryInput | null {
+  const [value, setValue] = useState<StrategicMemoryInput | null>(() => readStrategicMemory());
+  useEffect(() => subscribe(() => setValue(readStrategicMemory())), []);
+  return value;
+}
+
+export function useLedgerHistory(): LedgerSnapshot[] {
+  const [value, setValue] = useState<LedgerSnapshot[]>(() => readLedgerHistory());
+  useEffect(() => subscribe(() => setValue(readLedgerHistory())), []);
+  return value;
+}
+
+/**
+ * Test-only: reset the in-memory state. Exported deliberately for tests and
+ * any "clear strategic memory" UI affordance. Not connected to any storage.
+ */
+export function __resetAutonomousMemoryForTests(): void {
+  state.memory = null;
+  state.history = [];
+  notify();
 }

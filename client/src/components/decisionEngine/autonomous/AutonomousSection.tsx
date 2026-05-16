@@ -142,7 +142,7 @@ export function AutonomousSection({
             Autonomous Financial OS
           </div>
           <div className="text-[11px] text-muted-foreground leading-snug truncate">
-            Continuous monitoring, alerts, priorities, opportunities, drift, rebalancing, life-event impact, regime, roadmap
+            Continuous monitoring, alerts, priorities, opportunities, drift, rebalancing, life-event impact, regime, roadmap · in-session baseline
           </div>
         </div>
         <ChevronDown
@@ -598,7 +598,9 @@ function LongitudinalBlock({ report }: { report: AutonomousReport }) {
           </Badge>
         </div>
         <CardDescription className="text-xs leading-snug">
-          Resilience comparison versus the prior window.
+          {l.hasHistory
+            ? "Resilience comparison versus the prior window."
+            : "Longitudinal comparison will activate when this run is connected to persistent history. For now this shows the current-session baseline only."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2 pt-0">
@@ -677,7 +679,9 @@ function StrategicMemoryBlock({ report }: { report: AutonomousReport }) {
           </Badge>
         </div>
         <CardDescription className="text-xs leading-snug">
-          Preferences, philosophy, leverage tolerance, liquidity preference, prior choices.
+          {m.hasMemory
+            ? "Preferences, philosophy, leverage tolerance, liquidity preference, prior choices — held for this session only."
+            : "Strategic memory will populate this session as you record preferences. Persistence across reloads requires a future server-side feed."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2 pt-0">
@@ -719,7 +723,7 @@ function VisualisationsBlock({ report }: { report: AutonomousReport }) {
           <CardTitle className="text-sm">Advanced visualisations</CardTitle>
         </div>
         <CardDescription className="text-xs leading-snug">
-          Trajectory, allocation, survivability, priority and recommendation evolution. Charts activate as history accumulates.
+          Trajectory, allocation, survivability, priority and recommendation evolution. Charts activate when this run is connected to persistent history; the current view shows the in-session baseline only.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2 pt-0">
@@ -780,8 +784,8 @@ function FooterMeta({ report }: { report: AutonomousReport }) {
   return (
     <div className="text-[10px] text-muted-foreground leading-snug px-1">
       Regime: {report.meta.regimeNote}
-      {" · "}History: {report.meta.hasHistory ? "available" : "baseline"}
-      {" · "}Strategic memory: {report.meta.memoryActive ? "active" : "baseline"}
+      {" · "}History: {report.meta.hasHistory ? "available (in-session)" : "baseline — awaiting persistent history feed"}
+      {" · "}Strategic memory: {report.meta.memoryActive ? "active (in-session)" : "baseline"}
     </div>
   );
 }
