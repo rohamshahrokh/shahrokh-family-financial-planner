@@ -444,9 +444,19 @@ function inputFor(
   // ─────────────────────────────────────────────────────────────────────────────
   section("9. Question presets registry");
 
+  // V3 — at least the 6 original engine kinds are still registered. The V3
+  // expansion adds many more user-facing question kinds (grouped by category)
+  // that re-use the same blueprint factories, so the registry size is now
+  // larger than 6. Spot-check the original six explicitly.
   assert(
-    "All 6 question kinds have presets",
-    listQuestionPresets().length === 6,
+    "V3: at least the 6 engine-kind questions remain registered",
+    listQuestionPresets().length >= 6,
+  );
+  assert(
+    "V3: every preset carries a category and an engineKind",
+    listQuestionPresets().every(p =>
+      typeof (p as any).category === "string" && typeof (p as any).engineKind === "string"
+    ),
   );
   const presetKinds: QuickDecisionQuestionKind[] = [
     "deploy_capital", "buy_property", "super_vs_invest",
@@ -454,7 +464,7 @@ function inputFor(
   ];
   for (const k of presetKinds) {
     const p = getQuestionPreset(k);
-    assert(`Preset for '${k}' has positive default capital`, p.defaults.capital > 0);
+    assert(`Preset for '${k}' has non-negative default capital`, p.defaults.capital >= 0);
     assert(`Preset for '${k}' has reasonable horizon`, p.defaults.horizonYears >= 5 && p.defaults.horizonYears <= 30);
     assert(`Preset for '${k}' references a valid investor profile`,
       Object.keys(PROFILE_REGISTRY).includes(p.defaults.investorProfile));

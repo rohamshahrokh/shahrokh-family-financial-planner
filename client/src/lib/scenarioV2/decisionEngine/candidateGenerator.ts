@@ -50,6 +50,11 @@ import {
   type ScoreInputs,
   type ScoreWeights,
   type InvestorProfile,
+  // V3 — behavioural priorities
+  applyPrioritiesToWeights,
+  DEFAULT_PRIORITIES,
+  isDefaultPriorities,
+  type BehaviouralPriorities,
   // Types
   type DsrBand,
   type RefinancePressureBand,
@@ -60,12 +65,71 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type QuickDecisionQuestionKind =
+  // Capital allocation
   | "deploy_capital"
+  | "lump_sum_vs_dca"
+  | "property_vs_etf_vs_offset"
+  | "cash_optionality"
+  | "when_leverage_outperforms"
+  // Property strategy
   | "buy_property"
-  | "super_vs_invest"
-  | "debt_vs_invest"
+  | "buy_now_or_buffer"
+  | "io_vs_pi"
+  | "lvr_80_vs_90"
+  | "one_expensive_vs_two_cheaper"
+  | "house_vs_townhouse_vs_unit"
+  | "brisbane_vs_gold_coast_vs_sunshine"
+  | "debt_recycle_vs_offset"
+  // FIRE & retirement
   | "fire_acceleration"
-  | "downside_protection";
+  | "coast_fire_vs_aggressive"
+  | "what_breaks_fire"
+  | "min_viable_fire"
+  | "semi_retire_earlier"
+  | "how_much_risk_required"
+  // Risk & survival
+  | "downside_protection"
+  | "rates_at_9_percent"
+  | "property_falls_20"
+  | "weakest_financial_point"
+  | "job_loss_resilience"
+  | "how_much_leverage_too_much"
+  // Tax & structure
+  | "super_vs_invest"
+  | "trust_vs_personal"
+  | "debt_recycle_vs_direct"
+  | "tax_efficiency_vs_flexibility"
+  | "cgt_impact_5y_sale"
+  | "debt_vs_invest"
+  // Family & lifestyle
+  | "one_income_household"
+  | "afford_another_child"
+  | "lifestyle_inflation_safe"
+  | "spending_hurts_fire_most"
+  | "sustainable_spending";
+
+/**
+ * V3 — Grouped categories for the strategic question framework. Drives the
+ * grouped UI: each category renders a labelled section, each question is a
+ * pill within that section. The engine itself doesn't branch on category —
+ * the category is metadata for the user.
+ */
+export type QuestionCategory =
+  | "capital_allocation"
+  | "property_strategy"
+  | "fire_retirement"
+  | "risk_survival"
+  | "tax_structure"
+  | "family_lifestyle";
+
+export const QUESTION_CATEGORY_LABELS: Record<QuestionCategory, { label: string; subtitle: string }> = {
+  capital_allocation:  { label: "Capital allocation",   subtitle: "Where and how to deploy capital" },
+  property_strategy:   { label: "Property strategy",    subtitle: "Property timing, structure, geography" },
+  fire_retirement:     { label: "FIRE & retirement",    subtitle: "Pathways to financial independence" },
+  risk_survival:       { label: "Risk & survival",      subtitle: "Resilience, downside, weak points" },
+  tax_structure:       { label: "Tax & structure",      subtitle: "Tax-aware allocation and ownership" },
+  family_lifestyle:    { label: "Family & lifestyle",   subtitle: "Household and spending decisions" },
+};
 
 export interface QuickDecisionInput {
   /** Live ledger (auto-derived basePlan, no manual entry). */
@@ -86,6 +150,13 @@ export interface QuickDecisionInput {
    * Monte Carlo math. Defaults to the question's preset profile when omitted.
    */
   investorProfile?: InvestorProfile;
+  /**
+   * V3 — Behavioural priorities overlay. Sliders 1-10 that nudge scoring
+   * weights without changing the underlying math. Defaults are all 5, which
+   * means a no-op (existing behaviour preserved). See behaviouralPriorities.ts
+   * for the per-slider influence table.
+   */
+  behaviouralPriorities?: Partial<BehaviouralPriorities>;
   /** Constraints (defaults applied if omitted). */
   constraints?: Partial<{
     maxLvr: number;              // default 0.85 — absolute ceiling
@@ -210,8 +281,23 @@ export function resolveRiskControls(
 
 export interface QuestionPreset {
   kind: QuickDecisionQuestionKind;
+  category: QuestionCategory;
   label: string;
   description: string;
+  /**
+   * V3 — internal engine kind. Determines which blueprint factory runs.
+   * Multiple user-facing questions share a single engine kind when their
+   * strategic shape is identical (e.g. "rates at 9%" reuses the
+   * downside-protection blueprint set). The math is unchanged; the user
+   * sees a question that matches how they actually think.
+   */
+  engineKind:
+    | "deploy_capital"
+    | "buy_property"
+    | "super_vs_invest"
+    | "debt_vs_invest"
+    | "fire_acceleration"
+    | "downside_protection";
   defaults: {
     capital: number;
     horizonYears: number;
@@ -222,41 +308,232 @@ export interface QuestionPreset {
 }
 
 export const QUESTION_PRESETS: Record<QuickDecisionQuestionKind, QuestionPreset> = {
+  // ── Capital allocation ──────────────────────────────────────────────────
   deploy_capital: {
-    kind: "deploy_capital",
-    label: "Where do I deploy capital?",
+    kind: "deploy_capital", category: "capital_allocation", engineKind: "deploy_capital",
+    label: "Where should I deploy capital?",
     description: "Compare 15+ allocation × timing paths for cash you have available.",
     defaults: { capital: 50_000, horizonYears: 15, dependants: 0, incomeVolatility: 0.15, investorProfile: "balanced" },
   },
+  lump_sum_vs_dca: {
+    kind: "lump_sum_vs_dca", category: "capital_allocation", engineKind: "deploy_capital",
+    label: "Lump sum or DCA?",
+    description: "Single deployment vs spread entry over 12-24 months — sequencing risk vs time-in-market.",
+    defaults: { capital: 75_000, horizonYears: 15, dependants: 0, incomeVolatility: 0.15, investorProfile: "balanced" },
+  },
+  property_vs_etf_vs_offset: {
+    kind: "property_vs_etf_vs_offset", category: "capital_allocation", engineKind: "deploy_capital",
+    label: "Property vs ETF vs Offset?",
+    description: "Three-way comparison: leveraged property, diversified ETF, guaranteed offset return.",
+    defaults: { capital: 100_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.15, investorProfile: "balanced" },
+  },
+  cash_optionality: {
+    kind: "cash_optionality", category: "capital_allocation", engineKind: "downside_protection",
+    label: "Should I keep cash optionality?",
+    description: "What is the strategic value of an unallocated cash buffer in this rate environment?",
+    defaults: { capital: 50_000, horizonYears: 10, dependants: 1, incomeVolatility: 0.20, investorProfile: "cashflow_safe" },
+  },
+  when_leverage_outperforms: {
+    kind: "when_leverage_outperforms", category: "capital_allocation", engineKind: "buy_property",
+    label: "When does leverage outperform?",
+    description: "Compares leveraged paths vs unlevered paths over horizon and stress.",
+    defaults: { capital: 150_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.15, investorProfile: "wealth_max" },
+  },
+
+  // ── Property strategy ───────────────────────────────────────────────────
   buy_property: {
-    kind: "buy_property",
+    kind: "buy_property", category: "property_strategy", engineKind: "buy_property",
     label: "Is now the right time to buy?",
     description: "Property timing + buffer analysis. Compares buying now vs building buffer first.",
     defaults: { capital: 200_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.10, investorProfile: "conservative" },
   },
+  buy_now_or_buffer: {
+    kind: "buy_now_or_buffer", category: "property_strategy", engineKind: "buy_property",
+    label: "Buy now or build buffer first?",
+    description: "Tests entry-now vs deferred entry across multiple buffer-building windows.",
+    defaults: { capital: 180_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.15, investorProfile: "balanced" },
+  },
+  io_vs_pi: {
+    kind: "io_vs_pi", category: "property_strategy", engineKind: "buy_property",
+    label: "IO vs P&I?",
+    description: "Interest-only vs principal-and-interest structure across cash-flow and refinance risk.",
+    defaults: { capital: 200_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.10, investorProfile: "balanced" },
+  },
+  lvr_80_vs_90: {
+    kind: "lvr_80_vs_90", category: "property_strategy", engineKind: "buy_property",
+    label: "80% vs 90% LVR?",
+    description: "Lower deposit + larger loan vs larger deposit + smaller loan, holding price constant.",
+    defaults: { capital: 200_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.10, investorProfile: "balanced" },
+  },
+  one_expensive_vs_two_cheaper: {
+    kind: "one_expensive_vs_two_cheaper", category: "property_strategy", engineKind: "buy_property",
+    label: "One expensive property vs two cheaper?",
+    description: "Concentration vs diversification across two leveraged assets.",
+    defaults: { capital: 250_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.10, investorProfile: "balanced" },
+  },
+  house_vs_townhouse_vs_unit: {
+    kind: "house_vs_townhouse_vs_unit", category: "property_strategy", engineKind: "buy_property",
+    label: "House vs townhouse vs unit?",
+    description: "Yield-leaning vs growth-leaning property typologies.",
+    defaults: { capital: 200_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.10, investorProfile: "balanced" },
+  },
+  brisbane_vs_gold_coast_vs_sunshine: {
+    kind: "brisbane_vs_gold_coast_vs_sunshine", category: "property_strategy", engineKind: "buy_property",
+    label: "Brisbane vs Gold Coast vs Sunshine Coast?",
+    description: "Different SEQ markets across yield, growth assumption, and rental seasonality.",
+    defaults: { capital: 200_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.10, investorProfile: "balanced" },
+  },
+  debt_recycle_vs_offset: {
+    kind: "debt_recycle_vs_offset", category: "property_strategy", engineKind: "debt_vs_invest",
+    label: "Debt recycle or keep offset?",
+    description: "Recycle non-deductible PPOR debt into deductible investment debt vs retain offset balance.",
+    defaults: { capital: 80_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.15, investorProfile: "balanced" },
+  },
+
+  // ── FIRE & retirement ────────────────────────────────────────────────────
+  fire_acceleration: {
+    kind: "fire_acceleration", category: "fire_retirement", engineKind: "fire_acceleration",
+    label: "How do I reach FIRE fastest?",
+    description: "Survivability-first FIRE acceleration. Heavy weighting on time-to-FIRE.",
+    defaults: { capital: 75_000, horizonYears: 20, dependants: 0, incomeVolatility: 0.15, investorProfile: "fire_focused" },
+  },
+  coast_fire_vs_aggressive: {
+    kind: "coast_fire_vs_aggressive", category: "fire_retirement", engineKind: "fire_acceleration",
+    label: "Coast FIRE vs aggressive FIRE?",
+    description: "Front-load the corpus then coast vs maximise contributions for the entire horizon.",
+    defaults: { capital: 75_000, horizonYears: 20, dependants: 0, incomeVolatility: 0.15, investorProfile: "fire_focused" },
+  },
+  what_breaks_fire: {
+    kind: "what_breaks_fire", category: "fire_retirement", engineKind: "downside_protection",
+    label: "What breaks my FIRE plan?",
+    description: "Identifies the assumptions and shocks the FIRE plan is most sensitive to.",
+    defaults: { capital: 50_000, horizonYears: 20, dependants: 0, incomeVolatility: 0.20, investorProfile: "fire_focused" },
+  },
+  min_viable_fire: {
+    kind: "min_viable_fire", category: "fire_retirement", engineKind: "fire_acceleration",
+    label: "What is my minimum viable FIRE number?",
+    description: "Smallest corpus that supports planned spending under stressed return assumptions.",
+    defaults: { capital: 50_000, horizonYears: 20, dependants: 0, incomeVolatility: 0.15, investorProfile: "fire_focused" },
+  },
+  semi_retire_earlier: {
+    kind: "semi_retire_earlier", category: "fire_retirement", engineKind: "fire_acceleration",
+    label: "Can I semi-retire earlier?",
+    description: "Reduced-income pathways that bridge to full FIRE without breaking the plan.",
+    defaults: { capital: 60_000, horizonYears: 20, dependants: 0, incomeVolatility: 0.20, investorProfile: "fire_focused" },
+  },
+  how_much_risk_required: {
+    kind: "how_much_risk_required", category: "fire_retirement", engineKind: "fire_acceleration",
+    label: "How much risk is actually required?",
+    description: "Smallest level of volatility that still hits FIRE within target horizon.",
+    defaults: { capital: 75_000, horizonYears: 20, dependants: 0, incomeVolatility: 0.15, investorProfile: "balanced" },
+  },
+
+  // ── Risk & survival ──────────────────────────────────────────────────────
+  downside_protection: {
+    kind: "downside_protection", category: "risk_survival", engineKind: "downside_protection",
+    label: "Can I survive a recession?",
+    description: "Stress-tested defensive paths against income shock, valuation drop, rate rise.",
+    defaults: { capital: 50_000, horizonYears: 10, dependants: 1, incomeVolatility: 0.20, investorProfile: "conservative" },
+  },
+  rates_at_9_percent: {
+    kind: "rates_at_9_percent", category: "risk_survival", engineKind: "downside_protection",
+    label: "What if rates hit 9%?",
+    description: "Severe rate-shock scenario — which paths survive, which break.",
+    defaults: { capital: 50_000, horizonYears: 10, dependants: 1, incomeVolatility: 0.20, investorProfile: "cashflow_safe" },
+  },
+  property_falls_20: {
+    kind: "property_falls_20", category: "risk_survival", engineKind: "downside_protection",
+    label: "What if property falls 20%?",
+    description: "Negative-equity and LVR-breach exposure after a sustained property correction.",
+    defaults: { capital: 50_000, horizonYears: 10, dependants: 1, incomeVolatility: 0.20, investorProfile: "conservative" },
+  },
+  weakest_financial_point: {
+    kind: "weakest_financial_point", category: "risk_survival", engineKind: "downside_protection",
+    label: "What is my weakest financial point?",
+    description: "Engine highlights the single dimension where the household is least resilient.",
+    defaults: { capital: 0, horizonYears: 15, dependants: 1, incomeVolatility: 0.20, investorProfile: "conservative" },
+  },
+  job_loss_resilience: {
+    kind: "job_loss_resilience", category: "risk_survival", engineKind: "downside_protection",
+    label: "How resilient am I to job loss?",
+    description: "How long the household survives a sustained income drop without forced asset sale.",
+    defaults: { capital: 0, horizonYears: 10, dependants: 1, incomeVolatility: 0.30, investorProfile: "cashflow_safe" },
+  },
+  how_much_leverage_too_much: {
+    kind: "how_much_leverage_too_much", category: "risk_survival", engineKind: "buy_property",
+    label: "How much leverage is too much?",
+    description: "Tests LVR ceiling against survivability — finds the leverage band that still passes safety screens.",
+    defaults: { capital: 150_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.15, investorProfile: "conservative" },
+  },
+
+  // ── Tax & structure ──────────────────────────────────────────────────────
   super_vs_invest: {
-    kind: "super_vs_invest",
+    kind: "super_vs_invest", category: "tax_structure", engineKind: "super_vs_invest",
     label: "Super vs ETF outside?",
     description: "Concessional-cap-aware super vs taxable ETF investment.",
     defaults: { capital: 30_000, horizonYears: 20, dependants: 0, incomeVolatility: 0.10, investorProfile: "balanced" },
   },
+  trust_vs_personal: {
+    kind: "trust_vs_personal", category: "tax_structure", engineKind: "super_vs_invest",
+    label: "Trust vs personal ownership?",
+    description: "Trust-held investments vs personal-name — distribution flexibility vs simplicity.",
+    defaults: { capital: 50_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.10, investorProfile: "balanced" },
+  },
+  debt_recycle_vs_direct: {
+    kind: "debt_recycle_vs_direct", category: "tax_structure", engineKind: "debt_vs_invest",
+    label: "Debt recycle vs direct investing?",
+    description: "Tax-deductible recycled debt funding investments vs direct contribution from savings.",
+    defaults: { capital: 80_000, horizonYears: 20, dependants: 1, incomeVolatility: 0.15, investorProfile: "balanced" },
+  },
+  tax_efficiency_vs_flexibility: {
+    kind: "tax_efficiency_vs_flexibility", category: "tax_structure", engineKind: "super_vs_invest",
+    label: "Tax efficiency vs flexibility?",
+    description: "How much pre-retirement liquidity is the household willing to trade for tax efficiency?",
+    defaults: { capital: 40_000, horizonYears: 20, dependants: 0, incomeVolatility: 0.10, investorProfile: "balanced" },
+  },
+  cgt_impact_5y_sale: {
+    kind: "cgt_impact_5y_sale", category: "tax_structure", engineKind: "super_vs_invest",
+    label: "CGT impact if I sell in 5 years?",
+    description: "After-CGT outcomes across paths assuming a partial disposal at year 5.",
+    defaults: { capital: 50_000, horizonYears: 15, dependants: 0, incomeVolatility: 0.10, investorProfile: "balanced" },
+  },
   debt_vs_invest: {
-    kind: "debt_vs_invest",
+    kind: "debt_vs_invest", category: "tax_structure", engineKind: "debt_vs_invest",
     label: "Pay down debt or invest?",
     description: "Offset/prepay vs taxable ETF vs concessional super.",
     defaults: { capital: 40_000, horizonYears: 15, dependants: 1, incomeVolatility: 0.15, investorProfile: "cashflow_safe" },
   },
-  fire_acceleration: {
-    kind: "fire_acceleration",
-    label: "How do I get to FIRE faster?",
-    description: "Survivability-first FIRE acceleration. Heavy weighting on time-to-FIRE.",
-    defaults: { capital: 75_000, horizonYears: 20, dependants: 0, incomeVolatility: 0.15, investorProfile: "fire_focused" },
+
+  // ── Family & lifestyle ───────────────────────────────────────────────────
+  one_income_household: {
+    kind: "one_income_household", category: "family_lifestyle", engineKind: "downside_protection",
+    label: "Can one income support the household?",
+    description: "Stress-tests the plan with a single-income assumption and longer income-volatility.",
+    defaults: { capital: 0, horizonYears: 15, dependants: 1, incomeVolatility: 0.30, investorProfile: "cashflow_safe" },
   },
-  downside_protection: {
-    kind: "downside_protection",
-    label: "Protect against a downturn",
-    description: "Stress-tested defensive paths. Heavier offset, cash, defensive ETF.",
-    defaults: { capital: 50_000, horizonYears: 10, dependants: 1, incomeVolatility: 0.20, investorProfile: "conservative" },
+  afford_another_child: {
+    kind: "afford_another_child", category: "family_lifestyle", engineKind: "downside_protection",
+    label: "Can we afford another child?",
+    description: "Pre/post-natal cash-flow stress and the multi-year impact on FIRE trajectory.",
+    defaults: { capital: 0, horizonYears: 18, dependants: 2, incomeVolatility: 0.20, investorProfile: "cashflow_safe" },
+  },
+  lifestyle_inflation_safe: {
+    kind: "lifestyle_inflation_safe", category: "family_lifestyle", engineKind: "downside_protection",
+    label: "How much lifestyle inflation is safe?",
+    description: "Highest monthly-spend uplift that does not break the FIRE/serviceability plan.",
+    defaults: { capital: 0, horizonYears: 15, dependants: 1, incomeVolatility: 0.15, investorProfile: "balanced" },
+  },
+  spending_hurts_fire_most: {
+    kind: "spending_hurts_fire_most", category: "family_lifestyle", engineKind: "fire_acceleration",
+    label: "What spending hurts FIRE most?",
+    description: "Sensitivity of the FIRE timeline to recurring-expense increases.",
+    defaults: { capital: 0, horizonYears: 20, dependants: 1, incomeVolatility: 0.15, investorProfile: "fire_focused" },
+  },
+  sustainable_spending: {
+    kind: "sustainable_spending", category: "family_lifestyle", engineKind: "fire_acceleration",
+    label: "What level of spending is sustainable long-term?",
+    description: "Highest baseline expense level that the plan can support across stressed return paths.",
+    defaults: { capital: 0, horizonYears: 25, dependants: 1, incomeVolatility: 0.15, investorProfile: "balanced" },
   },
 };
 
@@ -402,6 +679,10 @@ export interface QuickDecisionOutput {
   capital?: number;
   /** Investor profile actually used for scoring (resolved from input or question preset). */
   investorProfile: InvestorProfile;
+  /** V3 — behavioural-priorities overlay actually used for scoring. */
+  behaviouralPriorities: BehaviouralPriorities;
+  /** V3 — true when at least one priority slider is non-default. */
+  prioritiesActive: boolean;
   ranked: RankedCandidate[];
   discarded: DiscardedCandidate[];
   /**
@@ -646,9 +927,12 @@ function blueprintsForDownsideProtection(): CandidateBlueprint[] {
   ];
 }
 
-// Top-level dispatcher — each question kind gets its own realistic blueprint set
+// Top-level dispatcher — each question kind gets its own realistic blueprint
+// set, indirected through its `engineKind`. The user-facing question is what
+// they see; the engineKind is what the engine runs.
 function blueprintsForQuestion(kind: QuickDecisionQuestionKind): CandidateBlueprint[] {
-  switch (kind) {
+  const engineKind = QUESTION_PRESETS[kind]?.engineKind ?? "deploy_capital";
+  switch (engineKind) {
     case "deploy_capital":      return blueprintsForDeployCapital();
     case "buy_property":        return blueprintsForBuyProperty();
     case "super_vs_invest":     return blueprintsForSuperVsInvest();
@@ -1679,7 +1963,17 @@ export async function generateQuickDecisionCandidates(
   // Resolve investor profile -> scoring weights
   const profileId: InvestorProfile = input.investorProfile
     ?? QUESTION_PRESETS[input.question.kind].defaults.investorProfile;
-  const profileWeights: ScoreWeights = getProfileWeights(profileId);
+  const baseProfileWeights: ScoreWeights = getProfileWeights(profileId);
+
+  // V3 — apply behavioural-priorities overlay. Defaults are neutral (all 5s),
+  // so when the user hasn't touched the sliders the resulting weights are
+  // identical to the pre-V3 path. The function does its own renormalisation.
+  const priorities: BehaviouralPriorities = {
+    ...DEFAULT_PRIORITIES,
+    ...(input.behaviouralPriorities ?? {}),
+  };
+  const profileWeights: ScoreWeights = applyPrioritiesToWeights(baseProfileWeights, priorities);
+  const prioritiesActive = !isDefaultPriorities(priorities);
 
   const baseAssumptions = (input.assumptions
     ? { ...input.assumptions }
@@ -1877,6 +2171,8 @@ export async function generateQuickDecisionCandidates(
     question: input.question.kind,
     capital: input.question.capital,
     investorProfile: profileId,
+    behaviouralPriorities: priorities,
+    prioritiesActive,
     ranked: normalRanked,
     discarded,
     highRiskPaths,

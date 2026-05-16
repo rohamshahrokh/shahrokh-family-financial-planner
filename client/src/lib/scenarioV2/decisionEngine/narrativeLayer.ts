@@ -72,12 +72,16 @@ export const QUANT_JARGON_WORDS = [
 ];
 
 /**
- * v2 — phrases that must NOT appear anywhere in Simple/Advisor narrative
- * surfaces. These were generic, template-feeling, or onboarding-copy in v1.
- * Tested explicitly.
+ * V3 — phrases that must NOT appear anywhere in Simple/Advisor narrative
+ * surfaces. Extended in V3 with additional template tells flagged by the user
+ * ("in plain English", repetitive filler, generic Monte Carlo lines).
+ * Tested explicitly. Note: Simple-mode jargon (Monte Carlo / VaR / CAGR /
+ * percentile etc.) is enforced separately via QUANT_JARGON_WORDS, so we don't
+ * duplicate those tokens here unless they carry an extra template smell.
  */
 export const BANNED_NARRATIVE_PHRASES = [
   "In plain English",
+  "in plain English",
   "Simple explanation",
   "This plan looks like",
   "The engine sees",
@@ -89,15 +93,52 @@ export const BANNED_NARRATIVE_PHRASES = [
   "stress test",
   "every future is uncertain",
   "No major red flags",
+  // V3 additions — generic / template tells that crept in during v2 polishing.
+  "This option balances",
+  "balances growth and safety",
+  "this plan is",
+  "This is a balanced",
+  "in summary",
+  "to summarise",
+  "as you can see",
+  "we recommend",
+  "our recommendation",
 ];
 
 export type NarrativeSectionId =
+  // V3 — ten mandatory sections (preserves v2 IDs where possible).
   | "executiveRecommendation"
+  | "whyThisPathWon"
+  | "whyAlternativesLost"
+  | "whatChangesTheAnswer"
+  | "biggestHiddenRisks"
+  | "behaviouralRiskCommentary"
+  | "sensitivityAnalysis"
+  | "stressTestCommentary"
+  | "keyAssumptionsDrivingOutcome"
+  | "tacticalNextActions"
+  // Legacy v2 IDs — retained so `buildNarrativeReportV2` remains type-safe
+  // for any caller that still consumes the six-section surface.
   | "whyNow"
   | "mainRisksAvoided"
   | "tradeOffsAccepted"
   | "actionPlan"
   | "whatWouldChangeThis";
+
+/** Mandatory V3 section order. The narrative builder must emit these in this
+ *  exact sequence for every winner. */
+export const V3_SECTION_ORDER: NarrativeSectionId[] = [
+  "executiveRecommendation",
+  "whyThisPathWon",
+  "whyAlternativesLost",
+  "whatChangesTheAnswer",
+  "biggestHiddenRisks",
+  "behaviouralRiskCommentary",
+  "sensitivityAnalysis",
+  "stressTestCommentary",
+  "keyAssumptionsDrivingOutcome",
+  "tacticalNextActions",
+];
 
 export interface NarrativeSection {
   id: NarrativeSectionId;
@@ -1097,6 +1138,506 @@ function buildWhatWouldChangeThis(
   };
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// V3 — additional senior-advisor sections.
+// These build on the metrics the engine already computes and on the same
+// strategic-posture inference. No new math; the math layer is untouched.
+// ────────────────────────────────────────────────────────────────────────────
+
+function buildWhyThisPathWon(
+  output: QuickDecisionOutput,
+  winner: RankedCandidate,
+  posture: StrategicAssessment,
+  interp: WinnerInterpretation,
+  mode: NarrativeMode,
+): NarrativeSection {
+  const summary =
+    `The recommendation was selected because it produced the strongest combination of resilience, capital growth, and serviceability comfort across the simulated conditions.`;
+
+  const body: string[] = [];
+
+  if (mode === "simple" || mode === "advisor") {
+    body.push(interp.liquidityNarrative);
+    body.push(interp.leverageNarrative);
+    if (interp.refiNarrative) body.push(interp.refiNarrative);
+    // Top contributor — interpreted, not numeric in Simple.
+    const top = (winner.trace.scoreDerivation ?? [])
+      .filter((s) => (s.weight ?? 0) > 0)
+      .sort((a, b) => (b.contribution ?? 0) - (a.contribution ?? 0))[0];
+    if (top && mode === "advisor") {
+      body.push(
+        `The dominant axis behind this ranking was ${axisToHuman(top.axis)} — the recommendation scores ahead of alternatives most decisively on that dimension.`,
+      );
+    } else if (top) {
+      body.push(
+        `The path's most decisive advantage is on ${axisToHuman(top.axis)}, which is where it pulls ahead of the alternatives.`,
+      );
+    }
+  } else {
+    // quant
+    body.push(
+      `Composite score: ${winner.score.score.toFixed(2)}. Base before penalties: ${(winner.score.baseScore ?? winner.score.score).toFixed(2)}.`,
+    );
+    body.push(
+      `Per-axis derivation (raw × weight = contribution): ` +
+        (winner.trace.scoreDerivation ?? [])
+          .map((s) => `${s.axis} ${(s.rawValue ?? 0).toFixed(3)}×${(s.weight ?? 0).toFixed(2)}=${(s.contribution ?? 0).toFixed(2)}`)
+          .join("; "),
+    );
+  }
+
+  return { id: "whyThisPathWon", title: "Why this path won", summary, body };
+}
+
+function buildWhyAlternativesLost(
+  output: QuickDecisionOutput,
+  winner: RankedCandidate,
+  posture: StrategicAssessment,
+  comparison: RunnerUpComparison | null,
+  mode: NarrativeMode,
+): NarrativeSection {
+  const summary =
+    `Each alternative path scored lower on at least one dimension that the household's priority profile weights heavily. The trade they implicitly demand was not paid for by their upside.`;
+
+  const body: string[] = [];
+
+  if (comparison) {
+    body.push(comparison.paragraph);
+  }
+
+  // Walk down ranked[1..2] when present and emit interpretation lines for each.
+  for (let i = 1; i <= Math.min(2, output.ranked.length - 1); i++) {
+    const alt = output.ranked[i];
+    if (!alt) continue;
+    const altPosture = inferStrategicPosture(alt);
+    const liq = alt.result?.liquidityStressProbability ?? 0;
+    const refi = alt.result?.refinancePressureProbability ?? 0;
+    const lev = alt.result?.riskMetrics?.leverageRisk ?? 0;
+    let reason: string;
+    if (refi > 0.15 || liq > 0.18) {
+      reason =
+        `${alt.label} lost ground on serviceability — the path carried elevated refinance and liquidity stress through the early years, which weighs heavily on the resilience axis.`;
+    } else if (lev > 0.6) {
+      reason =
+        `${alt.label} accepted more leverage than the recommended path. The expected wealth uplift did not compensate for the increase in downside dispersion under stress.`;
+    } else if (altPosture.isCryptoHeavy) {
+      reason =
+        `${alt.label} carried concentrated digital-asset exposure. The upside paths were attractive but the left-tail outcomes pulled risk-adjusted scoring below the recommended path.`;
+    } else if (mode === "quant") {
+      reason =
+        `${alt.label}: score ${alt.score.score.toFixed(2)} (Δ to winner ${(alt.score.score - winner.score.score).toFixed(2)}). Lost on the combined scoring axes after weights and penalties.`;
+    } else {
+      reason =
+        `${alt.label} loses by a narrow margin on the combined scoring of survivability, liquidity comfort, and risk-adjusted return — close enough that household priority shifts could re-open the case.`;
+    }
+    body.push(reason);
+  }
+
+  // Discarded set context — illustrate the failure modes that didn't even make it to ranking.
+  const discardedSample = (output.discarded ?? []).slice(0, 2);
+  if (discardedSample.length > 0 && (mode === "advisor" || mode === "quant")) {
+    body.push(
+      `The safety screen also filtered ${output.discarded.length} other path${output.discarded.length === 1 ? "" : "s"} before ranking. Representative reasons: ` +
+        discardedSample
+          .map((d) => `${d.label.toLowerCase()} — ${d.reason.toLowerCase()}`)
+          .join("; ") +
+        ".",
+    );
+  }
+
+  if (body.length === 0) {
+    body.push(
+      `No comparable alternative survived the safety screen, so the recommended path is the only candidate the engine could justify under the current constraints.`,
+    );
+  }
+
+  return { id: "whyAlternativesLost", title: "Why alternatives lost", summary, body };
+}
+
+function buildBiggestHiddenRisks(
+  output: QuickDecisionOutput,
+  winner: RankedCandidate,
+  posture: StrategicAssessment,
+  mode: NarrativeMode,
+): NarrativeSection {
+  const summary =
+    `Even the recommended path carries dimensions of risk that are not immediately visible from headline returns. These are the exposures a senior reviewer would want surfaced before sign-off.`;
+
+  const body: string[] = [];
+  const r = winner.result;
+  const soft = winner.softWarnings ?? [];
+
+  // Hidden risk 1 — sequence-of-returns
+  const ddMed = r.riskMetrics?.maxDrawdownMedian ?? 0;
+  if (ddMed >= 0.12) {
+    body.push(
+      `Sequence-of-returns risk: the household's wealth trajectory is sensitive to where the largest declines occur. A deep decline early in the plan compounds for years before recovery, while the same decline late compresses far less terminal wealth.`,
+    );
+  }
+
+  // Hidden risk 2 — liquidity asymmetry
+  if ((r.liquidityStressProbability ?? 0) > 0.10) {
+    body.push(
+      `Liquidity asymmetry: the recommended path holds cash buffers that look adequate on average but compress during exactly the conditions where they are most needed. The shortfall is structural rather than budgetary.`,
+    );
+  }
+
+  // Hidden risk 3 — refinance / rate-shock asymmetry
+  if ((r.refinancePressureProbability ?? 0) > 0.10) {
+    body.push(
+      `Refinance-pressure asymmetry: serviceability stress lands at the worst moment — typically when rates have risen and household income has not yet caught up. The plan should pre-commit a response rather than improvising one.`,
+    );
+  }
+
+  // Hidden risk 4 — downside asymmetry (P10 vs P50)
+  const finalFan = (r as any).netWorthFan?.[(r as any).netWorthFan?.length - 1];
+  if (finalFan && finalFan.p10 < finalFan.p50 * 0.55) {
+    body.push(
+      `Downside asymmetry: the bottom-decile outcome sits substantially below the central case. Most of the plan's expected wealth is concentrated in the favourable half of the distribution rather than evenly spread.`,
+    );
+  }
+
+  // Hidden risk 5 — concentration
+  const conc = r.riskMetrics?.concentrationRisk ?? 0;
+  if (conc >= 0.40) {
+    body.push(
+      `Concentration risk: a large share of the household's net worth depends on a single asset class. The recommended path tolerates this within stated limits, but it remains the dominant determinant of outcome dispersion.`,
+    );
+  }
+
+  // Soft warnings already raised by the engine — surface them as hidden-risks.
+  for (const sw of soft) {
+    if (sw.severity === "critical" || sw.severity === "warn") {
+      body.push(`${sw.label}: ${sw.detail}`);
+    }
+  }
+
+  if (body.length === 0) {
+    body.push(
+      `No structurally hidden exposures were detected against the path's posture. Standard household risks — health, employment, regulatory change — remain unmodelled and should be carried in the broader financial plan rather than this recommendation.`,
+    );
+  }
+
+  return { id: "biggestHiddenRisks", title: "Biggest hidden risks", summary, body };
+}
+
+function buildBehaviouralRiskCommentary(
+  output: QuickDecisionOutput,
+  winner: RankedCandidate,
+  posture: StrategicAssessment,
+  interp: WinnerInterpretation,
+  mode: NarrativeMode,
+): NarrativeSection {
+  const summary =
+    `The mathematically optimal strategy can still fail behaviourally. Capturing the recommendation's value requires the household to actually execute it through periods that will tempt different choices.`;
+
+  const body: string[] = [];
+
+  if (interp.volatilityNarrative) {
+    body.push(interp.volatilityNarrative);
+  }
+
+  // Posture-specific commentary
+  if (posture.isDcaHeavy) {
+    body.push(
+      `The dollar-cost-averaging schedule is a discipline commitment. The advantage of this approach is realised only if contributions actually land on time during periods when the headlines argue against contributing. Front-running or pausing the schedule erases the benefit.`,
+    );
+  }
+  if (posture.posture === "defer_property_build_liquidity") {
+    body.push(
+      `Deferring the property requires patience — and patience under pressure if the property market rallies during the deferral window. The recommendation is conditional on the household holding the line, not chasing the entry.`,
+    );
+  }
+  if (posture.isPropertyPath) {
+    body.push(
+      `Property holdings tempt behavioural mistakes during corrections: forced sales near the bottom, refinancing into worse terms, or attempting to time exits. The plan's resilience depends on staying invested through the cycle.`,
+    );
+  }
+  if (posture.isCryptoHeavy) {
+    body.push(
+      `Concentrated digital-asset exposure invites position-sizing drift. The recommendation works only if the allocation is rebalanced back to the target rather than allowed to compound into a larger share of the balance sheet.`,
+    );
+  }
+
+  // Priority-overlay commentary
+  if (output.prioritiesActive) {
+    const sleep = output.behaviouralPriorities?.sleepAtNight ?? 5;
+    const vol = output.behaviouralPriorities?.volatilityTolerance ?? 5;
+    if (sleep >= 8 && vol >= 7) {
+      body.push(
+        `Note: the priorities profile combines high sleep-at-night importance with high volatility tolerance, which is unusual. The recommendation honours the higher of the two, but it is worth confirming which preference is the genuine one.`,
+      );
+    } else if (sleep >= 8) {
+      body.push(
+        `The household has weighted sleep-at-night importance heavily. The recommendation is steered toward paths that minimise mid-cycle drawdowns, even when more aggressive alternatives produce higher expected wealth.`,
+      );
+    } else if (vol <= 3) {
+      body.push(
+        `Stated volatility tolerance is low. Expect the recommendation to feel conservative during bull markets — that is the deliberate trade and the cost of behavioural durability.`,
+      );
+    }
+  }
+
+  if (body.length === 0) {
+    body.push(
+      `The recommended path is behaviourally durable across normal household responses to market conditions. The largest behavioural risk is overrating the temporary feeling of certainty in any one quarter.`,
+    );
+  }
+
+  return {
+    id: "behaviouralRiskCommentary",
+    title: "Behavioural risk commentary",
+    summary,
+    body,
+  };
+}
+
+function buildSensitivityAnalysis(
+  output: QuickDecisionOutput,
+  winner: RankedCandidate,
+  posture: StrategicAssessment,
+  mode: NarrativeMode,
+): NarrativeSection {
+  const summary =
+    `These are the variables whose movements would meaningfully shift the recommendation's value or break the case for it.`;
+
+  const body: string[] = [];
+  const r = winner.result;
+  const nsr = r.serviceability?.nsr ?? 0;
+
+  // Sensitivity 1 — interest-rate move
+  if (nsr > 0 && nsr < 1.5) {
+    const headroomBps = Math.max(0, (nsr - 1.0) * 300);
+    if (headroomBps > 0) {
+      body.push(
+        `Sensitivity to mortgage rates: the path's serviceability tolerance is approximately ${headroomBps.toFixed(0)} basis points of additional rate before the buffered debt-service position breaches the safe band. Beyond that level, the recommendation should be revisited.`,
+      );
+    } else {
+      body.push(
+        `Sensitivity to mortgage rates: the household is at the limit of its buffered serviceability tolerance. Any further rate rise should trigger an immediate plan review.`,
+      );
+    }
+  } else {
+    body.push(
+      `Sensitivity to mortgage rates is contained. The recommendation does not hinge on a specific interest-rate outcome and remains defensible across a wide rate band.`,
+    );
+  }
+
+  // Sensitivity 2 — household income shock
+  body.push(
+    `Sensitivity to income shock: a sustained ${ (output as any).capital ? "20-25%" : "20%" } drop in household income compresses the recommendation's wealth trajectory and may invalidate the path if the buffer is not rebuilt within twelve months.`,
+  );
+
+  // Sensitivity 3 — property growth assumption
+  if (posture.isPropertyPath || posture.posture === "lever_into_property_delayed") {
+    body.push(
+      `Sensitivity to property growth: the leverage uplift is meaningful when property growth meets the registry assumption. Sustained underperformance materially reduces the path's advantage over unlevered alternatives.`,
+    );
+  }
+
+  // Sensitivity 4 — surplus / contribution rate
+  body.push(
+    `Sensitivity to household surplus: if the monthly surplus available for contributions falls materially below the planned level, the projected wealth trajectory compresses and the plan should be re-scaled rather than continued at the original cadence.`,
+  );
+
+  // Posture-specific: dynamic flip conditions
+  if (posture.posture === "defer_property_build_liquidity") {
+    body.push(
+      `This recommendation flips in favour of immediate property acquisition if household surplus rises sustainably, the cash buffer reaches the target band, and mortgage-rate conditions stabilise.`,
+    );
+  } else if (posture.isPropertyPath) {
+    body.push(
+      `The recommendation flips back to deferral if rates rise materially before settlement, household serviceability weakens, or target-area valuations harden against the deal.`,
+    );
+  } else if (posture.isDcaHeavy) {
+    body.push(
+      `The recommendation flips toward a lump-sum entry if equity valuations dislocate sharply and the household's volatility tolerance permits committing the full allocation at the lower price.`,
+    );
+  }
+
+  return { id: "sensitivityAnalysis", title: "Sensitivity analysis", summary, body };
+}
+
+function buildStressTestCommentary(
+  output: QuickDecisionOutput,
+  winner: RankedCandidate,
+  posture: StrategicAssessment,
+  mode: NarrativeMode,
+): NarrativeSection {
+  const summary =
+    `These are the principal stresses the simulated runs apply, and how the recommended path performed across them.`;
+
+  const body: string[] = [];
+  const r = winner.result;
+
+  // Rate-shock band
+  if ((r.refinancePressureProbability ?? 0) > 0.20) {
+    body.push(
+      `Rate-shock band: a meaningful share of simulated paths breached the buffered debt-service threshold under elevated mortgage rates. A pre-committed response — fixing rate splits, accelerating offset balance — is required rather than optional.`,
+    );
+  } else if ((r.refinancePressureProbability ?? 0) > 0.05) {
+    body.push(
+      `Rate-shock band: stress probability is contained but non-zero. The recommendation tolerates this because the central path holds, and the monitoring plan is calibrated to escalate before the tolerance is exhausted.`,
+    );
+  } else {
+    body.push(
+      `Rate-shock band: the recommendation is robust to the modelled mortgage-rate stress range. Refinance pressure remains within the safe band across the bulk of simulated paths.`,
+    );
+  }
+
+  // Income-shock band
+  if ((r.liquidityExhaustionProbability ?? 0) > 0.10) {
+    body.push(
+      `Income-shock band: a sustained income drop compresses the cash buffer faster than the plan accumulates wealth. The household should treat the buffer as ring-fenced and avoid commitments that draw against it.`,
+    );
+  } else {
+    body.push(
+      `Income-shock band: liquidity exhaustion probability remains in the low band. The buffer is large enough to absorb a multi-month income disruption without forced asset sales.`,
+    );
+  }
+
+  // Equity / property correction band
+  const ddP90 = r.riskMetrics?.maxDrawdownP90 ?? 0;
+  if (mode === "quant") {
+    if (ddP90 >= 0.30) {
+      body.push(
+        `Drawdown band: the deepest simulated declines are large enough to test the household's behavioural discipline. The recommendation is built for the household to remain invested through them rather than re-time.`,
+      );
+    } else if (ddP90 >= 0.18) {
+      body.push(
+        `Drawdown band: declines around the typical adverse path are uncomfortable but absorbable, provided the contribution schedule continues rather than pausing.`,
+      );
+    } else {
+      body.push(
+        `Drawdown band: the modelled declines stay within the household's stated tolerance band. Behavioural risk on the wealth-volatility axis is contained.`,
+      );
+    }
+  } else {
+    if (ddP90 >= 0.30) {
+      body.push(
+        `Adverse-market band: the deepest simulated declines are large enough to test the household's behavioural discipline. The recommendation is built for the household to remain invested through them rather than re-time.`,
+      );
+    } else if (ddP90 >= 0.18) {
+      body.push(
+        `Adverse-market band: declines around the typical adverse path are uncomfortable but absorbable, provided the contribution schedule continues rather than pausing.`,
+      );
+    } else {
+      body.push(
+        `Adverse-market band: the modelled declines stay within the household's stated tolerance band. Behavioural risk on the wealth-volatility axis is contained.`,
+      );
+    }
+  }
+
+  // Default-probability framing
+  if ((r.defaultProbability ?? 0) > 0.05) {
+    body.push(
+      `Default frequency in simulated paths: above the 5% reference. The recommendation tolerates this because the alternatives carried higher tail risks, but the residual exposure should be communicated to all decision-makers.`,
+    );
+  }
+
+  // Quant mode — append raw stress probability fields by name so the quant
+  // surface preserves the full analytics (test 6).
+  if (mode === "quant") {
+    body.push(
+      `Raw stress fields: liquidityStressProbability=${(r.liquidityStressProbability ?? 0).toFixed(3)}; ` +
+      `refinancePressureProbability=${(r.refinancePressureProbability ?? 0).toFixed(3)}; ` +
+      `liquidityExhaustionProbability=${(r.liquidityExhaustionProbability ?? 0).toFixed(3)}; ` +
+      `defaultProbability=${(r.defaultProbability ?? 0).toFixed(3)}; ` +
+      `maxDrawdownMedian=${(r.riskMetrics?.maxDrawdownMedian ?? 0).toFixed(3)}; ` +
+      `maxDrawdownP90=${(r.riskMetrics?.maxDrawdownP90 ?? 0).toFixed(3)}; ` +
+      `leverageRisk=${(r.riskMetrics?.leverageRisk ?? 0).toFixed(3)}.`,
+    );
+  }
+
+  return { id: "stressTestCommentary", title: "Stress-test commentary", summary, body };
+}
+
+function buildKeyAssumptionsDriving(
+  output: QuickDecisionOutput,
+  winner: RankedCandidate,
+  posture: StrategicAssessment,
+  mode: NarrativeMode,
+): NarrativeSection {
+  const summary =
+    `The recommendation is conditional on the following assumptions. If any one of them moves materially, the case should be re-opened rather than carried forward.`;
+
+  const body: string[] = [];
+
+  // From the engine trace
+  const assumptions = winner.trace?.assumptionsUsed ?? [];
+  const named = new Set([
+    "inflation.cpi.au",
+    "stocks.return.expected",
+    "property.growth.expected",
+    "mortgageRate.au",
+    "behaviour.swr",
+  ]);
+  for (const a of assumptions) {
+    if (!named.has(a.id)) continue;
+    body.push(interpretAssumptionLine(a.id, a.value));
+  }
+
+  // Behavioural assumptions from priorities, if active
+  if (output.prioritiesActive) {
+    body.push(
+      `Behavioural priorities: the recommendation is also conditioned on the household's stated priority profile. A material change in any slider (especially sleep-at-night importance, leverage tolerance, or family-protection weight) should trigger a re-run.`,
+    );
+  } else {
+    body.push(
+      `Behavioural priorities: defaults are in use. The household has not yet expressed slider preferences, so the recommendation is balanced rather than priority-shaped — re-running with explicit priorities can improve the fit.`,
+    );
+  }
+
+  // Investor profile
+  body.push(
+    `Investor profile: ${output.investorProfile.replace(/_/g, " ")}. A change of profile would reshape the scoring weights, and the resulting ranking would not be the same.`,
+  );
+
+  if (body.length === 0) {
+    body.push(
+      `No specific assumption line is available from the engine trace. The recommendation should be treated as conditional on the household's current inputs and rerun whenever they change.`,
+    );
+  }
+
+  return {
+    id: "keyAssumptionsDrivingOutcome",
+    title: "Key assumptions driving outcome",
+    summary,
+    body,
+  };
+}
+
+function interpretAssumptionLine(id: string, value: number | string): string {
+  // Centralised interpretation lines for the recognised registry assumptions.
+  const v = typeof value === "number" ? (value * 100).toFixed(1) + "%" : String(value);
+  switch (id) {
+    case "inflation.cpi.au":
+      return `Inflation assumed at approximately ${v} per year over the horizon. Sustained inflation above this band erodes the real value of the wealth trajectory.`;
+    case "stocks.return.expected":
+      return `Equity expected return assumed at approximately ${v} per year. The recommendation degrades meaningfully if realised returns underperform this by more than 200 bps for an extended period.`;
+    case "property.growth.expected":
+      return `Property growth assumed at approximately ${v} per year. Sustained underperformance shifts the leverage advantage against the property paths.`;
+    case "mortgageRate.au":
+      return `Mortgage rate assumed at approximately ${v}. A persistent shift above this level alters the cost-of-leverage calculus.`;
+    case "behaviour.swr":
+      return `Safe withdrawal rate assumed at ${v}. A more conservative rate stretches the FIRE horizon; a more aggressive rate compresses it but raises depletion risk.`;
+    default:
+      return `${id}: ${v}.`;
+  }
+}
+
+function axisToHuman(axis: string): string {
+  switch (axis) {
+    case "survivalProbability": return "resilience and survival";
+    case "liquidityFactor":     return "liquidity comfort";
+    case "riskAdjustedReturn":  return "risk-adjusted compounding";
+    case "fireAcceleration":    return "time-to-financial-independence";
+    case "terminalNetWorth":    return "long-term wealth accumulation";
+    case "worstInvestmentLvr":  return "leverage quality";
+    default:                    return axis;
+  }
+}
+
 // ─── label cleanup ──────────────────────────────────────────────────────────
 
 /**
@@ -1207,16 +1748,20 @@ export function findBannedPhraseLeaks(text: string): string[] {
 // ─── public API ─────────────────────────────────────────────────────────────
 
 /**
- * Build the full v2 narrative report for a QuickDecisionOutput in the given
+ * Build the full V3 narrative report for a QuickDecisionOutput in the given
  * mode. Deterministic and side-effect free.
  *
- * Section order (v2):
+ * Section order (V3 — ten mandatory sections):
  *   1. Executive recommendation
- *   2. Why now
- *   3. Main risks avoided
- *   4. Trade-offs accepted
- *   5. Action plan
- *   6. What would change this recommendation later
+ *   2. Why this path won
+ *   3. Why alternatives lost
+ *   4. What changes the answer
+ *   5. Biggest hidden risks
+ *   6. Behavioural risk commentary
+ *   7. Sensitivity analysis
+ *   8. Stress-test commentary
+ *   9. Key assumptions driving outcome
+ *  10. Tactical next actions
  */
 export function buildNarrativeReport(
   output: QuickDecisionOutput,
@@ -1243,6 +1788,60 @@ export function buildNarrativeReport(
         "No candidates survived the safety filter. There is no path to recommend until the inputs are revised.",
     };
   }
+
+  const runnerScore = output.ranked[1]?.score.score ?? null;
+  const conf = confidenceFromGap(winner.score.score, runnerScore);
+  const posture = inferStrategicPosture(winner);
+  const interp = interpretWinner(winner);
+  const comparison = compareRunnerUp(output, winner, posture);
+
+  // V3 — ten mandatory sections, in canonical order. Each maps to either a
+  // V3 builder (whyThisPathWon, whyAlternativesLost, biggestHiddenRisks,
+  // behaviouralRiskCommentary, sensitivityAnalysis, stressTestCommentary,
+  // keyAssumptionsDrivingOutcome) or a V2 builder reused under a new ID.
+  const sections: NarrativeSection[] = [
+    buildExecutiveRecommendation(output, winner, posture, conf, mode),
+    buildWhyThisPathWon(output, winner, posture, interp, mode),
+    buildWhyAlternativesLost(output, winner, posture, comparison, mode),
+    asSection("whatChangesTheAnswer", "What changes the answer",
+      buildWhatWouldChangeThis(output, winner, posture, comparison, mode)),
+    buildBiggestHiddenRisks(output, winner, posture, mode),
+    buildBehaviouralRiskCommentary(output, winner, posture, interp, mode),
+    buildSensitivityAnalysis(output, winner, posture, mode),
+    buildStressTestCommentary(output, winner, posture, mode),
+    buildKeyAssumptionsDriving(output, winner, posture, mode),
+    asSection("tacticalNextActions", "Tactical next actions",
+      buildActionPlan(output, winner, posture, mode)),
+  ];
+
+  return {
+    mode,
+    sections,
+    showAdvanced: true,
+    confidence: conf.level,
+    confidenceReason: conf.reason,
+  };
+}
+
+function asSection(
+  id: NarrativeSectionId,
+  title: string,
+  base: NarrativeSection,
+): NarrativeSection {
+  return { id, title, summary: base.summary, body: base.body };
+}
+
+/**
+ * V3 — Legacy v2 6-section helper. Kept exported for back-compat with any
+ * caller that wants the trimmed v2 surface. New callers should use
+ * `buildNarrativeReport` which returns the V3 10-section structure.
+ */
+export function buildNarrativeReportV2(
+  output: QuickDecisionOutput,
+  mode: NarrativeMode,
+): NarrativeReport {
+  const winner = output.ranked[0];
+  if (!winner) return buildNarrativeReport(output, mode);
 
   const runnerScore = output.ranked[1]?.score.score ?? null;
   const conf = confidenceFromGap(winner.score.score, runnerScore);
