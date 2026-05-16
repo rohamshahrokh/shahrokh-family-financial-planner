@@ -3058,11 +3058,75 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          YEAR-BY-YEAR TABLE
+          MONTE CARLO WEALTH PROJECTION  (primary realistic forecast)
+          Rendered when a Monte Carlo run is available. Source of truth label
+          is shown explicitly so users never confuse this with the deterministic
+          year-by-year projection below.
+          ═════════════════════════════════════════════════════════════════ */}
+      {monteCarloResult && (monteCarloResult.fan_data?.length ?? 0) > 0 && (
+        <div className="px-4 pb-4 db-section-monte-carlo">
+          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+            <div>
+              <h2 className="text-base font-bold text-foreground">Wealth Projection — Monte Carlo</h2>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Projection source: Monte Carlo forecast · {monteCarloResult.simulations.toLocaleString()} simulations · single SoT shared with Forecast Engine, Decision Engine and Reports
+              </p>
+            </div>
+            <Link href="/ai-forecast-engine">
+              <span className="text-xs text-primary hover:underline">Open Forecast Engine →</span>
+            </Link>
+          </div>
+          <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-purple-500/20">
+                    {["Year","P10 Net Worth","P50 Net Worth (median)","P90 Net Worth","Confidence band (P90 − P10)","Key risk"].map(h => (
+                      <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {monteCarloResult.fan_data.map((row, idx) => {
+                    const band = row.p90 - row.p10;
+                    const bandPct = row.median > 0 ? (band / Math.max(1, row.median)) * 100 : 0;
+                    const risk = idx === 0 ? "Starting position"
+                      : row.p10 < 0 ? "P10 turns negative — severe downside risk"
+                      : bandPct > 200 ? "Very wide outcome range — high uncertainty"
+                      : bandPct > 100 ? "Moderate spread — typical long-horizon variance"
+                      : "Tight range — outcomes converging";
+                    return (
+                      <tr key={row.year} className="border-b border-border/30 hover:bg-purple-500/5">
+                        <td className="px-3 py-2 font-bold text-foreground whitespace-nowrap">{row.year}{idx === 0 ? " ★" : ""}</td>
+                        <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(row.p10, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-amber-400 font-bold tabular-nums whitespace-nowrap">{maskValue(formatCurrency(row.median, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(row.p90, true), privacyMode)}</td>
+                        <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(band, true), privacyMode)} ({bandPct.toFixed(0)}%)</td>
+                        <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{risk}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-2 text-[10px] text-muted-foreground border-t border-purple-500/20 bg-purple-500/[0.03]">
+              P10 = worst 10% of outcomes · P50 = median · P90 = best 10%. Probability of ${"≥"}$5M by {monteCarloResult.fan_data[monteCarloResult.fan_data.length - 1]?.year ?? "—"}: {monteCarloResult.prob_5m.toFixed(1)}% · FIRE probability: {monteCarloResult.prob_ff.toFixed(1)}% · Cash shortfall risk: {monteCarloResult.prob_cash_shortfall.toFixed(1)}%.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════
+          YEAR-BY-YEAR TABLE (deterministic — Simple Forecast / Year-by-Year)
           ═════════════════════════════════════════════════════════════════ */}
       <div className="px-4 pb-4 db-section-year">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-bold text-foreground">Year-by-Year Projection</h2>
+          <div>
+            <h2 className="text-base font-bold text-foreground">Year-by-Year Projection (deterministic)</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Projection source: {forecastMode === "monte-carlo" ? "Monte Carlo median path (see table above for P10/P90 bands)" : forecastMode === "year-by-year" ? "Year-by-Year custom assumptions" : `Simple Forecast (${profile})`} · single straight-line view
+            </p>
+          </div>
           <Link href="/timeline"><span className="text-xs text-primary hover:underline">Full Timeline →</span></Link>
         </div>
         <div className="rounded-2xl border border-border bg-card overflow-hidden">
