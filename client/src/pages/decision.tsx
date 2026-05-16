@@ -86,6 +86,11 @@ import {
   ConditionalRecsList,
 } from "@/components/decisionEngine/RecommendationLayer";
 import { StrategyCard } from "@/components/decisionEngine/StrategyCard";
+import {
+  NarrativeReport,
+  NarrativeModeToggle,
+} from "@/components/decisionEngine/NarrativeReport";
+import type { NarrativeMode } from "@/lib/scenarioV2/decisionEngine/narrativeLayer";
 
 // Embedded power-user tab — re-uses every line of premium Scenario Lab UX.
 import ScenarioCompareV2Page from "./scenario-compare-v2";
@@ -206,6 +211,13 @@ function QuickDecisionTab() {
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [showDiscarded, setShowDiscarded] = useState(false);
+
+  // ── Narrative-layer v1: reading mode (Simple / Advisor / Quant) ──────────
+  // Simple is the default — the page should be readable by a non-finance user
+  // out of the box. Advisor adds comparative reasoning; Quant exposes the full
+  // Monte-Carlo / tail-risk surface (which is otherwise tucked behind the
+  // AdvancedAnalysisSection progressive disclosure).
+  const [narrativeMode, setNarrativeMode] = useState<NarrativeMode>("simple");
 
   // ── Question-switching reset (Session 6 bug fix) ──────────────────────────
   //
@@ -652,7 +664,22 @@ function QuickDecisionTab() {
               />
             </div>
 
+            {/* ── Narrative layer v1 ──────────────────────────────────────
+                Mode toggle + deterministic plain-English narrative built from
+                engine outputs. The mandatory section order is enforced inside
+                NarrativeReport: executive summary → what should I do → why →
+                main risks → what if ignored → step-by-step action plan. */}
             {output && (
+              <div className="space-y-3" data-testid="narrative-block">
+                <NarrativeModeToggle value={narrativeMode} onChange={setNarrativeMode} />
+                <NarrativeReport output={output} mode={narrativeMode} />
+              </div>
+            )}
+
+            {/* Legacy "why-won / what-could-invalidate" block — Quant mode only,
+                since Simple/Advisor narratives already cover this. Kept so quant
+                users still see the engine's raw rationale strings verbatim. */}
+            {output && narrativeMode === "quant" && (
               <div className="de-result-narrative rounded-lg p-3 space-y-3">
                 <div>
                   <div className="text-[11px] uppercase tracking-wide font-semibold text-[hsl(var(--success-light))] mb-1">
@@ -709,11 +736,17 @@ function QuickDecisionTab() {
             </div>
 
             {/* Everything else — quant-grade charts and bad-tail analysis —
-                tucked into progressive disclosure so beginners don't drown. */}
+                tucked into progressive disclosure so beginners don't drown.
+                In Quant mode it auto-opens (key remounts) so Monte Carlo,
+                VaR/CVaR, distribution histogram and waterfall are all visible. */}
             <AdvancedAnalysisSection
+              key={`adv-${narrativeMode}`}
               title="Advanced analysis"
-              hint="Tail risk, score breakdown, runner-up comparison"
+              hint={narrativeMode === "quant"
+                ? "Monte Carlo, VaR/CVaR, distribution, score waterfall"
+                : "Tail risk, score breakdown, runner-up comparison"}
               helpTopic={HELP_TOPICS.chartGuides}
+              defaultOpen={narrativeMode === "quant"}
               dataTestid="winner-advanced-analysis"
             >
               <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
