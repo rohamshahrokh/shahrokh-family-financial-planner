@@ -40,6 +40,10 @@ import { HelpLink, HELP_TOPICS } from "@/components/help";
 import { PlainMetric } from "@/components/decisionEngine/PlainMetric";
 import { AdvancedAnalysisSection } from "@/components/decisionEngine/AdvancedAnalysisSection";
 import { IntelligenceSection } from "@/components/decisionEngine/intelligence/IntelligenceSection";
+import { AutonomousSection } from "@/components/decisionEngine/autonomous/AutonomousSection";
+import { buildFinancialIntelligence } from "@/lib/scenarioV2";
+import { DEFAULT_ASSUMPTIONS } from "@/lib/scenarioV2/basePlan";
+import { useLedgerHistory, useStrategicMemory } from "@/lib/autonomousMemoryStore";
 import { METRIC_LABELS, LENS_LABELS, RISK_MODE_LABELS } from "@/lib/decisionEngineLabels";
 import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
@@ -184,6 +188,12 @@ function QuickDecisionTab() {
   // ── Privacy mode ───────────────────────────────────────────────────────────
   const { privacyMode, togglePrivacy } = useAppStore();
   const { fmt$, fmt$k, fmt$M, pct, sentence } = useMaskFmt(privacyMode);
+
+  // ── Autonomous OS in-session memory (no browser storage) ──────────────────
+  // History + memory live in a module-level singleton for the current
+  // session only. They reset on reload — the UI is explicit about that.
+  const autonomousHistory = useLedgerHistory();
+  const autonomousMemory = useStrategicMemory();
 
   // ── User question input ────────────────────────────────────────────────────
   const [question, setQuestion] = useState<QuickDecisionQuestionKind>(DEFAULT_QUESTION);
@@ -686,6 +696,24 @@ function QuickDecisionTab() {
                 Engine math untouched. */}
             {output && (
               <IntelligenceSection output={output} prior={null} />
+            )}
+
+            {/* ── Autonomous Financial OS (Phase 3) ───────────────────────
+                Deterministic proactive layer composed on top of the
+                Financial Intelligence Layer. Adds continuous monitoring,
+                recommendation evolution, regime awareness, opportunity
+                detection, drift, dynamic priorities, autonomous alerts,
+                rebalancing, life-event simulation, longitudinal comparison,
+                rolling roadmap, strategic memory, and visual modules.
+                Engine math untouched. */}
+            {output && (
+              <AutonomousSection
+                output={output}
+                intelligence={buildFinancialIntelligence({ output, prior: null })}
+                assumptions={DEFAULT_ASSUMPTIONS}
+                history={autonomousHistory}
+                memory={autonomousMemory}
+              />
             )}
 
             {/* Legacy "why-won / what-could-invalidate" block — Quant mode only,

@@ -12,10 +12,11 @@
     "test:dashboard-contract": "tsx script/test-dashboard-contract.ts",
     "test:scenario-v2": "tsx script/test-scenario-v2.ts",
     "test:registry": "tsx script/test-registry.ts",
-    "test:all": "npm run test:scenario-v2 && npm run test:registry && npm run test:decision-engine && npm run test:narrative-layer && npm run test:financial-intelligence && npm run test:audit-p1",
+    "test:all": "npm run test:scenario-v2 && npm run test:registry && npm run test:decision-engine && npm run test:narrative-layer && npm run test:financial-intelligence && npm run test:autonomous-os && npm run test:audit-p1",
     "test:decision-engine": "tsx script/test-decision-engine.ts",
     "test:narrative-layer": "tsx script/test-narrative-layer.ts",
     "test:financial-intelligence": "tsx script/test-financial-intelligence.ts",
+    "test:autonomous-os": "tsx script/test-autonomous-os.ts",
     "test:audit-p1": "tsx script/run-audit-p1-tests.ts",
     "db:push": "drizzle-kit push"
   },
