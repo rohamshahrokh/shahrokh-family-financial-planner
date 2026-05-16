@@ -2,13 +2,13 @@
  * NarrativeReport.tsx — Renders the deterministic narrative produced by
  * `buildNarrativeReport()` for the winning candidate.
  *
- * Mandatory section order:
- *   1. Executive summary
- *   2. What should I do?
- *   3. Why did the engine choose this?
- *   4. What are the main risks?
- *   5. What happens if I ignore this?
- *   6. Step-by-step action plan
+ * Mandatory v2 section order:
+ *   1. Executive recommendation
+ *   2. Why now
+ *   3. Main risks avoided
+ *   4. Trade-offs accepted
+ *   5. Action plan
+ *   6. What would change this recommendation later
  *
  * Advanced analytics live BELOW this component, collapsed by default.
  *
@@ -27,11 +27,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   CheckCircle2,
-  AlertTriangle,
-  HelpCircle,
+  Clock,
+  ShieldCheck,
+  Scale,
   ListChecks,
   Sparkles,
-  ShieldAlert,
+  RefreshCw,
   TrendingUp,
 } from "lucide-react";
 import type { QuickDecisionOutput } from "@/lib/scenarioV2/decisionEngine/candidateGenerator";
@@ -42,21 +43,21 @@ import {
 } from "@/lib/scenarioV2/decisionEngine/narrativeLayer";
 
 const SECTION_ICON: Record<NarrativeSection["id"], React.ReactNode> = {
-  executiveSummary: <Sparkles className="h-4 w-4" />,
-  whatShouldIDo: <CheckCircle2 className="h-4 w-4" />,
-  whyEngineChoseThis: <HelpCircle className="h-4 w-4" />,
-  mainRisks: <ShieldAlert className="h-4 w-4" />,
-  ifIgnored: <AlertTriangle className="h-4 w-4" />,
+  executiveRecommendation: <Sparkles className="h-4 w-4" />,
+  whyNow: <Clock className="h-4 w-4" />,
+  mainRisksAvoided: <ShieldCheck className="h-4 w-4" />,
+  tradeOffsAccepted: <Scale className="h-4 w-4" />,
   actionPlan: <ListChecks className="h-4 w-4" />,
+  whatWouldChangeThis: <RefreshCw className="h-4 w-4" />,
 };
 
 const SECTION_TONE: Record<NarrativeSection["id"], string> = {
-  executiveSummary: "border-[hsl(var(--intelligence)/0.30)]",
-  whatShouldIDo: "border-[hsl(var(--success)/0.30)]",
-  whyEngineChoseThis: "border-border",
-  mainRisks: "border-[hsl(var(--warning)/0.30)]",
-  ifIgnored: "border-[hsl(var(--warning)/0.30)]",
+  executiveRecommendation: "border-[hsl(var(--intelligence)/0.30)]",
+  whyNow: "border-[hsl(var(--intelligence)/0.30)]",
+  mainRisksAvoided: "border-[hsl(var(--success)/0.30)]",
+  tradeOffsAccepted: "border-[hsl(var(--warning)/0.30)]",
   actionPlan: "border-[hsl(var(--success)/0.30)]",
+  whatWouldChangeThis: "border-border",
 };
 
 export interface NarrativeReportProps {
@@ -128,9 +129,9 @@ export function NarrativeReport({ output, mode, advancedSlot }: NarrativeReportP
 function modeDescription(mode: NarrativeMode): string {
   switch (mode) {
     case "simple":
-      return "Plain-English summary aimed at a non-technical reader.";
+      return "Advisor-style memo: the recommendation, why now, what it avoids, and what would change it.";
     case "advisor":
-      return "Comparative reasoning, runner-up, projections.";
+      return "Senior-advisor reasoning with runner-up comparison and leverage / liquidity interpretation.";
     case "quant":
       return "Full quantitative context: stress probabilities, score derivation, dispersion metrics.";
   }
@@ -143,9 +144,9 @@ export interface NarrativeModeToggleProps {
 
 export function NarrativeModeToggle({ value, onChange }: NarrativeModeToggleProps) {
   const opts: { id: NarrativeMode; label: string; sub: string }[] = [
-    { id: "simple", label: "Simple", sub: "Plain English, no jargon" },
-    { id: "advisor", label: "Advisor", sub: "Comparisons & projections" },
-    { id: "quant", label: "Quant", sub: "Full Monte-Carlo & tail risk" },
+    { id: "simple", label: "Simple", sub: "Advisor memo, plain language" },
+    { id: "advisor", label: "Advisor", sub: "Runner-up comparison & leverage analysis" },
+    { id: "quant", label: "Quant", sub: "Full simulation & risk metrics" },
   ];
   return (
     <div
