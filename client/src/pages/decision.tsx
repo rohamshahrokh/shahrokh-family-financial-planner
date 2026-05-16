@@ -40,6 +40,10 @@ import { HelpLink, HELP_TOPICS } from "@/components/help";
 import { PlainMetric } from "@/components/decisionEngine/PlainMetric";
 import { AdvancedAnalysisSection } from "@/components/decisionEngine/AdvancedAnalysisSection";
 import { IntelligenceSection } from "@/components/decisionEngine/intelligence/IntelligenceSection";
+import { AutonomousSection } from "@/components/decisionEngine/autonomous/AutonomousSection";
+import { buildFinancialIntelligence } from "@/lib/scenarioV2";
+import { DEFAULT_ASSUMPTIONS } from "@/lib/scenarioV2/basePlan";
+import { readLedgerHistory, readStrategicMemory } from "@/lib/autonomousMemoryStore";
 import { METRIC_LABELS, LENS_LABELS, RISK_MODE_LABELS } from "@/lib/decisionEngineLabels";
 import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
@@ -687,6 +691,29 @@ function QuickDecisionTab() {
             {output && (
               <IntelligenceSection output={output} prior={null} />
             )}
+
+            {/* ── Autonomous Financial OS (Phase 3) ───────────────────────
+                Deterministic proactive layer composed on top of the
+                Financial Intelligence Layer. Adds continuous monitoring,
+                recommendation evolution, regime awareness, opportunity
+                detection, drift, dynamic priorities, autonomous alerts,
+                rebalancing, life-event simulation, longitudinal comparison,
+                rolling roadmap, strategic memory, and visual modules.
+                Engine math untouched. */}
+            {output && (() => {
+              const intelligence = buildFinancialIntelligence({ output, prior: null });
+              const history = readLedgerHistory();
+              const memory = readStrategicMemory();
+              return (
+                <AutonomousSection
+                  output={output}
+                  intelligence={intelligence}
+                  assumptions={DEFAULT_ASSUMPTIONS}
+                  history={history}
+                  memory={memory}
+                />
+              );
+            })()}
 
             {/* Legacy "why-won / what-could-invalidate" block — Quant mode only,
                 since Simple/Advisor narratives already cover this. Kept so quant
