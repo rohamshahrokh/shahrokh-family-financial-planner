@@ -39,6 +39,7 @@ import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { HelpLink, HELP_TOPICS } from "@/components/help";
 import { PlainMetric } from "@/components/decisionEngine/PlainMetric";
 import { AdvancedAnalysisSection } from "@/components/decisionEngine/AdvancedAnalysisSection";
+import { IntelligenceSection } from "@/components/decisionEngine/intelligence/IntelligenceSection";
 import { METRIC_LABELS, LENS_LABELS, RISK_MODE_LABELS } from "@/lib/decisionEngineLabels";
 import {
   Sparkles, Play, Award, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp,
@@ -674,6 +675,17 @@ function QuickDecisionTab() {
                 <NarrativeModeToggle value={narrativeMode} onChange={setNarrativeMode} />
                 <NarrativeReport output={output} mode={narrativeMode} />
               </div>
+            )}
+
+            {/* ── Financial Intelligence Layer V1 ─────────────────────────
+                Deterministic interpretive overlay sitting on top of the
+                Decision Engine narrative. Adds turning-point detection,
+                fragility scanning, assumption dependency ranking, regime
+                awareness, behavioural survivability, path-robustness
+                scoring, recommendation drift, and an explainability memo.
+                Engine math untouched. */}
+            {output && (
+              <IntelligenceSection output={output} prior={null} />
             )}
 
             {/* Legacy "why-won / what-could-invalidate" block — Quant mode only,
