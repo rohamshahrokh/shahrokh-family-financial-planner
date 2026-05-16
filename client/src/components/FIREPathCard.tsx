@@ -72,10 +72,9 @@ export default function FIREPathCard() {
             <p className="text-[10px] text-muted-foreground">Fastest path to financial independence</p>
           </div>
         </div>
-        <Link href="/wealth-strategy">
+        <Link href="/financial-plan">
           <button
             className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-orange-400 transition-colors"
-            onClick={() => sessionStorage.setItem('wealth-strategy-tab', 'fire-path')}
           >
             Full Analysis <ChevronRight size={12} />
           </button>
