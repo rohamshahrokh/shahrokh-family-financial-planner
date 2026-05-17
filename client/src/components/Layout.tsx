@@ -35,15 +35,22 @@ import {
 // ─── Navigation Structure ─────────────────────────────────────────────────────
 // Each step maps to a life stage in the wealth-building journey.
 
+// FWL Phase 7 — Executive-flow grouping. Same 4 steps, sharper sublabels:
+//   Snapshot  → "Today" (where am I right now)
+//   Strategy  → "Plan" (where am I going)
+//   Forecast  → "Project" (will it work)
+//   Action    → "Execute" (what do I do this week)
+// The Decision Engine moves to Action because it's the family-office command
+// brain that drives the weekly action queue — not a forecast.
 const NAV_STEPS = [
   {
     id: "snapshot",
     step: 1,
     label: "Snapshot",
-    sublabel: "Input Today",
+    sublabel: "Today · Where am I",
     badgeClass: "step-1",
     items: [
-      { href: "/dashboard",       label: "Overview",            icon: LayoutDashboard, adminOnly: false },
+      { href: "/dashboard",       label: "Executive Overview",  icon: LayoutDashboard, adminOnly: false },
       { href: "/expenses",        label: "Income & Expenses",   icon: DollarSign,      adminOnly: false },
       { href: "/recurring-bills", label: "Recurring Bills",     icon: Receipt,         adminOnly: false },
       { href: "/budget",          label: "Monthly Budget",      icon: Target,          adminOnly: false },
@@ -56,28 +63,27 @@ const NAV_STEPS = [
     id: "strategy",
     step: 2,
     label: "Strategy",
-    sublabel: "Plan the Future",
+    sublabel: "Plan · Where am I going",
     badgeClass: "step-2",
     items: [
-      { href: "/financial-plan",  label: "My Financial Plan",   icon: ClipboardList,   adminOnly: false },
-      { href: "/property",        label: "Property Plan",       icon: Home,            adminOnly: false },
-      { href: "/stocks",          label: "Stocks Plan",         icon: BarChart2,       adminOnly: false },
-      { href: "/crypto",          label: "Crypto Plan",         icon: Bitcoin,         adminOnly: false },
+      { href: "/financial-plan",  label: "Family Plan",         icon: ClipboardList,   adminOnly: false },
+      { href: "/wealth-strategy", label: "Wealth Strategy",     icon: Briefcase,       adminOnly: false },
+      { href: "/property",        label: "Property",            icon: Home,            adminOnly: false },
+      { href: "/stocks",          label: "Stocks",              icon: BarChart2,       adminOnly: false },
+      { href: "/crypto",          label: "Crypto",              icon: Bitcoin,         adminOnly: false },
       { href: "/debt-strategy",   label: "Debt Strategy",       icon: CreditCard,      adminOnly: false },
       { href: "/tax",             label: "Tax Strategy",        icon: Calculator,      adminOnly: false },
-      { href: "/cgt-simulator",    label: "CGT Simulator",       icon: BarChart2,       adminOnly: false },
-      { href: "/wealth-strategy", label: "Wealth Strategy",     icon: Briefcase,       adminOnly: false },
+      { href: "/cgt-simulator",   label: "CGT Simulator",       icon: BarChart2,       adminOnly: false },
     ],
   },
   {
     id: "forecast",
     step: 3,
     label: "Forecast",
-    sublabel: "Model & Project",
+    sublabel: "Project · Will it work",
     badgeClass: "step-3",
     items: [
       { href: "/ai-forecast-engine", label: "Forecast Engine",      icon: Sigma,         adminOnly: true  },
-      { href: "/decision",            label: "Decision Engine",        icon: Sparkles,      adminOnly: false },
       // Hidden from sidebar (V1) — routes retained:
       //   /what-if-scenarios       (legacy What-If)
       //   /scenario-compare        (legacy Scenario Lab)
@@ -90,9 +96,12 @@ const NAV_STEPS = [
     id: "action",
     step: 4,
     label: "Action",
-    sublabel: "Take Action",
+    sublabel: "Execute · This week",
     badgeClass: "step-4",
     items: [
+      // Decision Engine moves here in Phase 7 — it's the executive brain that
+      // ranks priorities and drives the action queue, not a forecast model.
+      { href: "/decision",       label: "Decision Engine",     icon: Sparkles,        adminOnly: false },
       { href: "/ai-weekly-cfo",  label: "Sat. Bulletin",       icon: BrainCircuit,    adminOnly: false, requiredPermission: 'view_bulletin' as Permission },
       { href: "/ai-insights",    label: "AI Insights",         icon: Lightbulb,       adminOnly: false, requiredPermission: 'view_ai_insights' as Permission },
     ],

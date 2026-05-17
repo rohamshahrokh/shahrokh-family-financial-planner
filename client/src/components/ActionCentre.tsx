@@ -62,16 +62,26 @@ export default function ActionCentre() {
   const top  = unified.topPriorities;
   const meaningfulChanges = changes.filter(c => c.changedReason !== 'unchanged');
 
+  // FWL Phase 7 — Action Centre is the family-office command centre.
+  // Header label upgraded; CIO-style framing; same visual identity.
+  const confidencePct = Math.round(best.confidenceScore * 100);
+  const confidenceTone =
+    confidencePct >= 75 ? 'text-emerald-400'
+    : confidencePct >= 55 ? 'text-amber-400'
+    : 'text-rose-400';
   return (
     <div className="rounded-2xl border border-border bg-card overflow-hidden" data-testid="action-centre">
       <div className="px-4 pt-4 pb-3 border-b border-border flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
             <Activity className="w-4 h-4 text-amber-400" />
           </div>
           <div>
-            <p className="text-sm font-bold text-foreground">Action Centre</p>
-            <p className="text-[10px] text-muted-foreground">Unified strategic brain · {unified.signalCoverage.length} signals</p>
+            <p className="text-sm font-bold text-foreground">Action Centre · Command Hub</p>
+            <p className="text-[10px] text-muted-foreground">
+              Family-office brain · {unified.signalCoverage.length} signals · confidence{' '}
+              <span className={confidenceTone}>{confidencePct}%</span>
+            </p>
           </div>
         </div>
         <Link href="/wealth-strategy">
