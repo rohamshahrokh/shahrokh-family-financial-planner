@@ -97,18 +97,23 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
   const mv = (v: string) => maskValue(v, privacyMode);
   const macro = regimeLabel();
   // Source-of-truth resolution for the 10y trajectory shown in the header.
-  // Canonical MC P50 wins when available — that is the same number rendered
-  // in the Wealth Projection (Monte Carlo) table. Falls back to the
-  // deterministic projection ONLY when MC has not yet been run.
+  // Monte Carlo P50 is the ONLY canonical source of truth. When MC has not
+  // been run we MUST NOT show the deterministic projection as the primary
+  // trajectory — instead the card renders a neutral "Monte Carlo pending"
+  // state with a CTA to run the simulation. The deterministic figure is
+  // demoted to a small secondary line, clearly labelled "non-canonical".
   const hasMcTrajectory = typeof p.trajectoryP50 === 'number' && Number.isFinite(p.trajectoryP50);
-  const trajectoryValue = hasMcTrajectory ? (p.trajectoryP50 as number) : p.year10NW;
   const trajectoryYearLabel = hasMcTrajectory && p.trajectoryYear
     ? `${p.trajectoryYear} P50`
-    : `${new Date().getFullYear() + 9} (deterministic)`;
+    : `${new Date().getFullYear() + 9} horizon`;
   const trajectorySourceLabel = hasMcTrajectory
     ? 'Source: Monte Carlo P50'
-    : 'Source: Deterministic baseline · run Monte Carlo for canonical P50';
-  const traj = trajectoryFromGrowth(p.netWorth, trajectoryValue);
+    : 'Source: Monte Carlo not yet run — open Forecast Engine to populate';
+  // `traj` (growth % vs today) is only computed when MC is available; the
+  // deterministic figure deliberately does NOT drive the primary card.
+  const traj = hasMcTrajectory
+    ? trajectoryFromGrowth(p.netWorth, p.trajectoryP50 as number)
+    : { delta: 0, pct: 0, label: 'Monte Carlo pending' };
   const surplusPositive = p.surplus >= 0;
   const riskTone =
     p.riskScore >= 70 ? 'hsl(142,60%,55%)'
@@ -182,38 +187,87 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
           <div className="text-[10px] text-muted-foreground mt-1 tabular-nums">{p.riskScore} / 100</div>
         </div>
 
-        {/* Trajectory — canonical Monte Carlo P50 when available, deterministic fallback otherwise */}
+        {/* Trajectory — Monte Carlo P50 is the ONLY canonical source.
+            When MC has not been run we show a neutral "Monte Carlo pending"
+            state instead of a deterministic dollar value, so the dashboard
+            never presents a deterministic figure as the official trajectory. */}
         <div className="px-4 py-3" data-testid="executive-trajectory">
           <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1 flex items-center gap-1">
             <span>10y Trajectory</span>
             <span
               className="text-[8px] font-bold px-1 py-0.5 rounded"
               style={{
-                color: hasMcTrajectory ? 'hsl(280,80%,72%)' : 'hsl(43,90%,55%)',
-                background: hasMcTrajectory ? 'hsl(280,80%,12%)' : 'hsl(43,90%,8%)',
-                border: `1px solid ${hasMcTrajectory ? 'hsl(280,80%,30%)' : 'hsl(43,90%,30%)'}`,
+                color: hasMcTrajectory ? 'hsl(280,80%,72%)' : 'hsl(215,15%,65%)',
+                background: hasMcTrajectory ? 'hsl(280,80%,12%)' : 'hsl(215,15%,12%)',
+                border: `1px solid ${hasMcTrajectory ? 'hsl(280,80%,30%)' : 'hsl(215,15%,30%)'}`,
               }}
               data-testid="executive-trajectory-source-badge"
             >
-              {hasMcTrajectory ? 'MC P50' : 'DET'}
+              {hasMcTrajectory ? 'MC P50' : 'PENDING'}
             </span>
           </div>
-          <div
-            className="text-lg font-extrabold tabular-nums leading-none"
-            style={{ color: 'hsl(210,80%,68%)' }}
-            data-testid="executive-trajectory-value"
-          >
-            {mv(formatCurrency(trajectoryValue, true))}
-          </div>
-          <div className="text-[10px] mt-1" style={{ color: traj.pct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
-            {traj.pct >= 0 ? '+' : ''}{traj.pct.toFixed(0)}% · {trajectoryYearLabel}
-          </div>
-          <div
-            className="text-[9px] mt-0.5 text-muted-foreground/80 leading-tight"
-            data-testid="executive-trajectory-source"
-          >
-            {trajectorySourceLabel}
-          </div>
+
+          {hasMcTrajectory ? (
+            <>
+              <div
+                className="text-lg font-extrabold tabular-nums leading-none"
+                style={{ color: 'hsl(210,80%,68%)' }}
+                data-testid="executive-trajectory-value"
+              >
+                {mv(formatCurrency(p.trajectoryP50 as number, true))}
+              </div>
+              <div className="text-[10px] mt-1" style={{ color: traj.pct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
+                {traj.pct >= 0 ? '+' : ''}{traj.pct.toFixed(0)}% · {trajectoryYearLabel}
+              </div>
+              <div
+                className="text-[9px] mt-0.5 text-muted-foreground/80 leading-tight"
+                data-testid="executive-trajectory-source"
+              >
+                {trajectorySourceLabel}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Neutral pending state — NO deterministic dollar value as
+                  the primary trajectory figure. The deterministic baseline
+                  is intentionally NOT rendered as the headline number. */}
+              <div
+                className="text-sm font-bold leading-tight"
+                style={{ color: 'hsl(215,15%,72%)' }}
+                data-testid="executive-trajectory-pending"
+              >
+                Monte Carlo pending
+              </div>
+              <div className="text-[10px] mt-1 text-muted-foreground">
+                No canonical P50 yet · {trajectoryYearLabel}
+              </div>
+              <Link href="/ai-forecast-engine">
+                <span
+                  className="inline-block mt-1 text-[10px] font-semibold text-primary hover:underline cursor-pointer"
+                  data-testid="executive-trajectory-cta"
+                >
+                  Run Monte Carlo →
+                </span>
+              </Link>
+              <div
+                className="text-[9px] mt-1 text-muted-foreground/70 leading-tight"
+                data-testid="executive-trajectory-source"
+              >
+                {trajectorySourceLabel}
+              </div>
+              {/* Deterministic figure demoted to a small secondary line,
+                  clearly labelled as non-canonical so it cannot be
+                  mistaken for the official trajectory. */}
+              {Number.isFinite(p.year10NW) && p.year10NW > 0 && (
+                <div
+                  className="text-[9px] mt-1 text-muted-foreground/60 leading-tight italic"
+                  data-testid="executive-trajectory-deterministic-secondary"
+                >
+                  Deterministic baseline (non-canonical): {mv(formatCurrency(p.year10NW, true))}
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Macro — desktop only on mobile shown in header pill */}

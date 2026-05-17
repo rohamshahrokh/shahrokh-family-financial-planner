@@ -25,6 +25,11 @@ import {
   computeUnifiedRecommendations,
   type UnifiedSignals,
 } from '../client/src/lib/recommendationEngine';
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let failures = 0;
 
@@ -179,23 +184,88 @@ section('Validation 1: Executive trajectory uses MC P50 when available');
     { year: horizonYear,     p10: 2_400_000, median: 3_580_000, p90: 5_800_000 },
   ];
   const determ10y = 5_330_000; // production bug case
-  const resolveTrajectory = () => {
-    const row = fanData.find(r => r.year === horizonYear) ?? fanData[fanData.length - 1];
-    return row ? { value: row.median, source: 'MC P50' as const } : { value: determ10y, source: 'deterministic' as const };
+  const resolveTrajectory = (fan: any[]) => {
+    const row = fan.find(r => r.year === horizonYear) ?? fan[fan.length - 1];
+    // Tightened contract: the resolver returns a neutral "pending" state
+    // when fan_data is empty — it does NOT return a deterministic value as
+    // the canonical trajectory.
+    if (!row) return { trajectoryP50: null, source: 'pending' as const };
+    return { trajectoryP50: row.median, source: 'MC P50' as const };
   };
-  const t = resolveTrajectory();
+  const t = resolveTrajectory(fanData);
   assert('trajectory source = "MC P50" when fan_data contains horizon year', t.source === 'MC P50');
   assert(`trajectory value = canonical MC P50 ($3.58M) — not deterministic ($5.33M)`,
-    t.value === 3_580_000 && t.value !== determ10y);
+    t.trajectoryP50 === 3_580_000 && t.trajectoryP50 !== determ10y);
 
-  // And the fallback path:
-  const noMcResolve = () => {
-    const fan: any[] = [];
-    const row = fan.find(r => r.year === horizonYear) ?? fan[fan.length - 1];
-    return row ? { value: row.median, source: 'MC P50' as const } : { value: determ10y, source: 'deterministic' as const };
-  };
-  const fallback = noMcResolve();
-  assert('falls back to deterministic projection when fan_data is empty', fallback.source === 'deterministic');
+  // Fallback path: empty fan_data MUST yield the neutral pending state —
+  // not a deterministic dollar value pretending to be canonical.
+  const fallback = resolveTrajectory([]);
+  assert('returns "pending" state when fan_data is empty (no deterministic primary value)',
+    fallback.source === 'pending');
+  assert('returns null trajectoryP50 when fan_data is empty (no canonical figure)',
+    fallback.trajectoryP50 === null);
+}
+
+// ─── Test 7: Deterministic baseline never marked official when MC absent ─────
+section('Validation 5: Deterministic forecast never shown as official trajectory');
+{
+  // Static-source assertion: read the Executive Dashboard component and
+  // verify the no-MC branch renders the "Monte Carlo pending" copy and a
+  // CTA, and that the deterministic figure (if shown at all) is explicitly
+  // tagged "non-canonical" — never as the primary trajectory value.
+  const file = resolve(__dirname, '..', 'client', 'src', 'components', 'ExecutiveDashboard.tsx');
+  const src = readFileSync(file, 'utf8');
+
+  assert('Executive header has a no-MC "Monte Carlo pending" copy block',
+    /Monte Carlo pending/.test(src));
+  assert('Executive header has a "Run Monte Carlo" CTA in the fallback',
+    /Run Monte Carlo/.test(src));
+  assert('Executive header source line names the no-MC state explicitly',
+    /Monte Carlo not yet run/.test(src));
+
+  // The PRIMARY trajectory dollar value must be guarded by hasMcTrajectory.
+  // We assert the source does NOT contain a primary trajectory render that
+  // pulls year10NW unguarded (which would re-create the bug).
+  const primaryDeterministicRegex =
+    /executive-trajectory-value[^}]*formatCurrency\([^)]*year10NW/;
+  assert('no primary trajectory render reads year10NW as the canonical figure',
+    !primaryDeterministicRegex.test(src));
+
+  // Any deterministic figure that DOES appear in the no-MC branch must be
+  // labelled "non-canonical" so it cannot be mistaken for the official one.
+  const determSecondaryRegex =
+    /executive-trajectory-deterministic-secondary[\s\S]{0,300}non-canonical/;
+  assert('any deterministic figure in the fallback is labelled "non-canonical"',
+    determSecondaryRegex.test(src));
+
+  // And the badge must read "PENDING" (not "DET") when MC is absent so the
+  // user immediately understands the headline figure is intentionally absent.
+  const pendingBadgeRegex =
+    /executive-trajectory-source-badge[\s\S]{0,400}PENDING/;
+  assert('source badge reads "PENDING" when MC is absent (not "DET")',
+    pendingBadgeRegex.test(src));
+}
+
+// ─── Test 8: No deterministic dollar trajectory is marked official ──────────
+section('Validation 6: Deterministic value never wins as official trajectory');
+{
+  // A consumer of the Executive Dashboard contract that omits trajectoryP50
+  // MUST NOT cause a deterministic dollar value to appear in the canonical
+  // trajectory slot. We assert the prop contract by inspecting the
+  // component's interface: trajectoryP50 is optional, and the absence of it
+  // must route through the pending branch.
+  const file = resolve(__dirname, '..', 'client', 'src', 'components', 'ExecutiveDashboard.tsx');
+  const src = readFileSync(file, 'utf8');
+
+  // The `hasMcTrajectory` gate must be the ONLY thing that opens the
+  // canonical (dollar-value) trajectory render path.
+  assert('hasMcTrajectory gate exists and is the truth value for canonical render',
+    /hasMcTrajectory\s*=\s*typeof p\.trajectoryP50/.test(src));
+
+  // When the gate is false the source label must NOT say "Deterministic baseline"
+  // as the primary description (it was the production-bug copy).
+  assert('no-MC source label does NOT call deterministic baseline the canonical source',
+    !/Source:\s*Deterministic baseline/.test(src));
 }
 
 // ─── Test 6: DCA title reflects the cap ─────────────────────────────────────
