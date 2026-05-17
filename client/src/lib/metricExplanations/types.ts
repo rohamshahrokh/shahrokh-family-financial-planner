@@ -71,6 +71,49 @@ export interface RangeGuide {
   meaning: string;
 }
 
+/**
+ * Depth tier for an explainer entry.
+ *
+ *   • L1 — simple term / acronym. Title + plain-English definition only.
+ *   • L2 — strategic metric. Adds why-it-matters, ranges, influences, actions.
+ *   • L3 — advanced engine / composite. Full structured explanation, often
+ *     with formula / source-of-truth pointer.
+ *
+ * UI primitives render the same structured shape regardless of tier; missing
+ * optional fields collapse cleanly so L1 entries don't show empty sections.
+ */
+export type ExplainerDepth = 'L1' | 'L2' | 'L3';
+
+/**
+ * Category groups for the explainer registry. Used to drive search /
+ * filtering and to colour-code chips in dev/QA. Categories are descriptive
+ * — they do not change rendering.
+ */
+export const EXPLAINER_CATEGORIES = [
+  'metric',
+  'engine',
+  'acronym',
+  'signal',
+  'score',
+  'formula',
+  'chart',
+  'icon',
+  'recommendation',
+  'scenario',
+  'percentage',
+  'financial',
+  'risk',
+  'projection',
+  'strategy',
+  'behavioural',
+  'monte-carlo',
+  'tax',
+  'fire',
+  'leverage',
+] as const;
+
+export type ExplainerCategory = (typeof EXPLAINER_CATEGORIES)[number];
+
 export interface MetricExplanation {
   /** Canonical metric ID (kebab-case). */
   id: string;
@@ -80,6 +123,10 @@ export interface MetricExplanation {
   unit?: string;
   /** Direction of "healthy": higher value is better OR lower value is better. */
   direction: 'higher' | 'lower';
+  /** Depth tier — drives the rendering hint. Defaults to L2. */
+  depth?: ExplainerDepth;
+  /** Category tag(s) for search/filtering. Optional, descriptive only. */
+  categories?: ExplainerCategory[];
   /** One-sentence plain-English definition. NO jargon. */
   definition: string;
   /** Why this matters specifically to a long-horizon family. */
@@ -99,6 +146,16 @@ export interface MetricExplanation {
    * shown beneath major card groups.
    */
   interpretation?: (value: number, state: SemanticState) => string;
+  /**
+   * Optional pointer to the canonical engine / source of truth that produces
+   * this metric. Shown in L3 entries so readers can chase the math.
+   */
+  source?: string;
+  /**
+   * Optional one-line "what the engine currently thinks" copy. Static or
+   * signal-driven only — NEVER an LLM call.
+   */
+  engineCue?: string;
 }
 
 /**

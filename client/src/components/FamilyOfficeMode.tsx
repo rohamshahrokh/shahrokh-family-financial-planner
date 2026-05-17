@@ -11,6 +11,7 @@
 
 import { useMemo, useState } from 'react';
 import { Briefcase, Compass, Coins, Map as MapIcon, Brain, FileText, ShieldCheck, Activity } from 'lucide-react';
+import { SectionExplainer } from '@/components/intelligence/SectionExplainer';
 import { useForecastStore } from '@/lib/forecastStore';
 import { buildPortfolio, type PortfolioConstructionResult, type AssetClass } from '@/lib/portfolioConstruction';
 import {
@@ -203,6 +204,7 @@ export default function FamilyOfficeMode() {
       <div className="flex items-center gap-3 mb-4">
         <Briefcase className="w-5 h-5 text-emerald-300" />
         <h2 className="text-lg sm:text-xl font-semibold text-slate-100">Family Office Mode</h2>
+        <SectionExplainer metricId="family-office-mode" />
         <span className="ml-auto text-xs text-slate-400">Phase 6 — Intelligence Layer</span>
       </div>
 
@@ -222,6 +224,7 @@ export default function FamilyOfficeMode() {
           <header className="flex items-center gap-2 mb-3">
             <Compass className="w-4 h-4 text-sky-300" />
             <h3 className="font-medium text-slate-100 text-sm sm:text-base">Portfolio Construction</h3>
+            <SectionExplainer metricId="portfolio-construction" />
             <span className="ml-auto text-xs text-slate-400">{portfolio.modelLabel}</span>
           </header>
           <p className="text-xs text-slate-400 mb-3">{portfolio.modelRationale}</p>
@@ -320,6 +323,7 @@ export default function FamilyOfficeMode() {
           <header className="flex items-center gap-2 mb-3">
             <Coins className="w-4 h-4 text-amber-300" />
             <h3 className="font-medium text-slate-100 text-sm sm:text-base">Tax Intelligence (AU)</h3>
+            <SectionExplainer metricId="tax-efficiency" />
             <span className="ml-auto text-xs text-slate-400">Planning estimates</span>
           </header>
           <p className="text-xs text-slate-400 mb-3">{tax.narrative}</p>
@@ -353,6 +357,7 @@ export default function FamilyOfficeMode() {
           <header className="flex items-center gap-2 mb-3">
             <ShieldCheck className="w-4 h-4 text-emerald-300" />
             <h3 className="font-medium text-slate-100 text-sm sm:text-base">Execution OS</h3>
+            <SectionExplainer metricId="execution-os" />
             <span className="ml-auto text-xs text-slate-400">Readiness {Math.round(execution.overallReadinessPct)}/100</span>
           </header>
           <p className="text-xs text-slate-400 mb-3">{execution.narrative}</p>
@@ -408,6 +413,7 @@ export default function FamilyOfficeMode() {
             <header className="flex items-center gap-2 mb-3">
               <Activity className="w-4 h-4 text-rose-300" />
               <h3 className="font-medium text-slate-100 text-sm sm:text-base">Strategic Priority Stack</h3>
+              <SectionExplainer metricId="strategic-priorities" />
               <span className="ml-auto text-xs text-slate-400">From Recommendation Engine V2</span>
             </header>
             <ol className="space-y-2 text-xs">

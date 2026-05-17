@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { maskValue } from '@/components/PrivacyMask';
+import { SectionExplainer } from '@/components/intelligence/SectionExplainer';
 import { useAppStore } from '@/lib/store';
 import { useForecastStore } from '@/lib/forecastStore';
 import {
@@ -311,7 +312,10 @@ export default function BestMoveCard() {
           <div className="w-7 h-7 rounded-lg bg-amber-500/15 flex items-center justify-center">
             <Zap className="w-4 h-4 text-amber-400" />
           </div>
-          <span className="text-sm font-bold text-foreground tracking-tight">Best Move Right Now</span>
+          <span className="text-sm font-bold text-foreground tracking-tight inline-flex items-center gap-1.5">
+            Best Move Right Now
+            <SectionExplainer metricId="best-move" />
+          </span>
         </div>
         <button
           onClick={() => load(true)}

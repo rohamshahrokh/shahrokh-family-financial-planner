@@ -8,6 +8,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { computeTaxAlpha, buildTaxAlphaInput, type TaxAlphaStrategy } from '@/lib/taxAlphaEngine';
+import { SectionExplainer } from '@/components/intelligence/SectionExplainer';
 import { useAppStore } from '@/lib/store';
 import { maskValue } from '@/components/PrivacyMask';
 import { Link } from 'wouter';
@@ -85,7 +86,10 @@ export default function TaxAlphaCard() {
             <Zap className="w-4 h-4 text-emerald-400" />
           </div>
           <div>
-            <div className="text-sm font-bold text-foreground leading-tight">Tax Alpha Engine</div>
+            <div className="text-sm font-bold text-foreground leading-tight inline-flex items-center gap-1.5">
+              Tax Alpha Engine
+              <SectionExplainer metricId="tax-efficiency" />
+            </div>
             <div className="text-[10px] text-muted-foreground">Australian optimisation · FY 2025-26</div>
           </div>
         </div>

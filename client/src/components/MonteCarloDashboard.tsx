@@ -21,6 +21,7 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { SectionExplainer } from "@/components/intelligence/SectionExplainer";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/finance";
 import { Button } from "@/components/ui/button";
@@ -621,6 +622,7 @@ export default function MonteCarloDashboard() {
           <h2 className="text-xl font-bold flex items-center gap-2">
             <Flame className="w-5 h-5 text-orange-400"/>
             Monte Carlo FIRE Engine
+            <SectionExplainer metricId="monte-carlo" />
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             {localSettings.simulationCount.toLocaleString()} simulations · monthly steps · correlated shocks · random events

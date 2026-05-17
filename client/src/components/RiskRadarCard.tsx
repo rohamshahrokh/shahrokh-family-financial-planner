@@ -7,6 +7,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { computeRiskRadar, buildRiskInput, type RiskLevel } from '@/lib/riskEngine';
+import { SectionExplainer } from '@/components/intelligence/SectionExplainer';
 import { useAppStore } from '@/lib/store';
 import { maskValue } from '@/components/PrivacyMask';
 import { Link } from 'wouter';
@@ -105,7 +106,10 @@ export default function RiskRadarCard() {
             <Shield className="w-4 h-4" />
           </div>
           <div>
-            <div className="text-sm font-bold text-foreground leading-tight">Risk Radar</div>
+            <div className="text-sm font-bold text-foreground leading-tight inline-flex items-center gap-1.5">
+              Risk Radar
+              <SectionExplainer metricId="risk-state" />
+            </div>
             <div className="text-[10px] text-muted-foreground">Financial Fragility Engine</div>
           </div>
         </div>

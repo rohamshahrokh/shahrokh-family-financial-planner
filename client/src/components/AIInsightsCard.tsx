@@ -15,6 +15,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { SectionExplainer } from "@/components/intelligence/SectionExplainer";
 import {
   Sparkles, RefreshCw, AlertTriangle, TrendingUp,
   Lightbulb, Zap, ChevronDown, ChevronRight, Info,
@@ -177,7 +178,10 @@ export default function AIInsightsCard({
             <Sparkles className="w-3.5 h-3.5 text-white" />
           </div>
           <div>
-            <p className="text-sm font-bold leading-none">AI Insights</p>
+            <p className="text-sm font-bold leading-none inline-flex items-center gap-1.5">
+              AI Insights
+              <SectionExplainer metricId="autonomous-os" />
+            </p>
             <p className="text-xs text-muted-foreground mt-0.5">{pageLabel}</p>
           </div>
           {result && (

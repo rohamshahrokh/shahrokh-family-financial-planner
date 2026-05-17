@@ -18,6 +18,7 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight, ShieldCheck, AlertTriangle, Compass, BookOpen, Sliders, Target } from "lucide-react";
+import { SectionExplainer } from "@/components/intelligence/SectionExplainer";
 import type {
   MonteCarloV5Extras, NarrativeTone, RegimeIdV5,
 } from "@/lib/monteCarloV5";
@@ -73,6 +74,7 @@ export default function MonteCarloV5Panel({ v5, startYear, endYear }: Props) {
         <h2 className="text-sm font-bold tracking-wide">
           V5 Realism &amp; Advisor Intelligence
         </h2>
+        <SectionExplainer metricId="monte-carlo" />
         <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground">
           Non-destructive overlay
         </span>
