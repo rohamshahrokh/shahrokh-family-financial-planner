@@ -105,6 +105,7 @@ import {
   Database,
   Unlock,
   Lock,
+  Sparkles,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -123,6 +124,8 @@ import TaxAlphaCard from "@/components/TaxAlphaCard";
 import RiskRadarCard from "@/components/RiskRadarCard";
 import KpiCard from "@/components/KpiCard";
 import WealthFlowBanner from "@/components/WealthFlowBanner";
+import ExecutiveDashboard from "@/components/ExecutiveDashboard";
+import DeepDiveSection from "@/components/DeepDiveSection";
 import { Link, useLocation } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
@@ -1846,15 +1849,93 @@ export default function DashboardPage() {
   const activeIncomeSources = (incomeRecords ?? []).filter((r: any) => r.is_active !== false).length;
 
   // ─── Render ───────────────────────────────────────────────────────────────
+  // ─── Phase 7 — Executive Dashboard props ─────────────────────────────────
+  // Single composable surface that introduces narrative-first hierarchy at
+  // the top of the dashboard. All values feed from the existing data
+  // contract — no new sources, no architectural change.
+  const phase7ExecProps = {
+    netWorth,
+    surplus,
+    totalLiquidCash,
+    totalLiab,
+    monthlyExpenses: monthlyExpensesSOT,
+    passiveIncome,
+    year10NW,
+    fireProgressPct,
+    fireCurrentAmt,
+    fireTargetAmt,
+    riskScore,
+    riskLabel,
+    monthlyDebtService: monthlyDebtServiceSOT,
+    totalMortgage: snap.mortgage,
+    totalPropertyValue: snap.ppor + ipCurrentValueSettled,
+    totalAssets,
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground pb-16">
+
+      {/* ══════════════════════════════════════════════════════════════════
+          FWL PHASE 7 (polish) — Top stack uses CSS `order` on mobile so the
+          narrative flow is intelligence-first:
+            mobile  : Smart-assumptions pill → Timeline → Welcome → Executive
+            desktop : (unchanged) Executive → Timeline → Welcome
+          Wrapped in flex-col so children can reorder via order-* classes.
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="flex flex-col">
+
+      {/* MOBILE-ONLY: compact Smart-Assumptions / Forecast pill row.
+          Sits at the very top of the mobile flow as the contextual header.
+          Hidden on lg+ where the desktop hero badges already surface it. */}
+      <div className="px-4 pt-3 pb-1 lg:hidden order-1 db-section-smart-assumptions">
+        <Link href="/ai-forecast-engine">
+          <span
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer transition-all hover:brightness-110 ${
+              forecastMode === "monte-carlo"
+                ? "bg-purple-500/10 border border-purple-500/30 text-purple-300"
+                : forecastMode === "year-by-year"
+                ? "bg-sky-500/10 border border-sky-500/30 text-sky-300"
+                : profile === "aggressive"
+                ? "bg-rose-500/10 border border-rose-500/30 text-rose-300"
+                : profile === "conservative"
+                ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
+                : "bg-blue-500/10 border border-blue-500/30 text-blue-300"
+            }`}
+            data-testid="badge-smart-assumptions-mobile"
+            title="Tap to change forecast assumptions"
+          >
+            <Sparkles className="w-3 h-3" />
+            <span className="opacity-70">Smart assumptions ·</span>{" "}
+            {
+              forecastMode === "monte-carlo"
+                ? `Monte Carlo${monteCarloResult ? " (median)" : ""}`
+                : forecastMode === "year-by-year"
+                ? "Year-by-Year"
+                : profile === "aggressive"
+                ? "Aggressive"
+                : profile === "conservative"
+                ? "Conservative"
+                : "Base (Moderate)"
+            }
+            <ChevronRight className="w-3 h-3 opacity-70" />
+          </span>
+        </Link>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          FWL PHASE 7 — EXECUTIVE DASHBOARD (narrative-first hierarchy)
+          Mobile order 4 (after timeline + welcome). Desktop order 1.
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pt-4 pb-2 order-4 lg:order-1">
+        <ExecutiveDashboard {...phase7ExecProps} />
+      </div>
 
       {/* ══════════════════════════════════════════════════════════════════
           ABOVE-FOLD KPI STRIP (mobile: order 1 — first thing on screen)
           4 cards: Net Worth / Cash Today / Monthly Surplus / Deposit Power
           + Forecast selector badge
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-3 pb-2 db-section-hero-kpis">
+      <div className="px-4 pt-3 pb-2 db-section-hero-kpis order-5 lg:order-2">
         <div className="grid grid-cols-2 gap-2 mb-2">
           {/* Net Worth */}
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
@@ -1915,14 +1996,16 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          WEALTH FLOW BANNER
+          WEALTH FLOW BANNER (animated intelligence timeline)
+          Mobile order 2 (after Smart-Assumptions pill). Desktop order 3.
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section-networth"><WealthFlowBanner /></div>
+      <div className="db-section-networth order-2 lg:order-3"><WealthFlowBanner /></div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          HERO SECTION
+          HERO SECTION — welcome / narrative identity
+          Mobile order 3. Desktop order 4.
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-4 pb-4 db-section-networth">
+      <div className="px-4 pt-4 pb-4 db-section-networth order-3 lg:order-4">
         <div className="flex flex-col lg:flex-row gap-4 items-stretch">
 
           {/* Left — Family welcome card */}
@@ -2007,6 +2090,8 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      </div>{/* /flex-col top stack wrapper */}
 
       {/* ══════════════════════════════════════════════════════════════════
           DATA-AVAILABILITY BANNER
@@ -3420,51 +3505,67 @@ export default function DashboardPage() {
         })()}
       </div>
 
-      {/* ACTION CENTRE — Unified Strategic Brain (recommendation system V2) */}
+      {/* ACTION CENTRE — Unified Strategic Brain (primary surface — stays visible)
+          Phase 7: Action Centre is the family-office command centre. It is the
+          first visible deep brain surface after the Executive Dashboard. */}
       <div className="px-4 pb-4 db-section-action-centre">
         <ActionCentre />
       </div>
 
-      {/* FINANCIAL OS CENTRE — Behavioural + Autonomous OS + Strategy Drift (Phase 5) */}
-      <div className="px-4 pb-4 db-section-financial-os">
-        <FinancialOSCentre />
-      </div>
+      {/* ══════════════════════════════════════════════════════════════════
+          PHASE 7 — DEEP DIVE GROUP
+          Heavier intelligence surfaces collapsed by default. Eye lands on the
+          Executive Dashboard + Action Centre first; deeper layers open on
+          intent. Each panel preserves its current visual identity.
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pb-4 space-y-3 db-section-deep-dive">
+        <DeepDiveSection
+          title="Financial OS Centre"
+          subtitle="Behavioural · Autonomous OS · Strategy drift (Phase 5)"
+          testId="deep-financial-os"
+        >
+          <FinancialOSCentre />
+        </DeepDiveSection>
 
-      {/* FAMILY OFFICE MODE — Portfolio / Life / Tax / Execution / Adaptive (Phase 6) */}
-      <div className="px-4 pb-4 db-section-family-office">
-        <FamilyOfficeMode />
-      </div>
+        <DeepDiveSection
+          title="Family Office Mode"
+          subtitle="Portfolio · Life · Tax · Execution · Adaptive (Phase 6)"
+          testId="deep-family-office"
+        >
+          <FamilyOfficeMode />
+        </DeepDiveSection>
 
-      {/* FUTURE WORLDS — probability-weighted macro scenarios (Phase 5) */}
-      <div className="px-4 pb-4 db-section-future-worlds">
-        <FutureWorldsPanel />
-      </div>
+        <DeepDiveSection
+          title="Future Worlds"
+          subtitle="Probability-weighted macro scenarios (Phase 5)"
+          testId="deep-future-worlds"
+        >
+          <FutureWorldsPanel />
+        </DeepDiveSection>
 
-      {/* BEST MOVE CARD */}
-      <div className="px-4 pb-4 db-section-bestmove-card">
-        <BestMoveCard />
-      </div>
-
-      {/* DEPOSIT POWER — cash + offset + usable equity across all properties */}
-      <div className="px-4 pb-4 db-section-deposit-card">
-        <DepositPowerCard compact />
+        <DeepDiveSection
+          title="Best Move · Deposit · FIRE"
+          subtitle="Companion cards aligned with the unified engine"
+          testId="deep-companion-cards"
+        >
+          <div className="space-y-3">
+            <BestMoveCard />
+            <DepositPowerCard compact />
+            <FIREPathCard />
+            <PortfolioLiveReturn />
+          </div>
+        </DeepDiveSection>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          FIRE PATH OPTIMIZER + PORTFOLIO LIVE RETURN
+          ACTION CENTER (smart actions table) — collapsed by default (Phase 7).
           ═════════════════════════════════════════════════════════════════ */}
       <div className="px-4 pb-4 db-section-fire">
-        <FIREPathCard />
-      </div>
-
-      <div className="px-4 pb-4 db-section-fire">
-        <PortfolioLiveReturn />
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          ACTION CENTER (smart actions table)
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4 db-section-fire">
+        <DeepDiveSection
+          title="ROI Action Table"
+          subtitle="Top opportunities ranked by ROI · technical view"
+          testId="deep-roi-table"
+        >
         <div className="rounded-2xl border border-border bg-card p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -3511,14 +3612,20 @@ export default function DashboardPage() {
             </table>
           </div>
         </div>
+        </DeepDiveSection>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          NET WORTH RECONCILIATION  (audit fix P1.1)
+          NET WORTH RECONCILIATION  (audit fix P1.1) — collapsed (Phase 7)
           Surfaces the single source-of-truth NW alongside the engine's view
           so users can confirm no silent gap has reopened.
           ═════════════════════════════════════════════════════════════════ */}
       <div className="px-4 pb-4">
+       <DeepDiveSection
+          title="Net Worth Reconciliation"
+          subtitle="Audit P1.1 — single source-of-truth NW vs engine view"
+          testId="deep-nw-reconciliation"
+       >
         <div className={`rounded-2xl border p-5 ${
           reconcileNetWorth(canonicalNw, canonicalNw.netWorth).status === "PASS"
             ? "border-emerald-500/30 bg-emerald-500/5"
@@ -3555,6 +3662,7 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+       </DeepDiveSection>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════

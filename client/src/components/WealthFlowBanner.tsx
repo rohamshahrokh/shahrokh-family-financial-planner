@@ -11,11 +11,17 @@
 import { useEffect, useRef, useState } from "react";
 
 // ── Stage definitions ─────────────────────────────────────────────────────────
+// FWL Phase 7 polish — the visible journey is unified across sidebar + this
+// animated timeline. Each stage carries:
+//   word — large canonical word users see (TODAY / PLAN / FUTURE / MOVE)
+//   sub  — short sublabel: Snapshot / Strategy / Forecast / Action
+//   tag  — original mental-model tagline, kept for tooltip context
 const STAGES = [
   {
     id: "today",
     word: "TODAY",
-    sub: "Live snapshot",
+    sub: "Snapshot",
+    tag: "Where am I now",
     accent: "#38bdf8",   // sky blue
     dim: "rgba(56,189,248,0.18)",
     glow: "rgba(56,189,248,0.5)",
@@ -23,7 +29,8 @@ const STAGES = [
   {
     id: "plan",
     word: "PLAN",
-    sub: "Your intentions",
+    sub: "Strategy",
+    tag: "What is my financial plan",
     accent: "#818cf8",   // indigo
     dim: "rgba(129,140,248,0.18)",
     glow: "rgba(129,140,248,0.5)",
@@ -31,7 +38,8 @@ const STAGES = [
   {
     id: "future",
     word: "FUTURE",
-    sub: "AI modelling",
+    sub: "Forecast",
+    tag: "Where am I heading",
     accent: "#34d399",   // emerald
     dim: "rgba(52,211,153,0.18)",
     glow: "rgba(52,211,153,0.5)",
@@ -39,7 +47,8 @@ const STAGES = [
   {
     id: "move",
     word: "MOVE",
-    sub: "Best action now",
+    sub: "Action",
+    tag: "What should I do next",
     accent: "#fb923c",   // orange
     dim: "rgba(251,146,60,0.18)",
     glow: "rgba(251,146,60,0.5)",
@@ -374,14 +383,14 @@ export default function WealthFlowBanner() {
                     letterSpacing: "0.08em",
                     textTransform: "uppercase",
                   }}>
-                    {s.word}
+                    {s.word} · {s.sub}
                   </span>
                   <span style={{
                     color: "rgba(255,255,255,0.45)",
                     fontSize: 10,
                     marginLeft: 6,
                   }}>
-                    {s.sub}
+                    {s.tag}
                   </span>
                 </div>
               )}
@@ -467,13 +476,17 @@ export default function WealthFlowBanner() {
                   {s.word}
                 </div>
 
-                {/* Sub-label */}
+                {/* Sub-label — canonical journey term (Snapshot / Strategy /
+                    Forecast / Action). Kept compact on mobile so labels don't
+                    crowd; opens up slightly on tablet/desktop. */}
                 <div
                   className="wfb-sub"
                   style={{
                     fontSize: "clamp(7px,0.78vw,9px)",
-                    color: "rgba(255,255,255,0.3)",
-                    letterSpacing: "0.04em",
+                    color: "rgba(255,255,255,0.42)",
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    fontWeight: 600,
                     marginTop: 2,
                     lineHeight: 1.2,
                   }}
