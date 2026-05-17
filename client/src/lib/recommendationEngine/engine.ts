@@ -687,6 +687,50 @@ function scoreCandidate(rec: Recommendation, s: UnifiedSignals): number {
       if (rec.pillar === 'maximise_wealth') score *= Math.max(0.6, 1 - insolvency);
     }
   }
+
+  // Phase 6 — Portfolio construction soft tilts (intra-pillar only).
+  const pt = s.portfolioTilts;
+  if (pt) {
+    if (rec.actionType === 'etf_dca' && pt.etfPush) score *= 1 + 0.5 * pt.etfPush;
+    if ((rec.actionType === 'proceed_property_purchase' || rec.actionType === 'delay_property_purchase') && pt.propertyPush) score *= 1 + 0.4 * pt.propertyPush;
+    if (rec.actionType === 'hold_cash_offset' && pt.cashHold) score *= 1 + 0.4 * pt.cashHold;
+    if (rec.actionType === 'pay_high_interest_debt' && pt.debtPay) score *= 1 + 0.4 * pt.debtPay;
+    if (rec.actionType === 'increase_super' && pt.superPush) score *= 1 + 0.5 * pt.superPush;
+    if (rec.actionType === 'crypto_dca' && pt.cryptoTrim) score *= Math.max(0.5, 1 - 0.6 * pt.cryptoTrim);
+  }
+
+  // Phase 6 — Life context tilt: pending stress / buffer drain amplifies liquidity pillar.
+  const life = s.lifeContext;
+  if (life) {
+    if ((life.stressProbability ?? 0) > 0.35 && rec.pillar === 'protect_liquidity') score *= 1.25;
+    if ((life.liquidityStressMonths ?? 0) > 6 && rec.pillar === 'protect_liquidity') score *= 1.15;
+    if ((life.fireYearDelayEstimate ?? 0) > 1.5 && rec.pillar === 'improve_fire_timeline') score *= 1.15;
+  }
+
+  // Phase 6 — Tax intelligence tilt: amplify tax-pillar items proportional to dollar savings.
+  const tax = s.taxContext;
+  if (tax && rec.pillar === 'preserve_tax_efficiency') {
+    const sav = tax.totalEstimatedSaving ?? 0;
+    if (sav > 1000) score *= 1 + Math.min(0.3, sav / 30_000);
+  }
+  if (tax && rec.actionType === 'increase_super' && (tax.totalEstimatedSaving ?? 0) > 0) {
+    score *= 1.15;
+  }
+
+  // Phase 6 — Execution OS tilt: when overall readiness is low and pillar is investing discipline, mild dampen.
+  const ex = s.executionContext;
+  if (ex && (ex.overallReadinessPct ?? 100) < 40 && rec.pillar === 'maintain_investing_discipline') {
+    score *= 0.85;
+  }
+
+  // Phase 6 — Adaptive learning multipliers (soft).
+  const ad = s.adaptive;
+  if (ad) {
+    const mAction = ad.rankingMultiplierByActionType?.[rec.actionType];
+    if (typeof mAction === 'number') score *= mAction;
+    const wp = ad.pillarWeights?.[rec.pillar];
+    if (typeof wp === 'number') score *= wp;
+  }
   return score;
 }
 

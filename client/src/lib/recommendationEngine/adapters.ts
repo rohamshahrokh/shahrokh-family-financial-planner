@@ -176,6 +176,78 @@ export function fromScenarioTree(tree: any): Partial<UnifiedSignals> {
   };
 }
 
+// ─── Phase 6 — Portfolio Construction → signal overlay ──────────────────────
+export function fromPortfolioConstruction(r: any): Partial<UnifiedSignals> {
+  if (!r) return {};
+  const tilts = r.tilts ?? {};
+  return {
+    portfolioTilts: {
+      etfPush: tilts.etfPush,
+      propertyPush: tilts.propertyPush,
+      cashHold: tilts.cashHold,
+      debtPay: tilts.debtPay,
+      superPush: tilts.superPush,
+      cryptoTrim: tilts.cryptoTrim,
+      modelLabel: r.modelLabel,
+      liquidityScore: r.metrics?.liquidityScore,
+      taxEfficiencyScore: r.metrics?.taxEfficiencyScore,
+    },
+  };
+}
+
+// ─── Phase 6 — Life Planning → signal overlay ────────────────────────────────
+export function fromLifePlan(r: any): Partial<UnifiedSignals> {
+  if (!r || !r.summary) return {};
+  return {
+    lifeContext: {
+      fireYearDelayEstimate: r.summary.fireYearDelayEstimate,
+      averageAnnualDrag: r.summary.averageAnnualDrag,
+      stressProbability: r.summary.stressProbability,
+      liquidityStressMonths: r.summary.liquidityStressMonths,
+      upcomingEventCount: Array.isArray(r.events) ? r.events.length : undefined,
+    },
+  };
+}
+
+// ─── Phase 6 — Tax Intelligence → signal overlay ────────────────────────────
+export function fromTaxIntelligence(r: any): Partial<UnifiedSignals> {
+  if (!r) return {};
+  return {
+    taxContext: {
+      totalEstimatedSaving: r.totalEstimatedSaving,
+      longTermTaxDragPct: r.longTermTaxDragPct,
+      fireWithdrawalEfficiencyScore: r.fireWithdrawalEfficiencyScore,
+      topStrategyId: r.topStrategies?.[0]?.id,
+    },
+  };
+}
+
+// ─── Phase 6 — Execution OS → signal overlay ─────────────────────────────────
+export function fromExecutionOS(r: any): Partial<UnifiedSignals> {
+  if (!r) return {};
+  return {
+    executionContext: {
+      overallReadinessPct: r.overallReadinessPct,
+      topBlocker: r.topBlockers?.[0],
+    },
+  };
+}
+
+// ─── Phase 6 — Adaptive Learning adjustments → signal overlay ────────────────
+export function fromAdaptiveLearning(adj: any): Partial<UnifiedSignals> {
+  if (!adj) return {};
+  return {
+    adaptive: {
+      rankingMultiplierByActionType: adj.rankingMultiplierByActionType,
+      urgencyMultiplier: adj.urgencyMultiplier,
+      riskScoreTilt: adj.riskScoreTilt,
+      pillarWeights: adj.pillarWeights,
+      monteCarloPriorityMultiplier: adj.monteCarloPriorityMultiplier,
+      explanation: adj.explanation,
+    },
+  };
+}
+
 // ─── Merge helper ────────────────────────────────────────────────────────────
 export function mergeSignals(...parts: Array<Partial<UnifiedSignals> | undefined>): UnifiedSignals {
   const merged: UnifiedSignals = {};

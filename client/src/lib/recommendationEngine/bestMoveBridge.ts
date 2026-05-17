@@ -15,6 +15,7 @@ import { computeUnifiedRecommendations } from './engine';
 import {
   fromBestMoveLedger, mergeSignals, fromRiskRadar, fromFirePath, fromMonteCarloV5,
   fromBehaviouralProfile, fromAutonomousOS, fromScenarioTree,
+  fromPortfolioConstruction, fromLifePlan, fromTaxIntelligence, fromExecutionOS, fromAdaptiveLearning,
 } from './adapters';
 import type { UnifiedRecommendationResult, UnifiedSignals, Recommendation } from './types';
 import { snapshotHistory, type RecommendationChange } from './history';
@@ -73,6 +74,16 @@ export async function computeUnifiedBestMove(args: {
   autonomousOS?: any;
   /** Phase 5 — Scenario tree (ScenarioTreeResult) */
   scenarioTree?: any;
+  /** Phase 6 — Portfolio construction result */
+  portfolio?: any;
+  /** Phase 6 — Life plan result */
+  lifePlan?: any;
+  /** Phase 6 — Tax intelligence result */
+  taxIntelligence?: any;
+  /** Phase 6 — Execution OS result */
+  executionOS?: any;
+  /** Phase 6 — Adaptive learning adjustments */
+  adaptive?: any;
 } = {}): Promise<UnifiedBestMoveResult> {
   const legacy = await computeBestMoveV2(args.cfg ?? {});
   const partial = ledgerFromInputs(legacy);
@@ -86,6 +97,11 @@ export async function computeUnifiedBestMove(args: {
     fromBehaviouralProfile(args.behaviouralProfile),
     fromAutonomousOS(args.autonomousOS),
     fromScenarioTree(args.scenarioTree),
+    fromPortfolioConstruction(args.portfolio),
+    fromLifePlan(args.lifePlan),
+    fromTaxIntelligence(args.taxIntelligence),
+    fromExecutionOS(args.executionOS),
+    fromAdaptiveLearning(args.adaptive),
   );
   const unified = computeUnifiedRecommendations(signals);
   const changes = snapshotHistory(unified);
