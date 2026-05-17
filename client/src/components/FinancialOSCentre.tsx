@@ -79,7 +79,12 @@ export default function FinancialOSCentre() {
       depositReadinessPct: s.depositReadinessPct / 100,
       mortgageRate: 0.0625,
       marketMortgageRate: 0.057,
-      personalDebtRate: s.otherDebts > 0 ? 0.17 : undefined,
+      // Do not hardcode 0.17 here. The classified debt portfolio (set on
+      // /debt-strategy and persisted to app_settings.debt_prefs.debts) is the
+      // sole source of truth for personal debt APR. Passing undefined means
+      // the OS detector simply won't fire a high-APR debt finding from a
+      // synthesised rate — it will only fire when real per-debt APRs are set.
+      personalDebtRate: undefined,
       etfExpectedReturn: 0.095,
       marginalTaxRate: 0.325,
     });

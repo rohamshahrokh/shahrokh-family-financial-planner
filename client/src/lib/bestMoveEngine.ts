@@ -34,6 +34,7 @@
 
 import { safeNum } from './finance';
 import { computeDepositPower } from './depositPower';
+import { classifyDebtPortfolio, type DebtRecord } from './recommendationEngine/debtClassification';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -120,6 +121,14 @@ export interface BestMoveLedger {
   superContribAnnual:  number;   // employer SG + salary sacrifice already going in
   stocksValue:         number;
   cryptoValue:         number;
+  /**
+   * Optional classified debt list (from app_settings.debt_prefs.debts).
+   * When supplied, the high-interest debt candidate is gated by classification
+   * (only fires for `high_apr_consumer_debt` ≥ 10% APR). When absent,
+   * `otherDebts` defaults to `unknown_apr_debt` and the "Pay down personal
+   * debt" candidate is suppressed — NOT falsely tagged as 17% high APR.
+   */
+  debtPortfolio?:      DebtRecord[];
   // Property deposit power (pre-computed by equityEngine.calcDepositPower)
   depositPowerResult:  {
     totalDepositPower:    number;
@@ -448,34 +457,73 @@ export function getBestMoveRecommendation(ledger: BestMoveLedger): BestMoveResul
   }
 
   // ── PRIORITY 4: High-interest personal debt ───────────────────────────────
+  // CRITICAL: only fire "Pay down personal debt" when the classified portfolio
+  // contains real high-APR consumer debt. 0%, unknown, mortgage and tax-
+  // deductible debt MUST NOT trigger this candidate.
   if (otherDebts > 1_000) {
-    // Amount that can be paid using truly free cash (after offset calc)
-    const payable     = Math.min(freeCashForOffset > 0 ? freeCashForOffset : 0, otherDebts);
-    const debtBenefit = otherDebts * PERSONAL_DEBT_RATE; // total annual cost of debt
-    candidates.push({
-      id:              'paydown_personal_debt',
-      action:          `Pay down personal debt (${fmt(otherDebts)})`,
-      reason:
-        `Personal debt at ~17% interest costs ${fmt(debtBenefit)}/year. ` +
-        (payable > 0
-          ? `You have ${fmt(payable)} of free cash that could immediately wipe ${fmt(payable * PERSONAL_DEBT_RATE)}/year in interest charges — a guaranteed, risk-free return far exceeding any investment. `
-          : `While you have no idle cash right now, prioritise directing future surplus here before investing elsewhere. `) +
-        `${PERSONAL_DEBT_RATE > etfExpectedReturn ? 'This beats the long-run ETF return of 9.5%.' : ''}`,
-      annual_benefit:  payable > 0 ? payable * PERSONAL_DEBT_RATE : debtBenefit * 0.1,
-      benefit_label:   payable > 0
-        ? `${fmt(payable * PERSONAL_DEBT_RATE)}/yr guaranteed (debt eliminated)`
-        : `${fmt(debtBenefit)}/yr total cost — address with surplus`,
-      risk:            'Low',
-      cta:             'View Debt Strategy',
-      cta_route:       '/debt-strategy',
-      data_reliable:   otherDebts > 0,
-      calcBreakdown: [
-        { label: 'Total personal debt',    value: otherDebts,                      sign: '+' },
-        { label: '× ~17% interest rate',  value: debtBenefit,                     sign: '=' },
-        { label: 'Payable from free cash', value: payable,                         sign: '+' },
-        { label: 'Annual saving',          value: payable * PERSONAL_DEBT_RATE,    sign: '=' },
-      ],
-    });
+    const portfolio = classifyDebtPortfolio(
+      Array.isArray(ledger.debtPortfolio) && ledger.debtPortfolio.length > 0
+        ? ledger.debtPortfolio
+        // Legacy fallback: classify a single anonymous record with UNKNOWN APR.
+        // That maps to unknown_apr_debt — not high_apr_consumer_debt — so the
+        // urgent payoff candidate is correctly suppressed.
+        : [{ id: 'other', name: 'Other Debts', balance: otherDebts, ratePct: null, type: 'other' }]
+    );
+
+    if (portfolio.hasUrgentHighAprDebt && portfolio.highAprBalance >= 1_000) {
+      const highBal = portfolio.highAprBalance;
+      const rate = portfolio.highAprWeightedRate ?? 0;
+      const payable = Math.min(freeCashForOffset > 0 ? freeCashForOffset : 0, highBal);
+      const debtBenefit = highBal * rate;
+      const ratePctText = (rate * 100).toFixed(1);
+      candidates.push({
+        id:              'paydown_personal_debt',
+        action:          `Pay down high-APR debt (${fmt(highBal)})`,
+        reason:
+          `High-APR consumer debt at ~${ratePctText}% interest costs ${fmt(debtBenefit)}/year. ` +
+          (payable > 0
+            ? `You have ${fmt(payable)} of free cash that could immediately wipe ${fmt(payable * rate)}/year in interest — a guaranteed, risk-free return far exceeding any investment. `
+            : `While you have no idle cash right now, prioritise directing future surplus here before investing elsewhere. `) +
+          `${rate > etfExpectedReturn ? 'This beats the long-run ETF return of 9.5%.' : ''}`,
+        annual_benefit:  payable > 0 ? payable * rate : debtBenefit * 0.1,
+        benefit_label:   payable > 0
+          ? `${fmt(payable * rate)}/yr guaranteed (debt eliminated)`
+          : `${fmt(debtBenefit)}/yr total cost — address with surplus`,
+        risk:            'Low',
+        cta:             'View Debt Strategy',
+        cta_route:       '/debt-strategy',
+        data_reliable:   true,
+        calcBreakdown: [
+          { label: 'High-APR balance',               value: highBal,           sign: '+' },
+          { label: `× ${ratePctText}% interest`,     value: debtBenefit,       sign: '=' },
+          { label: 'Payable from free cash',         value: payable,           sign: '+' },
+          { label: 'Annual saving',                  value: payable * rate,    sign: '=' },
+        ],
+      });
+    } else if (portfolio.interestFreeBalance > 0 && !portfolio.hasUrgentHighAprDebt) {
+      // Surface a transparent "interest-free debt — not urgent" alternative so
+      // users see the engine has classified the debt and explicitly chosen NOT
+      // to recommend aggressive payoff.
+      const bal = portfolio.interestFreeBalance;
+      candidates.push({
+        id:              'interest_free_debt_optionality',
+        action:          `Interest-free debt detected (${fmt(bal)})`,
+        reason:
+          `Your debt balance is interest-free at 0% APR. Maintaining liquidity or ` +
+          `offset positioning may currently be more optimal than early payoff. ` +
+          `0% financing creates optionality — capital may produce higher expected value elsewhere.`,
+        annual_benefit:  0.5,
+        benefit_label:   'No urgent payoff — preserve optionality',
+        risk:            'Low',
+        cta:             'View Debt Strategy',
+        cta_route:       '/debt-strategy',
+        data_reliable:   true,
+        calcBreakdown: [
+          { label: 'Interest-free balance',  value: bal,  sign: '+' },
+          { label: 'Annual interest cost',    value: 0,    sign: '=' },
+        ],
+      });
+    }
   }
 
   // ── PRIORITY 5a: Super salary sacrifice (tax alpha) ───────────────────────
@@ -728,6 +776,7 @@ export async function computeBestMoveV2(cfg: BestMoveConfig = {}): Promise<BestM
     snapRows, billRows, propRows,
     stockRows, cryptoRows, dcaStockRows, dcaCryptoRows,
     incomeRows, stockOrderRows, cryptoOrderRows,
+    appSettingsRows,
   ] = await Promise.all([
     sb('sf_snapshot?id=eq.shahrokh-family-main'),
     sb('sf_recurring_bills?active=eq.true'),
@@ -739,7 +788,36 @@ export async function computeBestMoveV2(cfg: BestMoveConfig = {}): Promise<BestM
     sb('sf_income?order=date.desc&limit=60'),
     sb('sf_stock_orders?status=neq.cancelled'),
     sb('sf_crypto_orders?status=neq.cancelled'),
+    sb('sf_app_settings?select=value&limit=1'),
   ]);
+
+  // Extract the user's classified debt portfolio (preserves 0 and null APR).
+  let debtPortfolio: DebtRecord[] | undefined;
+  try {
+    const debts = appSettingsRows?.[0]?.value?.debt_prefs?.debts;
+    if (Array.isArray(debts) && debts.length > 0) {
+      debtPortfolio = debts.map((d: any, i: number): DebtRecord => {
+        let ratePct: number | null = null;
+        if (d.rate === null || d.rate === undefined) ratePct = null;
+        else if (typeof d.rate === 'string') {
+          const t = d.rate.trim();
+          ratePct = t === '' ? null : (Number.isFinite(parseFloat(t)) ? parseFloat(t) : null);
+        } else if (typeof d.rate === 'number') {
+          ratePct = Number.isFinite(d.rate) ? d.rate : null;
+        }
+        return {
+          id: String(d.id ?? `debt_${i}`),
+          name: String(d.name ?? 'Debt'),
+          balance: typeof d.balance === 'number' ? d.balance : 0,
+          ratePct,
+          minPaymentMonthly: typeof d.minPayment === 'number' ? d.minPayment : undefined,
+          type: d.type,
+          expiryDateISO: d.expiryDateISO,
+          taxDeductible: d.taxDeductible === true,
+        };
+      });
+    }
+  } catch { /* ignore — fallback path handles missing portfolio */ }
 
   const snap = snapRows?.[0] ?? {};
 
@@ -841,6 +919,7 @@ export async function computeBestMoveV2(cfg: BestMoveConfig = {}): Promise<BestM
     superContribAnnual,
     stocksValue,
     cryptoValue,
+    debtPortfolio,
     depositPowerResult,
   };
 

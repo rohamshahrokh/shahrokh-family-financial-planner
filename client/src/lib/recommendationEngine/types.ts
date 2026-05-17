@@ -17,6 +17,9 @@
 export type ActionType =
   | 'build_emergency_buffer'
   | 'pay_high_interest_debt'
+  | 'maintain_interest_free_debt'    // 0% / interest-free — keep liquidity / offset positioning
+  | 'monitor_strategic_debt'          // tax-deductible / strategic — non-urgent monitor
+  | 'plan_promo_expiry'               // 0% promo with upcoming cliff → timed warning
   | 'hold_cash_offset'
   | 'etf_dca'
   | 'crypto_dca'
@@ -146,6 +149,31 @@ export interface Recommendation {
   benefitLabel?: string;
   /** Optional CTA. */
   cta?: { label: string; route: string };
+
+  /**
+   * Structured rationale rendered by the "Why this recommendation exists"
+   * panel for debt actions. Only populated for debt-related recommendations
+   * (pay_high_interest_debt, maintain_interest_free_debt, monitor_strategic_debt,
+   * plan_promo_expiry). Surfacing these as structured data — rather than
+   * weaving them into prose — lets the UI render them deterministically.
+   */
+  debtRationale?: {
+    classification: string;          // class label e.g. "High-APR consumer debt"
+    aprPct: number | null;           // effective APR % (null when unknown)
+    balance: number;
+    annualInterestCost: number;      // $ / year if not paid down
+    guaranteedReturnPct: number | null; // payoff yield equivalent (= APR)
+    pillarRank: number;              // 1 = top priority pillar
+    /** Trigger that *would* upgrade the recommendation to urgent payoff. */
+    triggers?: {
+      expiryDateISO?: string;
+      daysToExpiry?: number;
+      liquidityStress?: boolean;
+      minimumRepaymentMissed?: boolean;
+    };
+    /** Plain-English "what would change this advice". */
+    whatChangesThis?: string[];
+  };
 }
 
 export interface InvestorPreference {
@@ -203,6 +231,26 @@ export interface UnifiedSignals {
   riskCashflowScore?: number;
   topRiskFactor?: { id: string; label: string; action: string };
   secondRiskFactor?: { id: string; label: string; action: string };
+
+  /**
+   * Classified debt portfolio — single source of truth for debt advice.
+   * When provided, the recommendation engine uses this instead of the legacy
+   * `otherDebts × personalDebtRate` heuristic. Drives Best Move, Action Queue,
+   * Daily Briefing, Executive Overview and Monte Carlo overlays.
+   *
+   * Kept as `any[]` here to avoid a load-order coupling with debtClassification.ts;
+   * the engine narrows it to `ClassifiedDebt[] | DebtRecord[]` at use.
+   */
+  debtPortfolio?: Array<{
+    id: string;
+    name: string;
+    balance: number;
+    ratePct: number | null | undefined;
+    minPaymentMonthly?: number;
+    type?: string;
+    expiryDateISO?: string;
+    taxDeductible?: boolean;
+  }>;
 
   /** Returns assumed. */
   etfExpectedReturn?: number;

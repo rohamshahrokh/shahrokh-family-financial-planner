@@ -5,6 +5,7 @@
  */
 export * from './types';
 export * from './opportunityCost';
+export * from './debtClassification';
 export * from './engine';
 export * from './adapters';
 export * from './history';

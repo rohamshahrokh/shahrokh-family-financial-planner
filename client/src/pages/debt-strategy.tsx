@@ -14,8 +14,8 @@
  */
 
 import SaveButton from "@/components/SaveButton";
-import { useState, useMemo, useId } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useMemo, useId, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum } from "@/lib/finance";
 import { useAppStore } from "@/lib/store";
@@ -36,12 +36,35 @@ import { useToast } from "@/hooks/use-toast";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/**
+ * NOTE on `rate`:
+ *   - Stored in PERCENT units (e.g. 17 for 17%, 6 for 6%, 0 for 0%).
+ *   - `0` is a VALID value and must be preserved verbatim through the form,
+ *     the simulator and persistence. A blank input becomes `null` (unknown),
+ *     NOT 15% / 17% / any synthesised "high APR" default.
+ */
+type DebtType =
+  | 'mortgage'
+  | 'investment_loan'
+  | 'heloc'
+  | 'personal_loan'
+  | 'credit_card'
+  | 'bnpl'
+  | 'promo_zero'
+  | 'auto'
+  | 'student'
+  | 'family'
+  | 'other';
+
 interface DebtItem {
   id: string;
   name: string;
   balance: number;
-  rate: number;      // annual % e.g. 6.5
+  rate: number | null;  // annual %, e.g. 6.5; 0 is valid; null = unknown
   minPayment: number;
+  type?: DebtType;
+  expiryDateISO?: string;        // 0%/promo cliff
+  taxDeductible?: boolean;
 }
 
 interface DebtResult {
@@ -55,10 +78,14 @@ interface DebtResult {
 // ─── Engine ───────────────────────────────────────────────────────────────────
 
 function simulateDebtPayoff(
-  debts: DebtItem[],
+  debtsIn: DebtItem[],
   extraPayment: number,
   sortFn: (a: DebtItem, b: DebtItem) => number
 ): DebtResult {
+  // Unknown-APR debts (rate === null) are excluded from the simulator —
+  // they cannot be modelled. They still appear in the inputs list and the
+  // recommendation engine classifies them as "unknown_apr_debt".
+  const debts = debtsIn.filter(d => typeof d.rate === 'number') as Array<DebtItem & { rate: number }>;
   if (!debts.length) return { months: 0, totalPaid: 0, totalInterest: 0, schedule: [], perDebtPayoff: {} };
 
   const totalMin = debts.reduce((s, d) => s + d.minPayment, 0);
@@ -130,7 +157,7 @@ function simulateDebtPayoff(
 }
 
 function simulateMinimumOnly(debts: DebtItem[]): DebtResult {
-  return simulateDebtPayoff(debts, 0, (a, b) => a.rate - b.rate);
+  return simulateDebtPayoff(debts, 0, (a, b) => (a.rate ?? 0) - (b.rate ?? 0));
 }
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
@@ -182,67 +209,128 @@ interface DebtRowProps {
 
 function DebtRow({ debt, onChange, onRemove, canRemove }: DebtRowProps) {
   const uid = useId();
+  // Preserve 0 verbatim — `?? ''` keeps 0 visible; `|| ''` would hide it.
+  const balanceVal = debt.balance == null ? '' : String(debt.balance);
+  const rateVal = debt.rate == null ? '' : String(debt.rate);
+  const minPayVal = debt.minPayment == null ? '' : String(debt.minPayment);
+  const isPromo = debt.type === 'promo_zero' || debt.type === 'bnpl' || debt.rate === 0;
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end p-3 rounded-lg bg-secondary/30 border border-border/50">
-      <div className="col-span-2 sm:col-span-1">
-        <Label htmlFor={`${uid}-name`} className="text-xs text-muted-foreground mb-1 block">Debt Name</Label>
-        <Input
-          id={`${uid}-name`}
-          value={debt.name}
-          onChange={(e) => onChange(debt.id, 'name', e.target.value)}
-          className="h-8 text-sm"
-          placeholder="e.g. Personal Loan"
-        />
-      </div>
-      <div>
-        <Label htmlFor={`${uid}-balance`} className="text-xs text-muted-foreground mb-1 block">Balance ($)</Label>
-        <Input
-          id={`${uid}-balance`}
-          type="number"
-          value={debt.balance || ''}
-          onChange={(e) => onChange(debt.id, 'balance', e.target.value)}
-          className="h-8 text-sm"
-          placeholder="0"
-          min={0}
-        />
-      </div>
-      <div>
-        <Label htmlFor={`${uid}-rate`} className="text-xs text-muted-foreground mb-1 block">Rate (% p.a.)</Label>
-        <Input
-          id={`${uid}-rate`}
-          type="number"
-          value={debt.rate || ''}
-          onChange={(e) => onChange(debt.id, 'rate', e.target.value)}
-          className="h-8 text-sm"
-          placeholder="0.00"
-          step={0.1}
-          min={0}
-        />
-      </div>
-      <div>
-        <Label htmlFor={`${uid}-min`} className="text-xs text-muted-foreground mb-1 block">Min Payment ($/mo)</Label>
-        <Input
-          id={`${uid}-min`}
-          type="number"
-          value={debt.minPayment || ''}
-          onChange={(e) => onChange(debt.id, 'minPayment', e.target.value)}
-          className="h-8 text-sm"
-          placeholder="0"
-          min={0}
-        />
-      </div>
-      <div className="flex justify-end">
-        {canRemove && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-950/30"
-            onClick={() => onRemove(debt.id)}
+    <div className="p-3 rounded-lg bg-secondary/30 border border-border/50 space-y-2">
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
+        <div className="col-span-2 sm:col-span-2">
+          <Label htmlFor={`${uid}-name`} className="text-xs text-muted-foreground mb-1 block">Debt Name</Label>
+          <Input
+            id={`${uid}-name`}
+            value={debt.name}
+            onChange={(e) => onChange(debt.id, 'name', e.target.value)}
+            className="h-8 text-sm"
+            placeholder="e.g. Personal Loan"
+          />
+        </div>
+        <div>
+          <Label htmlFor={`${uid}-type`} className="text-xs text-muted-foreground mb-1 block">Type</Label>
+          <select
+            id={`${uid}-type`}
+            value={debt.type ?? 'other'}
+            onChange={(e) => onChange(debt.id, 'type', e.target.value)}
+            className="h-8 text-sm w-full rounded-md border border-input bg-background px-2"
           >
-            <Trash2 className="w-3.5 h-3.5" />
-          </Button>
-        )}
+            <option value="mortgage">Mortgage</option>
+            <option value="investment_loan">Investment / margin loan</option>
+            <option value="heloc">HELOC</option>
+            <option value="personal_loan">Personal loan</option>
+            <option value="credit_card">Credit card</option>
+            <option value="bnpl">Buy now / pay later</option>
+            <option value="promo_zero">0% promo finance</option>
+            <option value="auto">Auto loan</option>
+            <option value="student">Student loan</option>
+            <option value="family">Family / interest-free</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div>
+          <Label htmlFor={`${uid}-balance`} className="text-xs text-muted-foreground mb-1 block">Balance ($)</Label>
+          <Input
+            id={`${uid}-balance`}
+            type="number"
+            value={balanceVal}
+            onChange={(e) => onChange(debt.id, 'balance', e.target.value)}
+            className="h-8 text-sm"
+            placeholder="0"
+            min={0}
+          />
+        </div>
+        <div>
+          <Label htmlFor={`${uid}-rate`} className="text-xs text-muted-foreground mb-1 block">Rate (% p.a.)</Label>
+          <Input
+            id={`${uid}-rate`}
+            type="number"
+            value={rateVal}
+            onChange={(e) => onChange(debt.id, 'rate', e.target.value)}
+            className="h-8 text-sm"
+            placeholder="0.00"
+            step={0.1}
+            min={0}
+            data-testid={`debt-rate-${debt.id}`}
+          />
+        </div>
+        <div>
+          <Label htmlFor={`${uid}-min`} className="text-xs text-muted-foreground mb-1 block">Min ($/mo)</Label>
+          <Input
+            id={`${uid}-min`}
+            type="number"
+            value={minPayVal}
+            onChange={(e) => onChange(debt.id, 'minPayment', e.target.value)}
+            className="h-8 text-sm"
+            placeholder="0"
+            min={0}
+          />
+        </div>
       </div>
+      <div className="flex flex-wrap items-end gap-2">
+        {isPromo && (
+          <div className="grow min-w-[180px]">
+            <Label htmlFor={`${uid}-expiry`} className="text-xs text-muted-foreground mb-1 block">
+              0% Promo Expiry (optional)
+            </Label>
+            <Input
+              id={`${uid}-expiry`}
+              type="date"
+              value={debt.expiryDateISO ?? ''}
+              onChange={(e) => onChange(debt.id, 'expiryDateISO', e.target.value)}
+              className="h-8 text-sm"
+            />
+          </div>
+        )}
+        {(debt.type === 'investment_loan' || debt.type === 'heloc') && (
+          <label className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={debt.taxDeductible === true}
+              onChange={(e) => onChange(debt.id, 'taxDeductible', e.target.checked ? 'true' : 'false')}
+            />
+            Interest tax-deductible
+          </label>
+        )}
+        <div className="ml-auto">
+          {canRemove && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-950/30"
+              onClick={() => onRemove(debt.id)}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </Button>
+          )}
+        </div>
+      </div>
+      {debt.rate === null && (
+        <p className="text-[11px] text-amber-400/90">
+          Rate unknown — this debt is shown but not used in the simulator or
+          urgent-payoff recommendations. Add a rate (or 0 for interest-free) to include it.
+        </p>
+      )}
     </div>
   );
 }
@@ -274,8 +362,47 @@ export default function DebtStrategyPage() {
   const snapMortgage   = safeNum(snapshot?.mortgage);
   const snapOtherDebts = safeNum(snapshot?.other_debts);
 
+  // ── Debt prefs / app_settings query (must precede persistedDebts memo) ───
+  const queryClient = useQueryClient();
+  const { data: appSettings } = useQuery({
+    queryKey: ['/api/app-settings'],
+    queryFn: () => apiRequest('GET', '/api/app-settings').then(r => r.json()),
+    staleTime: 0,
+  });
+
   // ── Debts state (pre-populated from snapshot) ─────────────────────────────
+  // Persisted debts (debt_prefs.debts) take precedence over snapshot defaults.
+  // Snapshot-derived "Other Debts" rate is NULL (unknown) — not 15% — so the
+  // recommendation engine treats it as unknown_apr_debt instead of inventing
+  // a high-APR signal. User must enter the real rate (0% is valid).
+  const persistedDebts: DebtItem[] | null = useMemo(() => {
+    const arr = appSettings?.debt_prefs?.debts;
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    return arr.map((d: any, i: number): DebtItem => {
+      const rawRate = d.rate;
+      let rate: number | null;
+      if (rawRate === null || rawRate === undefined) rate = null;
+      else if (typeof rawRate === 'string') {
+        const t = rawRate.trim();
+        rate = t === '' ? null : (Number.isFinite(parseFloat(t)) ? parseFloat(t) : null);
+      } else {
+        rate = typeof rawRate === 'number' && Number.isFinite(rawRate) ? rawRate : null;
+      }
+      return {
+        id: String(d.id ?? `debt_${i}`),
+        name: String(d.name ?? 'Debt'),
+        balance: typeof d.balance === 'number' ? d.balance : parseFloat(String(d.balance ?? '0')) || 0,
+        rate,
+        minPayment: typeof d.minPayment === 'number' ? d.minPayment : parseFloat(String(d.minPayment ?? '0')) || 0,
+        type: d.type,
+        expiryDateISO: d.expiryDateISO,
+        taxDeductible: d.taxDeductible === true,
+      };
+    });
+  }, [appSettings]);
+
   const defaultDebts: DebtItem[] = useMemo(() => {
+    if (persistedDebts && persistedDebts.length) return persistedDebts;
     const list: DebtItem[] = [];
     if (snapMortgage > 0) {
       list.push({
@@ -283,7 +410,8 @@ export default function DebtStrategyPage() {
         name: 'Home Mortgage',
         balance: snapMortgage,
         rate: fa.flat.interest_rate,
-        minPayment: Math.round(snapMortgage * 0.006),  // ~0.6% of balance as rough est.
+        minPayment: Math.round(snapMortgage * 0.006),
+        type: 'mortgage',
       });
     }
     if (snapOtherDebts > 0) {
@@ -291,24 +419,22 @@ export default function DebtStrategyPage() {
         id: 'other',
         name: 'Other Debts',
         balance: snapOtherDebts,
-        rate: 15.0,
-        minPayment: Math.round(snapOtherDebts * 0.03),  // ~3% of balance
+        // NULL — not 15% — so unknown APR is never classified as high APR.
+        rate: null,
+        minPayment: Math.round(snapOtherDebts * 0.03),
+        type: 'other',
       });
     }
     if (!list.length) {
-      list.push({ id: 'sample', name: 'Credit Card', balance: 5000, rate: 19.99, minPayment: 150 });
+      list.push({ id: 'sample', name: 'Credit Card', balance: 5000, rate: 19.99, minPayment: 150, type: 'credit_card' });
     }
     return list;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapMortgage, snapOtherDebts]);
+  }, [persistedDebts, snapMortgage, snapOtherDebts]);
 
   const [debts, setDebts] = useState<DebtItem[]>([]);
-  // ── Debt prefs — loaded from Supabase (sf_app_settings) ─────────────────
-  const { data: appSettings } = useQuery({
-    queryKey: ['/api/app-settings'],
-    queryFn: () => apiRequest('GET', '/api/app-settings').then(r => r.json()),
-    staleTime: 0,
-  });
+  // queryClient and appSettings are declared above (so the persistedDebts memo
+  // can read them); only the local edit-buffer is declared here.
   const [debtPrefsEdit, setDebtPrefsEdit] = useState<any>(null);
   const debtPrefs = debtPrefsEdit ??
     (appSettings?.debt_prefs ? { extraPayment: 500, activeStrategy: 'avalanche', ...appSettings.debt_prefs }
@@ -319,9 +445,43 @@ export default function DebtStrategyPage() {
   function setExtraPayment(v: number)             { setDebtPrefsEdit((p:any) => ({ ...(p ?? debtPrefs), extraPayment: v })); }
   function setActiveStrategy(v: 'avalanche' | 'snowball' | 'hybrid') { setDebtPrefsEdit((p:any) => ({ ...(p ?? debtPrefs), activeStrategy: v })); }
 
+  /**
+   * Persist `debt_prefs` (which includes the full classified `debts` array)
+   * to Supabase, then invalidate every downstream query whose recommendation
+   * derives from debt state. The unified engine reads `app_settings.debt_prefs.debts`
+   * via `fromDebtPrefsDebts`, so invalidating `/api/app-settings` is enough to
+   * trigger a recompute of Best Move, Top Priorities, Risk signals, Action
+   * Queue, Daily Briefing, Executive Overview, Financial OS Centre and the
+   * Monte Carlo recommendation overlays — all of which subscribe to that
+   * query. We also invalidate `/api/snapshot` so any consumer that still
+   * reads `other_debts` re-fetches.
+   */
   const saveDebtPrefs = async () => {
-    await apiRequest('PATCH', '/api/app-settings', { debt_prefs: debtPrefs });
+    // Include the full debt list (rates / type / expiry / tax-deductible) so
+    // downstream surfaces have the classified portfolio. Rates are persisted
+    // exactly as entered — including 0 and null (for unknown).
+    const persistedDebts = debts.map(d => ({
+      id: d.id,
+      name: d.name,
+      balance: d.balance,
+      rate: d.rate,
+      minPayment: d.minPayment,
+      type: d.type ?? 'other',
+      expiryDateISO: d.expiryDateISO,
+      taxDeductible: d.taxDeductible === true,
+    }));
+    const payload = { debt_prefs: { ...debtPrefs, debts: persistedDebts } };
+    await apiRequest('PATCH', '/api/app-settings', payload);
     setDebtPrefsEdit(null);
+    // Bust the Best Move sessionStorage cache so the dashboard re-runs
+    // computeUnifiedBestMove on next render with the new debt portfolio.
+    try { sessionStorage.removeItem('best_move_result_v2'); } catch { /* noop */ }
+    // Deterministic recompute / invalidation across every downstream surface.
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['/api/app-settings'] }),
+      queryClient.invalidateQueries({ queryKey: ['/api/snapshot'] }),
+    ]);
+    toast({ title: 'Debt strategy saved', description: 'Recommendations updated across the app.' });
   };
   const [showActionPlan, setShowActionPlan] = useState(false);
   const [initialized, setInitialized] = useState(false);
@@ -338,25 +498,48 @@ export default function DebtStrategyPage() {
   // ── Debt CRUD ──────────────────────────────────────────────────────────────
 
   const handleChange = (id: string, field: keyof DebtItem, value: string) => {
-    setDebts(prev => prev.map(d => d.id !== id ? d : {
-      ...d,
-      [field]: field === 'name' ? value : parseFloat(value) || 0,
+    setDebts(prev => prev.map(d => {
+      if (d.id !== id) return d;
+      if (field === 'name') return { ...d, name: value };
+      if (field === 'type') return { ...d, type: (value || undefined) as DebtType | undefined };
+      if (field === 'expiryDateISO') return { ...d, expiryDateISO: value || undefined };
+      if (field === 'taxDeductible') return { ...d, taxDeductible: value === 'true' };
+      // Numeric fields: preserve literal 0; treat blank as null (unknown) for rate, 0 for others.
+      const trimmed = value.trim();
+      if (field === 'rate') {
+        if (trimmed === '') return { ...d, rate: null };          // blank → unknown
+        const n = parseFloat(trimmed);
+        return { ...d, rate: Number.isFinite(n) ? n : null };
+      }
+      // balance / minPayment: blank → 0, "0" → 0 (preserved), invalid → 0
+      if (trimmed === '') return { ...d, [field]: 0 } as DebtItem;
+      const n = parseFloat(trimmed);
+      return { ...d, [field]: Number.isFinite(n) ? n : 0 } as DebtItem;
     }));
+    // Mark unsaved so the Save button surface is enabled.
+    setDebtPrefsEdit((p: any) => ({ ...(p ?? debtPrefs) }));
   };
 
   const handleRemove = (id: string) => {
     setDebts(prev => prev.filter(d => d.id !== id));
+    setDebtPrefsEdit((p: any) => ({ ...(p ?? debtPrefs) }));
   };
 
   const handleAdd = () => {
     const id = `debt_${Date.now()}`;
-    setDebts(prev => [...prev, { id, name: 'New Debt', balance: 0, rate: 5.0, minPayment: 100 }]);
+    setDebts(prev => [...prev, { id, name: 'New Debt', balance: 0, rate: 5.0, minPayment: 100, type: 'other' }]);
+    setDebtPrefsEdit((p: any) => ({ ...(p ?? debtPrefs) }));
     toast({ title: 'Debt added', description: 'Fill in the details above.' });
   };
 
   // ── Engine runs ────────────────────────────────────────────────────────────
 
-  const validDebts = debts.filter(d => d.balance > 0 && d.rate >= 0 && d.minPayment > 0);
+  // Valid for simulator: balance > 0, rate is a known non-negative number
+  // (including 0), and minPayment > 0. Debts with rate === null still show in
+  // the inputs list but are skipped by the simulator.
+  const validDebts = debts.filter(
+    d => d.balance > 0 && typeof d.rate === 'number' && d.rate >= 0 && d.minPayment > 0,
+  ) as Array<DebtItem & { rate: number }>;
 
   const results = useMemo(() => {
     if (!validDebts.length) return null;
@@ -364,11 +547,11 @@ export default function DebtStrategyPage() {
     const maxRate = Math.max(...validDebts.map(d => d.rate));
     const maxBal  = Math.max(...validDebts.map(d => d.balance));
 
-    const avalanche = simulateDebtPayoff(validDebts, extraPayment, (a, b) => b.rate - a.rate);
+    const avalanche = simulateDebtPayoff(validDebts, extraPayment, (a, b) => (b.rate ?? 0) - (a.rate ?? 0));
     const snowball  = simulateDebtPayoff(validDebts, extraPayment, (a, b) => a.balance - b.balance);
     const hybrid    = simulateDebtPayoff(validDebts, extraPayment, (a, b) => {
-      const scoreA = (a.rate / maxRate) * 0.6 + (1 - a.balance / maxBal) * 0.4;
-      const scoreB = (b.rate / maxBal) * 0.6 + (1 - b.balance / maxBal) * 0.4;
+      const scoreA = ((a.rate ?? 0) / maxRate) * 0.6 + (1 - a.balance / maxBal) * 0.4;
+      const scoreB = ((b.rate ?? 0) / maxBal) * 0.6 + (1 - b.balance / maxBal) * 0.4;
       return scoreB - scoreA;
     });
     const minimum   = simulateMinimumOnly(validDebts);
@@ -382,13 +565,13 @@ export default function DebtStrategyPage() {
     if (!validDebts.length || !results) return [];
 
     const sortFn =
-      activeStrategy === 'avalanche' ? (a: DebtItem, b: DebtItem) => b.rate - a.rate :
+      activeStrategy === 'avalanche' ? (a: DebtItem, b: DebtItem) => (b.rate ?? 0) - (a.rate ?? 0) :
       activeStrategy === 'snowball'  ? (a: DebtItem, b: DebtItem) => a.balance - b.balance :
       (a: DebtItem, b: DebtItem) => {
         const maxRate = Math.max(...validDebts.map(d => d.rate));
         const maxBal  = Math.max(...validDebts.map(d => d.balance));
-        const scoreA = (a.rate / maxRate) * 0.6 + (1 - a.balance / maxBal) * 0.4;
-        const scoreB = (b.rate / maxRate) * 0.6 + (1 - b.balance / maxBal) * 0.4;
+        const scoreA = ((a.rate ?? 0) / maxRate) * 0.6 + (1 - a.balance / maxBal) * 0.4;
+        const scoreB = ((b.rate ?? 0) / maxRate) * 0.6 + (1 - b.balance / maxBal) * 0.4;
         return scoreB - scoreA;
       };
 
@@ -430,8 +613,9 @@ export default function DebtStrategyPage() {
 
         // Check if any debt was freed this month
         for (const d of ds) {
-          if (d.remaining <= 0.01 && validDebts.find(od => od.id === d.id)?.balance > 0) {
-            freed += validDebts.find(od => od.id === d.id)?.minPayment || 0;
+          const match = validDebts.find(od => od.id === d.id);
+          if (d.remaining <= 0.01 && (match?.balance ?? 0) > 0) {
+            freed += match?.minPayment ?? 0;
           }
         }
       }

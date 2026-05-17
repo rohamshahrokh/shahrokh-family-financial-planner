@@ -30,6 +30,7 @@ import type {
   RiskLevel,
 } from './types';
 import { debtVsETF, cashVsInvest } from './opportunityCost';
+import { classifyDebtPortfolio, type DebtRecord, type DebtPortfolioSummary } from './debtClassification';
 
 const PILLAR_RANK: Record<StrategicPillar, number> = {
   prevent_failure: 1,
@@ -103,8 +104,16 @@ interface CandidateOpts {
   whatCouldChange?: string[];
 }
 
-function makeRecommendation(opts: CandidateOpts): Recommendation {
-  return {
+/**
+ * Tiny augmentation so candidates can attach structured `debtRationale`
+ * without threading another field through CandidateOpts.
+ */
+type RecommendationWithBuilder = Recommendation & {
+  withDebtRationale(r: NonNullable<Recommendation['debtRationale']>): Recommendation;
+};
+
+function makeRecommendation(opts: CandidateOpts): RecommendationWithBuilder {
+  const rec: Recommendation = {
     id: opts.id,
     title: opts.title,
     actionType: opts.actionType,
@@ -137,6 +146,12 @@ function makeRecommendation(opts: CandidateOpts): Recommendation {
     benefitLabel: opts.benefitLabel,
     cta: opts.cta,
   };
+  return Object.assign(rec, {
+    withDebtRationale(r: NonNullable<Recommendation['debtRationale']>): Recommendation {
+      rec.debtRationale = r;
+      return rec;
+    },
+  });
 }
 
 // ─── Candidate builders ──────────────────────────────────────────────────────
@@ -181,10 +196,85 @@ function buildEmergencyBuffer(s: UnifiedSignals, signals: SourceSignal[]): Recom
   });
 }
 
-function payHighInterestDebt(s: UnifiedSignals, signals: SourceSignal[]): Recommendation | null {
-  const debt = num(s.otherDebts);
-  if (debt < 1000) return null;
-  const rate = num(s.personalDebtRate, 0.17);
+/**
+ * Build the classified debt portfolio used by every debt-related candidate.
+ *
+ * Resolution order:
+ *  1. `s.debtPortfolio` — the canonical detailed debt list set by the user
+ *     on /debt-strategy. This is the only source we trust for APR.
+ *  2. Fallback to legacy `otherDebts` + `personalDebtRate` only when an
+ *     explicit non-null personalDebtRate is supplied. We do NOT fabricate
+ *     a 17% rate when it is missing.
+ *
+ * Mortgage is added as a classified record when `mortgage > 0` so downstream
+ * candidates can reason about it strategically.
+ */
+function buildDebtPortfolio(s: UnifiedSignals): DebtPortfolioSummary {
+  const records: DebtRecord[] = [];
+
+  if (Array.isArray(s.debtPortfolio) && s.debtPortfolio.length > 0) {
+    for (const d of s.debtPortfolio) {
+      records.push({
+        id: d.id,
+        name: d.name ?? 'Debt',
+        balance: typeof d.balance === 'number' ? d.balance : 0,
+        ratePct: d.ratePct,                          // preserve null/undefined/0 verbatim
+        minPaymentMonthly: d.minPaymentMonthly,
+        type: (d.type as DebtRecord['type']) ?? 'other',
+        expiryDateISO: d.expiryDateISO,
+        taxDeductible: d.taxDeductible,
+      });
+    }
+  } else {
+    // Legacy fallback. Only treat `otherDebts` as classifiable when the
+    // caller supplied an explicit personalDebtRate. We MUST NOT default
+    // missing APR to 17% — that is the bug we are fixing.
+    const otherDebts = num(s.otherDebts);
+    if (otherDebts > 0) {
+      records.push({
+        id: 'other_debts_legacy',
+        name: 'Other Debts',
+        balance: otherDebts,
+        ratePct: typeof s.personalDebtRate === 'number'
+          ? s.personalDebtRate * 100   // signals carry decimal — classifier expects percent
+          : null,                       // unknown → classified as unknown_apr_debt, never high APR
+        type: 'other',
+      });
+    }
+  }
+
+  // Add mortgage as a classified record for strategic evaluation.
+  const mortgageBalance = num(s.mortgage);
+  if (mortgageBalance > 0) {
+    records.push({
+      id: 'mortgage_primary',
+      name: 'Home Mortgage',
+      balance: mortgageBalance,
+      ratePct: typeof s.mortgageRate === 'number' ? s.mortgageRate * 100 : null,
+      type: 'mortgage',
+    });
+  }
+
+  return classifyDebtPortfolio(records);
+}
+
+/**
+ * High-APR consumer debt payoff — only fires when the classification engine
+ * identifies a real high-APR balance (≥ 10% APR, non-deductible).
+ *
+ * Crucially: 0% debt, unknown-APR debt, tax-deductible debt and mortgage are
+ * never routed through this candidate.
+ */
+function payHighInterestDebt(
+  s: UnifiedSignals,
+  signals: SourceSignal[],
+  portfolio: DebtPortfolioSummary,
+): Recommendation | null {
+  if (!portfolio.hasUrgentHighAprDebt) return null;
+  const debt = portfolio.highAprBalance;
+  const rate = portfolio.highAprWeightedRate ?? 0;
+  if (debt < 1000 || rate <= 0) return null;
+
   const annualCost = debt * rate;
   const etfRet = num(s.etfExpectedReturn, 0.095);
 
@@ -202,7 +292,7 @@ function payHighInterestDebt(s: UnifiedSignals, signals: SourceSignal[]): Recomm
     pillar: 'reduce_high_interest_debt',
     urgency: debt > 10_000 ? 'immediate' : 'this_quarter',
     riskLevel: 'Low',
-    reasoning: `Personal/consumer debt at ~${(rate * 100).toFixed(0)}% costs ${fmt(annualCost)}/yr. ` +
+    reasoning: `High-APR consumer debt at ~${(rate * 100).toFixed(0)}% costs ${fmt(annualCost)}/yr. ` +
       `A guaranteed ${(rate * 100).toFixed(1)}% return from paydown beats the volatile ` +
       `~${(etfRet * 100).toFixed(1)}% expected ETF return. This is a hard-priority safety action.`,
     steps: [
@@ -223,6 +313,210 @@ function payHighInterestDebt(s: UnifiedSignals, signals: SourceSignal[]): Recomm
     surfaces: ['best_move', 'action_centre', 'debt'],
     signalsUsed: signals.filter(s => ['debt_balances', 'snapshot'].includes(s)),
     confidence: 0.95,
+    whatCouldChange: [
+      'New high-APR consumer debt taken on',
+      'Effective APR rises (variable-rate debt)',
+      'Minimum repayment missed',
+    ],
+  }).withDebtRationale({
+    classification: 'High-APR consumer debt',
+    aprPct: rate * 100,
+    balance: debt,
+    annualInterestCost: annualCost,
+    guaranteedReturnPct: rate * 100,
+    pillarRank: PILLAR_RANK.reduce_high_interest_debt,
+    whatChangesThis: [
+      'Refinancing the balance to a lower APR',
+      'Paying the balance to zero',
+      'Liquidity falling below emergency buffer',
+    ],
+  });
+}
+
+/**
+ * Interest-free debt → narrative-only optionality message. Never an urgent
+ * payoff recommendation. Visible in `action_centre`, `debt` and `best_move`
+ * surfaces so users can see the engine considered the debt and explicitly
+ * chose NOT to recommend payoff.
+ */
+function maintainInterestFreeDebt(
+  s: UnifiedSignals,
+  signals: SourceSignal[],
+  portfolio: DebtPortfolioSummary,
+): Recommendation | null {
+  if (portfolio.interestFreeBalance <= 0) return null;
+  // If there is a cliff < 90 days, the timed warning candidate takes precedence.
+  if (portfolio.promosWithUpcomingCliff.length > 0) return null;
+
+  const bal = portfolio.interestFreeBalance;
+  const etfRet = num(s.etfExpectedReturn, 0.095);
+  const mortgageRate = num(s.mortgageRate, 0);
+  const altYield = Math.max(etfRet, mortgageRate);
+
+  return makeRecommendation({
+    id: 'maintain_interest_free_debt',
+    title: `Interest-free debt detected (${fmt(bal)}) — maintain optionality`,
+    actionType: 'maintain_interest_free_debt',
+    pillar: 'maintain_investing_discipline',
+    urgency: 'monitor',
+    riskLevel: 'Low',
+    reasoning:
+      `Interest-free debt detected. Maintaining liquidity or offset positioning ` +
+      `may currently be more optimal than early payoff. 0% financing creates ` +
+      `optionality — capital may produce higher expected value elsewhere ` +
+      `(offset at ~${(mortgageRate * 100 || 0).toFixed(2)}%, ETFs at ~${(etfRet * 100).toFixed(1)}%).`,
+    steps: [
+      { step: 'Keep paying minimums on schedule to preserve the 0% rate' },
+      { step: 'Diary the expiry date — set a reminder ~60 days before' },
+      { step: 'Direct the capital to offset / ETFs / buffer instead' },
+    ],
+    alternatives: [
+      { title: 'Pay off early anyway', whyAlternative: 'Removes a balance from your statement', tradeoff: 'Forgoes the opportunity cost on the same capital' },
+    ],
+    benefitLabel: `0% APR — preserve optionality`,
+    cta: { label: 'Open Debt Strategy', route: '/debt-strategy' },
+    impact: { annualDollar: bal * altYield, confidence: 0.7, label: `~${fmt(bal * altYield)}/yr opportunity value` },
+    watchSignals: ['debt_balances'],
+    surfaces: ['best_move', 'action_centre', 'debt'],
+    signalsUsed: signals.filter(s => ['debt_balances', 'snapshot'].includes(s)),
+    confidence: 0.8,
+    whatCouldChange: [
+      'Promotional rate expires',
+      'Minimum repayment missed → reverts to penalty APR',
+      'Liquidity stress → switch to payoff',
+    ],
+  }).withDebtRationale({
+    classification: 'Interest-free debt',
+    aprPct: 0,
+    balance: bal,
+    annualInterestCost: 0,
+    guaranteedReturnPct: 0,
+    pillarRank: PILLAR_RANK.maintain_investing_discipline,
+    whatChangesThis: [
+      'Promo rate expires (cliff)',
+      'Missed minimum repayment',
+      'Liquidity drops below emergency buffer',
+    ],
+  });
+}
+
+/**
+ * Mortgage / tax-deductible / strategic-leverage → strategic monitor, NOT
+ * urgent payoff. Provides a transparent "we evaluated this debt strategically"
+ * signal so users see the engine handles mortgage differently from credit card.
+ */
+function monitorStrategicDebt(
+  s: UnifiedSignals,
+  signals: SourceSignal[],
+  portfolio: DebtPortfolioSummary,
+): Recommendation | null {
+  const mortgageBal = portfolio.balanceByClass.mortgage_debt;
+  const deductibleBal = portfolio.balanceByClass.tax_deductible_debt;
+  const strategicBal = portfolio.balanceByClass.strategic_leverage_debt;
+  const total = mortgageBal + deductibleBal + strategicBal;
+  if (total <= 0) return null;
+
+  const mortgageRate = num(s.mortgageRate, 0);
+  // Surface only when there is no urgent high-APR debt — strategic monitoring
+  // shouldn't compete with a real high-APR payoff.
+  if (portfolio.hasUrgentHighAprDebt) return null;
+
+  return makeRecommendation({
+    id: 'monitor_strategic_debt',
+    title: `Strategic debt monitored (${fmt(total)})`,
+    actionType: 'monitor_strategic_debt',
+    pillar: 'stabilise_leverage',
+    urgency: 'monitor',
+    riskLevel: 'Low',
+    reasoning:
+      `Mortgage / tax-deductible / strategic leverage are evaluated strategically — ` +
+      `not as urgent consumer debt. Current effective mortgage rate ~${(mortgageRate * 100 || 0).toFixed(2)}%. ` +
+      `Refinance, offset positioning and serviceability are the right levers, not aggressive paydown.`,
+    steps: [
+      { step: 'Re-check refinance offers if rates drop > 0.5%' },
+      { step: 'Maintain offset balance to maximise interest saved' },
+      { step: 'Re-stress at +1% before adding new leverage' },
+    ],
+    alternatives: [
+      { title: 'Refinance', whyAlternative: 'Lower effective APR', tradeoff: 'Application fees / break costs' },
+      { title: 'Extra principal repayments', whyAlternative: 'Faster equity build', tradeoff: 'Locks capital, no liquidity' },
+    ],
+    benefitLabel: 'Evaluated strategically — not urgent',
+    cta: { label: 'Open Debt Strategy', route: '/debt-strategy' },
+    impact: { confidence: 0.7 },
+    watchSignals: ['debt_balances'],
+    surfaces: ['action_centre', 'debt'],
+    signalsUsed: signals.filter(s => ['debt_balances', 'snapshot'].includes(s)),
+    confidence: 0.75,
+  }).withDebtRationale({
+    classification: 'Mortgage / strategic leverage',
+    aprPct: mortgageRate > 0 ? mortgageRate * 100 : null,
+    balance: total,
+    annualInterestCost: total * (mortgageRate || 0),
+    guaranteedReturnPct: mortgageRate > 0 ? mortgageRate * 100 : null,
+    pillarRank: PILLAR_RANK.stabilise_leverage,
+    whatChangesThis: [
+      'LVR rises above 80%',
+      'Monte Carlo stress flag goes severe',
+      'Serviceability headroom turns negative',
+    ],
+  });
+}
+
+/**
+ * 0% debt approaching expiry → timed warning, not an urgent payoff.
+ */
+function planPromoExpiry(
+  _s: UnifiedSignals,
+  signals: SourceSignal[],
+  portfolio: DebtPortfolioSummary,
+): Recommendation | null {
+  if (portfolio.promosWithUpcomingCliff.length === 0) return null;
+  const totalAtRisk = portfolio.promosWithUpcomingCliff
+    .reduce((s, d) => s + Math.max(0, d.balance), 0);
+  const soonest = portfolio.promosWithUpcomingCliff
+    .reduce((min, d) => (d.daysToExpiry ?? 999) < min ? (d.daysToExpiry ?? 999) : min, 999);
+
+  return makeRecommendation({
+    id: 'plan_promo_expiry',
+    title: `Promo 0% finance expires in ~${soonest} days (${fmt(totalAtRisk)})`,
+    actionType: 'plan_promo_expiry',
+    pillar: 'reduce_high_interest_debt',
+    urgency: soonest <= 30 ? 'immediate' : 'this_quarter',
+    riskLevel: 'Low',
+    reasoning:
+      `Interest-free promotional debt has a cliff in ~${soonest} days. ` +
+      `On expiry the rate typically reverts to a penalty APR (20%+) on the ` +
+      `full balance. Plan the payoff or refinance NOW to avoid the step-up.`,
+    steps: [
+      { step: 'Clear the balance before the expiry date if possible' },
+      { step: 'Or balance-transfer to a fresh 0% facility before the cliff' },
+      { step: 'Set a reminder 14 days pre-expiry' },
+    ],
+    alternatives: [
+      { title: 'Refinance to a low-rate personal loan', whyAlternative: 'Predictable APR after cliff', tradeoff: 'Application fees' },
+      { title: 'Let it revert and pay down aggressively', whyAlternative: 'Avoid balance-transfer fees', tradeoff: 'Penalty APR applies to full balance' },
+    ],
+    benefitLabel: `Avoids penalty APR on cliff`,
+    cta: { label: 'Open Debt Strategy', route: '/debt-strategy' },
+    impact: { annualDollar: totalAtRisk * 0.20, confidence: 0.85, label: `~${fmt(totalAtRisk * 0.20)}/yr avoided` },
+    watchSignals: ['debt_balances'],
+    surfaces: ['best_move', 'action_centre', 'debt'],
+    signalsUsed: signals.filter(s => ['debt_balances', 'snapshot'].includes(s)),
+    confidence: 0.88,
+  }).withDebtRationale({
+    classification: 'Interest-free debt — promo expiring',
+    aprPct: 0,
+    balance: totalAtRisk,
+    annualInterestCost: 0,
+    guaranteedReturnPct: 20,                 // assumed reverted APR
+    pillarRank: PILLAR_RANK.reduce_high_interest_debt,
+    triggers: { daysToExpiry: soonest },
+    whatChangesThis: [
+      'Balance cleared before the cliff',
+      'Promo extended by lender',
+      'Successful balance-transfer to a new 0% facility',
+    ],
   });
 }
 
@@ -391,10 +685,16 @@ function propertyAction(s: UnifiedSignals, signals: SourceSignal[]): Recommendat
   return null;
 }
 
-function etfDCA(s: UnifiedSignals, signals: SourceSignal[]): Recommendation | null {
+function etfDCA(
+  s: UnifiedSignals,
+  signals: SourceSignal[],
+  portfolio?: DebtPortfolioSummary,
+): Recommendation | null {
   const surplus = num(s.monthlySurplus);
   if (surplus < 500) return null;
-  if (num(s.otherDebts) > 5_000) return null; // safety: debt outranks
+  // Safety: only block ETF DCA when there is genuine high-APR debt, not when
+  // the user simply has 0%/strategic/mortgage debt on file.
+  if (portfolio?.hasUrgentHighAprDebt) return null;
   const cash = num(s.cashOutsideOffset);
   const buffer = num(s.emergencyBufferTarget);
   if (cash + num(s.offsetBalance) < buffer) return null;
@@ -564,18 +864,22 @@ function holdCashFallback(s: UnifiedSignals, signals: SourceSignal[]): Recommend
 
 export function computeUnifiedRecommendations(s: UnifiedSignals): UnifiedRecommendationResult {
   const signals = signalsAvailable(s);
+  const portfolio = buildDebtPortfolio(s);
 
   const candidates: Recommendation[] = [];
   const push = (r: Recommendation | null) => { if (r) candidates.push(r); };
 
   push(buildEmergencyBuffer(s, signals));
-  push(payHighInterestDebt(s, signals));
+  push(planPromoExpiry(s, signals, portfolio));
+  push(payHighInterestDebt(s, signals, portfolio));
+  push(maintainInterestFreeDebt(s, signals, portfolio));
+  push(monitorStrategicDebt(s, signals, portfolio));
   push(reduceLeverageIfStressed(s, signals));
   push(propertyAction(s, signals));
   push(holdCashOffset(s, signals));
   push(increaseSuper(s, signals));
   push(fireAccelerate(s, signals));
-  push(etfDCA(s, signals));
+  push(etfDCA(s, signals, portfolio));
   push(rebalanceIfNeeded(s, signals));
 
   if (candidates.length === 0) {
