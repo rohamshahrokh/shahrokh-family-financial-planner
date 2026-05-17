@@ -114,6 +114,7 @@ import CFODashboardWidget from "@/components/CFODashboardWidget";
 import BestMoveCard from "@/components/BestMoveCard";
 import ActionCentre from "@/components/ActionCentre";
 import FinancialOSCentre from "@/components/FinancialOSCentre";
+import FamilyOfficeMode from "@/components/FamilyOfficeMode";
 import FutureWorldsPanel from "@/components/FutureWorldsPanel";
 import { getBestMoveRecommendation, type BestMoveLedger } from "@/lib/bestMoveEngine";
 import DepositPowerCard from "@/components/DepositPowerCard";
@@ -3427,6 +3428,11 @@ export default function DashboardPage() {
       {/* FINANCIAL OS CENTRE — Behavioural + Autonomous OS + Strategy Drift (Phase 5) */}
       <div className="px-4 pb-4 db-section-financial-os">
         <FinancialOSCentre />
+      </div>
+
+      {/* FAMILY OFFICE MODE — Portfolio / Life / Tax / Execution / Adaptive (Phase 6) */}
+      <div className="px-4 pb-4 db-section-family-office">
+        <FamilyOfficeMode />
       </div>
 
       {/* FUTURE WORLDS — probability-weighted macro scenarios (Phase 5) */}

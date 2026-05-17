@@ -269,6 +269,67 @@ export interface UnifiedSignals {
     dominantRegime?: string;
   };
 
+  /**
+   * Phase 6 — Portfolio Construction soft tilts. Per-action multipliers in
+   * 0..0.25 range applied INSIDE the same pillar only. They never override
+   * hard safety pillars.
+   */
+  portfolioTilts?: {
+    etfPush?: number;
+    propertyPush?: number;
+    cashHold?: number;
+    debtPay?: number;
+    superPush?: number;
+    cryptoTrim?: number;
+    modelLabel?: string;
+    liquidityScore?: number;       // 0..100
+    taxEfficiencyScore?: number;   // 0..100
+  };
+
+  /**
+   * Phase 6 — Life Planning context. Major life-event horizon stress that
+   * pushes urgency on liquidity / buffer items.
+   */
+  lifeContext?: {
+    fireYearDelayEstimate?: number;
+    averageAnnualDrag?: number;
+    stressProbability?: number;
+    liquidityStressMonths?: number;
+    upcomingEventCount?: number;
+  };
+
+  /**
+   * Phase 6 — Tax Intelligence overlay. Tilts ranking toward tax-efficient
+   * actions; never replaces tax-pillar recommendations.
+   */
+  taxContext?: {
+    totalEstimatedSaving?: number;
+    longTermTaxDragPct?: number;
+    fireWithdrawalEfficiencyScore?: number;
+    topStrategyId?: string;
+  };
+
+  /**
+   * Phase 6 — Execution OS readiness summary.
+   */
+  executionContext?: {
+    overallReadinessPct?: number;
+    topBlocker?: string;
+  };
+
+  /**
+   * Phase 6 — Adaptive Learning soft adjustments. Multipliers/tilts derived
+   * deterministically from observed user behaviour.
+   */
+  adaptive?: {
+    rankingMultiplierByActionType?: Record<string, number>;
+    urgencyMultiplier?: number;
+    riskScoreTilt?: number;
+    pillarWeights?: Partial<Record<StrategicPillar, number>>;
+    monteCarloPriorityMultiplier?: number;
+    explanation?: string;
+  };
+
   /** Diagnostic: which signal groups were available. */
   availableSignals?: SourceSignal[];
 }
