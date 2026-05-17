@@ -26,6 +26,7 @@ import {
   type CalcBreakdownStep,
   type LedgerInputs,
 } from '@/lib/bestMoveEngine';
+import { computeUnifiedBestMove, type UnifiedBestMoveResult, type Recommendation } from '@/lib/recommendationEngine';
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
 const CACHE_KEY = 'best_move_result_v2';   // bumped key to bust V1 cache
@@ -218,14 +219,18 @@ export default function BestMoveCard() {
   const mv = (v: string) => maskValue(v, privacyMode);
 
   const [result,        setResult]        = useState<BestMoveResult | null>(null);
+  const [unified,       setUnified]       = useState<UnifiedBestMoveResult | null>(null);
   const [loading,       setLoading]       = useState(false);
   const [error,         setError]         = useState<string | null>(null);
   const [expanded,      setExpanded]      = useState(false);
   const [showCalc,      setShowCalc]      = useState(false);
   const [showLedgerIn,  setShowLedgerIn]  = useState(false);
+  const [showExec,      setShowExec]      = useState(true);
 
   // Pull deposit-power inputs from the forecast store
   const maxLvr = useForecastStore(s => s.maxLvr);
+  // Pull live MC result so stress flag flows through into the unified engine
+  const liveMC = useForecastStore(s => s.monteCarloResult);
 
   const load = useCallback(async (force = false) => {
     if (!force) {
@@ -235,15 +240,16 @@ export default function BestMoveCard() {
     setLoading(true);
     setError(null);
     try {
-      const r = await computeBestMove({ maxLvr });
-      saveCache(r);
-      setResult(r);
+      const u = await computeUnifiedBestMove({ cfg: { maxLvr }, monteCarloV5: liveMC });
+      saveCache(u.legacy);
+      setResult(u.legacy);
+      setUnified(u);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to compute best move');
     } finally {
       setLoading(false);
     }
-  }, [maxLvr]);
+  }, [maxLvr, liveMC]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -374,6 +380,67 @@ export default function BestMoveCard() {
           )}
         </div>
       </div>
+
+      {/* ── Unified Strategic Brain panel ─────────────────────────────────────── */}
+      {unified && unified.unified.topPriorities.length > 0 && (
+        <div className="border-t border-white/[0.05]">
+          <button
+            className="w-full flex items-center justify-between px-4 py-2.5 text-xs text-muted-foreground hover:text-foreground/70 hover:bg-card transition-colors"
+            onClick={() => setShowExec(v => !v)}
+            data-testid="toggle-strategic-brain"
+          >
+            <div className="flex items-center gap-1.5">
+              <Shield className="w-3 h-3" />
+              <span className="font-medium">Strategic brain — top {unified.unified.topPriorities.length} priorities</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-slate-600">{unified.unified.signalCoverage.length} signals</span>
+              {showExec ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </div>
+          </button>
+          {showExec && (
+            <div className="px-4 pb-3 space-y-2">
+              <div className="text-[10px] text-muted-foreground italic">
+                Risk being reduced: <span className="text-foreground/80 not-italic">{unified.unified.riskBeingReduced}</span>
+              </div>
+              {unified.unified.topPriorities.map((r: Recommendation) => (
+                <div key={r.id} className="rounded-xl border border-border/40 bg-background/40 p-2.5 space-y-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-xs font-semibold text-foreground leading-snug">
+                      #{r.priorityRank} {r.title}
+                    </p>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <RiskBadge risk={r.riskLevel} />
+                      <span className="text-[9px] text-muted-foreground tabular-nums">
+                        conf {(r.confidenceScore * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground leading-snug line-clamp-3">{r.reasoning}</p>
+                  {r.benefitLabel && (
+                    <div className="text-[10px] text-emerald-400 font-mono">{r.benefitLabel}</div>
+                  )}
+                  {r.opportunityCost?.description && (
+                    <div className="text-[10px] text-amber-400/80">
+                      Opportunity cost: {r.opportunityCost.description}
+                    </div>
+                  )}
+                  {r.reviewTrigger?.reviewByISO && (
+                    <div className="text-[9px] text-slate-500">
+                      Review by {new Date(r.reviewTrigger.reviewByISO).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {unified.changes.some(c => c.changedReason !== 'unchanged') && (
+                <div className="text-[10px] text-sky-300/80 pt-1">
+                  Changed since last run: {unified.changes.filter(c => c.changedReason !== 'unchanged').map(c => c.changedReason).join(', ')}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Alternatives ──────────────────────────────────────────────────────── */}
       {alternatives.length > 0 && (

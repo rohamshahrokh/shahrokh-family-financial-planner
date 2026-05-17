@@ -27,6 +27,7 @@ import { useAppStore } from '@/lib/store';
 import { maskValue } from '@/components/PrivacyMask';
 import { formatCurrency } from '@/lib/finance';
 import { computeDepositPower, type StateCode } from '@/lib/depositPower';
+import { depositPowerReadinessFromSignals, computeUnifiedRecommendations } from '@/lib/recommendationEngine';
 
 const STATES: StateCode[] = ['QLD', 'NSW', 'VIC', 'SA', 'WA', 'TAS', 'NT', 'ACT'];
 
@@ -71,6 +72,30 @@ export default function DepositPowerCard({
 
   const fmt = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
 
+  // ── Unified strategy-readiness gate ────────────────────────────────────────
+  const readiness = useMemo(() => {
+    const monthlyIncome = snap?.monthly_income || 0;
+    const monthlyExpenses = snap?.monthly_expenses || 0;
+    const surplus = monthlyIncome - monthlyExpenses;
+    const liquid = (snap?.cash || 0) + (snap?.offset_balance || 0);
+    const signals = {
+      cashOutsideOffset: snap?.cash || 0,
+      offsetBalance: snap?.offset_balance || 0,
+      mortgage: snap?.mortgage || 0,
+      ppor: snap?.ppor || 0,
+      monthlyIncome,
+      monthlyExpenses,
+      monthlySurplus: surplus,
+      emergencyBufferTarget: buffer,
+      depositPower: result.next_deposit_capacity,
+      depositReadinessPct: result.deposit_pct_of_target * 5, // 20% deposit fully-funded = 100% readiness
+      serviceabilityHeadroomMonthly: surplus,
+      postPurchaseBufferMonths: monthlyExpenses > 0 ? liquid / monthlyExpenses : undefined,
+    };
+    const unified = computeUnifiedRecommendations(signals);
+    return depositPowerReadinessFromSignals(signals, unified);
+  }, [snap, result, buffer]);
+
   // ── Compact mode (used inside other cards / sidebars) ───────────────────────
   if (compact) {
     return (
@@ -112,6 +137,31 @@ export default function DepositPowerCard({
         <Link href="/property">
           <span className="text-xs text-primary hover:underline whitespace-nowrap">View Property →</span>
         </Link>
+      </div>
+
+      {/* Strategy readiness banner (Unified Recommendation Engine) */}
+      <div
+        className={`rounded-xl px-3 py-2 text-xs border ${
+          readiness.strategyReady
+            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+            : readiness.depositReady
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+              : 'bg-secondary/40 border-border text-foreground/70'
+        }`}
+        data-testid="deposit-power-readiness"
+      >
+        <div className="flex items-center gap-2 font-semibold">
+          {readiness.headline}
+        </div>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1.5 text-[10px] text-foreground/70">
+          <span>Deposit: {readiness.depositReady ? '✓' : '·'}</span>
+          <span>Serviceability: {readiness.serviceabilityReady ? '✓' : '·'}</span>
+          <span>Liquidity: {readiness.liquidityReady ? '✓' : '·'}</span>
+          <span>Stress test: {readiness.stressTestReady ? '✓' : '·'}</span>
+          <span>Post-buy buffer: {readiness.postPurchaseBufferReady ? '✓' : '·'}</span>
+          <span>Refinance risk: {readiness.refinanceRiskAcceptable ? '✓' : '·'}</span>
+          <span>Opportunity cost: {readiness.opportunityCostAcceptable ? '✓' : '·'}</span>
+        </div>
       </div>
 
       {/* Per-property breakdown */}

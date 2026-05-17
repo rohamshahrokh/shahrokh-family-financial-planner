@@ -1,0 +1,115 @@
+/**
+ * Best Move ↔ Unified Recommendation bridge.
+ *
+ * `computeBestMoveV2` (the existing async data-fetcher) returns a
+ * `BestMoveResult` plus the `BestMoveLedger` it used. We feed that ledger
+ * into the unified engine so the dashboard's executive Best Move card and
+ * the Action Centre share one source of truth.
+ *
+ * The legacy `BestMoveResult` is preserved and returned alongside the
+ * unified payload — no existing consumer is broken.
+ */
+
+import { computeBestMoveV2, type BestMoveConfig, type BestMoveResult, type BestMoveLedger, type CalcBreakdownStep } from '../bestMoveEngine';
+import { computeUnifiedRecommendations } from './engine';
+import { fromBestMoveLedger, mergeSignals, fromRiskRadar, fromFirePath, fromMonteCarloV5 } from './adapters';
+import type { UnifiedRecommendationResult, UnifiedSignals, Recommendation } from './types';
+import { snapshotHistory, type RecommendationChange } from './history';
+
+// We rebuild the ledger from BestMoveResult.ledgerInputs (everything we need
+// for unified signals is already in the audit panel inputs).
+function ledgerFromInputs(b: BestMoveResult): Partial<BestMoveLedger> {
+  const li = b.ledgerInputs;
+  return {
+    cash: li.cashOutsideOffset,
+    offsetBalance: li.offsetBalance,
+    mortgage: li.mortgage,
+    otherDebts: li.otherDebts,
+    monthlyIncome: li.monthlyIncome,
+    monthlyExpenses: li.monthlyExpenses,
+    emergencyBuffer: li.emergencyBuffer,
+    rohamGrossAnnual: li.monthlyIncome * 12,
+    superContribAnnual: 0,
+    etfExpectedReturn: 0.095,
+    cryptoExpectedReturn: 0.20,
+    mortgageRate: 0.0625,
+    ppor: 0,
+    depositPowerResult: {
+      totalDepositPower: li.depositPower,
+      readinessPct: li.depositReadinessPct,
+      isReady: li.depositReadinessPct >= 100,
+      totalUsableEquity: 0,
+      deployableCash: 0,
+      fundingSources: [],
+    },
+  };
+}
+
+export interface UnifiedBestMoveResult {
+  /** Legacy Best Move result for backward-compat UI bits. */
+  legacy: BestMoveResult;
+  /** Unified recommendation result — shared across surfaces. */
+  unified: UnifiedRecommendationResult;
+  /** What changed since previous run (in-memory only). */
+  changes: RecommendationChange[];
+}
+
+/**
+ * Run the existing Best Move fetcher, then layer in the unified engine.
+ * Optional signal overlays (risk, fire, MC) merge in if available.
+ */
+export async function computeUnifiedBestMove(args: {
+  cfg?: BestMoveConfig;
+  riskRadar?: any;
+  firePath?: any;
+  monteCarloV5?: any;
+  preference?: UnifiedSignals['preference'];
+} = {}): Promise<UnifiedBestMoveResult> {
+  const legacy = await computeBestMoveV2(args.cfg ?? {});
+  const partial = ledgerFromInputs(legacy);
+  const baseSignals = fromBestMoveLedger(partial as BestMoveLedger);
+  const signals = mergeSignals(
+    baseSignals,
+    fromRiskRadar(args.riskRadar),
+    fromFirePath(args.firePath),
+    fromMonteCarloV5(args.monteCarloV5),
+    args.preference ? { preference: args.preference } : {},
+  );
+  const unified = computeUnifiedRecommendations(signals);
+  const changes = snapshotHistory(unified);
+  return { legacy, unified, changes };
+}
+
+// ─── Helpers to bridge legacy → unified for surfaces that only have one ──────
+export function legacyBestMoveToRecommendation(legacy: BestMoveResult): Recommendation {
+  const best = legacy.best;
+  return {
+    id: best.id,
+    title: best.action,
+    actionType: 'hold_cash_offset', // legacy fallback type
+    pillar: 'maintain_investing_discipline',
+    priorityRank: 1,
+    confidenceScore: best.data_reliable ? 0.85 : 0.6,
+    urgency: 'this_quarter',
+    riskLevel: best.risk,
+    expectedFinancialImpact: { annualDollar: best.annual_benefit, label: best.benefit_label, confidence: best.data_reliable ? 0.85 : 0.6 },
+    implementationSteps: [{ step: best.action }],
+    whatCouldChangeRecommendation: ['Snapshot changes', 'New high-interest debt'],
+    alternativeOptions: legacy.alternatives.map(a => ({
+      title: a.action,
+      whyAlternative: a.reason,
+      tradeoff: a.benefit_label,
+    })),
+    reviewTrigger: { condition: 'Refresh when snapshot changes' },
+    sourceSignalsUsed: ['snapshot', 'cash_offset'],
+    surfaces: ['best_move', 'action_centre'],
+    reasoning: best.reason,
+    benefitLabel: best.benefit_label,
+    cta: { label: best.cta, route: best.cta_route },
+  };
+}
+
+// Convenience: shape the calc breakdown from legacy for UI re-use.
+export function legacyCalcBreakdown(legacy: BestMoveResult): CalcBreakdownStep[] | undefined {
+  return legacy.best.calcBreakdown;
+}
