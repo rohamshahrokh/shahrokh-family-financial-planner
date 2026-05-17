@@ -128,6 +128,54 @@ export function fromDecisionEngine(r: any): Partial<UnifiedSignals> {
   };
 }
 
+// ─── Behavioural Profile → signal overlay (Phase 5) ──────────────────────────
+export function fromBehaviouralProfile(p: any): Partial<UnifiedSignals> {
+  if (!p) return {};
+  return {
+    behaviouralProfile: {
+      primary: p.primary,
+      secondary: p.secondary,
+      primaryLabel: p.primaryLabel,
+      scores: p.scores,
+      confidence: p.confidence,
+    },
+  };
+}
+
+// ─── Autonomous OS → signal overlay (Phase 5) ────────────────────────────────
+// Maps OSReport findings into UnifiedSignals.osFindings (derived signals
+// only — they never produce a parallel advice surface).
+export function fromAutonomousOS(report: any): Partial<UnifiedSignals> {
+  if (!report || !Array.isArray(report.findings)) return {};
+  return {
+    osFindings: report.findings.map((f: any) => ({
+      id: f.id,
+      detector: f.detector,
+      severity: f.severity,
+      actionTypeHint: f?.hints?.actionType,
+      pillarHint: f?.hints?.pillar,
+      confidence: f.confidence,
+    })),
+  };
+}
+
+// ─── Scenario Tree → signal overlay (Phase 5) ────────────────────────────────
+export function fromScenarioTree(tree: any): Partial<UnifiedSignals> {
+  if (!tree) return {};
+  const w = tree.baseProbabilityWeighted ?? {};
+  const dom = Array.isArray(tree.branches) && tree.branches.length
+    ? tree.branches[0]?.id
+    : undefined;
+  return {
+    scenarioContext: {
+      probWeightedInsolvencyRisk: w.insolvencyRisk,
+      probWeightedLiquidityRisk: w.liquidityRisk,
+      probWeightedFireYear: w.fireYear,
+      dominantRegime: dom,
+    },
+  };
+}
+
 // ─── Merge helper ────────────────────────────────────────────────────────────
 export function mergeSignals(...parts: Array<Partial<UnifiedSignals> | undefined>): UnifiedSignals {
   const merged: UnifiedSignals = {};

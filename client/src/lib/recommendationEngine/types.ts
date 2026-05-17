@@ -57,7 +57,10 @@ export type SourceSignal =
   | 'fire_engine'
   | 'risk_engine'
   | 'household_tax'
-  | 'investor_preference';
+  | 'investor_preference'
+  | 'behavioural_profile'
+  | 'autonomous_os'
+  | 'scenario_tree';
 
 export interface QuantifiedImpact {
   /** Expected annual $ benefit (positive) or $ cost (negative). */
@@ -212,6 +215,59 @@ export interface UnifiedSignals {
 
   /** Behavioural / investor profile. */
   preference?: InvestorPreference;
+
+  /**
+   * Phase 5 — Behavioural Engine summary. Used for *soft* tilts inside a
+   * pillar; never overrides hard safety pillars. Shape kept loose to avoid a
+   * cross-package type dependency.
+   */
+  behaviouralProfile?: {
+    primary?: string;
+    secondary?: string;
+    primaryLabel?: string;
+    scores?: Partial<{
+      leveragePreference: number;
+      liquidityPreference: number;
+      volatilityTolerance: number;
+      fireUrgency: number;
+      debtAversion: number;
+      propertyBias: number;
+      etfBias: number;
+      cryptoBias: number;
+      cashSafetyPreference: number;
+      drawdownPanicThreshold: number;
+      lifestyleFlexibility: number;
+      spendingRigidity: number;
+      retirementAggressiveness: number;
+    }>;
+    confidence?: number;
+  };
+
+  /**
+   * Phase 5 — Autonomous OS findings as derived signals only. The engine may
+   * use these for ranking nudges (e.g. boost refinance during opportunity
+   * window) but never as direct advice. All on-screen advice still flows
+   * through this engine's recommendations.
+   */
+  osFindings?: Array<{
+    id: string;
+    detector: string;
+    severity: 'info' | 'watch' | 'elevated' | 'critical';
+    actionTypeHint?: string;
+    pillarHint?: string;
+    confidence?: number;
+  }>;
+
+  /**
+   * Phase 5 — Scenario Tree context. Probability-weighted regime metrics that
+   * help tilt confidence and urgency under macro stress regimes.
+   */
+  scenarioContext?: {
+    probWeightedInsolvencyRisk?: number;
+    probWeightedLiquidityRisk?: number;
+    probWeightedFireYear?: number;
+    dominantRegime?: string;
+  };
 
   /** Diagnostic: which signal groups were available. */
   availableSignals?: SourceSignal[];
