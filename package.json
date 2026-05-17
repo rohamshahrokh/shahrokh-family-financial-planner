@@ -24,6 +24,7 @@
     "test:autonomous-os": "tsx script/test-autonomous-os.ts",
     "test:decision-engine-cumulative": "tsx script/test-decision-engine-cumulative.ts",
     "test:audit-p1": "tsx script/run-audit-p1-tests.ts",
+    "test:recommendation-engine": "tsx script/test-recommendation-engine.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

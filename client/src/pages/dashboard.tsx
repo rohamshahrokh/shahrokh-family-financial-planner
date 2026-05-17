@@ -112,6 +112,7 @@ import AIInsightsCard from "@/components/AIInsightsCard";
 import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import CFODashboardWidget from "@/components/CFODashboardWidget";
 import BestMoveCard from "@/components/BestMoveCard";
+import ActionCentre from "@/components/ActionCentre";
 import { getBestMoveRecommendation, type BestMoveLedger } from "@/lib/bestMoveEngine";
 import DepositPowerCard from "@/components/DepositPowerCard";
 import FIREPathCard from "@/components/FIREPathCard";
@@ -3414,6 +3415,11 @@ export default function DashboardPage() {
             </div>
           );
         })()}
+      </div>
+
+      {/* ACTION CENTRE — Unified Strategic Brain (recommendation system V2) */}
+      <div className="px-4 pb-4 db-section-action-centre">
+        <ActionCentre />
       </div>
 
       {/* BEST MOVE CARD */}
