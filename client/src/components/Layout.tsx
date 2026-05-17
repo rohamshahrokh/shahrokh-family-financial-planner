@@ -35,19 +35,21 @@ import {
 // ─── Navigation Structure ─────────────────────────────────────────────────────
 // Each step maps to a life stage in the wealth-building journey.
 
-// FWL Phase 7 — Executive-flow grouping. Same 4 steps, sharper sublabels:
-//   Snapshot  → "Today" (where am I right now)
-//   Strategy  → "Plan" (where am I going)
-//   Forecast  → "Project" (will it work)
-//   Action    → "Execute" (what do I do this week)
-// The Decision Engine moves to Action because it's the family-office command
-// brain that drives the weekly action queue — not a forecast.
+// FWL Phase 7 (polish) — Unified visible journey across sidebar + animated
+// dashboard timeline. Canonical labels are TODAY / PLAN / FUTURE / MOVE.
+// The internal terms (Snapshot / Strategy / Forecast / Action) survive as
+// sublabels so the routing taxonomy stays stable and discoverable.
+//   TODAY  · Snapshot  — Where am I now?
+//   PLAN   · Strategy  — What is my financial plan?
+//   FUTURE · Forecast  — Where am I heading?
+//   MOVE   · Action    — What should I do next?
+// The Decision Engine sits in MOVE because it drives the weekly action queue.
 const NAV_STEPS = [
   {
     id: "snapshot",
     step: 1,
-    label: "Snapshot",
-    sublabel: "Today · Where am I",
+    label: "Today",
+    sublabel: "Snapshot · Where am I now",
     badgeClass: "step-1",
     items: [
       { href: "/dashboard",       label: "Executive Overview",  icon: LayoutDashboard, adminOnly: false },
@@ -62,8 +64,8 @@ const NAV_STEPS = [
   {
     id: "strategy",
     step: 2,
-    label: "Strategy",
-    sublabel: "Plan · Where am I going",
+    label: "Plan",
+    sublabel: "Strategy · What is my plan",
     badgeClass: "step-2",
     items: [
       { href: "/financial-plan",  label: "Family Plan",         icon: ClipboardList,   adminOnly: false },
@@ -79,8 +81,8 @@ const NAV_STEPS = [
   {
     id: "forecast",
     step: 3,
-    label: "Forecast",
-    sublabel: "Project · Will it work",
+    label: "Future",
+    sublabel: "Forecast · Where am I heading",
     badgeClass: "step-3",
     items: [
       { href: "/ai-forecast-engine", label: "Forecast Engine",      icon: Sigma,         adminOnly: true  },
@@ -95,8 +97,8 @@ const NAV_STEPS = [
   {
     id: "action",
     step: 4,
-    label: "Action",
-    sublabel: "Execute · This week",
+    label: "Move",
+    sublabel: "Action · What should I do next",
     badgeClass: "step-4",
     items: [
       // Decision Engine moves here in Phase 7 — it's the executive brain that
@@ -157,13 +159,14 @@ function isSupportActive(location: string): boolean {
 
 function WealthOSLogo() {
   return (
-    <div className="flex items-center gap-2.5">
+    <div className="flex items-center gap-2.5 min-w-0">
       <svg
         width="30"
         height="30"
         viewBox="0 0 36 36"
         fill="none"
         aria-label="Family Wealth Lab"
+        className="shrink-0"
       >
         <rect width="36" height="36" rx="9" fill="hsl(42,80%,52%)" />
         {/* W shape */}
@@ -178,12 +181,15 @@ function WealthOSLogo() {
         {/* Dot at center peak */}
         <circle cx="18" cy="16" r="1.5" fill="hsl(222,22%,7%)" />
       </svg>
-      <div className="leading-none">
-        <div className="text-[11px] font-bold tracking-wider text-foreground uppercase">
+      {/* FWL Phase 7 polish — wordmark stays on a single line and shrinks
+          letter-spacing slightly on narrow screens so it never wraps into
+          the close button on mobile. */}
+      <div className="leading-none min-w-0">
+        <div className="text-[11px] font-bold tracking-wider text-foreground uppercase whitespace-nowrap">
           FamilyWealth
         </div>
         <div
-          className="text-[10px] font-medium tracking-widest uppercase"
+          className="text-[10px] font-medium tracking-widest uppercase whitespace-nowrap"
           style={{ color: "hsl(var(--gold))" }}
         >
           Lab
@@ -287,18 +293,28 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // ─── Sidebar JSX (inlined — NOT a nested component to avoid remount on nav) ──
   const sidebarJsx = (
     <>
-      {/* Logo + close (mobile) */}
+      {/* Logo + close (mobile)
+          FWL Phase 7 polish — mobile-safe header:
+            • Reserves env(safe-area-inset-top) so the wordmark/close button
+              clear the iOS status bar / notch.
+            • Slightly taller (min-h on mobile) so wordmark doesn't crowd the
+              close affordance.
+            • The logo gets min-w-0 so the wordmark can shrink/wrap safely
+              on very narrow devices instead of overlapping the close icon. */}
       <div
-        className="flex items-center justify-between px-4 py-4"
+        className="flex items-center justify-between gap-3 px-4 sidebar-mobile-safe-header"
         style={{ borderBottom: "1px solid hsl(var(--border))" }}
       >
-        <WealthOSLogo />
+        <div className="min-w-0 flex-1">
+          <WealthOSLogo />
+        </div>
         <Button
           variant="ghost"
           size="icon"
-          className="lg:hidden w-7 h-7"
+          className="lg:hidden w-8 h-8 shrink-0"
           onClick={() => setMobileOpen(false)}
           data-testid="button-close-mobile-nav"
+          aria-label="Close navigation"
         >
           <X className="w-4 h-4" />
         </Button>
@@ -354,11 +370,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     <span className="block text-[11px] font-bold uppercase tracking-widest">
                       {stepDef.label}
                     </span>
-                    {isActiveSection && (
-                      <span className="block text-[9px] font-medium opacity-70 mt-0.5">
-                        {stepDef.sublabel}
-                      </span>
-                    )}
+                    {/* FWL Phase 7 polish — always show the canonical
+                        sublabel (Snapshot / Strategy / Forecast / Action) so
+                        the journey mapping is visible everywhere. */}
+                    <span
+                      className="block text-[9px] font-medium uppercase tracking-wider mt-0.5"
+                      style={{
+                        color: isActiveSection ? accentColor : "hsl(var(--muted-foreground))",
+                        opacity: isActiveSection ? 0.8 : 0.55,
+                      }}
+                    >
+                      {stepDef.sublabel}
+                    </span>
                   </div>
                 </div>
                 <ChevronDown
@@ -683,17 +706,18 @@ function TopBarBreadcrumb({ location, isAdmin }: { location: string; isAdmin: bo
       stepLabel = "Support";
       pageLabel = supportMatch.label;
     } else {
-      stepLabel = "Snapshot";
+      stepLabel = "Today";
       pageLabel = "Overview";
     }
   }
 
+  // FWL Phase 7 polish — keyed by the new canonical visible labels.
   const stepColorMap: Record<string, string> = {
-    Snapshot: "hsl(var(--intelligence-light))",
-    Strategy: "hsl(var(--gold-light))",
-    Forecast: "hsl(var(--forecast-light))",
-    Action:   "hsl(var(--success-light))",
-    Support:  "hsl(var(--muted-foreground))",
+    Today:   "hsl(var(--intelligence-light))",
+    Plan:    "hsl(var(--gold-light))",
+    Future:  "hsl(var(--forecast-light))",
+    Move:    "hsl(var(--success-light))",
+    Support: "hsl(var(--muted-foreground))",
   };
 
   return (

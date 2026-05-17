@@ -3700,6 +3700,24 @@ input[type="number"] {
   align-items: center;
 }
 
+/* ── Mobile sidebar header: reserves iOS safe-area top so the logo, wordmark
+   and close button never overlap the status bar / notch / phone time area.
+   On desktop (lg+) the sidebar is static and doesn't need the inset, so we
+   keep a normal 16px top padding there. ───────────────────────────────────── */
+.sidebar-mobile-safe-header {
+  /* Mobile/tablet defaults */
+  padding-top: calc(14px + env(safe-area-inset-top));
+  padding-bottom: 14px;
+  min-height: calc(64px + env(safe-area-inset-top));
+}
+@media (min-width: 1024px) {
+  .sidebar-mobile-safe-header {
+    padding-top: 16px;
+    padding-bottom: 16px;
+    min-height: 0;
+  }
+}
+
 /* ── DEMO banner: compact one-liner on mobile ────────────────────────────── */
 @media (max-width: 768px) {
   .demo-banner-text {
@@ -3853,6 +3871,29 @@ body {
   /* ChartViewToggle: hide on mobile */
   .chart-view-toggle-header {
     display: none !important;
+  }
+}
+
+/* ── FWL Phase 7 polish: mobile dashboard top-stack spacing ──────────────────
+   Tightens vertical gaps between the Smart-Assumptions pill, the animated
+   intelligence timeline (WealthFlowBanner), the Welcome card, and the
+   Executive Overview so the mobile narrative reads tighter and more premium.
+   Desktop is untouched (rules are gated by ≤1023px).                          */
+@media (max-width: 1023px) {
+  .db-section-smart-assumptions {
+    padding-top: 10px !important;
+    padding-bottom: 4px !important;
+  }
+  /* Timeline sits directly under the pill — reduce its own top spacing.
+     The WealthFlowBanner uses its own internal padding; we only nudge the
+     wrapper. */
+  .db-section-networth + .db-section-networth {
+    padding-top: 0 !important;
+  }
+  /* Welcome / hero card section (mobile order-3) — pull closer to the timeline. */
+  .db-section-networth.order-3 {
+    padding-top: 4px !important;
+    padding-bottom: 12px !important;
   }
 }
 

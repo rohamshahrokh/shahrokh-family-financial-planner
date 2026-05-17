@@ -105,6 +105,7 @@ import {
   Database,
   Unlock,
   Lock,
+  Sparkles,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -1875,11 +1876,57 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-background text-foreground pb-16">
 
       {/* ══════════════════════════════════════════════════════════════════
-          FWL PHASE 7 — EXECUTIVE DASHBOARD (narrative-first hierarchy)
-          Reads in <15s. Preserves current visual identity. Existing deeper
-          panels remain below under "Deep dive" collapsible sections.
+          FWL PHASE 7 (polish) — Top stack uses CSS `order` on mobile so the
+          narrative flow is intelligence-first:
+            mobile  : Smart-assumptions pill → Timeline → Welcome → Executive
+            desktop : (unchanged) Executive → Timeline → Welcome
+          Wrapped in flex-col so children can reorder via order-* classes.
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-4 pb-2">
+      <div className="flex flex-col">
+
+      {/* MOBILE-ONLY: compact Smart-Assumptions / Forecast pill row.
+          Sits at the very top of the mobile flow as the contextual header.
+          Hidden on lg+ where the desktop hero badges already surface it. */}
+      <div className="px-4 pt-3 pb-1 lg:hidden order-1 db-section-smart-assumptions">
+        <Link href="/ai-forecast-engine">
+          <span
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer transition-all hover:brightness-110 ${
+              forecastMode === "monte-carlo"
+                ? "bg-purple-500/10 border border-purple-500/30 text-purple-300"
+                : forecastMode === "year-by-year"
+                ? "bg-sky-500/10 border border-sky-500/30 text-sky-300"
+                : profile === "aggressive"
+                ? "bg-rose-500/10 border border-rose-500/30 text-rose-300"
+                : profile === "conservative"
+                ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
+                : "bg-blue-500/10 border border-blue-500/30 text-blue-300"
+            }`}
+            data-testid="badge-smart-assumptions-mobile"
+            title="Tap to change forecast assumptions"
+          >
+            <Sparkles className="w-3 h-3" />
+            <span className="opacity-70">Smart assumptions ·</span>{" "}
+            {
+              forecastMode === "monte-carlo"
+                ? `Monte Carlo${monteCarloResult ? " (median)" : ""}`
+                : forecastMode === "year-by-year"
+                ? "Year-by-Year"
+                : profile === "aggressive"
+                ? "Aggressive"
+                : profile === "conservative"
+                ? "Conservative"
+                : "Base (Moderate)"
+            }
+            <ChevronRight className="w-3 h-3 opacity-70" />
+          </span>
+        </Link>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          FWL PHASE 7 — EXECUTIVE DASHBOARD (narrative-first hierarchy)
+          Mobile order 4 (after timeline + welcome). Desktop order 1.
+          ═════════════════════════════════════════════════════════════════ */}
+      <div className="px-4 pt-4 pb-2 order-4 lg:order-1">
         <ExecutiveDashboard {...phase7ExecProps} />
       </div>
 
@@ -1888,7 +1935,7 @@ export default function DashboardPage() {
           4 cards: Net Worth / Cash Today / Monthly Surplus / Deposit Power
           + Forecast selector badge
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-3 pb-2 db-section-hero-kpis">
+      <div className="px-4 pt-3 pb-2 db-section-hero-kpis order-5 lg:order-2">
         <div className="grid grid-cols-2 gap-2 mb-2">
           {/* Net Worth */}
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
@@ -1949,14 +1996,16 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          WEALTH FLOW BANNER
+          WEALTH FLOW BANNER (animated intelligence timeline)
+          Mobile order 2 (after Smart-Assumptions pill). Desktop order 3.
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section-networth"><WealthFlowBanner /></div>
+      <div className="db-section-networth order-2 lg:order-3"><WealthFlowBanner /></div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          HERO SECTION
+          HERO SECTION — welcome / narrative identity
+          Mobile order 3. Desktop order 4.
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-4 pb-4 db-section-networth">
+      <div className="px-4 pt-4 pb-4 db-section-networth order-3 lg:order-4">
         <div className="flex flex-col lg:flex-row gap-4 items-stretch">
 
           {/* Left — Family welcome card */}
@@ -2041,6 +2090,8 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      </div>{/* /flex-col top stack wrapper */}
 
       {/* ══════════════════════════════════════════════════════════════════
           DATA-AVAILABILITY BANNER
