@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { useForecastStore } from '@/lib/forecastStore';
 import { useAppStore } from '@/lib/store';
-import { computeUnifiedBestMove, type UnifiedBestMoveResult } from '@/lib/recommendationEngine';
+import { computeUnifiedBestMove, type UnifiedBestMoveResult, type Recommendation } from '@/lib/recommendationEngine';
 import { formatCurrency } from '@/lib/finance';
 import { maskValue } from '@/components/PrivacyMask';
 
@@ -88,6 +88,40 @@ function trajectoryFromGrowth(start: number, end: number): { delta: number; pct:
     pct,
     label: pct >= 50 ? 'Strong growth' : pct >= 20 ? 'Steady growth' : pct >= 5 ? 'Modest growth' : pct >= 0 ? 'Flat' : 'Drawdown',
   };
+}
+
+/**
+ * Concise card-preview copy for a recommendation. The Strategic Priorities
+ * and Action Queue cards have very limited horizontal real estate (clamped
+ * to ~2 lines on desktop, ~1 line in the expanded list). Full reasoning
+ * paragraphs — especially the DCA recommendation, which now embeds the full
+ * surplus-reconciliation explanation — get truncated mid-sentence and read
+ * as broken copy.
+ *
+ * Resolution rules:
+ *   1. Recommendations with a `surplusReconciliation` block render a single
+ *      reconciled sentence: "DCA $X/mo · within $Y safe surplus
+ *      (income $A − expenses $B − debt $C)". Full breakdown lives in the
+ *      Daily Briefing reconciliation panel + "Full plan" link.
+ *   2. Everything else falls through to the first sentence of `reasoning`
+ *      (period-terminated), so the card never cuts off in the middle of a
+ *      clause.
+ */
+function priorityPreview(rec: Recommendation): string {
+  const fmt = (n: number) => {
+    if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+    if (Math.abs(n) >= 1_000)     return `$${Math.round(n / 1_000)}K`;
+    return `$${Math.round(n)}`;
+  };
+  const sr = rec.surplusReconciliation;
+  if (sr) {
+    return `${fmt(sr.recommendedMonthlyAmount)}/mo · within ${fmt(sr.safeDeployableSurplus)} safe surplus (income ${fmt(sr.monthlyIncomeUsed)} − expenses ${fmt(sr.monthlyExpensesUsed)})`;
+  }
+  const reasoning = rec.reasoning ?? '';
+  // Split at the first sentence terminator so card copy reads as a complete
+  // thought even when CSS line-clamping shortens it further.
+  const firstSentence = reasoning.match(/^[^.!?]+[.!?]/)?.[0] ?? reasoning;
+  return firstSentence.trim();
 }
 
 // ─── 1. ExecutiveHeader ──────────────────────────────────────────────────────
@@ -190,16 +224,30 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
         {/* Trajectory — Monte Carlo P50 is the ONLY canonical source.
             When MC has not been run we show a neutral "Monte Carlo pending"
             state instead of a deterministic dollar value, so the dashboard
-            never presents a deterministic figure as the official trajectory. */}
+            never presents a deterministic figure as the official trajectory.
+
+            Layout polish:
+              • Label and badge sit on their own row with `flex-wrap` so the
+                PENDING/MC P50 badge can drop below the label on narrow
+                screens instead of overlapping the "10y Trajectory" copy.
+              • Source line uses `text-foreground/70` (not `muted-foreground/70`)
+                so the dark theme keeps WCAG-AA contrast on small text.
+              • The deterministic baseline is hidden behind a `<details>`
+                disclosure ("Show deterministic baseline (non-canonical)")
+                so it is never visible by default, but the user can still
+                expand it for a sanity check. */}
         <div className="px-4 py-3" data-testid="executive-trajectory">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1 flex items-center gap-1">
-            <span>10y Trajectory</span>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
+              10y Trajectory
+            </span>
             <span
-              className="text-[8px] font-bold px-1 py-0.5 rounded"
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
               style={{
-                color: hasMcTrajectory ? 'hsl(280,80%,72%)' : 'hsl(215,15%,65%)',
-                background: hasMcTrajectory ? 'hsl(280,80%,12%)' : 'hsl(215,15%,12%)',
-                border: `1px solid ${hasMcTrajectory ? 'hsl(280,80%,30%)' : 'hsl(215,15%,30%)'}`,
+                color: hasMcTrajectory ? 'hsl(280,85%,78%)' : 'hsl(215,15%,78%)',
+                background: hasMcTrajectory ? 'hsl(280,80%,14%)' : 'hsl(215,15%,14%)',
+                border: `1px solid ${hasMcTrajectory ? 'hsl(280,80%,35%)' : 'hsl(215,15%,35%)'}`,
+                letterSpacing: '0.04em',
               }}
               data-testid="executive-trajectory-source-badge"
             >
@@ -220,7 +268,8 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
                 {traj.pct >= 0 ? '+' : ''}{traj.pct.toFixed(0)}% · {trajectoryYearLabel}
               </div>
               <div
-                className="text-[9px] mt-0.5 text-muted-foreground/80 leading-tight"
+                className="text-[10px] mt-0.5 leading-snug"
+                style={{ color: 'hsl(var(--foreground) / 0.65)' }}
                 data-testid="executive-trajectory-source"
               >
                 {trajectorySourceLabel}
@@ -229,42 +278,60 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
           ) : (
             <>
               {/* Neutral pending state — NO deterministic dollar value as
-                  the primary trajectory figure. The deterministic baseline
-                  is intentionally NOT rendered as the headline number. */}
+                  the primary trajectory figure. */}
               <div
                 className="text-sm font-bold leading-tight"
-                style={{ color: 'hsl(215,15%,72%)' }}
+                style={{ color: 'hsl(215,15%,82%)' }}
                 data-testid="executive-trajectory-pending"
               >
                 Monte Carlo pending
               </div>
-              <div className="text-[10px] mt-1 text-muted-foreground">
+              <div
+                className="text-[11px] mt-1 leading-snug"
+                style={{ color: 'hsl(var(--foreground) / 0.70)' }}
+              >
                 No canonical P50 yet · {trajectoryYearLabel}
               </div>
               <Link href="/ai-forecast-engine">
                 <span
-                  className="inline-block mt-1 text-[10px] font-semibold text-primary hover:underline cursor-pointer"
+                  className="inline-block mt-1.5 text-[11px] font-semibold text-primary hover:underline cursor-pointer"
                   data-testid="executive-trajectory-cta"
                 >
                   Run Monte Carlo →
                 </span>
               </Link>
               <div
-                className="text-[9px] mt-1 text-muted-foreground/70 leading-tight"
+                className="text-[10px] mt-1 leading-snug"
+                style={{ color: 'hsl(var(--foreground) / 0.55)' }}
                 data-testid="executive-trajectory-source"
               >
                 {trajectorySourceLabel}
               </div>
-              {/* Deterministic figure demoted to a small secondary line,
-                  clearly labelled as non-canonical so it cannot be
-                  mistaken for the official trajectory. */}
+              {/* Deterministic baseline is collapsed by default. Users can
+                  expand it for sanity-checking, but it never visually
+                  competes with the canonical Monte Carlo P50. */}
               {Number.isFinite(p.year10NW) && p.year10NW > 0 && (
-                <div
-                  className="text-[9px] mt-1 text-muted-foreground/60 leading-tight italic"
-                  data-testid="executive-trajectory-deterministic-secondary"
+                <details
+                  className="mt-1.5 group"
+                  data-testid="executive-trajectory-deterministic-details"
                 >
-                  Deterministic baseline (non-canonical): {mv(formatCurrency(p.year10NW, true))}
-                </div>
+                  <summary
+                    className="text-[10px] cursor-pointer select-none hover:underline list-none"
+                    style={{ color: 'hsl(var(--foreground) / 0.55)' }}
+                  >
+                    Show deterministic baseline (non-canonical)
+                  </summary>
+                  <div
+                    className="text-[10px] mt-1 italic leading-snug"
+                    style={{ color: 'hsl(var(--foreground) / 0.60)' }}
+                    data-testid="executive-trajectory-deterministic-secondary"
+                  >
+                    Deterministic baseline (non-canonical): {mv(formatCurrency(p.year10NW, true))}
+                    <span className="block mt-0.5 not-italic" style={{ color: 'hsl(var(--foreground) / 0.45)' }}>
+                      Straight-line projection — ignores volatility &amp; sequence-of-returns risk.
+                    </span>
+                  </div>
+                </details>
               )}
             </>
           )}
@@ -584,7 +651,9 @@ function StrategicPriorities({ result }: { result: UnifiedBestMoveResult | null 
                   <p className="text-[9px] text-muted-foreground tabular-nums">conf {(r.confidenceScore * 100).toFixed(0)}%</p>
                 </div>
               </div>
-              <p className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5 leading-snug">{r.reasoning}</p>
+              <p className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5 leading-snug">
+                {priorityPreview(r)}
+              </p>
             </div>
           </li>
         ))}
@@ -609,7 +678,7 @@ function StrategicPriorities({ result }: { result: UnifiedBestMoveResult | null 
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[11px] font-medium text-foreground/90 leading-snug truncate">{r.title}</p>
-                    <p className="text-[10px] text-muted-foreground line-clamp-1">{r.reasoning}</p>
+                    <p className="text-[10px] text-muted-foreground line-clamp-1">{priorityPreview(r)}</p>
                   </div>
                   {r.benefitLabel && (
                     <p className="text-[10px] text-emerald-400 font-mono shrink-0">{mv(r.benefitLabel)}</p>

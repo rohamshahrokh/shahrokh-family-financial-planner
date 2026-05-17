@@ -806,9 +806,13 @@ function etfDCA(
     urgency: 'this_year',
     riskLevel: 'Med',
     reasoning:
-      `${surplusReconciliation.explanation} ` +
-      `At ${fmt(dca)}/mo into broad-market ETFs (e.g. VAS+VGS) compounding at ~${(retPct * 100).toFixed(1)}%, ` +
-      `expected gain ${fmt(gain)}/yr. Dollar-cost averaging removes market-timing risk.`,
+      // Lead with the strategic story (one short sentence) so card previews
+      // and the Daily Briefing summary read cleanly without truncation. The
+      // full reconciliation breakdown lives in the `surplusReconciliation`
+      // block, which the Daily Briefing renders below as a structured grid.
+      `${fmt(dca)}/mo into broad-market ETFs (VAS+VGS) is within your safe deployable surplus ` +
+      `and compounds at ~${(retPct * 100).toFixed(1)}%, an expected ${fmt(gain)}/yr. ` +
+      `Dollar-cost averaging removes market-timing risk. ${surplusReconciliation.explanation}`,
     steps: [
       { step: 'Set up auto-buy on a discount broker' },
       { step: 'Diversify across VAS / VGS / VAE for global coverage' },
