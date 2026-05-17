@@ -32,6 +32,9 @@ import { useAppStore } from '@/lib/store';
 import { computeUnifiedBestMove, type UnifiedBestMoveResult, type Recommendation } from '@/lib/recommendationEngine';
 import { formatCurrency } from '@/lib/finance';
 import { maskValue } from '@/components/PrivacyMask';
+import { MetricExplainer } from '@/components/intelligence/MetricExplainer';
+import { SystemInterpretation, pickDominantReading } from '@/components/intelligence/SystemInterpretation';
+import { readMetric, getMetricExplanation, type MetricReading } from '@/lib/metricExplanations';
 
 // ─── Public props ────────────────────────────────────────────────────────────
 
@@ -213,7 +216,21 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
 
         {/* Risk state */}
         <div className="px-4 py-3">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1">Risk State</div>
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1 flex items-center gap-1">
+            <span>Risk State</span>
+            <MetricExplainer
+              metricId="risk-state"
+              value={p.riskScore}
+              reading={{
+                id: 'risk-state',
+                value: p.riskScore,
+                displayValue: `${p.riskScore} / 100 · ${p.riskLabel}`,
+                state: readMetric(getMetricExplanation('risk-state')!, p.riskScore).state,
+                interpretation: readMetric(getMetricExplanation('risk-state')!, p.riskScore).interpretation,
+              }}
+              size={12}
+            />
+          </div>
           <div className="text-lg font-extrabold leading-none flex items-center gap-1" style={{ color: riskTone }}>
             <Shield className="w-3.5 h-3.5" />
             {p.riskLabel}
@@ -241,6 +258,7 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
             <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
               10y Trajectory
             </span>
+            <MetricExplainer metricId="monte-carlo-probability" size={12} />
             <span
               className="text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
               style={{
@@ -339,7 +357,10 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
 
         {/* Macro — desktop only on mobile shown in header pill */}
         <div className="px-4 py-3 hidden md:block">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1">Macro Regime</div>
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1 flex items-center gap-1">
+            <span>Macro Regime</span>
+            <MetricExplainer metricId="macro-regime" size={12} />
+          </div>
           <div className="text-sm font-bold leading-none" style={{ color: macro.tone }}>{macro.label}</div>
           <div className="text-[10px] text-muted-foreground mt-1">Adaptive · global</div>
         </div>
@@ -408,9 +429,21 @@ function DailyBriefing({ result }: { result: UnifiedBestMoveResult | null }) {
           </div>
           <div>
             <div className="text-sm font-bold text-foreground">Daily Briefing</div>
-            <div className="text-[10px] text-muted-foreground">
-              Narrative summary · {unified.signalCoverage.length} signals · confidence{' '}
+            <div className="text-[10px] text-muted-foreground flex items-center gap-1 flex-wrap">
+              <span>Narrative summary · {unified.signalCoverage.length} signals · confidence</span>
               <span style={{ color: confidenceTone }}>{confidencePct}%</span>
+              <MetricExplainer
+                metricId="confidence"
+                value={confidencePct}
+                reading={{
+                  id: 'confidence',
+                  value: confidencePct,
+                  displayValue: `${confidencePct}%`,
+                  state: readMetric(getMetricExplanation('confidence')!, confidencePct).state,
+                  interpretation: readMetric(getMetricExplanation('confidence')!, confidencePct).interpretation,
+                }}
+                size={11}
+              />
             </div>
           </div>
         </div>
@@ -504,8 +537,9 @@ function DailyBriefing({ result }: { result: UnifiedBestMoveResult | null }) {
           className="px-4 py-3 border-t border-border/30"
           data-testid="surplus-reconciliation"
         >
-          <div className="text-[10px] font-bold uppercase tracking-widest mb-1.5 text-muted-foreground">
-            Surplus reconciliation
+          <div className="text-[10px] font-bold uppercase tracking-widest mb-1.5 text-muted-foreground flex items-center gap-1">
+            <span>Surplus reconciliation</span>
+            <MetricExplainer metricId="dca-recommendation" size={11} />
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-1 text-[11px]">
             <div className="flex justify-between gap-2">
@@ -617,7 +651,10 @@ function StrategicPriorities({ result }: { result: UnifiedBestMoveResult | null 
             <Target className="w-4 h-4" style={{ color: 'hsl(210,80%,70%)' }} />
           </div>
           <div>
-            <div className="text-sm font-bold text-foreground">Strategic Priorities</div>
+            <div className="text-sm font-bold text-foreground flex items-center gap-1">
+              <span>Strategic Priorities</span>
+              <MetricExplainer metricId="scenario-confidence" size={11} />
+            </div>
             <div className="text-[10px] text-muted-foreground">Top 3 by impact-adjusted confidence</div>
           </div>
         </div>
@@ -697,6 +734,9 @@ function StrategicPriorities({ result }: { result: UnifiedBestMoveResult | null 
 
 interface HealthIndicator {
   label: string;
+  metricId: string;
+  /** Live numeric value driving the semantic state. */
+  rawValue: number;
   value: string;
   tone: string;
   Icon: React.ComponentType<{ className?: string }>;
@@ -721,6 +761,8 @@ function FinancialHealthStrip(p: ExecutiveDashboardProps) {
   const indicators: HealthIndicator[] = [
     {
       label: 'Liquidity',
+      metricId: 'liquidity',
+      rawValue: liquidityMonths,
       value: `${liquidityMonths.toFixed(1)} mo`,
       tone: liquidityMonths >= 6 ? 'hsl(142,60%,55%)' : liquidityMonths >= 3 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
       Icon: Wallet,
@@ -728,6 +770,8 @@ function FinancialHealthStrip(p: ExecutiveDashboardProps) {
     },
     {
       label: 'Leverage',
+      metricId: 'leverage',
+      rawValue: leveragePct,
       value: `${leveragePct.toFixed(0)}%`,
       tone: leveragePct < 50 ? 'hsl(142,60%,55%)' : leveragePct < 70 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
       Icon: Layers,
@@ -735,6 +779,8 @@ function FinancialHealthStrip(p: ExecutiveDashboardProps) {
     },
     {
       label: 'Survivability',
+      metricId: 'survivability',
+      rawValue: survivability,
       value: survivability >= 99 ? '∞' : `${survivability.toFixed(1)} mo`,
       tone: survivability >= 12 ? 'hsl(142,60%,55%)' : survivability >= 6 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
       Icon: Shield,
@@ -742,6 +788,8 @@ function FinancialHealthStrip(p: ExecutiveDashboardProps) {
     },
     {
       label: 'FIRE',
+      metricId: 'fire-progress',
+      rawValue: p.fireProgressPct,
       value: `${Math.round(p.fireProgressPct)}%`,
       tone: p.fireProgressPct >= 50 ? 'hsl(142,60%,55%)' : p.fireProgressPct >= 20 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
       Icon: Flame,
@@ -749,6 +797,8 @@ function FinancialHealthStrip(p: ExecutiveDashboardProps) {
     },
     {
       label: 'Runway',
+      metricId: 'runway',
+      rawValue: liquidityMonths,
       value: `${liquidityMonths.toFixed(0)} mo`,
       tone: liquidityMonths >= 12 ? 'hsl(142,60%,55%)' : liquidityMonths >= 6 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
       Icon: Clock,
@@ -756,12 +806,52 @@ function FinancialHealthStrip(p: ExecutiveDashboardProps) {
     },
     {
       label: 'Debt Pressure',
+      metricId: 'debt-pressure',
+      rawValue: debtPressure,
       value: `${debtPressure.toFixed(0)}%`,
       tone: debtPressure < 30 ? 'hsl(142,60%,55%)' : debtPressure < 45 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
       Icon: BarChart2,
       caption: 'Service / cashflow',
     },
   ];
+
+  // Live readings used by the system-interpretation line.
+  const readings: MetricReading[] = indicators
+    .map((ind) => {
+      const exp = getMetricExplanation(ind.metricId);
+      return exp ? readMetric(exp, ind.rawValue, ind.value) : undefined;
+    })
+    .filter((r): r is MetricReading => !!r);
+
+  // Compose a calm two-clause system narrative from the live readings.
+  const liquidityRead = readings.find((r) => r.id === 'liquidity');
+  const leverageRead = readings.find((r) => r.id === 'leverage');
+  const debtPressureRead = readings.find((r) => r.id === 'debt-pressure');
+  const survivabilityRead = readings.find((r) => r.id === 'survivability');
+
+  const goodish = new Set(['excellent', 'strong', 'healthy']);
+  const interpretationText = (() => {
+    const liqGood = liquidityRead && goodish.has(liquidityRead.state);
+    const levOk = leverageRead && goodish.has(leverageRead.state);
+    const debtOk = debtPressureRead && goodish.has(debtPressureRead.state);
+    const survOk = survivabilityRead && goodish.has(survivabilityRead.state);
+
+    const parts: string[] = [];
+    if (liqGood && !levOk) parts.push('Liquidity offsets leverage risk');
+    else if (liqGood && levOk) parts.push('Balance-sheet posture is balanced — liquidity and leverage in tolerance');
+    else if (!liqGood && levOk) parts.push('Leverage is comfortable, but liquidity is the upgrade lever');
+    else parts.push('Balance-sheet is the constraint — rebuild liquidity before scaling leverage');
+
+    if (debtOk) parts.push('debt is strategic, not distressed');
+    else parts.push('debt pressure is dominant — reduce balance before adding risk');
+
+    if (survOk) parts.push('cashflow resilience is healthy under moderate stress');
+    else parts.push('cashflow resilience is the upgrade lever');
+
+    return parts.join(' · ') + '.';
+  })();
+
+  const dominant = pickDominantReading(readings);
 
   return (
     <div
@@ -787,11 +877,23 @@ function FinancialHealthStrip(p: ExecutiveDashboardProps) {
       </div>
 
       <div className="grid grid-cols-3 md:grid-cols-6 divide-x divide-border/30 border-t border-border/30">
-        {indicators.map(ind => (
+        {indicators.map((ind) => (
           <div key={ind.label} className="px-3 py-2.5">
-            <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-widest font-bold text-muted-foreground mb-1">
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-widest font-bold text-muted-foreground mb-1">
               <ind.Icon className="w-3 h-3" />
-              {ind.label}
+              <span className="truncate">{ind.label}</span>
+              <MetricExplainer
+                metricId={ind.metricId}
+                value={ind.rawValue}
+                reading={{
+                  id: ind.metricId,
+                  value: ind.rawValue,
+                  displayValue: ind.value,
+                  state: readings.find((r) => r.id === ind.metricId)?.state ?? 'moderate',
+                  interpretation: readings.find((r) => r.id === ind.metricId)?.interpretation,
+                }}
+                size={11}
+              />
             </div>
             <div className="text-base font-extrabold tabular-nums leading-none" style={{ color: ind.tone }}>
               {ind.value}
@@ -800,6 +902,8 @@ function FinancialHealthStrip(p: ExecutiveDashboardProps) {
           </div>
         ))}
       </div>
+
+      <SystemInterpretation text={interpretationText} dominant={dominant} />
     </div>
   );
 }

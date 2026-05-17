@@ -20,6 +20,7 @@ import {
 } from '@/lib/recommendationEngine';
 import { maskValue } from '@/components/PrivacyMask';
 import { useAppStore } from '@/lib/store';
+import { MetricExplainer } from '@/components/intelligence/MetricExplainer';
 
 interface RiskFactorLike {
   id: string;
@@ -87,9 +88,23 @@ export default function UnifiedRiskPanel({ overallScore, topRisks }: Props) {
             <Shield className="w-4 h-4 text-sky-400" />
           </div>
           <div>
-            <p className="text-sm font-bold text-foreground">Risk Radar — Strategic brain</p>
-            <p className="text-[10px] text-muted-foreground">
-              From the unified recommendation engine · severity {surface.severity}
+            <p className="text-sm font-bold text-foreground flex items-center gap-1">
+              <span>Risk Radar — Strategic brain</span>
+              {typeof overallScore === 'number' && (
+                <MetricExplainer
+                  metricId="risk-state"
+                  value={overallScore}
+                  size={11}
+                />
+              )}
+            </p>
+            <p className="text-[10px] text-muted-foreground flex items-center gap-1 flex-wrap">
+              <span>From the unified recommendation engine · severity {surface.severity}</span>
+              <MetricExplainer
+                metricId="stress-signals"
+                value={surface.recommendations.length}
+                size={11}
+              />
             </p>
           </div>
         </div>
