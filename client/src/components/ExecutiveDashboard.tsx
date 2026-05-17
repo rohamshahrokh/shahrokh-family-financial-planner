@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { useForecastStore } from '@/lib/forecastStore';
 import { useAppStore } from '@/lib/store';
-import { computeUnifiedBestMove, type UnifiedBestMoveResult } from '@/lib/recommendationEngine';
+import { computeUnifiedBestMove, type UnifiedBestMoveResult, type Recommendation } from '@/lib/recommendationEngine';
 import { formatCurrency } from '@/lib/finance';
 import { maskValue } from '@/components/PrivacyMask';
 
@@ -42,7 +42,18 @@ export interface ExecutiveDashboardProps {
   totalLiab: number;
   monthlyExpenses: number;
   passiveIncome: number;
+  /** Deterministic 10y net worth (used only when Monte Carlo P50 is unavailable). */
   year10NW: number;
+  /**
+   * Canonical Monte Carlo P50 (median) net worth at the selected horizon.
+   * When provided AND non-null, this is the OFFICIAL 10Y trajectory figure
+   * shown in the Executive Overview header — matching the Wealth Projection
+   * (Monte Carlo) table to the dollar. When null/undefined the header falls
+   * back to `year10NW` (deterministic) with an explicit "deterministic" label.
+   */
+  trajectoryP50?: number | null;
+  /** Year that `trajectoryP50` represents (e.g. 2035). */
+  trajectoryYear?: number | null;
   fireProgressPct: number;
   fireCurrentAmt: number;
   fireTargetAmt: number;
@@ -79,13 +90,64 @@ function trajectoryFromGrowth(start: number, end: number): { delta: number; pct:
   };
 }
 
+/**
+ * Concise card-preview copy for a recommendation. The Strategic Priorities
+ * and Action Queue cards have very limited horizontal real estate (clamped
+ * to ~2 lines on desktop, ~1 line in the expanded list). Full reasoning
+ * paragraphs — especially the DCA recommendation, which now embeds the full
+ * surplus-reconciliation explanation — get truncated mid-sentence and read
+ * as broken copy.
+ *
+ * Resolution rules:
+ *   1. Recommendations with a `surplusReconciliation` block render a single
+ *      reconciled sentence: "DCA $X/mo · within $Y safe surplus
+ *      (income $A − expenses $B − debt $C)". Full breakdown lives in the
+ *      Daily Briefing reconciliation panel + "Full plan" link.
+ *   2. Everything else falls through to the first sentence of `reasoning`
+ *      (period-terminated), so the card never cuts off in the middle of a
+ *      clause.
+ */
+function priorityPreview(rec: Recommendation): string {
+  const fmt = (n: number) => {
+    if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+    if (Math.abs(n) >= 1_000)     return `$${Math.round(n / 1_000)}K`;
+    return `$${Math.round(n)}`;
+  };
+  const sr = rec.surplusReconciliation;
+  if (sr) {
+    return `${fmt(sr.recommendedMonthlyAmount)}/mo · within ${fmt(sr.safeDeployableSurplus)} safe surplus (income ${fmt(sr.monthlyIncomeUsed)} − expenses ${fmt(sr.monthlyExpensesUsed)})`;
+  }
+  const reasoning = rec.reasoning ?? '';
+  // Split at the first sentence terminator so card copy reads as a complete
+  // thought even when CSS line-clamping shortens it further.
+  const firstSentence = reasoning.match(/^[^.!?]+[.!?]/)?.[0] ?? reasoning;
+  return firstSentence.trim();
+}
+
 // ─── 1. ExecutiveHeader ──────────────────────────────────────────────────────
 
 function ExecutiveHeader(p: ExecutiveDashboardProps) {
   const { privacyMode } = useAppStore();
   const mv = (v: string) => maskValue(v, privacyMode);
   const macro = regimeLabel();
-  const traj = trajectoryFromGrowth(p.netWorth, p.year10NW);
+  // Source-of-truth resolution for the 10y trajectory shown in the header.
+  // Monte Carlo P50 is the ONLY canonical source of truth. When MC has not
+  // been run we MUST NOT show the deterministic projection as the primary
+  // trajectory — instead the card renders a neutral "Monte Carlo pending"
+  // state with a CTA to run the simulation. The deterministic figure is
+  // demoted to a small secondary line, clearly labelled "non-canonical".
+  const hasMcTrajectory = typeof p.trajectoryP50 === 'number' && Number.isFinite(p.trajectoryP50);
+  const trajectoryYearLabel = hasMcTrajectory && p.trajectoryYear
+    ? `${p.trajectoryYear} P50`
+    : `${new Date().getFullYear() + 9} horizon`;
+  const trajectorySourceLabel = hasMcTrajectory
+    ? 'Source: Monte Carlo P50'
+    : 'Source: Monte Carlo not yet run — open Forecast Engine to populate';
+  // `traj` (growth % vs today) is only computed when MC is available; the
+  // deterministic figure deliberately does NOT drive the primary card.
+  const traj = hasMcTrajectory
+    ? trajectoryFromGrowth(p.netWorth, p.trajectoryP50 as number)
+    : { delta: 0, pct: 0, label: 'Monte Carlo pending' };
   const surplusPositive = p.surplus >= 0;
   const riskTone =
     p.riskScore >= 70 ? 'hsl(142,60%,55%)'
@@ -159,15 +221,120 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
           <div className="text-[10px] text-muted-foreground mt-1 tabular-nums">{p.riskScore} / 100</div>
         </div>
 
-        {/* Trajectory */}
-        <div className="px-4 py-3">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1">10y Trajectory</div>
-          <div className="text-lg font-extrabold tabular-nums leading-none" style={{ color: 'hsl(210,80%,68%)' }}>
-            {mv(formatCurrency(p.year10NW, true))}
+        {/* Trajectory — Monte Carlo P50 is the ONLY canonical source.
+            When MC has not been run we show a neutral "Monte Carlo pending"
+            state instead of a deterministic dollar value, so the dashboard
+            never presents a deterministic figure as the official trajectory.
+
+            Layout polish:
+              • Label and badge sit on their own row with `flex-wrap` so the
+                PENDING/MC P50 badge can drop below the label on narrow
+                screens instead of overlapping the "10y Trajectory" copy.
+              • Source line uses `text-foreground/70` (not `muted-foreground/70`)
+                so the dark theme keeps WCAG-AA contrast on small text.
+              • The deterministic baseline is hidden behind a `<details>`
+                disclosure ("Show deterministic baseline (non-canonical)")
+                so it is never visible by default, but the user can still
+                expand it for a sanity check. */}
+        <div className="px-4 py-3" data-testid="executive-trajectory">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
+              10y Trajectory
+            </span>
+            <span
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+              style={{
+                color: hasMcTrajectory ? 'hsl(280,85%,78%)' : 'hsl(215,15%,78%)',
+                background: hasMcTrajectory ? 'hsl(280,80%,14%)' : 'hsl(215,15%,14%)',
+                border: `1px solid ${hasMcTrajectory ? 'hsl(280,80%,35%)' : 'hsl(215,15%,35%)'}`,
+                letterSpacing: '0.04em',
+              }}
+              data-testid="executive-trajectory-source-badge"
+            >
+              {hasMcTrajectory ? 'MC P50' : 'PENDING'}
+            </span>
           </div>
-          <div className="text-[10px] mt-1" style={{ color: traj.pct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
-            {traj.pct >= 0 ? '+' : ''}{traj.pct.toFixed(0)}% · {traj.label}
-          </div>
+
+          {hasMcTrajectory ? (
+            <>
+              <div
+                className="text-lg font-extrabold tabular-nums leading-none"
+                style={{ color: 'hsl(210,80%,68%)' }}
+                data-testid="executive-trajectory-value"
+              >
+                {mv(formatCurrency(p.trajectoryP50 as number, true))}
+              </div>
+              <div className="text-[10px] mt-1" style={{ color: traj.pct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
+                {traj.pct >= 0 ? '+' : ''}{traj.pct.toFixed(0)}% · {trajectoryYearLabel}
+              </div>
+              <div
+                className="text-[10px] mt-0.5 leading-snug"
+                style={{ color: 'hsl(var(--foreground) / 0.65)' }}
+                data-testid="executive-trajectory-source"
+              >
+                {trajectorySourceLabel}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Neutral pending state — NO deterministic dollar value as
+                  the primary trajectory figure. */}
+              <div
+                className="text-sm font-bold leading-tight"
+                style={{ color: 'hsl(215,15%,82%)' }}
+                data-testid="executive-trajectory-pending"
+              >
+                Monte Carlo pending
+              </div>
+              <div
+                className="text-[11px] mt-1 leading-snug"
+                style={{ color: 'hsl(var(--foreground) / 0.70)' }}
+              >
+                No canonical P50 yet · {trajectoryYearLabel}
+              </div>
+              <Link href="/ai-forecast-engine">
+                <span
+                  className="inline-block mt-1.5 text-[11px] font-semibold text-primary hover:underline cursor-pointer"
+                  data-testid="executive-trajectory-cta"
+                >
+                  Run Monte Carlo →
+                </span>
+              </Link>
+              <div
+                className="text-[10px] mt-1 leading-snug"
+                style={{ color: 'hsl(var(--foreground) / 0.55)' }}
+                data-testid="executive-trajectory-source"
+              >
+                {trajectorySourceLabel}
+              </div>
+              {/* Deterministic baseline is collapsed by default. Users can
+                  expand it for sanity-checking, but it never visually
+                  competes with the canonical Monte Carlo P50. */}
+              {Number.isFinite(p.year10NW) && p.year10NW > 0 && (
+                <details
+                  className="mt-1.5 group"
+                  data-testid="executive-trajectory-deterministic-details"
+                >
+                  <summary
+                    className="text-[10px] cursor-pointer select-none hover:underline list-none"
+                    style={{ color: 'hsl(var(--foreground) / 0.55)' }}
+                  >
+                    Show deterministic baseline (non-canonical)
+                  </summary>
+                  <div
+                    className="text-[10px] mt-1 italic leading-snug"
+                    style={{ color: 'hsl(var(--foreground) / 0.60)' }}
+                    data-testid="executive-trajectory-deterministic-secondary"
+                  >
+                    Deterministic baseline (non-canonical): {mv(formatCurrency(p.year10NW, true))}
+                    <span className="block mt-0.5 not-italic" style={{ color: 'hsl(var(--foreground) / 0.45)' }}>
+                      Straight-line projection — ignores volatility &amp; sequence-of-returns risk.
+                    </span>
+                  </div>
+                </details>
+              )}
+            </>
+          )}
         </div>
 
         {/* Macro — desktop only on mobile shown in header pill */}
@@ -331,6 +498,73 @@ function DailyBriefing({ result }: { result: UnifiedBestMoveResult | null }) {
         </div>
       )}
 
+      {/* Surplus reconciliation — only when the best move allocates a monthly $ amount */}
+      {best.surplusReconciliation && (
+        <div
+          className="px-4 py-3 border-t border-border/30"
+          data-testid="surplus-reconciliation"
+        >
+          <div className="text-[10px] font-bold uppercase tracking-widest mb-1.5 text-muted-foreground">
+            Surplus reconciliation
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-1 text-[11px]">
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Monthly income</span>
+              <span className="tabular-nums text-foreground" data-testid="surplus-recon-income">
+                {mv(formatCurrency(best.surplusReconciliation.monthlyIncomeUsed, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Monthly expenses</span>
+              <span className="tabular-nums text-foreground" data-testid="surplus-recon-expenses">
+                {mv(formatCurrency(best.surplusReconciliation.monthlyExpensesUsed, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Debt repayments</span>
+              <span className="tabular-nums text-foreground" data-testid="surplus-recon-debt">
+                {mv(formatCurrency(best.surplusReconciliation.monthlyDebtRepaymentsUsed, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Buffer top-up</span>
+              <span className="tabular-nums text-foreground">
+                {mv(formatCurrency(best.surplusReconciliation.bufferShortfallReserved, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground font-semibold">Safe deployable surplus</span>
+              <span
+                className="tabular-nums font-semibold"
+                style={{ color: 'hsl(142,60%,55%)' }}
+                data-testid="surplus-recon-safe"
+              >
+                {mv(formatCurrency(best.surplusReconciliation.safeDeployableSurplus, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground font-semibold">Recommended monthly DCA</span>
+              <span
+                className="tabular-nums font-semibold"
+                style={{ color: 'hsl(43,90%,62%)' }}
+                data-testid="surplus-recon-dca"
+              >
+                {mv(formatCurrency(best.surplusReconciliation.recommendedMonthlyAmount, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2 md:col-span-3">
+              <span className="text-muted-foreground">Remaining flexible buffer</span>
+              <span className="tabular-nums text-foreground">
+                {mv(formatCurrency(best.surplusReconciliation.remainingMonthlyBuffer, true))}
+              </span>
+            </div>
+          </div>
+          <div className="text-[10px] text-muted-foreground/80 mt-2 leading-snug">
+            Capped at the safe deployable surplus derived from the canonical ledger — never exceeds the dashboard headline surplus.
+          </div>
+        </div>
+      )}
+
       {/* Recommended action CTA */}
       {best.cta && (
         <div className="px-4 py-3 border-t border-border/30 flex items-center justify-between gap-3 flex-wrap">
@@ -417,7 +651,9 @@ function StrategicPriorities({ result }: { result: UnifiedBestMoveResult | null 
                   <p className="text-[9px] text-muted-foreground tabular-nums">conf {(r.confidenceScore * 100).toFixed(0)}%</p>
                 </div>
               </div>
-              <p className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5 leading-snug">{r.reasoning}</p>
+              <p className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5 leading-snug">
+                {priorityPreview(r)}
+              </p>
             </div>
           </li>
         ))}
@@ -442,7 +678,7 @@ function StrategicPriorities({ result }: { result: UnifiedBestMoveResult | null 
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[11px] font-medium text-foreground/90 leading-snug truncate">{r.title}</p>
-                    <p className="text-[10px] text-muted-foreground line-clamp-1">{r.reasoning}</p>
+                    <p className="text-[10px] text-muted-foreground line-clamp-1">{priorityPreview(r)}</p>
                   </div>
                   {r.benefitLabel && (
                     <p className="text-[10px] text-emerald-400 font-mono shrink-0">{mv(r.benefitLabel)}</p>

@@ -157,6 +157,24 @@ export interface Recommendation {
    * plan_promo_expiry). Surfacing these as structured data — rather than
    * weaving them into prose — lets the UI render them deterministically.
    */
+  /**
+   * Structured reconciliation block for any recommendation that allocates a
+   * monthly $ amount (currently DCA into ETFs). Lets every surface render the
+   * exact ledger inputs the cap was derived from so the recommended amount
+   * can never silently exceed the dashboard headline surplus.
+   */
+  surplusReconciliation?: {
+    monthlyIncomeUsed: number;
+    monthlyExpensesUsed: number;
+    monthlyDebtRepaymentsUsed: number;
+    bufferShortfallReserved: number;
+    safeDeployableSurplus: number;
+    recommendedMonthlyAmount: number;
+    remainingMonthlyBuffer: number;
+    /** Plain-English summary the UI can show without re-formatting. */
+    explanation: string;
+  };
+
   debtRationale?: {
     classification: string;          // class label e.g. "High-APR consumer debt"
     aprPct: number | null;           // effective APR % (null when unknown)
@@ -251,6 +269,23 @@ export interface UnifiedSignals {
     expiryDateISO?: string;
     taxDeductible?: boolean;
   }>;
+
+  /**
+   * Monthly debt service used to reduce the safe-deployable-surplus cap when
+   * the canonical ledger does not already include debt repayments in
+   * monthlyExpenses. See `selectMonthlyDebtService` in the dashboard data
+   * contract. When `monthlyExpenses` already includes debt rows this should
+   * be left undefined or 0.
+   */
+  monthlyDebtService?: number;
+
+  /**
+   * True when the source ledger already includes debt-repayment rows inside
+   * `monthlyExpenses`. Mirrors `selectExpensesIncludesDebt` so the engine can
+   * decide whether to subtract `monthlyDebtService` again when computing the
+   * safe deployable surplus.
+   */
+  expensesIncludeDebt?: boolean;
 
   /** Returns assumed. */
   etfExpectedReturn?: number;

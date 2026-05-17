@@ -1853,6 +1853,23 @@ export default function DashboardPage() {
   // Single composable surface that introduces narrative-first hierarchy at
   // the top of the dashboard. All values feed from the existing data
   // contract — no new sources, no architectural change.
+  // ── Canonical 10y trajectory source ────────────────────────────────────
+  // Executive Overview MUST present the SAME P50 value the Wealth Projection
+  // (Monte Carlo) table shows. We resolve the year-10 row (or the final fan
+  // point if the engine produced fewer rows) from `monteCarloResult.fan_data`
+  // and pass it through as `trajectoryP50`. When MC has not been run the
+  // header falls back to the deterministic `year10NW` and is clearly
+  // labelled as deterministic.
+  const trajectoryHorizonYear = new Date().getFullYear() + 9;
+  const mcTrajectoryRow = monteCarloResult?.fan_data?.length
+    ? (
+        monteCarloResult.fan_data.find(r => r.year === trajectoryHorizonYear)
+        ?? monteCarloResult.fan_data[monteCarloResult.fan_data.length - 1]
+      )
+    : null;
+  const trajectoryP50: number | null = mcTrajectoryRow ? mcTrajectoryRow.median : null;
+  const trajectoryYear: number | null = mcTrajectoryRow ? mcTrajectoryRow.year : null;
+
   const phase7ExecProps = {
     netWorth,
     surplus,
@@ -1861,6 +1878,8 @@ export default function DashboardPage() {
     monthlyExpenses: monthlyExpensesSOT,
     passiveIncome,
     year10NW,
+    trajectoryP50,
+    trajectoryYear,
     fireProgressPct,
     fireCurrentAmt,
     fireTargetAmt,
@@ -1884,10 +1903,20 @@ export default function DashboardPage() {
           ═════════════════════════════════════════════════════════════════ */}
       <div className="flex flex-col">
 
-      {/* MOBILE-ONLY: compact Smart-Assumptions / Forecast pill row.
-          Sits at the very top of the mobile flow as the contextual header.
-          Hidden on lg+ where the desktop hero badges already surface it. */}
-      <div className="px-4 pt-3 pb-1 lg:hidden order-1 db-section-smart-assumptions">
+      {/* ──────────────────────────────────────────────────────────────────
+          DASHBOARD HIERARCHY (canonical reconciliation fix)
+          Order on BOTH desktop and mobile (Phase 7 polish):
+            1) Smart-Assumptions pill (contextual header)
+            2) WealthFlowBanner — animated journey header (TODAY → PLAN → FUTURE → MOVE)
+            3) Welcome / family identity card
+            4) Executive Overview  (Daily Briefing, Strategic Priorities,
+               Action Queue and Financial Health are composed inside it)
+            5) Above-fold Hero KPI strip (mobile-first compact view)
+          The lg:order-* values pin this same order on desktop.
+          ────────────────────────────────────────────────────────────────── */}
+
+      {/* (1) Smart-Assumptions / Forecast pill — always visible. */}
+      <div className="px-4 pt-3 pb-1 order-1 lg:order-1 db-section-smart-assumptions">
         <Link href="/ai-forecast-engine">
           <span
             className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer transition-all hover:brightness-110 ${
@@ -1901,7 +1930,7 @@ export default function DashboardPage() {
                 ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
                 : "bg-blue-500/10 border border-blue-500/30 text-blue-300"
             }`}
-            data-testid="badge-smart-assumptions-mobile"
+            data-testid="badge-smart-assumptions"
             title="Tap to change forecast assumptions"
           >
             <Sparkles className="w-3 h-3" />
@@ -1922,20 +1951,24 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          FWL PHASE 7 — EXECUTIVE DASHBOARD (narrative-first hierarchy)
-          Mobile order 4 (after timeline + welcome). Desktop order 1.
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-4 pb-2 order-4 lg:order-1">
+      {/* (4) Executive Overview — moved BELOW the journey header and welcome
+          card so the narrative hierarchy reads:
+            assumptions → journey → who we are → executive numbers.
+          Same component, same data — only the desktop `order-*` changed. */}
+      <div
+        className="px-4 pt-4 pb-2 order-4 lg:order-4"
+        data-testid="dashboard-executive-section"
+      >
         <ExecutiveDashboard {...phase7ExecProps} />
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ABOVE-FOLD KPI STRIP (mobile: order 1 — first thing on screen)
-          4 cards: Net Worth / Cash Today / Monthly Surplus / Deposit Power
-          + Forecast selector badge
+          ABOVE-FOLD KPI STRIP — compact mobile-first summary.
+          4 cards: Net Worth / Cash Today / Monthly Surplus / Deposit Power.
+          Lives BELOW the Executive Overview now so the executive narrative
+          is the first dense numeric block.
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-3 pb-2 db-section-hero-kpis order-5 lg:order-2">
+      <div className="px-4 pt-3 pb-2 db-section-hero-kpis order-5 lg:order-5">
         <div className="grid grid-cols-2 gap-2 mb-2">
           {/* Net Worth */}
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
@@ -1996,16 +2029,18 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          WEALTH FLOW BANNER (animated intelligence timeline)
-          Mobile order 2 (after Smart-Assumptions pill). Desktop order 3.
+          (2) WEALTH FLOW BANNER (animated intelligence timeline)
+          Journey header — TODAY → PLAN → FUTURE → MOVE.
+          Renders second on BOTH desktop and mobile, after the assumptions
+          pill and before the welcome card.
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section-networth order-2 lg:order-3"><WealthFlowBanner /></div>
+      <div className="db-section-networth order-2 lg:order-2"><WealthFlowBanner /></div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          HERO SECTION — welcome / narrative identity
-          Mobile order 3. Desktop order 4.
+          (3) HERO SECTION — welcome / family identity
+          Renders third on BOTH desktop and mobile.
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-4 pb-4 db-section-networth order-3 lg:order-4">
+      <div className="px-4 pt-4 pb-4 db-section-networth order-3 lg:order-3">
         <div className="flex flex-col lg:flex-row gap-4 items-stretch">
 
           {/* Left — Family welcome card */}
