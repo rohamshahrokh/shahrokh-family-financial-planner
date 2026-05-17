@@ -1,0 +1,84 @@
+
+═══════════════════════════════════════════════════════════════════════════════
+  Debt Engine — Before / After demonstration
+═══════════════════════════════════════════════════════════════════════════════
+
+Case  Description                                       Debt rec(s) emitted                                         
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+A     $20K debt @ 0% APR (interest-free)                monitor_strategic_debt [monitor], maintain_interest_free_deb
+B     $20K debt @ 17% APR (consumer credit)             pay_high_interest_debt [immediate]                          
+C     Mortgage @ 5.8% (strategic)                       monitor_strategic_debt [monitor]                            
+D     0% promo finance expiring in 60 days              plan_promo_expiry [this_quarter], monitor_strategic_debt [mo
+E     Blank / unknown APR — $19K (legacy snapshot)      monitor_strategic_debt [monitor]                            
+
+Detailed rationale per case (only debt-class recommendations shown):
+
+─── Case A: $20K debt @ 0% APR (interest-free) ──────────────────────────
+  • Strategic debt monitored ($1.00M)
+      action: monitor_strategic_debt  pillar: stabilise_leverage  urgency: monitor
+      class:    Mortgage / strategic leverage
+      APR:      5.80%
+      balance:  $1,000,000
+      interest: $58,000/yr
+      pillar #: 4
+  • Interest-free debt detected ($20K) — maintain optionality
+      action: maintain_interest_free_debt  pillar: maintain_investing_discipline  urgency: monitor
+      class:    Interest-free debt
+      APR:      0.00%
+      balance:  $20,000
+      interest: $0/yr
+      pillar #: 6
+
+─── Case B: $20K debt @ 17% APR (consumer credit) ──────────────────────────
+  • Pay down high-interest debt ($20K)
+      action: pay_high_interest_debt  pillar: reduce_high_interest_debt  urgency: immediate
+      class:    High-APR consumer debt
+      APR:      17.00%
+      balance:  $20,000
+      interest: $3,400/yr
+      pillar #: 3
+
+─── Case C: Mortgage @ 5.8% (strategic) ──────────────────────────
+  • Strategic debt monitored ($2.00M)
+      action: monitor_strategic_debt  pillar: stabilise_leverage  urgency: monitor
+      class:    Mortgage / strategic leverage
+      APR:      5.80%
+      balance:  $2,000,000
+      interest: $116,000/yr
+      pillar #: 4
+
+─── Case D: 0% promo finance expiring in 60 days ──────────────────────────
+  • Promo 0% finance expires in ~60 days ($8K)
+      action: plan_promo_expiry  pillar: reduce_high_interest_debt  urgency: this_quarter
+      class:    Interest-free debt — promo expiring
+      APR:      0.00%
+      balance:  $8,000
+      interest: $0/yr
+      pillar #: 3
+      cliff:    60 days
+  • Strategic debt monitored ($1.00M)
+      action: monitor_strategic_debt  pillar: stabilise_leverage  urgency: monitor
+      class:    Mortgage / strategic leverage
+      APR:      5.80%
+      balance:  $1,000,000
+      interest: $58,000/yr
+      pillar #: 4
+
+─── Case E: Blank / unknown APR — $19K (legacy snapshot) ──────────────────────────
+  • Strategic debt monitored ($1.00M)
+      action: monitor_strategic_debt  pillar: stabilise_leverage  urgency: monitor
+      class:    Mortgage / strategic leverage
+      APR:      5.80%
+      balance:  $1,000,000
+      interest: $58,000/yr
+      pillar #: 4
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Expected outcome (this branch):
+  A → maintain_interest_free_debt           (NOT urgent payoff)
+  B → pay_high_interest_debt [immediate]    (urgent — by design)
+  C → monitor_strategic_debt                (strategic, not urgent)
+  D → plan_promo_expiry [this_quarter]      (timed warning)
+  E → (no debt action)                       (unknown APR — not high APR)
+

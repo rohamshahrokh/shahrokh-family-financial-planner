@@ -371,6 +371,168 @@ section('BestMoveLedger → UnifiedSignals adapter');
   assert('ledger deposit readiness carried across', signals.depositReadinessPct === 80);
 }
 
+// ─── Test 15: Debt classification — 0% APR / 17% / mortgage / promo cliff ───
+section('Debt classification (zero-APR / consumer / mortgage / promo cliff)');
+{
+  resetHistory();
+  // Case A: $20K debt @ 0% APR — must NOT recommend urgent payoff.
+  const caseA: UnifiedSignals = {
+    ...HEALTHY,
+    otherDebts: 20_000,
+    monthlySurplus: 4_000,
+    debtPortfolio: [{
+      id: 'd1', name: '0% Couch Finance', balance: 20_000, ratePct: 0,
+      type: 'promo_zero',
+    }],
+  };
+  const outA = computeUnifiedRecommendations(caseA);
+  const aHasPayoff = outA.all.some(r => r.actionType === 'pay_high_interest_debt');
+  const aHasOpt = outA.all.some(r => r.actionType === 'maintain_interest_free_debt');
+  assert('Case A: $20K @ 0% does NOT recommend urgent payoff', !aHasPayoff);
+  assert('Case A: $20K @ 0% surfaces interest-free optionality narrative', aHasOpt);
+
+  // Case B: $20K debt @ 17% APR — SHOULD recommend payoff.
+  resetHistory();
+  const caseB: UnifiedSignals = {
+    ...HEALTHY,
+    otherDebts: 20_000,
+    monthlySurplus: 4_000,
+    debtPortfolio: [{
+      id: 'd2', name: 'Credit Card', balance: 20_000, ratePct: 17,
+      type: 'credit_card',
+    }],
+  };
+  const outB = computeUnifiedRecommendations(caseB);
+  const bHasPayoff = outB.all.find(r => r.actionType === 'pay_high_interest_debt');
+  assert('Case B: $20K @ 17% RECOMMENDS payoff', !!bHasPayoff);
+  assert('Case B: rationale exposes APR = 17%',
+    bHasPayoff?.debtRationale?.aprPct !== undefined &&
+    Math.abs((bHasPayoff?.debtRationale?.aprPct ?? 0) - 17) < 0.01);
+
+  // Case C: mortgage @ 5.8% — strategic, not urgent.
+  resetHistory();
+  const caseC: UnifiedSignals = {
+    ...HEALTHY,
+    otherDebts: 0,
+    debtPortfolio: [{
+      id: 'mort', name: 'Home Mortgage', balance: 1_000_000, ratePct: 5.8,
+      type: 'mortgage',
+    }],
+  };
+  const outC = computeUnifiedRecommendations(caseC);
+  const cHasUrgent = outC.all.some(r => r.actionType === 'pay_high_interest_debt');
+  const cHasStrategic = outC.all.some(r => r.actionType === 'monitor_strategic_debt');
+  assert('Case C: mortgage @ 5.8% does NOT trigger urgent payoff', !cHasUrgent);
+  assert('Case C: mortgage @ 5.8% appears as strategic monitor', cHasStrategic);
+
+  // Case D: 0% debt with expiry in ~60 days — timed warning.
+  resetHistory();
+  const expiryISO = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
+  const caseD: UnifiedSignals = {
+    ...HEALTHY,
+    otherDebts: 8_000,
+    debtPortfolio: [{
+      id: 'promo', name: 'BNPL Furniture', balance: 8_000, ratePct: 0,
+      type: 'promo_zero', expiryDateISO: expiryISO,
+    }],
+  };
+  const outD = computeUnifiedRecommendations(caseD);
+  const dPromo = outD.all.find(r => r.actionType === 'plan_promo_expiry');
+  assert('Case D: 0% debt with 60d cliff surfaces a timed promo warning', !!dPromo);
+  assert('Case D: timed warning has urgency this_quarter or immediate',
+    dPromo?.urgency === 'this_quarter' || dPromo?.urgency === 'immediate');
+  // And the engine should NOT also recommend urgent high-APR payoff.
+  const dHasUrgent = outD.all.some(r => r.actionType === 'pay_high_interest_debt');
+  assert('Case D: timed warning does not duplicate as high-APR payoff', !dHasUrgent);
+}
+
+// ─── Test 16: Blank / unknown APR does not default to high APR ──────────────
+section('Blank / unknown APR is classified as unknown — not high APR');
+{
+  resetHistory();
+  // Caller omits personalDebtRate and omits debtPortfolio: legacy fallback
+  // path treats otherDebts as unknown_apr_debt. Engine must NOT recommend
+  // urgent payoff just because the dollar balance is non-zero.
+  const sig: UnifiedSignals = {
+    ...HEALTHY,
+    otherDebts: 19_000,
+    personalDebtRate: undefined,
+  };
+  const out = computeUnifiedRecommendations(sig);
+  const urgent = out.all.find(r => r.actionType === 'pay_high_interest_debt');
+  assert('Unknown APR does NOT trigger pay_high_interest_debt', !urgent);
+
+  // And the same with debtPortfolio carrying explicit null rate.
+  resetHistory();
+  const sig2: UnifiedSignals = {
+    ...HEALTHY,
+    otherDebts: 19_000,
+    debtPortfolio: [{ id: 'x', name: 'Other Debts', balance: 19_000, ratePct: null, type: 'other' }],
+  };
+  const out2 = computeUnifiedRecommendations(sig2);
+  const urgent2 = out2.all.find(r => r.actionType === 'pay_high_interest_debt');
+  assert('Explicit null APR does NOT trigger pay_high_interest_debt', !urgent2);
+}
+
+// ─── Test 17: Recompute / propagation — APR edit changes the recommendation ──
+section('Recompute propagation — editing APR from 17% to 0% removes payoff');
+{
+  resetHistory();
+  const initial: UnifiedSignals = {
+    ...HEALTHY,
+    otherDebts: 19_000,
+    monthlySurplus: 4_000,
+    debtPortfolio: [{ id: 'd', name: 'Card', balance: 19_000, ratePct: 17, type: 'credit_card' }],
+  };
+  const r1 = computeUnifiedRecommendations(initial);
+  const wasUrgent = r1.all.some(r => r.actionType === 'pay_high_interest_debt');
+  assert('Before edit (17%): urgent payoff present', wasUrgent);
+
+  // User edits the APR to 0% — same balance, same surplus. Engine must
+  // immediately stop recommending urgent payoff and instead surface the
+  // optionality narrative.
+  resetHistory();
+  const edited: UnifiedSignals = {
+    ...initial,
+    debtPortfolio: [{ id: 'd', name: 'Card', balance: 19_000, ratePct: 0, type: 'promo_zero' }],
+  };
+  const r2 = computeUnifiedRecommendations(edited);
+  const stillUrgent = r2.all.some(r => r.actionType === 'pay_high_interest_debt');
+  const optionality = r2.all.some(r => r.actionType === 'maintain_interest_free_debt');
+  assert('After edit (0%): urgent payoff GONE', !stillUrgent);
+  assert('After edit (0%): interest-free optionality narrative present', optionality);
+}
+
+// ─── Test 18: Mixed portfolio (mortgage + 0% + credit card) ─────────────────
+section('Mixed portfolio — only the credit card flips urgent');
+{
+  resetHistory();
+  const sig: UnifiedSignals = {
+    ...HEALTHY,
+    otherDebts: 25_000,
+    monthlySurplus: 5_000,
+    debtPortfolio: [
+      { id: 'm',  name: 'Home Mortgage',   balance: 950_000, ratePct: 5.8, type: 'mortgage' },
+      { id: 'p',  name: '0% Promo',        balance: 5_000,   ratePct: 0,   type: 'promo_zero' },
+      { id: 'cc', name: 'Credit Card',     balance: 20_000,  ratePct: 19.99, type: 'credit_card' },
+    ],
+  };
+  const out = computeUnifiedRecommendations(sig);
+  const urgent = out.all.find(r => r.actionType === 'pay_high_interest_debt');
+  const strategic = out.all.find(r => r.actionType === 'monitor_strategic_debt');
+  const optionality = out.all.find(r => r.actionType === 'maintain_interest_free_debt');
+  assert('Mixed: urgent payoff present for the credit card', !!urgent);
+  assert('Mixed: urgent rationale balance = $20K (only the CC)',
+    Math.abs((urgent?.debtRationale?.balance ?? 0) - 20_000) < 1);
+  // monitor_strategic_debt returns null when urgent high-APR debt is present
+  // (see engine.ts) so the urgent rec dominates the strategic-monitor slot —
+  // verify that suppression behaviour is intentional.
+  assert('Mixed: strategic monitor suppressed when urgent payoff present', !strategic);
+  // The 0% optionality candidate is allowed to coexist so users see the
+  // engine has classified the promo separately from the consumer debt.
+  assert('Mixed: interest-free optionality narrative present alongside urgent payoff', !!optionality);
+}
+
 // ─── Summary ─────────────────────────────────────────────────────────────────
 console.log('');
 if (failures === 0) {

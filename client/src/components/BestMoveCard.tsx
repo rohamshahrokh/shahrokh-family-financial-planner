@@ -417,6 +417,46 @@ export default function BestMoveCard() {
                     </div>
                   </div>
                   <p className="text-[10px] text-muted-foreground leading-snug line-clamp-3">{r.reasoning}</p>
+                  {r.debtRationale && (
+                    <div className="rounded-lg border border-border/30 bg-card/50 px-2 py-1.5 text-[10px] space-y-0.5"
+                         data-testid="debt-rationale">
+                      <p className="font-semibold text-foreground/80">Why this recommendation exists</p>
+                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-muted-foreground">
+                        <span>Class</span>
+                        <span className="text-foreground/80 text-right">{r.debtRationale.classification}</span>
+                        <span>Balance</span>
+                        <span className="text-foreground/80 text-right font-mono">{mv(fmtCurrency(r.debtRationale.balance))}</span>
+                        <span>APR</span>
+                        <span className="text-foreground/80 text-right font-mono">
+                          {r.debtRationale.aprPct === null ? 'unknown' : `${r.debtRationale.aprPct.toFixed(2)}%`}
+                        </span>
+                        <span>Interest cost / yr</span>
+                        <span className="text-foreground/80 text-right font-mono">{mv(fmtCurrency(r.debtRationale.annualInterestCost))}</span>
+                        <span>Guaranteed return from payoff</span>
+                        <span className="text-foreground/80 text-right font-mono">
+                          {r.debtRationale.guaranteedReturnPct === null ? '—' : `${r.debtRationale.guaranteedReturnPct.toFixed(2)}%`}
+                        </span>
+                        <span>Pillar rank</span>
+                        <span className="text-foreground/80 text-right">{r.debtRationale.pillarRank}</span>
+                        {r.debtRationale.triggers?.daysToExpiry !== undefined && (
+                          <>
+                            <span>Promo cliff</span>
+                            <span className="text-amber-400 text-right">in {r.debtRationale.triggers.daysToExpiry}d</span>
+                          </>
+                        )}
+                      </div>
+                      {r.debtRationale.whatChangesThis && r.debtRationale.whatChangesThis.length > 0 && (
+                        <div className="pt-1 text-muted-foreground">
+                          <span className="font-semibold text-foreground/70">What would change this:</span>
+                          <ul className="list-disc list-inside leading-snug">
+                            {r.debtRationale.whatChangesThis.slice(0, 3).map((t, i) => (
+                              <li key={i}>{t}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {r.benefitLabel && (
                     <div className="text-[10px] text-emerald-400 font-mono">{r.benefitLabel}</div>
                   )}

@@ -16,6 +16,7 @@ import {
   fromBestMoveLedger, mergeSignals, fromRiskRadar, fromFirePath, fromMonteCarloV5,
   fromBehaviouralProfile, fromAutonomousOS, fromScenarioTree,
   fromPortfolioConstruction, fromLifePlan, fromTaxIntelligence, fromExecutionOS, fromAdaptiveLearning,
+  fromDebtPrefsDebts,
 } from './adapters';
 import type { UnifiedRecommendationResult, UnifiedSignals, Recommendation } from './types';
 import { snapshotHistory, type RecommendationChange } from './history';
@@ -84,10 +85,37 @@ export async function computeUnifiedBestMove(args: {
   executionOS?: any;
   /** Phase 6 — Adaptive learning adjustments */
   adaptive?: any;
+  /**
+   * Classified debt list from `app_settings.debt_prefs.debts` (preserved
+   * verbatim through `fromDebtPrefsDebts`). When supplied this is the single
+   * source of truth for debt advice — overrides the legacy
+   * `otherDebts × personalDebtRate` heuristic.
+   */
+  debtPrefsDebts?: any[];
 } = {}): Promise<UnifiedBestMoveResult> {
   const legacy = await computeBestMoveV2(args.cfg ?? {});
   const partial = ledgerFromInputs(legacy);
   const baseSignals = fromBestMoveLedger(partial as BestMoveLedger);
+
+  // If the caller didn't pass an explicit `debtPrefsDebts`, fetch it from
+  // app_settings so every consumer (Best Move, FIRE, Risk, Action Centre,
+  // Executive Dashboard, Family Office, Financial OS) automatically reads
+  // the user's classified debt portfolio. Failures are tolerated — the
+  // engine simply falls back to the legacy `otherDebts` signal classified
+  // as `unknown_apr_debt` (NOT high APR).
+  let debtPrefsDebts = args.debtPrefsDebts;
+  if (!debtPrefsDebts) {
+    try {
+      const { apiRequest } = await import('../queryClient');
+      const res = await apiRequest('GET', '/api/app-settings');
+      const settings = await res.json();
+      if (settings?.debt_prefs?.debts && Array.isArray(settings.debt_prefs.debts)) {
+        debtPrefsDebts = settings.debt_prefs.debts;
+      }
+    } catch {
+      // ignore — legacy fallback path handles missing portfolio
+    }
+  }
   const signals = mergeSignals(
     baseSignals,
     fromRiskRadar(args.riskRadar),
@@ -102,6 +130,7 @@ export async function computeUnifiedBestMove(args: {
     fromTaxIntelligence(args.taxIntelligence),
     fromExecutionOS(args.executionOS),
     fromAdaptiveLearning(args.adaptive),
+    fromDebtPrefsDebts(debtPrefsDebts),
   );
   const unified = computeUnifiedRecommendations(signals);
   const changes = snapshotHistory(unified);

@@ -36,7 +36,10 @@ export function fromBestMoveLedger(ledger: BestMoveLedger): UnifiedSignals {
     etfExpectedReturn: ledger.etfExpectedReturn,
     cryptoExpectedReturn: ledger.cryptoExpectedReturn,
     mortgageRate: ledger.mortgageRate,
-    personalDebtRate: 0.17,
+    // personalDebtRate intentionally undefined. The unified engine prefers the
+    // classified `debtPortfolio` (set elsewhere with real per-debt APRs); when
+    // absent, an undefined personalDebtRate means "unknown" — and the engine
+    // must NOT default to 17% the way the legacy code did.
     marginalTaxRate: ledger.rohamGrossAnnual > 135_000 ? 0.47
                    : ledger.rohamGrossAnnual > 45_000  ? 0.325
                    : 0.19,
@@ -246,6 +249,48 @@ export function fromAdaptiveLearning(adj: any): Partial<UnifiedSignals> {
       explanation: adj.explanation,
     },
   };
+}
+
+// ─── Debt prefs (app_settings.debt_prefs.debts) → UnifiedSignals.debtPortfolio
+/**
+ * Convert the user-supplied detailed debt list (persisted in
+ * `app_settings.debt_prefs.debts`) into the canonical `debtPortfolio`
+ * consumed by the recommendation engine.
+ *
+ * The UI captures `rate` in PERCENT units (e.g. 17 for 17%, 0 for 0%). We
+ * preserve those values verbatim — including 0 and blank/missing — so the
+ * classifier can decide whether the debt is interest-free, unknown, etc.
+ */
+export function fromDebtPrefsDebts(rawDebts: any[] | undefined | null): Partial<UnifiedSignals> {
+  if (!Array.isArray(rawDebts) || rawDebts.length === 0) return {};
+  const debtPortfolio = rawDebts
+    .map((d, i) => {
+      const balance = typeof d.balance === 'number' ? d.balance : parseFloat(String(d.balance ?? '0')) || 0;
+      // Preserve null/undefined/'' as null (unknown). Preserve 0 as 0.
+      let ratePct: number | null | undefined;
+      if (d.rate === null || d.rate === undefined) {
+        ratePct = d.rate as any;
+      } else if (typeof d.rate === 'string') {
+        const t = d.rate.trim();
+        ratePct = t === '' ? null : (Number.isFinite(parseFloat(t)) ? parseFloat(t) : null);
+      } else if (typeof d.rate === 'number') {
+        ratePct = Number.isFinite(d.rate) ? d.rate : null;
+      } else {
+        ratePct = null;
+      }
+      return {
+        id: String(d.id ?? `debt_${i}`),
+        name: String(d.name ?? 'Debt'),
+        balance,
+        ratePct,
+        minPaymentMonthly: typeof d.minPayment === 'number' ? d.minPayment : undefined,
+        type: d.type,
+        expiryDateISO: d.expiryDateISO,
+        taxDeductible: d.taxDeductible === true,
+      };
+    })
+    .filter(d => d.balance > 0);
+  return debtPortfolio.length > 0 ? { debtPortfolio } : {};
 }
 
 // ─── Merge helper ────────────────────────────────────────────────────────────

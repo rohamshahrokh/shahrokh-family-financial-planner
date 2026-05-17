@@ -1,0 +1,17 @@
+
+═══════════════════════════════════════════════════════════════════════════════
+  BEFORE the fix — engine output (re-implemented from the pre-fix branch)
+═══════════════════════════════════════════════════════════════════════════════
+
+Case  Description                                       Best-Move debt rec emitted
+────────────────────────────────────────────────────────────────────────────────────────────────
+A     $20K debt @ 0% (TRUE APR)                         Pay down high-interest debt ($20,000) — ~17% APR, $3,400/yr [immediate]
+B     $20K debt @ 17%                                   Pay down high-interest debt ($20,000) — ~17% APR, $3,400/yr [immediate]
+C     Mortgage debt (only otherDebts=0 here)            (none)
+D     $8K 0% promo (TRUE APR)                           Pay down high-interest debt ($8,000) — ~17% APR, $1,360/yr [immediate]
+E     Blank / unknown APR — $19K (personalDebtRate=⊥)   Pay down high-interest debt ($19,000) — ~17% APR, $3,230/yr [immediate]
+
+Every non-zero otherDebts case falsely produced "Pay down high-interest debt ($X) — ~17% APR".
+Even cases A and D, where the real APR is 0%, were tagged as urgent ~17% high-APR debt,
+because the legacy code defaulted missing/zero APR to 0.17 (17%) — the root cause.
+
