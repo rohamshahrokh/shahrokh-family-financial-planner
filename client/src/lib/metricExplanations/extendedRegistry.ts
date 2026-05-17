@@ -842,6 +842,281 @@ export const EXTENDED_EXPLANATIONS: Record<string, MetricExplanation> = {
     ],
     thresholds: QUAL_THRESHOLDS,
   },
+  'bear-world': {
+    id: 'bear-world',
+    title: 'Bear World',
+    depth: 'L3',
+    categories: ['scenario', 'risk'],
+    direction: 'higher',
+    definition:
+      'Probability-weighted cluster of adverse macro paths — rate-hike persistence, equity drawdown, property cycle weakness, employment shock — aggregated into a single downside view of the household.',
+    whyItMatters:
+      'Sizing the downside makes the household resilient rather than fragile. The Bear World tells you the net worth, FIRE timeline and stress level you must remain solvent through, not the future you should expect.',
+    ranges: [
+      { state: 'excellent', range: 'Bear NW ≥ today', meaning: 'Plan survives the downside without giving up ground.' },
+      { state: 'strong', range: 'Bear NW within 15% of today', meaning: 'Mild compression — manageable with the existing buffer.' },
+      { state: 'moderate', range: 'Bear NW down 15 – 35%', meaning: 'Meaningful drawdown — verify liquidity and serviceability.' },
+      { state: 'stressed', range: 'Bear NW down > 35%', meaning: 'Fragility — defensive posture and buffer rebuild required.' },
+    ],
+    influences: [
+      'Leverage / mortgage rate sensitivity',
+      'Equity & crypto drawdown depth',
+      'Property cycle and rental serviceability',
+      'Employment income concentration',
+    ],
+    improvementActions: [
+      'Lift offset / liquidity buffer toward 6 months of total expenses',
+      'Lock or hedge serviceability against further rate stress',
+      'Diversify away from the single largest concentrated exposure',
+    ],
+    thresholds: QUAL_THRESHOLDS,
+  },
+  'base-world': {
+    id: 'base-world',
+    title: 'Base World',
+    depth: 'L3',
+    categories: ['scenario', 'projection'],
+    direction: 'higher',
+    definition:
+      'Probability-weighted central case — assumes the current macro regime continues with mild reversion to long-run averages on rates, growth and inflation.',
+    whyItMatters:
+      'The Base World is the planning case — the trajectory recommendations should be priced against. If the Base World fails the goal, no amount of upside-hunting fixes the underlying plan.',
+    ranges: [
+      { state: 'excellent', range: 'Base path funds goal early', meaning: 'On-track with buffer — keep deploying to plan.' },
+      { state: 'strong', range: 'Base path funds goal on time', meaning: 'Balanced — stay the course.' },
+      { state: 'moderate', range: 'Base path drifts behind goal', meaning: 'Lift contribution rate or extend horizon.' },
+      { state: 'stressed', range: 'Base path misses goal', meaning: 'Material change required — review allocation or lifestyle.' },
+    ],
+    influences: [
+      'Baseline ETF / property growth assumptions',
+      'Contribution cadence and surplus',
+      'Mortgage rate and serviceability path',
+    ],
+    improvementActions: [
+      'Treat Base World as the planning case, not the optimistic case',
+      'Continue balanced DCA at safe-surplus cap',
+      'Review when realised inputs diverge materially from base assumptions',
+    ],
+    thresholds: QUAL_THRESHOLDS,
+  },
+  'bull-world': {
+    id: 'bull-world',
+    title: 'Bull World',
+    depth: 'L3',
+    categories: ['scenario', 'projection'],
+    direction: 'higher',
+    definition:
+      'Probability-weighted cluster of supportive paths — rate-cut cycle, AI-led productivity boom, equity bull, property supercycle — aggregated into a single upside view of the household.',
+    whyItMatters:
+      'The Bull World is the ceiling, not the target. Used correctly it tells you which dry-powder posture (offset vs equity vs growth allocation) captures the upside without bending the Base plan.',
+    ranges: [
+      { state: 'excellent', range: 'Bull NW ≥ 1.6× Base', meaning: 'Strong asymmetric upside — pre-stage the growth posture.' },
+      { state: 'strong', range: 'Bull NW 1.3 – 1.6× Base', meaning: 'Meaningful upside — modest growth tilt warranted.' },
+      { state: 'healthy', range: 'Bull NW 1.1 – 1.3× Base', meaning: 'Mild upside — keep posture neutral.' },
+      { state: 'moderate', range: 'Bull NW < 1.1× Base', meaning: 'Limited asymmetric upside — focus on resilience.' },
+    ],
+    influences: [
+      'Equity & crypto upside compounding',
+      'Property cycle position',
+      'Surplus available for accelerated deployment',
+    ],
+    improvementActions: [
+      'Pre-define the growth-tilt rule before the regime arrives',
+      'Hold dry powder in offset for asymmetric deployment',
+      'Avoid over-fitting the plan to the bull case',
+    ],
+    thresholds: QUAL_THRESHOLDS,
+  },
+  'portfolio-sensitivity': {
+    id: 'portfolio-sensitivity',
+    title: 'Portfolio Sensitivity Map',
+    depth: 'L3',
+    categories: ['risk', 'scenario'],
+    direction: 'lower',
+    definition:
+      'Heatmap of how the household net worth responds to shocks across the five primary macro factors — interest rates, property cycle, equity market, inflation, and employment.',
+    whyItMatters:
+      'Knowing which factor moves the household most is the difference between strategic hedging and reactive scrambling. The map points to where buffer, diversification or insurance reduce the biggest residual risk.',
+    ranges: [
+      { state: 'excellent', range: 'all factors Low', meaning: 'Broadly diversified — no single shock derails the plan.' },
+      { state: 'strong', range: 'one Medium, rest Low', meaning: 'Targeted hedging covers the dominant exposure.' },
+      { state: 'moderate', range: 'one High or two Medium', meaning: 'Concentrated exposure — partial mitigation required.' },
+      { state: 'stressed', range: 'multiple High sensitivities', meaning: 'Fragile to compounded shocks — restructure exposures.' },
+    ],
+    influences: [
+      'Mortgage size vs net worth (rate sensitivity)',
+      'Property weight in portfolio (cycle sensitivity)',
+      'Equity / crypto concentration (market sensitivity)',
+      'Income-vs-expense gap (employment sensitivity)',
+    ],
+    improvementActions: [
+      'Lift offset to reduce rate-shock pass-through',
+      'Diversify the dominant asset class to reduce single-factor sensitivity',
+      'Strengthen income buffer to reduce employment-shock sensitivity',
+    ],
+    thresholds: QUAL_THRESHOLDS_LOWER,
+  },
+  'macro-tailwind': {
+    id: 'macro-tailwind',
+    title: 'Macro Tailwind',
+    depth: 'L2',
+    categories: ['signal', 'scenario'],
+    direction: 'higher',
+    definition:
+      'The strongest probability-weighted regime currently helping the household compound — typically rate cuts, equity bull, AI productivity boom or property supercycle.',
+    whyItMatters:
+      'Identifying the dominant tailwind keeps the plan honest about where compounding is coming from — and stops the household from over-attributing performance to its own decisions.',
+    ranges: [
+      { state: 'excellent', range: 'strong tailwind aligned with portfolio', meaning: 'Compounding amplified — keep posture.' },
+      { state: 'strong', range: 'mild tailwind', meaning: 'Modest support — stay disciplined.' },
+      { state: 'moderate', range: 'no clear tailwind', meaning: 'Returns will be earned, not gifted.' },
+    ],
+    influences: [
+      'Macro regime probabilities',
+      'Asset-mix alignment with tailwind',
+    ],
+    improvementActions: [
+      'Avoid over-deploying into the tailwind at the peak',
+      'Use the tailwind window to rebalance toward target weights',
+    ],
+    thresholds: QUAL_THRESHOLDS,
+  },
+  'macro-vulnerability': {
+    id: 'macro-vulnerability',
+    title: 'Macro Vulnerability',
+    depth: 'L2',
+    categories: ['signal', 'risk'],
+    direction: 'lower',
+    definition:
+      'The single macro factor that, if it materialises, would compress the household plan the most — typically rate persistence, equity drawdown, property weakness, or employment shock.',
+    whyItMatters:
+      'The largest vulnerability is the most useful sentence in the entire dashboard — it tells the household exactly which lever to pull in the next 6 months.',
+    ranges: [
+      { state: 'excellent', range: 'no single dominant vulnerability', meaning: 'Diversified — keep posture.' },
+      { state: 'moderate', range: 'one moderate vulnerability', meaning: 'Targeted mitigation worthwhile.' },
+      { state: 'stressed', range: 'one high vulnerability', meaning: 'Make this the next decision.' },
+    ],
+    influences: [
+      'Leverage ratio',
+      'Asset concentration',
+      'Income vs expenses gap',
+    ],
+    improvementActions: [
+      'Pull the single highest-impact mitigation lever',
+      'Re-test the plan with the vulnerability tripled',
+    ],
+    thresholds: QUAL_THRESHOLDS_LOWER,
+  },
+  'scenario-driver': {
+    id: 'scenario-driver',
+    title: 'Scenario Key Driver',
+    depth: 'L2',
+    categories: ['scenario', 'signal'],
+    direction: 'higher',
+    definition:
+      'The single macro variable that defines this scenario — e.g. CPI above 5%, RBA cash-rate cuts, persistent unemployment above 6%, or property cycle correction.',
+    whyItMatters:
+      'Naming the driver makes the scenario testable: you can watch the real economy for the trigger rather than relying on intuition that the world has changed.',
+    ranges: [
+      { state: 'excellent', range: 'driver is observable in real data', meaning: 'You can verify the regime from official statistics.' },
+      { state: 'strong', range: 'driver is plausible but not yet visible', meaning: 'Use as a contingency, not a forecast.' },
+      { state: 'moderate', range: 'driver is speculative', meaning: 'Useful for stress-testing only; do not pre-stage action.' },
+    ],
+    influences: [
+      'Macro regime catalogue',
+      'Probability calibration',
+      'Recency of macro inputs',
+    ],
+    improvementActions: [
+      'Watch the driver in monthly data, not headlines',
+      'Promote a driver to action only after sustained signal',
+      'Pair every scenario with a named driver, never an emotion',
+    ],
+    thresholds: QUAL_THRESHOLDS,
+  },
+  'stress-level': {
+    id: 'stress-level',
+    title: 'Scenario Stress Level',
+    depth: 'L2',
+    categories: ['scenario', 'risk'],
+    direction: 'lower',
+    definition:
+      'Composite intensity of a scenario on the household — a 0 – 100 index that blends liquidity, serviceability and insolvency risk under the scenario\'s effective rates.',
+    whyItMatters:
+      'A single stress level lets you rank scenarios without re-running mental Monte Carlo. Anything above 60 is a scenario the household should already have a contingency for.',
+    ranges: [
+      { state: 'excellent', range: '0 – 20', meaning: 'Minimal pressure — plan absorbs the scenario.' },
+      { state: 'healthy', range: '20 – 40', meaning: 'Mild — manage with existing buffer.' },
+      { state: 'moderate', range: '40 – 60', meaning: 'Meaningful — define the contingency.' },
+      { state: 'stressed', range: '> 60', meaning: 'Severe — pre-stage liquidity and serviceability moves.' },
+    ],
+    influences: [
+      'Liquidity risk under scenario',
+      'Insolvency risk under scenario',
+      'Effective mortgage rate under scenario',
+    ],
+    improvementActions: [
+      'Lift buffer to suppress liquidity component',
+      'Stress-test serviceability at scenario rate',
+      'Pre-commit to the action you would take in the scenario',
+    ],
+    thresholds: QUAL_THRESHOLDS_LOWER,
+  },
+  'decision-posture': {
+    id: 'decision-posture',
+    title: 'Decision Posture',
+    depth: 'L2',
+    categories: ['strategy', 'recommendation'],
+    direction: 'higher',
+    definition:
+      'Recommended household stance under the scenario — e.g. "continue balanced DCA", "maintain higher offset liquidity", "accelerate growth allocation". Descriptive, not an order.',
+    whyItMatters:
+      'A pre-defined posture removes the most expensive moment in personal finance — the surprised reaction to a regime change. Posture decisions are calmer and cheaper when written in advance.',
+    ranges: [
+      { state: 'excellent', range: 'posture pre-defined for each world', meaning: 'No surprise decisions required.' },
+      { state: 'strong', range: 'posture defined for base + bear', meaning: 'Bull captured opportunistically.' },
+      { state: 'moderate', range: 'posture undefined', meaning: 'Decisions made under stress will be worse.' },
+    ],
+    influences: [
+      'Macro scenario',
+      'Available surplus',
+      'Behavioural state',
+    ],
+    improvementActions: [
+      'Write the posture for each world in one sentence',
+      'Pre-commit to the rebalance rule, not the direction',
+    ],
+    thresholds: QUAL_THRESHOLDS,
+  },
+  'resilience-score': {
+    id: 'resilience-score',
+    title: 'Resilience Score',
+    depth: 'L2',
+    categories: ['score', 'risk'],
+    direction: 'higher',
+    definition:
+      'Composite measure of how well the household weathers the Bear World — blends liquidity, serviceability headroom, income diversification and Bear vs today net worth gap.',
+    whyItMatters:
+      'Resilience is the trait that lets compounding survive bad years. A strong number means the household can take risk; a weak number means it must reduce risk first.',
+    ranges: [
+      { state: 'excellent', range: '80 – 100', meaning: 'Robust — can lean into asymmetric upside.' },
+      { state: 'strong', range: '60 – 80', meaning: 'Sound — keep building buffer.' },
+      { state: 'healthy', range: '40 – 60', meaning: 'Workable — focus on the dominant vulnerability.' },
+      { state: 'moderate', range: '20 – 40', meaning: 'Fragile — prioritise defence.' },
+      { state: 'stressed', range: '0 – 20', meaning: 'Brittle — defensive posture mandatory.' },
+    ],
+    influences: [
+      'Liquidity buffer months',
+      'Mortgage / serviceability headroom',
+      'Bear-world net worth gap',
+    ],
+    improvementActions: [
+      'Lift offset to 6 months of expenses',
+      'Reduce concentration in single asset class',
+      'Insure or hedge serviceability against rate shocks',
+    ],
+    thresholds: QUAL_THRESHOLDS,
+  },
 
   // ── Family office / FOC / FIRE ───────────────────────────────────────────
   'family-office-mode': {
@@ -1055,4 +1330,14 @@ export const REQUIRED_EXTENDED_IDS = [
   'regime',
   'passive-income',
   'safe-surplus',
+  'bear-world',
+  'base-world',
+  'bull-world',
+  'portfolio-sensitivity',
+  'macro-tailwind',
+  'macro-vulnerability',
+  'scenario-driver',
+  'stress-level',
+  'decision-posture',
+  'resilience-score',
 ] as const;
