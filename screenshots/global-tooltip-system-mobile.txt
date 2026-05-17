@@ -1,0 +1,28 @@
+Global Intelligence Tooltip System — Mobile Coverage Map
+=========================================================
+
+Behaviour on touch devices (width < 768px, useIsMobile returns true):
+
+  Tap on any ⓘ trigger anywhere in the app  →  the explainer body opens
+  in the app's bottom-sheet primitive (Radix Sheet, side="bottom"):
+
+    • Rounded top corners, dark popover surface, gold accent.
+    • max-h: 85vh, scroll occurs INSIDE the sheet, not the page.
+    • Background is dimmed by the Sheet overlay (no overflow).
+    • Thumb-friendly drag handle + close affordance.
+    • Same body layout as desktop popover (Title · State chip · Definition
+      · Why it matters · Ranges · What moves it · How to improve ·
+      Source of truth · Engine cue).
+    • No native browser `title` tooltip is used anywhere in the system
+      (asserted by the test suite).
+
+Surfaces covered (identical list to desktop): see
+global-tooltip-system-desktop.txt.
+
+Note on visual capture:
+  This sandbox does not include Chromium / Playwright, so the binary
+  PNGs for this PR will be generated from the Vercel preview deployment
+  triggered by the PR. The interaction pattern is the same as the
+  Liquidity bottom-sheet that ships in PR #34 (already screen-shot in
+  screenshots/phase7-polish-mobile-dashboard*.png) — the new explainers
+  use the exact same primitive.

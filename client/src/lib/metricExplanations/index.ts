@@ -9,8 +9,11 @@
 export {
   METRIC_EXPLANATIONS,
   REQUIRED_METRIC_IDS,
+  REQUIRED_EXTENDED_IDS,
   getMetricExplanation,
 } from './registry';
+
+export { EXTENDED_EXPLANATIONS } from './extendedRegistry';
 
 export {
   resolveSemanticState,
@@ -24,6 +27,8 @@ export type {
   RangeGuide,
   SemanticState,
   SemanticThreshold,
+  ExplainerDepth,
+  ExplainerCategory,
 } from './types';
 
-export { SEMANTIC_STATES } from './types';
+export { SEMANTIC_STATES, EXPLAINER_CATEGORIES } from './types';

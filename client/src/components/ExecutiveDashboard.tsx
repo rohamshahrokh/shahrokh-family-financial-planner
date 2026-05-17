@@ -194,7 +194,10 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-0 divide-x divide-border/30">
         {/* Net Worth — dominant */}
         <div className="px-4 py-3 col-span-2 md:col-span-1">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1">Net Worth</div>
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1 inline-flex items-center gap-1">
+            Net Worth
+            <MetricExplainer metricId="net-worth-reconciliation" size={11} />
+          </div>
           <div className="text-2xl font-extrabold tabular-nums leading-none" style={{ color: 'hsl(var(--gold))' }}>
             {mv(formatCurrency(p.netWorth, true))}
           </div>
@@ -203,7 +206,10 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
 
         {/* Monthly Surplus */}
         <div className="px-4 py-3">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1">Monthly Surplus</div>
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1 inline-flex items-center gap-1">
+            Monthly Surplus
+            <MetricExplainer metricId="safe-surplus" size={11} />
+          </div>
           <div
             className="text-lg font-extrabold tabular-nums leading-none flex items-center gap-1"
             style={{ color: surplusPositive ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}
@@ -428,7 +434,10 @@ function DailyBriefing({ result }: { result: UnifiedBestMoveResult | null }) {
             <Activity className="w-4 h-4" style={{ color: 'hsl(var(--gold))' }} />
           </div>
           <div>
-            <div className="text-sm font-bold text-foreground">Daily Briefing</div>
+            <div className="text-sm font-bold text-foreground inline-flex items-center gap-1.5">
+              Daily Briefing
+              <MetricExplainer metricId="recommendation-engine" size={11} />
+            </div>
             <div className="text-[10px] text-muted-foreground flex items-center gap-1 flex-wrap">
               <span>Narrative summary · {unified.signalCoverage.length} signals · confidence</span>
               <span style={{ color: confidenceTone }}>{confidencePct}%</span>
@@ -653,6 +662,7 @@ function StrategicPriorities({ result }: { result: UnifiedBestMoveResult | null 
           <div>
             <div className="text-sm font-bold text-foreground flex items-center gap-1">
               <span>Strategic Priorities</span>
+              <MetricExplainer metricId="strategic-priorities" size={11} />
               <MetricExplainer metricId="scenario-confidence" size={11} />
             </div>
             <div className="text-[10px] text-muted-foreground">Top 3 by impact-adjusted confidence</div>

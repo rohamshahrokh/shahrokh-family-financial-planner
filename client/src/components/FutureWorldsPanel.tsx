@@ -12,6 +12,7 @@
 
 import { useMemo } from 'react';
 import { Globe2 } from 'lucide-react';
+import { SectionExplainer } from '@/components/intelligence/SectionExplainer';
 import { buildScenarioTree, type ScenarioBranchInputs } from '@/lib/scenarioTree';
 
 function fmtMoney(n?: number): string {
@@ -36,7 +37,10 @@ export default function FutureWorldsPanel({
             <Globe2 className="w-4 h-4 text-sky-300" />
           </div>
           <div>
-            <p className="text-sm font-bold text-foreground">Future Worlds</p>
+            <p className="text-sm font-bold text-foreground inline-flex items-center gap-1.5">
+              Future Worlds
+              <SectionExplainer metricId="future-worlds" />
+            </p>
             <p className="text-[10px] text-muted-foreground">Probability-weighted macro scenarios · {tree.branches.length} branches</p>
           </div>
         </div>

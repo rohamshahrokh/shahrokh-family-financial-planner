@@ -15,8 +15,9 @@
  */
 
 import type { MetricExplanation } from './types';
+import { EXTENDED_EXPLANATIONS, REQUIRED_EXTENDED_IDS } from './extendedRegistry';
 
-export const METRIC_EXPLANATIONS: Record<string, MetricExplanation> = {
+const CORE_METRIC_EXPLANATIONS: Record<string, MetricExplanation> = {
   // ── 1. Liquidity (months of expenses in liquid cash) ──────────────────────
   liquidity: {
     id: 'liquidity',
@@ -719,6 +720,20 @@ export const METRIC_EXPLANATIONS: Record<string, MetricExplanation> = {
     ],
   },
 };
+
+/**
+ * Final registry — core dashboard metrics MERGED with the extended global
+ * intelligence registry (engines, acronyms, signals, scores, formulas,
+ * tax/FIRE/Monte-Carlo/leverage/behavioural terms). Extended entries are
+ * spread first so the canonical core metrics always win on any ID clash.
+ */
+export const METRIC_EXPLANATIONS: Record<string, MetricExplanation> = {
+  ...EXTENDED_EXPLANATIONS,
+  ...CORE_METRIC_EXPLANATIONS,
+};
+
+/** Required extended explainer IDs — re-exported for test convenience. */
+export { REQUIRED_EXTENDED_IDS };
 
 /**
  * Required core metric IDs — used by tests to assert that the registry
