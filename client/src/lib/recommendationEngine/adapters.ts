@@ -71,18 +71,51 @@ export function fromFirePath(r: any): Partial<UnifiedSignals> {
   };
 }
 
-// ─── Monte Carlo V5 output → signal overlay ──────────────────────────────────
+// ─── Monte Carlo V5 / canonical MC output → signal overlay ──────────────────
+// Accepts either:
+//   - V5 advisor-intelligence shape: { survival_probability, stress_flag, ... }
+//   - Canonical MonteCarloResult shape (forecastStore): { prob_ff (0-100%),
+//     prob_neg_cf (0-100%), prob_cash_shortfall (0-100%), ... }
 export function fromMonteCarloV5(r: any): Partial<UnifiedSignals> {
   if (!r) return {};
-  const surv = r.survival_probability ?? r.survivalProbability ?? r.fire?.survival_probability;
-  const stress = r.stress_flag ?? r.stressFlag ?? (surv != null
-    ? (surv < 0.6 ? 'severe' : surv < 0.8 ? 'moderate' : 'none')
-    : undefined);
+  // Survival probability — normalise to 0-1.
+  let surv: number | undefined =
+    r.survival_probability ?? r.survivalProbability ?? r.fire?.survival_probability;
+  if (surv == null && typeof r.prob_ff === 'number') {
+    surv = r.prob_ff > 1 ? r.prob_ff / 100 : r.prob_ff;
+  }
+
+  // Stress flag — explicit overrides, else derived from prob_neg_cf / prob_cash_shortfall.
+  let stress: 'none' | 'moderate' | 'severe' | undefined =
+    r.stress_flag ?? r.stressFlag;
+  if (!stress) {
+    const negCf = typeof r.prob_neg_cf === 'number'
+      ? (r.prob_neg_cf > 1 ? r.prob_neg_cf / 100 : r.prob_neg_cf)
+      : 0;
+    const cashShort = typeof r.prob_cash_shortfall === 'number'
+      ? (r.prob_cash_shortfall > 1 ? r.prob_cash_shortfall / 100 : r.prob_cash_shortfall)
+      : 0;
+    const worst = Math.max(negCf, cashShort, surv != null ? 1 - surv : 0);
+    if (worst >= 0.4) stress = 'severe';
+    else if (worst >= 0.2) stress = 'moderate';
+    else if (worst > 0)    stress = 'none';
+  }
+
+  // Shortfall severity — accept explicit field; else proxy from prob_cash_shortfall.
+  let severity: number | undefined = r.shortfall_severity;
+  if (severity == null && typeof r.prob_cash_shortfall === 'number') {
+    severity = r.prob_cash_shortfall > 1 ? r.prob_cash_shortfall / 100 : r.prob_cash_shortfall;
+  }
+
+  // Rate-stress active — explicit boolean, else infer from biggest_risk_driver text.
+  const rateStress = r.rate_stress_active === true
+    || (typeof r.biggest_risk_driver === 'string' && /rate|interest/i.test(r.biggest_risk_driver));
+
   return {
     mcSurvivalProbability: typeof surv === 'number' ? surv : undefined,
     mcStressFlag: stress,
-    mcRateStressActive: r.rate_stress_active === true,
-    mcShortfallSeverity: r.shortfall_severity,
+    mcRateStressActive: rateStress || undefined,
+    mcShortfallSeverity: severity,
   };
 }
 

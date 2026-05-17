@@ -35,6 +35,7 @@ import { maskValue } from "@/components/PrivacyMask";
 import { useAppStore } from "@/lib/store";
 import { apiRequest } from "@/lib/queryClient";
 import { runCashEngine } from "@/lib/cashEngine";
+import UnifiedFirePanel from "@/components/UnifiedFirePanel";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1140,6 +1141,9 @@ export default function FIREPathPage() {
           saving={saving}
         />
       )}
+
+      {/* ── Unified Strategic Brain — FIRE pillar ──────────────────────────── */}
+      <UnifiedFirePanel />
 
       {/* ── Sensitivity ──────────────────────────────────────────────────────── */}
       <SensitivityPanel result={result} mv={mv} />

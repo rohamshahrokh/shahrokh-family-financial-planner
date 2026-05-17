@@ -16,6 +16,7 @@ import {
 } from '@/lib/riskEngine';
 import { useAppStore } from '@/lib/store';
 import { maskValue } from '@/components/PrivacyMask';
+import UnifiedRiskPanel from '@/components/UnifiedRiskPanel';
 import {
   Shield, AlertTriangle, CheckCircle2, AlertCircle,
   ChevronDown, ChevronUp, Info, TrendingDown, Zap,
@@ -247,6 +248,12 @@ export default function RiskRadarPage() {
           })}
         </div>
       </div>
+
+      {/* ── Unified Strategic Brain — Risk pillar ────────────────────────── */}
+      <UnifiedRiskPanel
+        overallScore={overall_score}
+        topRisks={top_risks.slice(0, 2).map(r => ({ id: r.id, label: r.label, action: r.action }))}
+      />
 
       {/* ── Top 3 risk factors ───────────────────────────────────────────── */}
       <div className="bg-card border border-border rounded-2xl p-5">

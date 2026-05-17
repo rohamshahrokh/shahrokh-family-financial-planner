@@ -229,6 +229,8 @@ export default function BestMoveCard() {
 
   // Pull deposit-power inputs from the forecast store
   const maxLvr = useForecastStore(s => s.maxLvr);
+  // Pull live MC result so stress flag flows through into the unified engine
+  const liveMC = useForecastStore(s => s.monteCarloResult);
 
   const load = useCallback(async (force = false) => {
     if (!force) {
@@ -238,7 +240,7 @@ export default function BestMoveCard() {
     setLoading(true);
     setError(null);
     try {
-      const u = await computeUnifiedBestMove({ cfg: { maxLvr } });
+      const u = await computeUnifiedBestMove({ cfg: { maxLvr }, monteCarloV5: liveMC });
       saveCache(u.legacy);
       setResult(u.legacy);
       setUnified(u);
@@ -247,7 +249,7 @@ export default function BestMoveCard() {
     } finally {
       setLoading(false);
     }
-  }, [maxLvr]);
+  }, [maxLvr, liveMC]);
 
   useEffect(() => { load(); }, [load]);
 

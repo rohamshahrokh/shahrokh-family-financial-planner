@@ -31,6 +31,9 @@ export default function ActionCentre() {
   const { privacyMode } = useAppStore();
   const mv = (v: string) => maskValue(v, privacyMode);
   const maxLvr = useForecastStore(s => s.maxLvr);
+  // Live MC result so stress flag flows into the unified engine
+  const liveMC = useForecastStore(s => s.monteCarloResult);
+  const mcSig  = liveMC ? `${liveMC.ran_at}-${liveMC.simulations}` : 'none';
 
   const [result, setResult] = useState<UnifiedBestMoveResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,12 +41,13 @@ export default function ActionCentre() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    computeUnifiedBestMove({ cfg: { maxLvr } })
+    computeUnifiedBestMove({ cfg: { maxLvr }, monteCarloV5: liveMC })
       .then(r => { if (!cancelled) setResult(r); })
       .catch(() => { /* silent — card hides */ })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [maxLvr]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maxLvr, mcSig]);
 
   if (loading || !result) {
     return (
