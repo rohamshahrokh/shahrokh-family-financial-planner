@@ -141,7 +141,7 @@ function ExecutiveSummaryRow({ model }: { model: FutureWorldsModel }) {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
         {summary.strongestTailwind && (
           <SummaryCell
             icon={TrendingUp}
@@ -210,12 +210,14 @@ function SummaryCell({
       className={cn('rounded-lg border p-3 flex flex-col gap-1', toneMap[tone])}
       data-testid={testId}
     >
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-bold opacity-90">
-        <Icon className="w-3 h-3 shrink-0" aria-hidden="true" />
-        <span className="truncate">{label}</span>
+      <div className="flex items-start gap-1.5 text-[10px] uppercase tracking-widest font-bold opacity-90">
+        <Icon className="w-3 h-3 shrink-0 mt-0.5" aria-hidden="true" />
+        {/* Wrap freely on narrow columns; desktop columns are wide enough that
+            the label still sits on one line. Never truncate the primary value. */}
+        <span className="leading-tight break-words">{label}</span>
       </div>
-      <div className="text-[13px] font-bold text-foreground leading-tight truncate">{value}</div>
-      {sub && <div className="text-[10px] text-muted-foreground truncate">{sub}</div>}
+      <div className="text-[13px] font-bold text-foreground leading-tight break-words">{value}</div>
+      {sub && <div className="text-[10px] text-muted-foreground leading-snug break-words">{sub}</div>}
     </div>
   );
 }
@@ -492,7 +494,18 @@ export default function FutureWorldsPanel({
     return deriveFutureWorlds(tree, derivationCtx);
   }, [JSON.stringify(inputs ?? {}), JSON.stringify(context ?? {})]);
 
-  const weighted = fmtMoney(model.weightedNetWorth);
+  // Header weighted-NW chip is rendered ONLY when it is backed by a real,
+  // positive canonical baseline net worth. When the panel mounts without
+  // inputs (e.g. dashboard hasn't wired the contract yet) the scenario
+  // engine returns 0 — which is non-informative and would render as
+  // "weighted NW $0". Per UX QA we hide it entirely in that case.
+  const weighted = (() => {
+    const v = model.weightedNetWorth;
+    if (v == null || !Number.isFinite(v)) return null;
+    if (Math.abs(v) < 1000) return null;
+    if (!(inputs?.baseNetWorth && Number.isFinite(inputs.baseNetWorth) && inputs.baseNetWorth > 0)) return null;
+    return fmtMoney(v);
+  })();
 
   return (
     <div

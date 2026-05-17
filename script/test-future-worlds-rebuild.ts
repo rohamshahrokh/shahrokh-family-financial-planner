@@ -247,6 +247,43 @@ assert(
   `base=${model.worlds.base.stressLevel} bull=${model.worlds.bull.stressLevel}`,
 );
 
+// ─── 6b. Visual QA hardening ───────────────────────────────────────────────
+section('Visual QA — mobile layout & empty-header guard');
+
+// Mobile signal cells must wrap, not truncate. The summary grid is mounted
+// single-column on mobile so labels and primary values are fully readable.
+assert(
+  'executive summary grid is single-column on mobile (grid-cols-1)',
+  panelSrc.includes('grid-cols-1 sm:grid-cols-2 md:grid-cols-4'),
+);
+
+// SummaryCell label/value/sub must not be hard-truncated.
+const summaryCellBlock = panelSrc.split('function SummaryCell')[1]?.split('function ')[0] ?? '';
+assert(
+  'SummaryCell label does NOT use class "truncate"',
+  !/<span\s+className="truncate"/.test(summaryCellBlock),
+);
+assert(
+  'SummaryCell value uses break-words instead of truncate',
+  summaryCellBlock.includes('break-words') && !/text-foreground leading-tight truncate/.test(summaryCellBlock),
+);
+
+// Header weighted-NW guard. The panel must never render a "weighted NW $0".
+assert(
+  'panel guards weighted-NW header against zero / unbacked values',
+  panelSrc.includes('Math.abs(v) < 1000') && panelSrc.includes('inputs?.baseNetWorth'),
+);
+
+// Behaviour assertion: mounted with no inputs (default 0 baseNetWorth) the
+// header value must be hidden — exercise the derivation directly.
+const emptyTree = buildScenarioTree(undefined);
+const emptyModel = deriveFutureWorlds(emptyTree, {});
+assert(
+  'derivation returns 0 weighted NW when baseNetWorth is missing',
+  (emptyModel.weightedNetWorth ?? 0) === 0,
+  `got ${emptyModel.weightedNetWorth}`,
+);
+
 // ─── 7. Executive summary references vulnerability and tailwind ────────────
 section('Executive summary — references key levers');
 
