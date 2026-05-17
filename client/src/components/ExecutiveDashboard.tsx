@@ -42,7 +42,18 @@ export interface ExecutiveDashboardProps {
   totalLiab: number;
   monthlyExpenses: number;
   passiveIncome: number;
+  /** Deterministic 10y net worth (used only when Monte Carlo P50 is unavailable). */
   year10NW: number;
+  /**
+   * Canonical Monte Carlo P50 (median) net worth at the selected horizon.
+   * When provided AND non-null, this is the OFFICIAL 10Y trajectory figure
+   * shown in the Executive Overview header — matching the Wealth Projection
+   * (Monte Carlo) table to the dollar. When null/undefined the header falls
+   * back to `year10NW` (deterministic) with an explicit "deterministic" label.
+   */
+  trajectoryP50?: number | null;
+  /** Year that `trajectoryP50` represents (e.g. 2035). */
+  trajectoryYear?: number | null;
   fireProgressPct: number;
   fireCurrentAmt: number;
   fireTargetAmt: number;
@@ -85,7 +96,19 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
   const { privacyMode } = useAppStore();
   const mv = (v: string) => maskValue(v, privacyMode);
   const macro = regimeLabel();
-  const traj = trajectoryFromGrowth(p.netWorth, p.year10NW);
+  // Source-of-truth resolution for the 10y trajectory shown in the header.
+  // Canonical MC P50 wins when available — that is the same number rendered
+  // in the Wealth Projection (Monte Carlo) table. Falls back to the
+  // deterministic projection ONLY when MC has not yet been run.
+  const hasMcTrajectory = typeof p.trajectoryP50 === 'number' && Number.isFinite(p.trajectoryP50);
+  const trajectoryValue = hasMcTrajectory ? (p.trajectoryP50 as number) : p.year10NW;
+  const trajectoryYearLabel = hasMcTrajectory && p.trajectoryYear
+    ? `${p.trajectoryYear} P50`
+    : `${new Date().getFullYear() + 9} (deterministic)`;
+  const trajectorySourceLabel = hasMcTrajectory
+    ? 'Source: Monte Carlo P50'
+    : 'Source: Deterministic baseline · run Monte Carlo for canonical P50';
+  const traj = trajectoryFromGrowth(p.netWorth, trajectoryValue);
   const surplusPositive = p.surplus >= 0;
   const riskTone =
     p.riskScore >= 70 ? 'hsl(142,60%,55%)'
@@ -159,14 +182,37 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
           <div className="text-[10px] text-muted-foreground mt-1 tabular-nums">{p.riskScore} / 100</div>
         </div>
 
-        {/* Trajectory */}
-        <div className="px-4 py-3">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1">10y Trajectory</div>
-          <div className="text-lg font-extrabold tabular-nums leading-none" style={{ color: 'hsl(210,80%,68%)' }}>
-            {mv(formatCurrency(p.year10NW, true))}
+        {/* Trajectory — canonical Monte Carlo P50 when available, deterministic fallback otherwise */}
+        <div className="px-4 py-3" data-testid="executive-trajectory">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1 flex items-center gap-1">
+            <span>10y Trajectory</span>
+            <span
+              className="text-[8px] font-bold px-1 py-0.5 rounded"
+              style={{
+                color: hasMcTrajectory ? 'hsl(280,80%,72%)' : 'hsl(43,90%,55%)',
+                background: hasMcTrajectory ? 'hsl(280,80%,12%)' : 'hsl(43,90%,8%)',
+                border: `1px solid ${hasMcTrajectory ? 'hsl(280,80%,30%)' : 'hsl(43,90%,30%)'}`,
+              }}
+              data-testid="executive-trajectory-source-badge"
+            >
+              {hasMcTrajectory ? 'MC P50' : 'DET'}
+            </span>
+          </div>
+          <div
+            className="text-lg font-extrabold tabular-nums leading-none"
+            style={{ color: 'hsl(210,80%,68%)' }}
+            data-testid="executive-trajectory-value"
+          >
+            {mv(formatCurrency(trajectoryValue, true))}
           </div>
           <div className="text-[10px] mt-1" style={{ color: traj.pct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
-            {traj.pct >= 0 ? '+' : ''}{traj.pct.toFixed(0)}% · {traj.label}
+            {traj.pct >= 0 ? '+' : ''}{traj.pct.toFixed(0)}% · {trajectoryYearLabel}
+          </div>
+          <div
+            className="text-[9px] mt-0.5 text-muted-foreground/80 leading-tight"
+            data-testid="executive-trajectory-source"
+          >
+            {trajectorySourceLabel}
           </div>
         </div>
 
@@ -328,6 +374,73 @@ function DailyBriefing({ result }: { result: UnifiedBestMoveResult | null }) {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Surplus reconciliation — only when the best move allocates a monthly $ amount */}
+      {best.surplusReconciliation && (
+        <div
+          className="px-4 py-3 border-t border-border/30"
+          data-testid="surplus-reconciliation"
+        >
+          <div className="text-[10px] font-bold uppercase tracking-widest mb-1.5 text-muted-foreground">
+            Surplus reconciliation
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-1 text-[11px]">
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Monthly income</span>
+              <span className="tabular-nums text-foreground" data-testid="surplus-recon-income">
+                {mv(formatCurrency(best.surplusReconciliation.monthlyIncomeUsed, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Monthly expenses</span>
+              <span className="tabular-nums text-foreground" data-testid="surplus-recon-expenses">
+                {mv(formatCurrency(best.surplusReconciliation.monthlyExpensesUsed, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Debt repayments</span>
+              <span className="tabular-nums text-foreground" data-testid="surplus-recon-debt">
+                {mv(formatCurrency(best.surplusReconciliation.monthlyDebtRepaymentsUsed, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Buffer top-up</span>
+              <span className="tabular-nums text-foreground">
+                {mv(formatCurrency(best.surplusReconciliation.bufferShortfallReserved, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground font-semibold">Safe deployable surplus</span>
+              <span
+                className="tabular-nums font-semibold"
+                style={{ color: 'hsl(142,60%,55%)' }}
+                data-testid="surplus-recon-safe"
+              >
+                {mv(formatCurrency(best.surplusReconciliation.safeDeployableSurplus, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground font-semibold">Recommended monthly DCA</span>
+              <span
+                className="tabular-nums font-semibold"
+                style={{ color: 'hsl(43,90%,62%)' }}
+                data-testid="surplus-recon-dca"
+              >
+                {mv(formatCurrency(best.surplusReconciliation.recommendedMonthlyAmount, true))}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2 md:col-span-3">
+              <span className="text-muted-foreground">Remaining flexible buffer</span>
+              <span className="tabular-nums text-foreground">
+                {mv(formatCurrency(best.surplusReconciliation.remainingMonthlyBuffer, true))}
+              </span>
+            </div>
+          </div>
+          <div className="text-[10px] text-muted-foreground/80 mt-2 leading-snug">
+            Capped at the safe deployable surplus derived from the canonical ledger — never exceeds the dashboard headline surplus.
+          </div>
         </div>
       )}
 

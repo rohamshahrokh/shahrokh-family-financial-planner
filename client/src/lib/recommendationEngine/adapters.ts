@@ -22,6 +22,12 @@ export function fromBestMoveLedger(ledger: BestMoveLedger): UnifiedSignals {
     monthlyIncome: ledger.monthlyIncome,
     monthlyExpenses: ledger.monthlyExpenses,
     monthlySurplus: surplus,
+    // Best Move builds `monthlyExpenses` from the canonical surplus selector
+    // (see computeBestMoveV2 — `monthlyExpenses = monthlyIncome − canonicalSurplus`).
+    // That means debt service is already baked into expenses; do NOT subtract
+    // it again when computing the safe deployable surplus cap.
+    expensesIncludeDebt: true,
+    monthlyDebtService: 0,
     rohamGrossAnnual: ledger.rohamGrossAnnual,
     superContribAnnualised: ledger.superContribAnnual,
     superCapRemaining: Math.max(0, SUPER_CAP - (ledger.superContribAnnual ?? 0)),
