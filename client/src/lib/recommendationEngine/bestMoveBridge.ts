@@ -12,7 +12,10 @@
 
 import { computeBestMoveV2, type BestMoveConfig, type BestMoveResult, type BestMoveLedger, type CalcBreakdownStep } from '../bestMoveEngine';
 import { computeUnifiedRecommendations } from './engine';
-import { fromBestMoveLedger, mergeSignals, fromRiskRadar, fromFirePath, fromMonteCarloV5 } from './adapters';
+import {
+  fromBestMoveLedger, mergeSignals, fromRiskRadar, fromFirePath, fromMonteCarloV5,
+  fromBehaviouralProfile, fromAutonomousOS, fromScenarioTree,
+} from './adapters';
 import type { UnifiedRecommendationResult, UnifiedSignals, Recommendation } from './types';
 import { snapshotHistory, type RecommendationChange } from './history';
 
@@ -64,6 +67,12 @@ export async function computeUnifiedBestMove(args: {
   firePath?: any;
   monteCarloV5?: any;
   preference?: UnifiedSignals['preference'];
+  /** Phase 5 — Behavioural profile (BehaviouralProfile) */
+  behaviouralProfile?: any;
+  /** Phase 5 — Autonomous OS report (OSReport) */
+  autonomousOS?: any;
+  /** Phase 5 — Scenario tree (ScenarioTreeResult) */
+  scenarioTree?: any;
 } = {}): Promise<UnifiedBestMoveResult> {
   const legacy = await computeBestMoveV2(args.cfg ?? {});
   const partial = ledgerFromInputs(legacy);
@@ -74,6 +83,9 @@ export async function computeUnifiedBestMove(args: {
     fromFirePath(args.firePath),
     fromMonteCarloV5(args.monteCarloV5),
     args.preference ? { preference: args.preference } : {},
+    fromBehaviouralProfile(args.behaviouralProfile),
+    fromAutonomousOS(args.autonomousOS),
+    fromScenarioTree(args.scenarioTree),
   );
   const unified = computeUnifiedRecommendations(signals);
   const changes = snapshotHistory(unified);

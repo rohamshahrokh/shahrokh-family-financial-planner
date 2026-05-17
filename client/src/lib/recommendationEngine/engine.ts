@@ -71,6 +71,9 @@ function signalsAvailable(s: UnifiedSignals): SourceSignal[] {
   if (s.riskOverallScore != null || s.topRiskFactor != null) list.push('risk_engine');
   if (s.marginalTaxRate != null || s.superCapRemaining != null) list.push('household_tax');
   if (s.preference != null) list.push('investor_preference');
+  if (s.behaviouralProfile != null) list.push('behavioural_profile');
+  if (Array.isArray(s.osFindings) && s.osFindings.length > 0) list.push('autonomous_os');
+  if (s.scenarioContext != null) list.push('scenario_tree');
   // dedupe
   return Array.from(new Set(list));
 }
@@ -636,6 +639,53 @@ function scoreCandidate(rec: Recommendation, s: UnifiedSignals): number {
   if (s.mcStressFlag === 'severe') {
     if (rec.actionType === 'etf_dca' || rec.actionType === 'crypto_dca') score *= 0.7;
     if (rec.pillar === 'protect_liquidity' || rec.pillar === 'reduce_high_interest_debt') score *= 1.3;
+  }
+
+  // Phase 5 — Behavioural soft tilts (intra-pillar only).
+  const bp = s.behaviouralProfile;
+  if (bp?.scores) {
+    const sc = bp.scores;
+    if (sc.fireUrgency != null && (rec.actionType === 'etf_dca' || rec.actionType === 'fire_acceleration')) {
+      score *= 1 + 0.25 * (sc.fireUrgency - 0.5);
+    }
+    if (sc.cryptoBias != null && rec.actionType === 'crypto_dca') {
+      score *= 1 + 0.3 * sc.cryptoBias;
+    }
+    if (sc.propertyBias != null && (rec.actionType === 'proceed_property_purchase' || rec.actionType === 'delay_property_purchase')) {
+      score *= 1 + 0.2 * sc.propertyBias;
+    }
+    if (sc.debtAversion != null && rec.pillar === 'reduce_high_interest_debt') {
+      score *= 1 + 0.3 * (sc.debtAversion - 0.5);
+    }
+    if (sc.liquidityPreference != null && rec.pillar === 'protect_liquidity') {
+      score *= 1 + 0.2 * sc.liquidityPreference;
+    }
+    if (sc.volatilityTolerance != null && (rec.actionType === 'etf_dca' || rec.actionType === 'crypto_dca')) {
+      // Pull back risk assets when user is loss averse.
+      if (sc.volatilityTolerance < -0.2) score *= 0.85;
+    }
+  }
+
+  // Phase 5 — Autonomous OS soft confirmation (intra-pillar only).
+  const findings = s.osFindings ?? [];
+  for (const f of findings) {
+    if (f.actionTypeHint && f.actionTypeHint === rec.actionType) {
+      const sevBoost = f.severity === 'critical' ? 1.4 :
+                       f.severity === 'elevated' ? 1.2 :
+                       f.severity === 'watch'    ? 1.05 : 1.0;
+      score *= sevBoost;
+    }
+  }
+
+  // Phase 5 — Scenario tree tilt: high probability-weighted liquidity/insolvency risk
+  // amplifies safety pillars; low risk amplifies wealth pillars.
+  const ctx = s.scenarioContext;
+  if (ctx) {
+    const insolvency = ctx.probWeightedInsolvencyRisk ?? 0;
+    if (insolvency > 0.15) {
+      if (rec.pillar === 'protect_liquidity' || rec.pillar === 'prevent_failure') score *= 1 + insolvency;
+      if (rec.pillar === 'maximise_wealth') score *= Math.max(0.6, 1 - insolvency);
+    }
   }
   return score;
 }
