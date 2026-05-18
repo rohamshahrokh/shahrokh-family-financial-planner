@@ -77,6 +77,11 @@ export interface DepositPowerSummary {
   readyNow?: boolean | null;
   totalDepositPower?: number | null;
   isEquityRichCashPoor?: boolean | null;
+  /** Live Cash + Offset (single liquidity line below the readiness summary). */
+  cashAndOffset?: number | null;
+  /** Last-year cash (e.g. "2035 Cash") — read from end of cashflow series. */
+  finalYearCash?: number | null;
+  finalYearLabel?: string | null;
 }
 
 export type CashflowChartMode = 'combo' | 'line' | 'candlestick';
@@ -830,6 +835,7 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
   // the canonical data series so the row never reads zeros when the engine
   // has run.
   const firstRow = hasData ? chartData[0] : null;
+  const lastRow  = hasData ? chartData[chartData.length - 1] : null;
   const sum = p.depositPowerSummary ?? {};
   const annualNetCF = sum.annualNetCashflow ?? firstRow?.netCashflow ?? firstRow?.netCF ?? 0;
   const taxRefundPerYear = sum.taxRefundPerYear ?? firstRow?.taxRefund ?? firstRow?.ngRefund ?? 0;
@@ -839,6 +845,20 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
   const ipReadinessPct = sum.ipReadinessPct;
   const readyNow = sum.readyNow ?? false;
   const equityRichCashPoor = !!sum.isEquityRichCashPoor;
+  // Cash + Offset — the live liquidity figure. Falls back to cashTodayVal
+  // when no explicit value is supplied so the row never reads blank.
+  const cashAndOffsetVal = sum.cashAndOffset ?? cashTodayVal;
+  // Final-year cash for the 2x2 grid (matches the reference label "{YYYY} Cash").
+  // For annual granularity we read the last row's cashBalance directly. For
+  // monthly granularity we still surface the final period as the future-cash
+  // anchor so the metric stays informative.
+  const finalYearCash: number = sum.finalYearCash ?? (lastRow?.cashBalance ?? lastRow?.balance ?? 0);
+  const finalYearLabel: string = sum.finalYearLabel ?? (lastRow?.label
+    ? (gran === 'monthly'
+        // Monthly labels look like "Jan 2035"; show year only on the tile.
+        ? (String(lastRow.label).match(/\d{4}/)?.[0] ?? String(lastRow.label))
+        : String(lastRow.label))
+    : `${new Date().getFullYear() + 9}`);
 
   const todayPower = hasData ? (chartData[0].totalDepositPower ?? 0) : 0;
   const yr5Power   = hasData && chartData.length >= 5 ? (chartData[4].totalDepositPower ?? null) : null;
@@ -864,49 +884,41 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
             <p className="text-[11px] text-muted-foreground">Liquidity · net cashflow · tax refund · deposit-power readiness</p>
           </div>
         </div>
-        <div className="flex items-center gap-4 text-[11px]">
-          <div className="flex flex-col items-end">
-            <span className="text-[9px] uppercase tracking-widest font-bold text-muted-foreground">Today</span>
-            <span className="tabular-nums font-mono" style={{ color: 'hsl(188,60%,72%)' }} data-testid="deposit-power-today">
-              {mv(formatCurrency(todayPower, true))}
-            </span>
+        {hasData && yr5Power !== null && (
+          <div className="flex items-center gap-4 text-[11px]" data-testid="deposit-power-header-meta">
+            <div className="flex flex-col items-end">
+              <span className="text-[9px] uppercase tracking-widest font-bold text-muted-foreground">Today</span>
+              <span className="tabular-nums font-mono" style={{ color: 'hsl(188,60%,72%)' }} data-testid="deposit-power-today">
+                {mv(formatCurrency(todayPower, true))}
+              </span>
+            </div>
+            <div className="w-px h-7 bg-border/40" />
+            <div className="flex flex-col items-end">
+              <span className="text-[9px] uppercase tracking-widest font-bold text-muted-foreground">5 yr</span>
+              <span className="tabular-nums font-mono" style={{ color: 'hsl(142,60%,60%)' }} data-testid="deposit-power-5yr">
+                {mv(formatCurrency(yr5Power, true))}
+              </span>
+            </div>
           </div>
-          {yr5Power !== null && (
-            <>
-              <div className="w-px h-7 bg-border/40" />
-              <div className="flex flex-col items-end">
-                <span className="text-[9px] uppercase tracking-widest font-bold text-muted-foreground">5 yr</span>
-                <span className="tabular-nums font-mono" style={{ color: 'hsl(142,60%,60%)' }} data-testid="deposit-power-5yr">
-                  {mv(formatCurrency(yr5Power, true))}
-                </span>
-              </div>
-            </>
-          )}
-        </div>
+        )}
       </header>
 
-      {/* Mini summary metrics row — institutional, calm, six tiles. */}
+      {/* ── Readiness summary — two-tile row matching the canonical reference.
+            Left tile: large IP-readiness %, full-width progress bar.
+            Right tile: Ready Now headline + "Deposit ready" subtitle.
+            Followed by a single Cash + Offset line in blue. */}
       <div
-        className="px-3 pt-3 pb-1 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2"
-        data-testid="deposit-power-summary-row"
+        className="px-3 pt-3 pb-1 grid grid-cols-2 gap-2"
+        data-testid="deposit-power-readiness-row"
       >
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">PPOR LVR</div>
-          <div className="text-sm font-bold tabular-nums" style={{ color: 'hsl(188,60%,60%)' }} data-testid="dp-ppor-lvr">
-            {typeof pporLvrPct === 'number' && Number.isFinite(pporLvrPct) ? `${Math.round(pporLvrPct)}%` : '—'}
-          </div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">Loan / value</div>
-        </div>
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">IP Readiness</div>
-          <div
-            className="text-sm font-bold tabular-nums"
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
+          <div className="text-lg sm:text-xl font-extrabold tabular-nums leading-none"
             style={{ color: (ipReadinessPct ?? 0) >= 100 ? 'hsl(142,60%,55%)' : 'hsl(43,90%,58%)' }}
             data-testid="dp-ip-readiness"
           >
             {typeof ipReadinessPct === 'number' && Number.isFinite(ipReadinessPct) ? `${Math.round(ipReadinessPct)}%` : '—'}
           </div>
-          <div className="h-1 rounded-full bg-border mt-1.5 overflow-hidden">
+          <div className="h-1.5 rounded-full bg-border mt-2 overflow-hidden">
             <div
               className="h-full rounded-full transition-all"
               style={{
@@ -916,41 +928,72 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
             />
           </div>
         </div>
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">{gran === 'monthly' ? 'Monthly Net CF' : 'Annual Net CF'}</div>
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
           <div
-            className="text-sm font-bold tabular-nums"
+            className="text-base sm:text-lg font-extrabold leading-tight"
+            style={{ color: equityRichCashPoor ? 'hsl(43,90%,60%)' : readyNow ? 'hsl(142,60%,55%)' : 'hsl(215,15%,65%)' }}
+            data-testid="dp-ready-now"
+          >
+            {equityRichCashPoor ? '⚠ Equity Rich' : readyNow ? 'Ready Now' : 'Building'}
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-1">
+            {equityRichCashPoor ? '/ Cash Poor — release equity' : readyNow ? 'Deposit ready' : 'Approaching deposit'}
+          </div>
+        </div>
+      </div>
+
+      {/* Cash / Offset liquidity line — single-row info strip, blue accent. */}
+      <div
+        className="px-3 pt-2 pb-1 flex items-center gap-1.5 text-[12px]"
+        style={{ color: 'hsl(210,80%,68%)' }}
+        data-testid="dp-cash-offset"
+      >
+        <DollarSign className="w-3.5 h-3.5" />
+        <span className="font-semibold">Cash / Offset:</span>
+        <span className="tabular-nums font-mono font-semibold">{mv(formatCurrency(cashAndOffsetVal, true))}</span>
+        <span className="ml-3 text-[10px] text-muted-foreground tabular-nums">
+          PPOR LVR {typeof pporLvrPct === 'number' && Number.isFinite(pporLvrPct) ? `${Math.round(pporLvrPct)}%` : '—'}
+          {' · '}
+          Total deposit power {mv(formatCurrency(totalDepositPowerNow, true))}
+        </span>
+      </div>
+
+      {/* 2×2 summary metric grid — Cash Today · Final-year Cash · Net CF · Tax Refund. */}
+      <div
+        className="px-3 pt-2 pb-1 grid grid-cols-2 gap-2"
+        data-testid="deposit-power-summary-row"
+      >
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
+          <div className="text-[11px] text-muted-foreground mb-1">Cash Today</div>
+          <div className="text-base sm:text-lg font-extrabold tabular-nums leading-tight" style={{ color: 'hsl(210,80%,68%)' }} data-testid="dp-cash-today">
+            {mv(formatCurrency(cashTodayVal, true))}
+          </div>
+        </div>
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
+          <div className="text-[11px] text-muted-foreground mb-1">{finalYearLabel} Cash</div>
+          <div
+            className="text-base sm:text-lg font-extrabold tabular-nums leading-tight"
+            style={{ color: (finalYearCash ?? 0) >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}
+            data-testid="dp-final-year-cash"
+          >
+            {mv(formatCurrency(finalYearCash ?? 0, true))}
+          </div>
+        </div>
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
+          <div className="text-[11px] text-muted-foreground mb-1">{gran === 'monthly' ? 'Monthly Net CF' : 'Annual Net CF'}</div>
+          <div
+            className="text-base sm:text-lg font-extrabold tabular-nums leading-tight"
             style={{ color: annualNetCF >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}
             data-testid="dp-net-cf"
           >
             {mv(formatCurrency(annualNetCF, true))}
           </div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">{gran === 'monthly' ? 'This month' : 'Year 1'}</div>
         </div>
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">Tax Refund / yr</div>
-          <div className="text-sm font-bold tabular-nums" style={{ color: 'hsl(43,90%,58%)' }} data-testid="dp-tax-refund">
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
+          <div className="text-[11px] text-muted-foreground mb-1">Tax Refund/yr</div>
+          <div className="text-base sm:text-lg font-extrabold tabular-nums leading-tight" style={{ color: 'hsl(43,90%,58%)' }} data-testid="dp-tax-refund">
             +{mv(formatCurrency(taxRefundPerYear, true))}
           </div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">{refund === 'payg' ? 'PAYG spread' : 'Lump-sum'}</div>
-        </div>
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">Cash Today</div>
-          <div className="text-sm font-bold tabular-nums" style={{ color: 'hsl(210,80%,68%)' }} data-testid="dp-cash-today">
-            {mv(formatCurrency(cashTodayVal, true))}
-          </div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">All liquid + offset</div>
-        </div>
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">Ready Now</div>
-          <div
-            className="text-sm font-bold tabular-nums"
-            style={{ color: equityRichCashPoor ? 'hsl(43,90%,60%)' : readyNow ? 'hsl(142,60%,55%)' : 'hsl(215,15%,65%)' }}
-            data-testid="dp-ready-now"
-          >
-            {equityRichCashPoor ? '⚠ Equity Rich' : readyNow ? 'Ready' : 'Building'}
-          </div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">{equityRichCashPoor ? '/ Cash Poor' : `Total ${mv(formatCurrency(totalDepositPowerNow, true))}`}</div>
         </div>
       </div>
 
@@ -1080,12 +1123,15 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
                 <ReferenceLine yAxisId="bal" y={0} stroke="hsl(var(--border) / 0.6)" />
               </ComposedChart>
             ) : (
-              // DEFAULT: Combo — Balance area + Net CF bars + Tax refund bars
+              // DEFAULT: Combo — Balance line (with circular markers) + Net CF
+              // bars + gold vertical dashed tax-refund markers per year. Dual
+              // y-axis (balance left, cashflow right) so the institutional
+              // chrome matches the canonical reference.
               <ComposedChart data={chartData} margin={{ top: 12, right: 18, left: 0, bottom: 6 }}>
                 <defs>
                   <linearGradient id="dpComboBalFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%"  stopColor="hsl(210,80%,62%)" stopOpacity={0.22} />
-                    <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.02} />
+                    <stop offset="0%"  stopColor="hsl(210,80%,62%)" stopOpacity={0.16} />
+                    <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border) / 0.32)" vertical={false} />
@@ -1096,16 +1142,36 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
                 <YAxis yAxisId="cf"  orientation="right" tickFormatter={(v) => fmtCompact(v)} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} width={48} />
                 <Tooltip content={<CalmChartTooltip />} cursor={{ fill: 'hsl(222,15%,16%)', fillOpacity: 0.4 }} />
                 <ReferenceLine yAxisId="cf" y={0} stroke="hsl(var(--border) / 0.55)" strokeDasharray="3 3" />
+                {/* Gold vertical dashed tax-refund markers per year — only
+                    drawn where a refund actually lands. */}
+                {chartData.map((d: any) => (
+                  (d.taxRefund ?? d.ngRefund ?? 0) > 0 ? (
+                    <ReferenceLine
+                      key={`tr-${d.label}`}
+                      yAxisId="cf"
+                      x={d.label}
+                      stroke="hsl(43,90%,55%)"
+                      strokeDasharray="4 3"
+                      strokeOpacity={0.55}
+                      strokeWidth={1}
+                    />
+                  ) : null
+                ))}
                 <Bar yAxisId="cf" dataKey="netCashflow" name="Net Cashflow" radius={[3,3,0,0]} maxBarSize={32} isAnimationActive={false}>
                   {chartData.map((d: any, i: number) => (
-                    <Cell key={i} fill={(d.netCashflow ?? 0) >= 0 ? 'hsl(142,55%,45%)' : 'hsl(0,65%,55%)'} fillOpacity={0.75} />
+                    <Cell key={i} fill={(d.netCashflow ?? 0) >= 0 ? 'hsl(142,55%,45%)' : 'hsl(0,65%,55%)'} fillOpacity={0.78} />
                   ))}
                 </Bar>
-                <Bar yAxisId="cf" dataKey="taxRefund" name="Tax Refund" fill="hsl(43,90%,58%)" fillOpacity={0.85} radius={[3,3,0,0]} maxBarSize={18} isAnimationActive={false} />
+                {/* Tax refund — small gold tick bars that pair with the dashed
+                    vertical markers above. Preserves the canonical refund
+                    channel + lets the legend chip reference the same series. */}
+                <Bar yAxisId="cf" dataKey="taxRefund" name="Tax Refund" fill="hsl(43,90%,55%)" fillOpacity={0.95} radius={[2,2,0,0]} maxBarSize={6} isAnimationActive={false} />
+                {/* Cash balance — line with gold circular markers, light blue
+                    gradient fill below. Matches the reference verbatim. */}
                 <Area yAxisId="bal" type="monotone" dataKey="cashBalance" name="Cash Balance"
                   stroke="hsl(210,80%,68%)" strokeWidth={2.6} fill="url(#dpComboBalFill)" isAnimationActive={false}
-                  activeDot={{ r: 4.5, fill: 'hsl(210,80%,68%)', stroke: 'hsl(var(--card))', strokeWidth: 2 }}
-                  dot={false}
+                  dot={{ r: 4, fill: 'hsl(43,90%,55%)', stroke: 'hsl(210,80%,68%)', strokeWidth: 1.8 }}
+                  activeDot={{ r: 5.5, fill: 'hsl(43,90%,55%)', stroke: 'hsl(210,80%,68%)', strokeWidth: 2 }}
                 />
                 {viewMode !== 'cash' && (
                   <Line yAxisId="bal" type="monotone" dataKey="usableEquity" name="Usable Equity"
@@ -1133,39 +1199,51 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
           </div>
         )}
 
-        {/* Dynamic legend row */}
+        {/* Dynamic legend row 1 — chart series. */}
         {hasData && (
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 px-3 pt-3 mt-1 border-t border-border/25">
-            <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(210,80%,68%)' }}>
-              <span className="inline-block w-6 h-0.5 rounded" style={{ background: 'hsl(210,80%,68%)' }} />Cash Balance
-            </div>
-            {viewMode !== 'cash' && (
-              <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(188,60%,60%)' }}>
-                <span className="inline-block w-6 h-0.5 rounded border-current" style={{ borderStyle: 'dashed', borderTopWidth: 2 }} />Usable Equity
+          <div className="px-3 pt-3 mt-1 border-t border-border/25 space-y-1.5" data-testid="dp-legend">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+              <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(210,80%,68%)' }}>
+                <span className="inline-block w-6 h-0.5 rounded" style={{ background: 'hsl(210,80%,68%)' }} />Cash Balance
               </div>
-            )}
-            {viewMode === 'deposit' && (
-              <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(43,90%,60%)' }}>
-                <span className="inline-block w-6 h-0.5 rounded" style={{ background: 'hsl(43,90%,60%)' }} />Deposit Power
-              </div>
-            )}
-            {chartMode !== 'line' && (
-              <>
-                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'hsl(142,55%,45%)', opacity: 0.85 }} />{chartMode === 'candlestick' ? 'Up year' : 'Net CF +'}
+              {viewMode !== 'cash' && (
+                <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(188,60%,60%)' }}>
+                  <span className="inline-block w-6 h-0.5 rounded border-current" style={{ borderStyle: 'dashed', borderTopWidth: 2 }} />Usable Equity
                 </div>
-                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'hsl(0,65%,55%)', opacity: 0.85 }} />{chartMode === 'candlestick' ? 'Down year' : 'Net CF −'}
+              )}
+              {viewMode === 'deposit' && (
+                <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(43,90%,60%)' }}>
+                  <span className="inline-block w-6 h-0.5 rounded" style={{ background: 'hsl(43,90%,60%)' }} />Deposit Power
                 </div>
-                {chartMode === 'combo' && (
-                  <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(43,90%,58%)' }}>
-                    <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'hsl(43,90%,58%)' }} />Tax Refund
+              )}
+              {chartMode !== 'line' && (
+                <>
+                  <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'hsl(142,55%,45%)', opacity: 0.85 }} />{chartMode === 'candlestick' ? 'Up year' : 'Net CF +'}
                   </div>
-                )}
-              </>
-            )}
-            <div className="ml-auto text-[10px] text-muted-foreground">
-              {gran === 'monthly' ? 'Monthly granularity · responsive' : 'Annual granularity · 10-year horizon'}
+                  <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'hsl(0,65%,55%)', opacity: 0.85 }} />{chartMode === 'candlestick' ? 'Down year' : 'Net CF −'}
+                  </div>
+                </>
+              )}
+            </div>
+            {/* Legend row 2 — event/category brand chips matching the canonical reference. */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <div className="flex items-center gap-1 text-[11px]" style={{ color: 'hsl(188,65%,55%)' }}>
+                <span>🏠</span><span style={{ opacity: 0.85 }}>Property</span>
+              </div>
+              <div className="flex items-center gap-1 text-[11px]" style={{ color: 'hsl(210,80%,68%)' }}>
+                <span>📈</span><span style={{ opacity: 0.85 }}>Stocks</span>
+              </div>
+              <div className="flex items-center gap-1 text-[11px]" style={{ color: 'hsl(262,70%,68%)' }}>
+                <span>₿</span><span style={{ opacity: 0.85 }}>Crypto</span>
+              </div>
+              <div className="flex items-center gap-1 text-[11px]" style={{ color: 'hsl(43,90%,58%)' }}>
+                <span>💰</span><span style={{ opacity: 0.85 }}>Tax Refund</span>
+              </div>
+              <div className="ml-auto text-[10px] text-muted-foreground">
+                {gran === 'monthly' ? 'Monthly granularity · responsive' : 'Annual granularity · 10-year horizon'}
+              </div>
             </div>
           </div>
         )}

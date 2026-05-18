@@ -2018,10 +2018,24 @@ export default function DashboardPage() {
       readyNow:           depositPowerResult.isReady,
       totalDepositPower:  depositPowerResult.totalDepositPower,
       isEquityRichCashPoor: !!depositPowerResult.isEquityRichCashPoor,
+      // Cash + Offset (live) — engine exposes `cashAndOffset` directly.
+      cashAndOffset:      (depositPowerResult as any).cashAndOffset
+                            ?? (snap.cash + snap.offset_balance),
+      // Final-year cash anchors the "{YYYY} Cash" tile in the 2x2 grid.
+      finalYearCash:      cashFlowAnnual?.[cashFlowAnnual.length - 1]?.endingBalance
+                            ?? null,
+      finalYearLabel:     cashFlowAnnual?.[cashFlowAnnual.length - 1]?.year
+                            ? String(cashFlowAnnual[cashFlowAnnual.length - 1].year)
+                            : null,
     } : {
       cashToday: totalLiquidCash,
       annualNetCashflow: cashFlowAnnual?.[0]?.netCashFlow ?? 0,
       taxRefundPerYear: ngSummary.totalAnnualTaxBenefit,
+      cashAndOffset: snap.cash + snap.offset_balance,
+      finalYearCash: cashFlowAnnual?.[cashFlowAnnual.length - 1]?.endingBalance ?? null,
+      finalYearLabel: cashFlowAnnual?.[cashFlowAnnual.length - 1]?.year
+                        ? String(cashFlowAnnual[cashFlowAnnual.length - 1].year)
+                        : null,
     },
   };
 
