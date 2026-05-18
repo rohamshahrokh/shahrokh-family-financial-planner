@@ -176,16 +176,21 @@ const execDash = readFileSync(
   resolve(__dirname, '../client/src/components/ExecutiveDashboard.tsx'),
   'utf8',
 );
+// Executive Overview rebuild V2 — homepage IA was reduced to exactly four
+// canonical health metrics (liquidity, leverage, cashflow-resilience,
+// fire-progress) plus the hero/trajectory/best-move explainers. The legacy
+// homepage-only metrics (survivability, runway, debt-pressure, macro-regime,
+// confidence) were intentionally relocated off the homepage — they live on
+// Risk Radar, Forecast Engine and Decision Engine deep pages instead.
 const requiredOnDashboard = [
   'liquidity',
   'leverage',
-  'survivability',
+  'cashflow-resilience',
   'fire-progress',
-  'runway',
-  'debt-pressure',
   'risk-state',
-  'macro-regime',
-  'confidence',
+  'monte-carlo-probability',
+  'p10-p50-p90',
+  'best-move',
 ];
 for (const id of requiredOnDashboard) {
   // Either the metricId='liquidity' literal, or the explainer prop with that ID.
@@ -193,7 +198,6 @@ for (const id of requiredOnDashboard) {
   assert(`ExecutiveDashboard wires '${id}'`, hit);
 }
 assert('ExecutiveDashboard imports MetricExplainer', execDash.includes("from '@/components/intelligence/MetricExplainer'"));
-assert('ExecutiveDashboard renders SystemInterpretation', execDash.includes('SystemInterpretation'));
 
 const riskPanel = readFileSync(
   resolve(__dirname, '../client/src/components/UnifiedRiskPanel.tsx'),

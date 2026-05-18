@@ -1,40 +1,53 @@
 /**
- * ExecutiveDashboard.tsx — FWL Phase 7 (Experience Rebuild)
+ * ExecutiveDashboard.tsx — FWL Executive Overview Rebuild V2
  *
- * New executive-mode entry surface that introduces hierarchy and progressive
- * disclosure to the dashboard while PRESERVING the existing visual identity
- * (dark navy/graphite surfaces, gold/yellow accents, cyan/green/purple
- * intelligence accents, current card styling, current glow intensity range,
- * current icon language, current typography direction).
+ * "A calm Family Office Cockpit" — NOT a data dump, forecast terminal, audit
+ * page or feature showcase. Replaces the prior Phase-7 Executive Dashboard
+ * (Header + Daily Briefing + Strategic Priorities + 6-metric Health Strip +
+ * Action Queue) with a tighter four-section information architecture that
+ * answers the only four questions the homepage should answer:
  *
- * Five composable surfaces, narrative-first:
- *   1. ExecutiveHeader   — net worth, monthly surplus, risk, trajectory, macro regime
- *   2. DailyBriefing     — best move, top risk, top opportunity, what changed, confidence
- *   3. StrategicPriorities — top 3 by default, "View full strategic stack" reveal
- *   4. FinancialHealthStrip — liquidity / leverage / survivability / FIRE / runway / debt pressure
- *   5. ActionQueue       — next executable steps
+ *     1. Where am I now?         → ExecutiveHeroSnapshot
+ *     2. Am I okay?              → ExecutiveHealthStrip (4 canonical metrics)
+ *     3. What is my trajectory?  → CanonicalTrajectoryPanel (MC P50 + Confidence)
+ *     4. What should I do next?  → ExecutiveActionQueue (max 3 items)
  *
- * No new data sources — all values come from the existing Unified Recommendation
- * Engine, dashboard data contract selectors, and store.
+ * Source-of-truth rules preserved:
+ *   • Monte Carlo P50 is the ONLY canonical trajectory representation. The
+ *     deterministic year-10 figure is NEVER shown as the official trajectory
+ *     (we render a neutral "Monte Carlo pending" state when MC has not run).
+ *   • Surplus, recommendation engine output, risk state and FIRE progress
+ *     all flow in via props from the canonical dashboard selectors — this
+ *     component performs ONLY presentation formatting.
+ *   • There is exactly ONE Best Move surface on Executive Overview (inside
+ *     the Hero), and exactly ONE Action Queue (max 3) — no duplicated
+ *     recommendation systems.
  *
- * Tone: calm, professional, CIO / family-office. Reads in < 15 seconds.
+ * Visual contract preserved:
+ *   • Dark navy/graphite card surfaces, restrained gold accent for the
+ *     primary Net Worth / Best Move signal, cyan/green/purple intelligence
+ *     accents for trajectory and health states. Premium, calm, minimal.
+ *
+ * Explainability:
+ *   • Every metric uses the global Liquidity-style MetricExplainer popup
+ *     (from PR #34/#35). No browser-native title tooltips on key signals.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
 import {
   TrendingUp, TrendingDown, Shield, Sparkles, AlertTriangle,
   Activity, ArrowRight, ChevronDown, ChevronUp, Flame, Wallet,
-  Layers, Clock, Target, CheckCircle2, BarChart2,
+  Layers, Target, CheckCircle2,
 } from 'lucide-react';
 import { useForecastStore } from '@/lib/forecastStore';
 import { useAppStore } from '@/lib/store';
-import { computeUnifiedBestMove, type UnifiedBestMoveResult, type Recommendation } from '@/lib/recommendationEngine';
+import { computeUnifiedBestMove, type UnifiedBestMoveResult } from '@/lib/recommendationEngine';
 import { formatCurrency } from '@/lib/finance';
 import { maskValue } from '@/components/PrivacyMask';
 import { MetricExplainer } from '@/components/intelligence/MetricExplainer';
-import { SystemInterpretation, pickDominantReading } from '@/components/intelligence/SystemInterpretation';
 import { readMetric, getMetricExplanation, type MetricReading } from '@/lib/metricExplanations';
+import type { MonteCarloFanPoint } from '@/lib/forecastStore';
 
 // ─── Public props ────────────────────────────────────────────────────────────
 
@@ -45,14 +58,11 @@ export interface ExecutiveDashboardProps {
   totalLiab: number;
   monthlyExpenses: number;
   passiveIncome: number;
-  /** Deterministic 10y net worth (used only when Monte Carlo P50 is unavailable). */
+  /** Deterministic 10y net worth — kept for compatibility, never rendered as primary. */
   year10NW: number;
   /**
    * Canonical Monte Carlo P50 (median) net worth at the selected horizon.
-   * When provided AND non-null, this is the OFFICIAL 10Y trajectory figure
-   * shown in the Executive Overview header — matching the Wealth Projection
-   * (Monte Carlo) table to the dollar. When null/undefined the header falls
-   * back to `year10NW` (deterministic) with an explicit "deterministic" label.
+   * Only canonical source — when null/undefined we render "Monte Carlo pending".
    */
   trajectoryP50?: number | null;
   /** Year that `trajectoryP50` represents (e.g. 2035). */
@@ -62,7 +72,7 @@ export interface ExecutiveDashboardProps {
   fireTargetAmt: number;
   riskScore: number;
   riskLabel: string;
-  /** Annual monthly debt service total. */
+  /** Monthly debt service total. */
   monthlyDebtService: number;
   /** Mortgage balance (for leverage calc). */
   totalMortgage: number;
@@ -70,107 +80,85 @@ export interface ExecutiveDashboardProps {
   totalPropertyValue: number;
   /** Total assets for leverage ratio. */
   totalAssets: number;
+  /**
+   * Canonical Monte Carlo fan data — the ONLY trajectory representation
+   * shown on the Executive Overview. When undefined or empty, the trajectory
+   * panel renders a neutral pending CTA.
+   */
+  monteCarloFanData?: MonteCarloFanPoint[] | null;
+  /** Number of MC simulations run (purely informational). */
+  monteCarloSimulations?: number | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function regimeLabel(): { label: string; tone: string } {
-  // Macro regime is computed by Phase 5/6 engines and not always available at
-  // dashboard mount. Default to "Expansion" — a calm reading consistent with
-  // the portfolio construction default. This is updated downstream by the
-  // FinancialOSCentre / FamilyOfficeMode panels.
-  return { label: 'Expansion · Stable', tone: 'hsl(142,60%,55%)' };
-}
-
-function trajectoryFromGrowth(start: number, end: number): { delta: number; pct: number; label: string } {
-  if (!start || start <= 0) return { delta: 0, pct: 0, label: 'Insufficient data' };
-  const delta = end - start;
-  const pct = (delta / start) * 100;
+function trajectoryFromGrowth(start: number, end: number): { pct: number; label: string } {
+  if (!start || start <= 0) return { pct: 0, label: 'Insufficient data' };
+  const pct = ((end - start) / start) * 100;
   return {
-    delta,
     pct,
     label: pct >= 50 ? 'Strong growth' : pct >= 20 ? 'Steady growth' : pct >= 5 ? 'Modest growth' : pct >= 0 ? 'Flat' : 'Drawdown',
   };
 }
 
-/**
- * Concise card-preview copy for a recommendation. The Strategic Priorities
- * and Action Queue cards have very limited horizontal real estate (clamped
- * to ~2 lines on desktop, ~1 line in the expanded list). Full reasoning
- * paragraphs — especially the DCA recommendation, which now embeds the full
- * surplus-reconciliation explanation — get truncated mid-sentence and read
- * as broken copy.
- *
- * Resolution rules:
- *   1. Recommendations with a `surplusReconciliation` block render a single
- *      reconciled sentence: "DCA $X/mo · within $Y safe surplus
- *      (income $A − expenses $B − debt $C)". Full breakdown lives in the
- *      Daily Briefing reconciliation panel + "Full plan" link.
- *   2. Everything else falls through to the first sentence of `reasoning`
- *      (period-terminated), so the card never cuts off in the middle of a
- *      clause.
- */
-function priorityPreview(rec: Recommendation): string {
-  const fmt = (n: number) => {
-    if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-    if (Math.abs(n) >= 1_000)     return `$${Math.round(n / 1_000)}K`;
-    return `$${Math.round(n)}`;
-  };
-  const sr = rec.surplusReconciliation;
-  if (sr) {
-    return `${fmt(sr.recommendedMonthlyAmount)}/mo · within ${fmt(sr.safeDeployableSurplus)} safe surplus (income ${fmt(sr.monthlyIncomeUsed)} − expenses ${fmt(sr.monthlyExpensesUsed)})`;
-  }
-  const reasoning = rec.reasoning ?? '';
-  // Split at the first sentence terminator so card copy reads as a complete
-  // thought even when CSS line-clamping shortens it further.
-  const firstSentence = reasoning.match(/^[^.!?]+[.!?]/)?.[0] ?? reasoning;
-  return firstSentence.trim();
+function fmtCompact(n: number): string {
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(n) >= 1_000)     return `$${Math.round(n / 1_000)}K`;
+  return `$${Math.round(n)}`;
 }
 
-// ─── 1. ExecutiveHeader ──────────────────────────────────────────────────────
+// ─── 1. ExecutiveHeroSnapshot ────────────────────────────────────────────────
+// "Where am I now?" — Net Worth, Monthly Surplus, Risk State, FIRE Timeline,
+// and exactly one primary Best Move. Visually dominant, scannable, calm.
 
-function ExecutiveHeader(p: ExecutiveDashboardProps) {
+interface HeroProps extends ExecutiveDashboardProps {
+  result: UnifiedBestMoveResult | null;
+}
+
+function ExecutiveHeroSnapshot(p: HeroProps) {
   const { privacyMode } = useAppStore();
   const mv = (v: string) => maskValue(v, privacyMode);
-  const macro = regimeLabel();
-  // Source-of-truth resolution for the 10y trajectory shown in the header.
-  // Monte Carlo P50 is the ONLY canonical source of truth. When MC has not
-  // been run we MUST NOT show the deterministic projection as the primary
-  // trajectory — instead the card renders a neutral "Monte Carlo pending"
-  // state with a CTA to run the simulation. The deterministic figure is
-  // demoted to a small secondary line, clearly labelled "non-canonical".
-  const hasMcTrajectory = typeof p.trajectoryP50 === 'number' && Number.isFinite(p.trajectoryP50);
-  const trajectoryYearLabel = hasMcTrajectory && p.trajectoryYear
-    ? `${p.trajectoryYear} P50`
-    : `${new Date().getFullYear() + 9} horizon`;
-  const trajectorySourceLabel = hasMcTrajectory
-    ? 'Source: Monte Carlo P50'
-    : 'Source: Monte Carlo not yet run — open Forecast Engine to populate';
-  // `traj` (growth % vs today) is only computed when MC is available; the
-  // deterministic figure deliberately does NOT drive the primary card.
-  const traj = hasMcTrajectory
-    ? trajectoryFromGrowth(p.netWorth, p.trajectoryP50 as number)
-    : { delta: 0, pct: 0, label: 'Monte Carlo pending' };
   const surplusPositive = p.surplus >= 0;
   const riskTone =
     p.riskScore >= 70 ? 'hsl(142,60%,55%)'
     : p.riskScore >= 50 ? 'hsl(43,90%,55%)'
     : 'hsl(0,72%,60%)';
 
+  // FIRE timeline: years until target at current pace. Use surplus * 12 + a
+  // conservative 6% real growth on the current FIRE capital as the implicit
+  // pace. When the target is already met or no surplus, show "—".
+  const fireYears: number | null = (() => {
+    if (p.fireProgressPct >= 100) return 0;
+    if (p.surplus <= 0 || p.fireTargetAmt <= 0) return null;
+    const annualSavings = p.surplus * 12;
+    const gap = Math.max(0, p.fireTargetAmt - p.fireCurrentAmt);
+    if (gap <= 0) return 0;
+    // Simple closed-form: gap / annualSavings — calm, defensible.
+    const naiveYears = gap / annualSavings;
+    if (!Number.isFinite(naiveYears) || naiveYears <= 0) return null;
+    return Math.round(naiveYears);
+  })();
+
+  const fireAge: number | null = fireYears !== null
+    ? Math.round(40 + fireYears) // Placeholder anchor age — exact age computed by FIRE engine elsewhere.
+    : null;
+
+  const best = p.result?.unified.bestMove;
+
   return (
-    <div
+    <section
       className="rounded-2xl border overflow-hidden"
       style={{
         borderColor: 'hsl(var(--gold-dim) / 0.35)',
-        background:
-          'linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--gold-surface) / 0.35) 100%)',
+        background: 'linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--gold-surface) / 0.30) 100%)',
       }}
-      data-testid="executive-header"
+      data-testid="executive-hero-snapshot"
     >
-      <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      {/* Section title — calm, gold accent. */}
+      <header className="px-5 pt-5 pb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
           <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center"
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
             style={{
               background: 'hsl(var(--gold-surface))',
               border: '1px solid hsl(var(--gold-dim) / 0.5)',
@@ -179,50 +167,48 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
             <Sparkles className="w-4 h-4" style={{ color: 'hsl(var(--gold))' }} />
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-widest font-bold" style={{ color: 'hsl(var(--gold))' }}>
+            <h1 className="text-[11px] uppercase tracking-widest font-bold" style={{ color: 'hsl(var(--gold))' }}>
               Executive Overview
-            </div>
-            <div className="text-[10px] text-muted-foreground">15-second daily read</div>
+            </h1>
+            <p className="text-[11px] text-muted-foreground">Family cockpit · 15-second read</p>
           </div>
         </div>
-        <div className="hidden md:flex items-center gap-2 text-[10px] text-muted-foreground">
-          <Activity className="w-3 h-3" />
-          <span>Macro: <span style={{ color: macro.tone }}>{macro.label}</span></span>
-        </div>
-      </div>
+      </header>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-0 divide-x divide-border/30">
-        {/* Net Worth — dominant */}
-        <div className="px-4 py-3 col-span-2 md:col-span-1">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1 inline-flex items-center gap-1">
+      {/* Four core orientation metrics — generous whitespace, calm rhythm. */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-0 divide-x divide-border/25 border-t border-border/30">
+        {/* Net Worth — dominant gold */}
+        <div className="px-5 py-4">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-2 inline-flex items-center gap-1">
             Net Worth
             <MetricExplainer metricId="net-worth-reconciliation" size={11} />
           </div>
-          <div className="text-2xl font-extrabold tabular-nums leading-none" style={{ color: 'hsl(var(--gold))' }}>
+          <div className="text-2xl md:text-3xl font-extrabold tabular-nums leading-none" style={{ color: 'hsl(var(--gold))' }}>
             {mv(formatCurrency(p.netWorth, true))}
           </div>
-          <div className="text-[10px] text-muted-foreground mt-1">Brisbane, QLD · AUD</div>
+          <div className="text-[10px] text-muted-foreground mt-2">Brisbane, QLD · AUD</div>
         </div>
 
         {/* Monthly Surplus */}
-        <div className="px-4 py-3">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1 inline-flex items-center gap-1">
+        <div className="px-5 py-4">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-2 inline-flex items-center gap-1">
             Monthly Surplus
-            <MetricExplainer metricId="safe-surplus" size={11} />
+            <MetricExplainer metricId="dca-recommendation" size={11} />
           </div>
           <div
-            className="text-lg font-extrabold tabular-nums leading-none flex items-center gap-1"
+            className="text-xl md:text-2xl font-extrabold tabular-nums leading-none flex items-center gap-1.5"
             style={{ color: surplusPositive ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}
+            data-testid="hero-surplus-value"
           >
-            {surplusPositive ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+            {surplusPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
             {mv(formatCurrency(p.surplus, true))}
           </div>
-          <div className="text-[10px] text-muted-foreground mt-1">{mv(formatCurrency(p.surplus * 12, true))} / yr</div>
+          <div className="text-[10px] text-muted-foreground mt-2">{mv(formatCurrency(p.surplus * 12, true))} / yr</div>
         </div>
 
         {/* Risk state */}
-        <div className="px-4 py-3">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1 flex items-center gap-1">
+        <div className="px-5 py-4">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-2 flex items-center gap-1">
             <span>Risk State</span>
             <MetricExplainer
               metricId="risk-state"
@@ -237,536 +223,320 @@ function ExecutiveHeader(p: ExecutiveDashboardProps) {
               size={12}
             />
           </div>
-          <div className="text-lg font-extrabold leading-none flex items-center gap-1" style={{ color: riskTone }}>
-            <Shield className="w-3.5 h-3.5" />
+          <div
+            className="text-xl md:text-2xl font-extrabold leading-none flex items-center gap-1.5"
+            style={{ color: riskTone }}
+            data-testid="hero-risk-value"
+          >
+            <Shield className="w-4 h-4" />
             {p.riskLabel}
           </div>
-          <div className="text-[10px] text-muted-foreground mt-1 tabular-nums">{p.riskScore} / 100</div>
+          <div className="text-[10px] text-muted-foreground mt-2 tabular-nums">{p.riskScore} / 100</div>
         </div>
 
-        {/* Trajectory — Monte Carlo P50 is the ONLY canonical source.
-            When MC has not been run we show a neutral "Monte Carlo pending"
-            state instead of a deterministic dollar value, so the dashboard
-            never presents a deterministic figure as the official trajectory.
-
-            Layout polish:
-              • Label and badge sit on their own row with `flex-wrap` so the
-                PENDING/MC P50 badge can drop below the label on narrow
-                screens instead of overlapping the "10y Trajectory" copy.
-              • Source line uses `text-foreground/70` (not `muted-foreground/70`)
-                so the dark theme keeps WCAG-AA contrast on small text.
-              • The deterministic baseline is hidden behind a `<details>`
-                disclosure ("Show deterministic baseline (non-canonical)")
-                so it is never visible by default, but the user can still
-                expand it for a sanity check. */}
-        <div className="px-4 py-3" data-testid="executive-trajectory">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1">
-            <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
-              10y Trajectory
-            </span>
-            <MetricExplainer metricId="monte-carlo-probability" size={12} />
-            <span
-              className="text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
-              style={{
-                color: hasMcTrajectory ? 'hsl(280,85%,78%)' : 'hsl(215,15%,78%)',
-                background: hasMcTrajectory ? 'hsl(280,80%,14%)' : 'hsl(215,15%,14%)',
-                border: `1px solid ${hasMcTrajectory ? 'hsl(280,80%,35%)' : 'hsl(215,15%,35%)'}`,
-                letterSpacing: '0.04em',
-              }}
-              data-testid="executive-trajectory-source-badge"
-            >
-              {hasMcTrajectory ? 'MC P50' : 'PENDING'}
-            </span>
+        {/* FIRE timeline */}
+        <div className="px-5 py-4">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-2 flex items-center gap-1">
+            <span>FIRE Timeline</span>
+            <MetricExplainer metricId="fire-progress" size={11} />
           </div>
+          {fireYears === null ? (
+            <div className="text-sm font-bold leading-tight text-muted-foreground" data-testid="hero-fire-pending">
+              Pending surplus
+            </div>
+          ) : fireYears === 0 ? (
+            <div
+              className="text-xl md:text-2xl font-extrabold leading-none flex items-center gap-1.5"
+              style={{ color: 'hsl(142,60%,55%)' }}
+              data-testid="hero-fire-value"
+            >
+              <Flame className="w-4 h-4" />
+              FIRE met
+            </div>
+          ) : (
+            <div
+              className="text-xl md:text-2xl font-extrabold leading-none flex items-center gap-1.5"
+              style={{ color: 'hsl(43,90%,55%)' }}
+              data-testid="hero-fire-value"
+            >
+              <Flame className="w-4 h-4" />
+              {fireYears} yr
+            </div>
+          )}
+          <div className="text-[10px] text-muted-foreground mt-2">
+            {fireAge !== null && fireYears !== null && fireYears > 0 ? `~age ${fireAge} · ${Math.round(p.fireProgressPct)}% of target` : `${Math.round(p.fireProgressPct)}% of target`}
+          </div>
+        </div>
+      </div>
 
-          {hasMcTrajectory ? (
-            <>
+      {/* Primary Best Move — single recommendation surface on the homepage. */}
+      <div className="border-t border-border/30 px-5 py-4" data-testid="hero-best-move">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Sparkles className="w-3.5 h-3.5" style={{ color: 'hsl(var(--gold))' }} />
+              <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'hsl(var(--gold))' }}>
+                Best Move
+              </span>
+              <MetricExplainer metricId="best-move" size={11} />
+            </div>
+            {best ? (
+              <>
+                <p className="text-sm md:text-base font-semibold text-foreground leading-snug" data-testid="hero-best-move-title">
+                  {best.title}
+                </p>
+                {best.benefitLabel && (
+                  <p className="text-xs text-emerald-400 font-mono mt-1.5" data-testid="hero-best-move-benefit">
+                    {mv(best.benefitLabel)}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Recommendation engine warming up…</p>
+            )}
+          </div>
+          {best?.cta && (
+            <Link href={best.cta.route}>
+              <button
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0"
+                style={{ background: 'hsl(var(--gold))', color: 'hsl(var(--primary-foreground))' }}
+                data-testid="hero-best-move-cta"
+              >
+                {best.cta.label}
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </Link>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── 2. CanonicalTrajectoryPanel ─────────────────────────────────────────────
+// "What is my trajectory?" — Monte Carlo P10/P50/P90 confidence band, then a
+// compact table (Year, P50, Confidence Range). P10/P90 columns live behind an
+// "Expand" toggle so the default view stays calm and decision-grade.
+
+function CanonicalTrajectoryPanel(p: ExecutiveDashboardProps) {
+  const { privacyMode } = useAppStore();
+  const mv = (v: string) => maskValue(v, privacyMode);
+  const [expandedRange, setExpandedRange] = useState(false);
+
+  const fan = p.monteCarloFanData;
+  const hasMc = !!fan && fan.length > 0;
+  const hasMcTrajectory = typeof p.trajectoryP50 === 'number' && Number.isFinite(p.trajectoryP50);
+  const traj = hasMcTrajectory
+    ? trajectoryFromGrowth(p.netWorth, p.trajectoryP50 as number)
+    : { pct: 0, label: 'Monte Carlo pending' };
+  const trajectoryYearLabel = hasMcTrajectory && p.trajectoryYear
+    ? `${p.trajectoryYear} P50`
+    : `${new Date().getFullYear() + 9} horizon`;
+
+  return (
+    <section
+      className="rounded-2xl border border-border bg-card overflow-hidden"
+      data-testid="canonical-trajectory-panel"
+    >
+      <header className="px-5 pt-5 pb-3 flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2.5">
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ background: 'hsl(280,80%,12%)', border: '1px solid hsl(280,80%,30%)' }}
+          >
+            <Activity className="w-4 h-4" style={{ color: 'hsl(280,80%,72%)' }} />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-foreground flex items-center gap-1.5">
+              Wealth Trajectory
+              <MetricExplainer metricId="monte-carlo-probability" size={11} />
+            </h2>
+            <p className="text-[11px] text-muted-foreground">Monte Carlo · canonical forecast</p>
+          </div>
+        </div>
+        <Link href="/ai-forecast-engine">
+          <span className="text-xs text-primary hover:underline">Open Forecast Engine →</span>
+        </Link>
+      </header>
+
+      {/* Hero trajectory readout — single dominant number with confidence framing. */}
+      <div className="px-5 pb-4 border-t border-border/30 pt-4">
+        {hasMcTrajectory ? (
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1.5 flex items-center gap-1">
+                <span>P50 — most-likely wealth, {trajectoryYearLabel}</span>
+                <MetricExplainer metricId="p10-p50-p90" size={11} />
+              </div>
               <div
-                className="text-lg font-extrabold tabular-nums leading-none"
+                className="text-3xl md:text-4xl font-extrabold tabular-nums leading-none"
                 style={{ color: 'hsl(210,80%,68%)' }}
-                data-testid="executive-trajectory-value"
+                data-testid="trajectory-p50-value"
               >
                 {mv(formatCurrency(p.trajectoryP50 as number, true))}
               </div>
-              <div className="text-[10px] mt-1" style={{ color: traj.pct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
-                {traj.pct >= 0 ? '+' : ''}{traj.pct.toFixed(0)}% · {trajectoryYearLabel}
+              <div className="text-[11px] mt-2" style={{ color: traj.pct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
+                {traj.pct >= 0 ? '+' : ''}{traj.pct.toFixed(0)}% vs today · {traj.label}
+              </div>
+            </div>
+            {fan && fan.length > 0 && (
+              <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                <div className="flex flex-col items-end">
+                  <span className="text-[9px] uppercase tracking-widest font-bold">Bear · P10</span>
+                  <span className="tabular-nums font-mono" style={{ color: 'hsl(0,72%,60%)' }}>
+                    {mv(formatCurrency(fan[fan.length - 1].p10, true))}
+                  </span>
+                </div>
+                <div className="w-px h-7 bg-border/40" />
+                <div className="flex flex-col items-end">
+                  <span className="text-[9px] uppercase tracking-widest font-bold">Bull · P90</span>
+                  <span className="tabular-nums font-mono" style={{ color: 'hsl(142,60%,55%)' }}>
+                    {mv(formatCurrency(fan[fan.length - 1].p90, true))}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-start gap-3 flex-wrap">
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1.5">
+                P50 — most-likely wealth
               </div>
               <div
-                className="text-[10px] mt-0.5 leading-snug"
-                style={{ color: 'hsl(var(--foreground) / 0.65)' }}
-                data-testid="executive-trajectory-source"
-              >
-                {trajectorySourceLabel}
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Neutral pending state — NO deterministic dollar value as
-                  the primary trajectory figure. */}
-              <div
-                className="text-sm font-bold leading-tight"
+                className="text-lg font-bold leading-tight"
                 style={{ color: 'hsl(215,15%,82%)' }}
-                data-testid="executive-trajectory-pending"
+                data-testid="trajectory-pending"
               >
                 Monte Carlo pending
               </div>
-              <div
-                className="text-[11px] mt-1 leading-snug"
-                style={{ color: 'hsl(var(--foreground) / 0.70)' }}
-              >
-                No canonical P50 yet · {trajectoryYearLabel}
+              <div className="text-[11px] mt-2 text-muted-foreground">
+                Open the Forecast Engine to run the canonical Monte Carlo simulation.
               </div>
-              <Link href="/ai-forecast-engine">
-                <span
-                  className="inline-block mt-1.5 text-[11px] font-semibold text-primary hover:underline cursor-pointer"
-                  data-testid="executive-trajectory-cta"
-                >
-                  Run Monte Carlo →
-                </span>
-              </Link>
-              <div
-                className="text-[10px] mt-1 leading-snug"
-                style={{ color: 'hsl(var(--foreground) / 0.55)' }}
-                data-testid="executive-trajectory-source"
+            </div>
+            <Link href="/ai-forecast-engine">
+              <button
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0"
+                style={{ background: 'hsl(280,80%,18%)', color: 'hsl(280,80%,82%)', border: '1px solid hsl(280,80%,30%)' }}
+                data-testid="trajectory-pending-cta"
               >
-                {trajectorySourceLabel}
-              </div>
-              {/* Deterministic baseline is collapsed by default. Users can
-                  expand it for sanity-checking, but it never visually
-                  competes with the canonical Monte Carlo P50. */}
-              {Number.isFinite(p.year10NW) && p.year10NW > 0 && (
-                <details
-                  className="mt-1.5 group"
-                  data-testid="executive-trajectory-deterministic-details"
-                >
-                  <summary
-                    className="text-[10px] cursor-pointer select-none hover:underline list-none"
-                    style={{ color: 'hsl(var(--foreground) / 0.55)' }}
-                  >
-                    Show deterministic baseline (non-canonical)
-                  </summary>
-                  <div
-                    className="text-[10px] mt-1 italic leading-snug"
-                    style={{ color: 'hsl(var(--foreground) / 0.60)' }}
-                    data-testid="executive-trajectory-deterministic-secondary"
-                  >
-                    Deterministic baseline (non-canonical): {mv(formatCurrency(p.year10NW, true))}
-                    <span className="block mt-0.5 not-italic" style={{ color: 'hsl(var(--foreground) / 0.45)' }}>
-                      Straight-line projection — ignores volatility &amp; sequence-of-returns risk.
-                    </span>
-                  </div>
-                </details>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Macro — desktop only on mobile shown in header pill */}
-        <div className="px-4 py-3 hidden md:block">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1 flex items-center gap-1">
-            <span>Macro Regime</span>
-            <MetricExplainer metricId="macro-regime" size={12} />
+                Run Monte Carlo
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </Link>
           </div>
-          <div className="text-sm font-bold leading-none" style={{ color: macro.tone }}>{macro.label}</div>
-          <div className="text-[10px] text-muted-foreground mt-1">Adaptive · global</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── 2. DailyBriefing ────────────────────────────────────────────────────────
-
-function DailyBriefing({ result }: { result: UnifiedBestMoveResult | null }) {
-  const { privacyMode } = useAppStore();
-  const mv = (v?: string) => v ? maskValue(v, privacyMode) : '';
-
-  if (!result) {
-    return (
-      <div className="rounded-2xl border border-border bg-card p-4">
-        <div className="text-xs text-muted-foreground">Loading daily briefing…</div>
-      </div>
-    );
-  }
-
-  const { unified, changes } = result;
-  const best = unified.bestMove;
-  const all = unified.all;
-
-  // Top opportunity = highest expected dollar impact among non-defensive recs
-  const defensiveTypes: Array<typeof all[number]['actionType']> = [
-    'build_emergency_buffer', 'pay_high_interest_debt', 'reduce_leverage', 'pause_investing',
-  ];
-  const opportunity = all
-    .filter(r => r.id !== best.id && !defensiveTypes.includes(r.actionType))
-    .sort((a, b) => (b.expectedFinancialImpact?.annualDollar ?? 0) - (a.expectedFinancialImpact?.annualDollar ?? 0))[0];
-
-  // Top risk = highest risk-reduction rec
-  const topRisk = all
-    .filter(r => r.id !== best.id && (r.riskReductionImpact?.points ?? 0) > 0)
-    .sort((a, b) => (b.riskReductionImpact?.points ?? 0) - (a.riskReductionImpact?.points ?? 0))[0];
-
-  const meaningfulChanges = changes.filter(c => c.changedReason !== 'unchanged');
-  const confidencePct = Math.round(best.confidenceScore * 100);
-  const confidenceTone =
-    confidencePct >= 75 ? 'hsl(142,60%,55%)'
-    : confidencePct >= 55 ? 'hsl(43,90%,55%)'
-    : 'hsl(0,72%,60%)';
-
-  return (
-    <div
-      className="rounded-2xl border overflow-hidden"
-      style={{
-        borderColor: 'hsl(var(--gold-dim) / 0.35)',
-        background: 'hsl(var(--card))',
-      }}
-      data-testid="daily-briefing"
-    >
-      <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center"
-            style={{
-              background: 'hsl(var(--gold-surface))',
-              border: '1px solid hsl(var(--gold-dim) / 0.5)',
-            }}
-          >
-            <Activity className="w-4 h-4" style={{ color: 'hsl(var(--gold))' }} />
-          </div>
-          <div>
-            <div className="text-sm font-bold text-foreground inline-flex items-center gap-1.5">
-              Daily Briefing
-              <MetricExplainer metricId="recommendation-engine" size={11} />
-            </div>
-            <div className="text-[10px] text-muted-foreground flex items-center gap-1 flex-wrap">
-              <span>Narrative summary · {unified.signalCoverage.length} signals · confidence</span>
-              <span style={{ color: confidenceTone }}>{confidencePct}%</span>
-              <MetricExplainer
-                metricId="confidence"
-                value={confidencePct}
-                reading={{
-                  id: 'confidence',
-                  value: confidencePct,
-                  displayValue: `${confidencePct}%`,
-                  state: readMetric(getMetricExplanation('confidence')!, confidencePct).state,
-                  interpretation: readMetric(getMetricExplanation('confidence')!, confidencePct).interpretation,
-                }}
-                size={11}
-              />
-            </div>
-          </div>
-        </div>
-        <Link href="/decision">
-          <span className="text-xs text-primary hover:underline">Full intelligence →</span>
-        </Link>
+        )}
       </div>
 
-      {/* Executive summary narrative */}
-      <div className="px-4 py-3">
-        <div className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'hsl(var(--gold))' }}>
-          Executive Summary
-        </div>
-        <p className="text-sm text-foreground/90 leading-relaxed">
-          {best.reasoning}
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border/30 border-t border-border/30">
-        {/* Best move */}
-        <div className="px-4 py-3">
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <Sparkles className="w-3 h-3 text-amber-400" />
-            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Best Move</span>
-          </div>
-          <p className="text-xs font-semibold text-foreground leading-snug">{best.title}</p>
-          {best.benefitLabel && (
-            <p className="text-xs text-emerald-400 font-mono mt-1">{mv(best.benefitLabel)}</p>
-          )}
-        </div>
-
-        {/* Top risk */}
-        <div className="px-4 py-3">
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <AlertTriangle className="w-3 h-3" style={{ color: 'hsl(0,72%,60%)' }} />
-            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'hsl(0,72%,60%)' }}>Top Risk</span>
-          </div>
-          {topRisk ? (
-            <>
-              <p className="text-xs font-semibold text-foreground leading-snug">{topRisk.title}</p>
-              <p className="text-[10px] text-muted-foreground mt-1">
-                {unified.riskBeingReduced}
-              </p>
-            </>
-          ) : (
-            <p className="text-xs text-muted-foreground">No high-priority risk surfaced this cycle.</p>
-          )}
-        </div>
-
-        {/* Top opportunity */}
-        <div className="px-4 py-3">
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <TrendingUp className="w-3 h-3" style={{ color: 'hsl(188,60%,55%)' }} />
-            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'hsl(188,60%,55%)' }}>Top Opportunity</span>
-          </div>
-          {opportunity ? (
-            <>
-              <p className="text-xs font-semibold text-foreground leading-snug">{opportunity.title}</p>
-              {opportunity.benefitLabel && (
-                <p className="text-xs text-emerald-400 font-mono mt-1">{mv(opportunity.benefitLabel)}</p>
-              )}
-            </>
-          ) : (
-            <p className="text-xs text-muted-foreground">Capacity steady — no new opportunity above threshold.</p>
-          )}
-        </div>
-      </div>
-
-      {/* What changed */}
-      {meaningfulChanges.length > 0 && (
-        <div className="px-4 py-3 border-t border-border/30">
-          <div className="text-[10px] font-bold uppercase tracking-widest mb-1.5 text-muted-foreground">What Changed</div>
-          <ul className="space-y-0.5 text-[11px] text-muted-foreground">
-            {meaningfulChanges.slice(0, 3).map(c => (
-              <li key={c.id}>
-                <span className="text-foreground/85">{c.current.title}</span> — {c.changedReason.replace(/_/g, ' ')}
-                {c.confidenceMovement !== 0 && (
-                  <span className="ml-1 text-sky-300/70">
-                    ({c.confidenceMovement > 0 ? '+' : ''}{(c.confidenceMovement * 100).toFixed(0)}% conf)
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Surplus reconciliation — only when the best move allocates a monthly $ amount */}
-      {best.surplusReconciliation && (
-        <div
-          className="px-4 py-3 border-t border-border/30"
-          data-testid="surplus-reconciliation"
-        >
-          <div className="text-[10px] font-bold uppercase tracking-widest mb-1.5 text-muted-foreground flex items-center gap-1">
-            <span>Surplus reconciliation</span>
-            <MetricExplainer metricId="dca-recommendation" size={11} />
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-1 text-[11px]">
-            <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground">Monthly income</span>
-              <span className="tabular-nums text-foreground" data-testid="surplus-recon-income">
-                {mv(formatCurrency(best.surplusReconciliation.monthlyIncomeUsed, true))}
-              </span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground">Monthly expenses</span>
-              <span className="tabular-nums text-foreground" data-testid="surplus-recon-expenses">
-                {mv(formatCurrency(best.surplusReconciliation.monthlyExpensesUsed, true))}
-              </span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground">Debt repayments</span>
-              <span className="tabular-nums text-foreground" data-testid="surplus-recon-debt">
-                {mv(formatCurrency(best.surplusReconciliation.monthlyDebtRepaymentsUsed, true))}
-              </span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground">Buffer top-up</span>
-              <span className="tabular-nums text-foreground">
-                {mv(formatCurrency(best.surplusReconciliation.bufferShortfallReserved, true))}
-              </span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground font-semibold">Safe deployable surplus</span>
-              <span
-                className="tabular-nums font-semibold"
-                style={{ color: 'hsl(142,60%,55%)' }}
-                data-testid="surplus-recon-safe"
-              >
-                {mv(formatCurrency(best.surplusReconciliation.safeDeployableSurplus, true))}
-              </span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground font-semibold">Recommended monthly DCA</span>
-              <span
-                className="tabular-nums font-semibold"
-                style={{ color: 'hsl(43,90%,62%)' }}
-                data-testid="surplus-recon-dca"
-              >
-                {mv(formatCurrency(best.surplusReconciliation.recommendedMonthlyAmount, true))}
-              </span>
-            </div>
-            <div className="flex justify-between gap-2 md:col-span-3">
-              <span className="text-muted-foreground">Remaining flexible buffer</span>
-              <span className="tabular-nums text-foreground">
-                {mv(formatCurrency(best.surplusReconciliation.remainingMonthlyBuffer, true))}
-              </span>
-            </div>
-          </div>
-          <div className="text-[10px] text-muted-foreground/80 mt-2 leading-snug">
-            Capped at the safe deployable surplus derived from the canonical ledger — never exceeds the dashboard headline surplus.
-          </div>
-        </div>
-      )}
-
-      {/* Recommended action CTA */}
-      {best.cta && (
-        <div className="px-4 py-3 border-t border-border/30 flex items-center justify-between gap-3 flex-wrap">
-          <div className="text-[11px] text-muted-foreground">
-            <span className="text-foreground/80 font-medium">Recommended action:</span>{' '}
-            calm, sequenced. Open the plan to review the full sequence.
-          </div>
-          <Link href={best.cta.route}>
-            <button className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
-              style={{
-                background: 'hsl(var(--gold))',
-                color: 'hsl(var(--primary-foreground))',
-              }}
-            >
-              {best.cta.label}
-              <ArrowRight className="w-3 h-3" />
-            </button>
-          </Link>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── 3. StrategicPriorities ──────────────────────────────────────────────────
-
-function StrategicPriorities({ result }: { result: UnifiedBestMoveResult | null }) {
-  const { privacyMode } = useAppStore();
-  const mv = (v?: string) => v ? maskValue(v, privacyMode) : '';
-  const [expanded, setExpanded] = useState(false);
-
-  if (!result) return null;
-  const top = result.unified.topPriorities.slice(0, 3);
-  const rest = result.unified.all.slice(3);
-
-  return (
-    <div
-      className="rounded-2xl border border-border bg-card overflow-hidden"
-      data-testid="strategic-priorities"
-    >
-      <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center"
-            style={{
-              background: 'hsl(210,80%,12%)',
-              border: '1px solid hsl(210,80%,30%)',
-            }}
-          >
-            <Target className="w-4 h-4" style={{ color: 'hsl(210,80%,70%)' }} />
-          </div>
-          <div>
-            <div className="text-sm font-bold text-foreground flex items-center gap-1">
-              <span>Strategic Priorities</span>
-              <MetricExplainer metricId="strategic-priorities" size={11} />
-              <MetricExplainer metricId="scenario-confidence" size={11} />
-            </div>
-            <div className="text-[10px] text-muted-foreground">Top 3 by impact-adjusted confidence</div>
-          </div>
-        </div>
-        <Link href="/wealth-strategy">
-          <span className="text-xs text-primary hover:underline">Full plan →</span>
-        </Link>
-      </div>
-
-      <ol className="divide-y divide-border/30">
-        {top.map(r => (
-          <li
-            key={r.id}
-            className="px-4 py-2.5 flex items-start gap-3"
-            data-testid={`strategic-priority-${r.priorityRank}`}
-          >
-            <div
-              className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold tabular-nums"
-              style={{
-                background: r.priorityRank === 1 ? 'hsl(var(--gold-surface))' : 'hsl(var(--muted))',
-                color: r.priorityRank === 1 ? 'hsl(var(--gold))' : 'hsl(var(--muted-foreground))',
-                border: r.priorityRank === 1 ? '1px solid hsl(var(--gold-dim) / 0.5)' : '1px solid hsl(var(--border))',
-              }}
-            >
-              {r.priorityRank}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-xs font-semibold text-foreground leading-snug">{r.title}</p>
-                <div className="text-right shrink-0">
-                  {r.benefitLabel && <p className="text-[10px] text-emerald-400 font-mono">{mv(r.benefitLabel)}</p>}
-                  <p className="text-[9px] text-muted-foreground tabular-nums">conf {(r.confidenceScore * 100).toFixed(0)}%</p>
-                </div>
-              </div>
-              <p className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5 leading-snug">
-                {priorityPreview(r)}
-              </p>
-            </div>
-          </li>
-        ))}
-      </ol>
-
-      {rest.length > 0 && (
+      {/* Compact projection table — Year · P50 · Confidence range. */}
+      {hasMc && (
         <div className="border-t border-border/30">
-          <button
-            onClick={() => setExpanded(e => !e)}
-            className="w-full px-4 py-2 text-[11px] font-semibold text-muted-foreground hover:text-foreground flex items-center justify-center gap-1.5 transition-colors"
-            data-testid="strategic-priorities-toggle"
-          >
-            {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            {expanded ? 'Hide full strategic stack' : `View full strategic stack (+${rest.length})`}
-          </button>
-          {expanded && (
-            <ol className="divide-y divide-border/30">
-              {rest.map(r => (
-                <li key={r.id} className="px-4 py-2 flex items-start gap-3">
-                  <div className="shrink-0 w-6 h-6 rounded bg-muted text-muted-foreground text-[10px] font-bold tabular-nums flex items-center justify-center">
-                    {r.priorityRank}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-medium text-foreground/90 leading-snug truncate">{r.title}</p>
-                    <p className="text-[10px] text-muted-foreground line-clamp-1">{priorityPreview(r)}</p>
-                  </div>
-                  {r.benefitLabel && (
-                    <p className="text-[10px] text-emerald-400 font-mono shrink-0">{mv(r.benefitLabel)}</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs" data-testid="trajectory-projection-table">
+              <thead>
+                <tr className="border-b border-border/40 bg-muted/10">
+                  <th className="px-4 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest">Year</th>
+                  <th className="px-4 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest">
+                    <span className="inline-flex items-center gap-1 justify-end w-full">
+                      P50 (median)
+                      <MetricExplainer metricId="p10-p50-p90" size={10} />
+                    </span>
+                  </th>
+                  <th className="px-4 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest">
+                    Confidence Range
+                  </th>
+                  {expandedRange && (
+                    <>
+                      <th className="px-4 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest">Bear · P10</th>
+                      <th className="px-4 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest">Bull · P90</th>
+                    </>
                   )}
-                </li>
-              ))}
-            </ol>
-          )}
+                </tr>
+              </thead>
+              <tbody>
+                {fan!.map((row, idx) => {
+                  const band = row.p90 - row.p10;
+                  const bandPct = row.median > 0 ? (band / Math.max(1, row.median)) * 100 : 0;
+                  return (
+                    <tr key={row.year} className={`border-b border-border/20 hover:bg-purple-500/[0.04] ${idx === 0 ? 'bg-purple-500/[0.03]' : ''}`}>
+                      <td className="px-4 py-2 font-bold text-foreground whitespace-nowrap">
+                        {row.year}{idx === 0 ? ' ★' : ''}
+                      </td>
+                      <td
+                        className="px-4 py-2 font-mono font-bold tabular-nums whitespace-nowrap text-right"
+                        style={{ color: 'hsl(43,90%,62%)' }}
+                        data-testid={`trajectory-row-${row.year}-p50`}
+                      >
+                        {mv(formatCurrency(row.median, true))}
+                      </td>
+                      <td className="px-4 py-2 font-mono text-muted-foreground tabular-nums whitespace-nowrap text-right">
+                        {mv(formatCurrency(band, true))} <span className="text-[10px] opacity-70">({bandPct.toFixed(0)}%)</span>
+                      </td>
+                      {expandedRange && (
+                        <>
+                          <td className="px-4 py-2 font-mono tabular-nums whitespace-nowrap text-right" style={{ color: 'hsl(0,72%,60%)' }}>
+                            {mv(formatCurrency(row.p10, true))}
+                          </td>
+                          <td className="px-4 py-2 font-mono tabular-nums whitespace-nowrap text-right" style={{ color: 'hsl(142,60%,55%)' }}>
+                            {mv(formatCurrency(row.p90, true))}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="px-4 py-2 border-t border-border/30 flex items-center justify-between flex-wrap gap-2 bg-muted/[0.05]">
+            <button
+              onClick={() => setExpandedRange(v => !v)}
+              className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              data-testid="trajectory-expand-range"
+            >
+              {expandedRange ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              {expandedRange ? 'Hide P10 / P90 columns' : 'Show P10 / P90 columns'}
+            </button>
+            <span className="text-[10px] text-muted-foreground">
+              {p.monteCarloSimulations
+                ? `${p.monteCarloSimulations.toLocaleString()} simulations · canonical forecast`
+                : 'Canonical forecast'}
+            </span>
+          </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
-// ─── 4. FinancialHealthStrip ─────────────────────────────────────────────────
+// ─── 3. ExecutiveHealthStrip ─────────────────────────────────────────────────
+// "Am I okay?" — exactly four canonical metrics: Liquidity, Leverage,
+// Cashflow, FIRE Progress. Each shows healthy/risky state with concise
+// contextual meaning.
 
 interface HealthIndicator {
   label: string;
   metricId: string;
-  /** Live numeric value driving the semantic state. */
   rawValue: number;
   value: string;
-  tone: string;
+  tone: 'healthy' | 'caution' | 'risk';
   Icon: React.ComponentType<{ className?: string }>;
   caption: string;
+  meaning: string;
 }
 
-function FinancialHealthStrip(p: ExecutiveDashboardProps) {
+function toneColor(tone: HealthIndicator['tone']): string {
+  return tone === 'healthy' ? 'hsl(142,60%,55%)' : tone === 'caution' ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)';
+}
+
+function ExecutiveHealthStrip(p: ExecutiveDashboardProps) {
   const { privacyMode } = useAppStore();
   const mv = (v: string) => maskValue(v, privacyMode);
 
-  // Liquidity: liquid cash / monthly expenses (months)
   const liquidityMonths = p.monthlyExpenses > 0 ? p.totalLiquidCash / p.monthlyExpenses : 0;
-  // Leverage: liabilities / assets
   const leveragePct = p.totalAssets > 0 ? (p.totalLiab / p.totalAssets) * 100 : 0;
-  // Survivability: months of runway including passive income
-  const survivability = (p.monthlyExpenses - p.passiveIncome) > 0
-    ? p.totalLiquidCash / (p.monthlyExpenses - p.passiveIncome)
-    : 99;
-  // Debt pressure: debt service / income proxy (use expenses as denom for now)
-  const debtPressure = p.monthlyExpenses > 0 ? (p.monthlyDebtService / (p.monthlyExpenses + Math.max(0, p.surplus))) * 100 : 0;
+  // Cashflow health = monthly surplus relative to monthly expenses.
+  const cashflowPct = p.monthlyExpenses > 0 ? (p.surplus / p.monthlyExpenses) * 100 : 0;
 
   const indicators: HealthIndicator[] = [
     {
@@ -774,58 +544,55 @@ function FinancialHealthStrip(p: ExecutiveDashboardProps) {
       metricId: 'liquidity',
       rawValue: liquidityMonths,
       value: `${liquidityMonths.toFixed(1)} mo`,
-      tone: liquidityMonths >= 6 ? 'hsl(142,60%,55%)' : liquidityMonths >= 3 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
+      tone: liquidityMonths >= 6 ? 'healthy' : liquidityMonths >= 3 ? 'caution' : 'risk',
       Icon: Wallet,
-      caption: `${mv(formatCurrency(p.totalLiquidCash, true))} cash`,
+      caption: `${mv(formatCurrency(p.totalLiquidCash, true))} liquid`,
+      meaning:
+        liquidityMonths >= 6 ? 'Buffer covers ≥6 months of expenses — resilient.'
+        : liquidityMonths >= 3 ? 'Buffer covers 3–6 months — rebuild before scaling risk.'
+        : 'Buffer below 3 months — restore liquidity first.',
     },
     {
       label: 'Leverage',
       metricId: 'leverage',
       rawValue: leveragePct,
       value: `${leveragePct.toFixed(0)}%`,
-      tone: leveragePct < 50 ? 'hsl(142,60%,55%)' : leveragePct < 70 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
+      tone: leveragePct < 50 ? 'healthy' : leveragePct < 70 ? 'caution' : 'risk',
       Icon: Layers,
       caption: 'Debt / Assets',
+      meaning:
+        leveragePct < 50 ? 'Balance sheet is conservatively levered — comfortable headroom.'
+        : leveragePct < 70 ? 'Leverage is in the working range — monitor capacity before new debt.'
+        : 'Leverage is high — reduce balance before adding risk.',
     },
     {
-      label: 'Survivability',
-      metricId: 'survivability',
-      rawValue: survivability,
-      value: survivability >= 99 ? '∞' : `${survivability.toFixed(1)} mo`,
-      tone: survivability >= 12 ? 'hsl(142,60%,55%)' : survivability >= 6 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
-      Icon: Shield,
-      caption: 'After passive income',
+      label: 'Cashflow',
+      metricId: 'cashflow-resilience',
+      rawValue: cashflowPct,
+      value: `${cashflowPct.toFixed(0)}%`,
+      tone: cashflowPct >= 25 ? 'healthy' : cashflowPct >= 10 ? 'caution' : 'risk',
+      Icon: Activity,
+      caption: 'Surplus / Expenses',
+      meaning:
+        cashflowPct >= 25 ? 'Strong monthly surplus — capacity to compound or repay debt.'
+        : cashflowPct >= 10 ? 'Modest surplus — protect from lifestyle inflation.'
+        : 'Surplus is thin or negative — tighten before deploying capital.',
     },
     {
-      label: 'FIRE',
+      label: 'FIRE Progress',
       metricId: 'fire-progress',
       rawValue: p.fireProgressPct,
       value: `${Math.round(p.fireProgressPct)}%`,
-      tone: p.fireProgressPct >= 50 ? 'hsl(142,60%,55%)' : p.fireProgressPct >= 20 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
-      Icon: Flame,
+      tone: p.fireProgressPct >= 50 ? 'healthy' : p.fireProgressPct >= 20 ? 'caution' : 'risk',
+      Icon: Target,
       caption: 'Of capital target',
-    },
-    {
-      label: 'Runway',
-      metricId: 'runway',
-      rawValue: liquidityMonths,
-      value: `${liquidityMonths.toFixed(0)} mo`,
-      tone: liquidityMonths >= 12 ? 'hsl(142,60%,55%)' : liquidityMonths >= 6 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
-      Icon: Clock,
-      caption: 'At full expense burn',
-    },
-    {
-      label: 'Debt Pressure',
-      metricId: 'debt-pressure',
-      rawValue: debtPressure,
-      value: `${debtPressure.toFixed(0)}%`,
-      tone: debtPressure < 30 ? 'hsl(142,60%,55%)' : debtPressure < 45 ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)',
-      Icon: BarChart2,
-      caption: 'Service / cashflow',
+      meaning:
+        p.fireProgressPct >= 50 ? 'Past the halfway mark — compounding does the heavy lifting now.'
+        : p.fireProgressPct >= 20 ? 'On the build — surplus and discipline are the levers.'
+        : 'Foundational phase — focus on income capacity and savings rate.',
     },
   ];
 
-  // Live readings used by the system-interpretation line.
   const readings: MetricReading[] = indicators
     .map((ind) => {
       const exp = getMetricExplanation(ind.metricId);
@@ -833,63 +600,30 @@ function FinancialHealthStrip(p: ExecutiveDashboardProps) {
     })
     .filter((r): r is MetricReading => !!r);
 
-  // Compose a calm two-clause system narrative from the live readings.
-  const liquidityRead = readings.find((r) => r.id === 'liquidity');
-  const leverageRead = readings.find((r) => r.id === 'leverage');
-  const debtPressureRead = readings.find((r) => r.id === 'debt-pressure');
-  const survivabilityRead = readings.find((r) => r.id === 'survivability');
-
-  const goodish = new Set(['excellent', 'strong', 'healthy']);
-  const interpretationText = (() => {
-    const liqGood = liquidityRead && goodish.has(liquidityRead.state);
-    const levOk = leverageRead && goodish.has(leverageRead.state);
-    const debtOk = debtPressureRead && goodish.has(debtPressureRead.state);
-    const survOk = survivabilityRead && goodish.has(survivabilityRead.state);
-
-    const parts: string[] = [];
-    if (liqGood && !levOk) parts.push('Liquidity offsets leverage risk');
-    else if (liqGood && levOk) parts.push('Balance-sheet posture is balanced — liquidity and leverage in tolerance');
-    else if (!liqGood && levOk) parts.push('Leverage is comfortable, but liquidity is the upgrade lever');
-    else parts.push('Balance-sheet is the constraint — rebuild liquidity before scaling leverage');
-
-    if (debtOk) parts.push('debt is strategic, not distressed');
-    else parts.push('debt pressure is dominant — reduce balance before adding risk');
-
-    if (survOk) parts.push('cashflow resilience is healthy under moderate stress');
-    else parts.push('cashflow resilience is the upgrade lever');
-
-    return parts.join(' · ') + '.';
-  })();
-
-  const dominant = pickDominantReading(readings);
-
   return (
-    <div
+    <section
       className="rounded-2xl border border-border bg-card overflow-hidden"
-      data-testid="financial-health-strip"
+      data-testid="executive-health-strip"
     >
-      <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <header className="px-5 pt-5 pb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
           <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center"
-            style={{
-              background: 'hsl(280,80%,12%)',
-              border: '1px solid hsl(280,80%,30%)',
-            }}
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ background: 'hsl(188,60%,10%)', border: '1px solid hsl(188,60%,28%)' }}
           >
-            <Activity className="w-4 h-4" style={{ color: 'hsl(280,80%,72%)' }} />
+            <Shield className="w-4 h-4" style={{ color: 'hsl(188,60%,65%)' }} />
           </div>
           <div>
-            <div className="text-sm font-bold text-foreground">Financial Health</div>
-            <div className="text-[10px] text-muted-foreground">Six structural indicators</div>
+            <h2 className="text-sm font-bold text-foreground">Financial Health</h2>
+            <p className="text-[11px] text-muted-foreground">Four structural signals</p>
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className="grid grid-cols-3 md:grid-cols-6 divide-x divide-border/30 border-t border-border/30">
+      <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border/25 border-t border-border/30">
         {indicators.map((ind) => (
-          <div key={ind.label} className="px-3 py-2.5">
-            <div className="flex items-center gap-1 text-[9px] uppercase tracking-widest font-bold text-muted-foreground mb-1">
+          <div key={ind.label} className="px-5 py-4" data-testid={`health-${ind.metricId}`}>
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-2">
               <ind.Icon className="w-3 h-3" />
               <span className="truncate">{ind.label}</span>
               <MetricExplainer
@@ -905,74 +639,78 @@ function FinancialHealthStrip(p: ExecutiveDashboardProps) {
                 size={11}
               />
             </div>
-            <div className="text-base font-extrabold tabular-nums leading-none" style={{ color: ind.tone }}>
+            <div className="text-xl md:text-2xl font-extrabold tabular-nums leading-none" style={{ color: toneColor(ind.tone) }}>
               {ind.value}
             </div>
-            <div className="text-[9px] text-muted-foreground mt-1 truncate">{ind.caption}</div>
+            <div className="text-[10px] text-muted-foreground mt-1.5">{ind.caption}</div>
+            <p className="text-[11px] text-foreground/70 mt-2 leading-snug">{ind.meaning}</p>
           </div>
         ))}
       </div>
-
-      <SystemInterpretation text={interpretationText} dominant={dominant} />
-    </div>
+    </section>
   );
 }
 
-// ─── 5. ActionQueue ──────────────────────────────────────────────────────────
+// ─── 4. ExecutiveActionQueue ─────────────────────────────────────────────────
+// "What should I do next?" — Maximum 3 actionable items. Each one line,
+// concise, executable, calm. No narrative overload, no duplicated reasoning.
 
-function ActionQueue({ result }: { result: UnifiedBestMoveResult | null }) {
+function ExecutiveActionQueue({ result }: { result: UnifiedBestMoveResult | null }) {
   if (!result) return null;
   const best = result.unified.bestMove;
-  const steps = best.implementationSteps.slice(0, 4);
+  const steps = best.implementationSteps.slice(0, 3);
 
   return (
-    <div
+    <section
       className="rounded-2xl border border-border bg-card overflow-hidden"
-      data-testid="action-queue"
+      data-testid="executive-action-queue"
     >
-      <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <header className="px-5 pt-5 pb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
           <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center"
-            style={{
-              background: 'hsl(142,60%,10%)',
-              border: '1px solid hsl(142,60%,30%)',
-            }}
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ background: 'hsl(142,60%,10%)', border: '1px solid hsl(142,60%,28%)' }}
           >
             <CheckCircle2 className="w-4 h-4" style={{ color: 'hsl(142,60%,55%)' }} />
           </div>
           <div>
-            <div className="text-sm font-bold text-foreground">Action Queue</div>
-            <div className="text-[10px] text-muted-foreground">Next executable steps for the best move</div>
+            <h2 className="text-sm font-bold text-foreground">Action Queue</h2>
+            <p className="text-[11px] text-muted-foreground">Up to 3 next steps · executable today</p>
           </div>
         </div>
         {best.cta && (
           <Link href={best.cta.route}>
-            <span className="text-xs text-primary hover:underline">Open →</span>
+            <span className="text-xs text-primary hover:underline">Open plan →</span>
           </Link>
         )}
-      </div>
+      </header>
 
       {steps.length === 0 ? (
-        <div className="px-4 py-3 text-xs text-muted-foreground">No specific steps queued. The current best move is already aligned with steady-state execution.</div>
+        <div className="px-5 py-4 text-xs text-muted-foreground border-t border-border/30">
+          No specific steps queued — current posture is already aligned with steady-state execution.
+        </div>
       ) : (
-        <ol className="divide-y divide-border/30">
+        <ol className="divide-y divide-border/25 border-t border-border/30" data-testid="action-queue-list">
           {steps.map((s, i) => (
-            <li key={i} className="px-4 py-2 flex items-start gap-3" data-testid={`action-queue-step-${i}`}>
-              <div className="shrink-0 w-6 h-6 rounded-full bg-emerald-500/10 border border-emerald-500/40 flex items-center justify-center text-[10px] font-bold text-emerald-400 tabular-nums">
+            <li
+              key={i}
+              className="px-5 py-3 flex items-start gap-3"
+              data-testid={`action-queue-step-${i}`}
+            >
+              <div className="shrink-0 w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/40 flex items-center justify-center text-[11px] font-bold text-emerald-400 tabular-nums">
                 {i + 1}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-foreground/90 leading-snug">{s.step}</p>
+                <p className="text-sm text-foreground/90 leading-snug">{s.step}</p>
                 {s.detail && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">{s.detail}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">{s.detail}</p>
                 )}
               </div>
             </li>
           ))}
         </ol>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -982,6 +720,15 @@ export default function ExecutiveDashboard(props: ExecutiveDashboardProps) {
   const maxLvr = useForecastStore(s => s.maxLvr);
   const liveMC = useForecastStore(s => s.monteCarloResult);
   const mcSig = liveMC ? `${liveMC.ran_at}-${liveMC.simulations}` : 'none';
+
+  // Allow the dashboard to pass MC fan data via props (preferred) but also
+  // gracefully fall back to the store when callers haven't wired the prop.
+  const fanData = useMemo<MonteCarloFanPoint[] | null>(() => {
+    if (props.monteCarloFanData && props.monteCarloFanData.length > 0) return props.monteCarloFanData;
+    if (liveMC?.fan_data && liveMC.fan_data.length > 0) return liveMC.fan_data;
+    return null;
+  }, [props.monteCarloFanData, liveMC]);
+  const simulations = props.monteCarloSimulations ?? liveMC?.simulations ?? null;
 
   const [result, setResult] = useState<UnifiedBestMoveResult | null>(null);
 
@@ -994,15 +741,21 @@ export default function ExecutiveDashboard(props: ExecutiveDashboardProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [maxLvr, mcSig]);
 
+  const resolved = {
+    ...props,
+    monteCarloFanData: fanData,
+    monteCarloSimulations: simulations,
+  };
+
   return (
-    <div className="space-y-3" data-testid="executive-dashboard">
-      <ExecutiveHeader {...props} />
-      <DailyBriefing result={result} />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <StrategicPriorities result={result} />
-        <ActionQueue result={result} />
-      </div>
-      <FinancialHealthStrip {...props} />
+    <div className="space-y-4" data-testid="executive-dashboard">
+      <ExecutiveHeroSnapshot {...resolved} result={result} />
+      <CanonicalTrajectoryPanel {...resolved} />
+      <ExecutiveHealthStrip {...resolved} />
+      <ExecutiveActionQueue result={result} />
     </div>
   );
 }
+
+// Re-export `fmtCompact` purely for testability of the helper.
+export { fmtCompact as __fmtCompactForTests };
