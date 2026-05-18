@@ -1699,6 +1699,35 @@ export default function DashboardPage() {
     .slice(0, 5)
     .map((m: any) => m.label || m.monthKey);
 
+  // ── Annual cashflow / deposit-power trajectory (Final Reconciliation Pass) ─
+  // Build a calm 10-year annual series for the Deposit Power & Cashflow panel
+  // on the Executive Overview. We reuse `cashFlowAnnual` and the canonical
+  // `equityTimeline` already computed above — no parallel engine, no
+  // duplicated recommendation system. This useMemo MUST live before the
+  // loading guard below so the hook is never conditionally skipped (Rules of
+  // Hooks — React error #310).
+  const cashflowTrajectory = useMemo(() => {
+    if (!Array.isArray(cashFlowAnnual) || cashFlowAnnual.length === 0) return null;
+    const equityByYear = new Map<number, number>();
+    (equityTimeline ?? []).forEach((pt: any) => {
+      equityByYear.set(pt.year, (pt.ppor_usable_equity ?? 0) + (pt.ip_usable_equity ?? 0));
+    });
+    return cashFlowAnnual.slice(0, 10).map((a: any) => {
+      const yr = a.year as number;
+      const cash = a.endingBalance ?? 0;
+      const usableEquity = equityByYear.get(yr) ?? 0;
+      const dp = Math.max(0, cash + usableEquity - emergencyBuffer);
+      return {
+        label: String(yr),
+        cashBalance: cash,
+        netCashflow: a.netCashFlow ?? 0,
+        taxRefund: a.ngTaxBenefit ?? 0,
+        usableEquity,
+        totalDepositPower: dp,
+      };
+    });
+  }, [cashFlowAnnual, equityTimeline, emergencyBuffer]);
+
   // ─── Best Move V2 useMemo — MUST be before loading guard (Rules of Hooks) ──────────
   const inlineBestMove_hook = useMemo(() => {
     if (!snapshot) return null;
@@ -1869,33 +1898,6 @@ export default function DashboardPage() {
     : null;
   const trajectoryP50: number | null = mcTrajectoryRow ? mcTrajectoryRow.median : null;
   const trajectoryYear: number | null = mcTrajectoryRow ? mcTrajectoryRow.year : null;
-
-  // ── Annual cashflow / deposit-power trajectory (Final Reconciliation Pass) ─
-  // Build a calm 10-year annual series for the Deposit Power & Cashflow panel
-  // on the Executive Overview. We reuse `cashFlowAnnual` and the canonical
-  // equityTimeline already computed above — no parallel engine, no duplicated
-  // recommendation system.
-  const cashflowTrajectory = useMemo(() => {
-    if (!Array.isArray(cashFlowAnnual) || cashFlowAnnual.length === 0) return null;
-    const equityByYear = new Map<number, number>();
-    (equityTimeline ?? []).forEach((pt: any) => {
-      equityByYear.set(pt.year, (pt.ppor_usable_equity ?? 0) + (pt.ip_usable_equity ?? 0));
-    });
-    return cashFlowAnnual.slice(0, 10).map((a: any, idx: number) => {
-      const yr = a.year as number;
-      const cash = a.endingBalance ?? 0;
-      const usableEquity = equityByYear.get(yr) ?? 0;
-      const dp = Math.max(0, cash + usableEquity - emergencyBuffer);
-      return {
-        label: String(yr),
-        cashBalance: cash,
-        netCashflow: a.netCashFlow ?? 0,
-        taxRefund: a.ngTaxBenefit ?? 0,
-        usableEquity,
-        totalDepositPower: dp,
-      };
-    });
-  }, [cashFlowAnnual, equityTimeline, emergencyBuffer]);
 
   const phase7ExecProps = {
     netWorth,
