@@ -229,6 +229,7 @@ assert(
 section('Routes — Risk Radar / Tax / Tax Alpha / Tax Strategy never produce router errors');
 
 const routePaths = [
+  { path: '/risk',       name: 'Risk short alias' },
   { path: '/risk-radar', name: 'Risk Radar' },
   { path: '/tax',        name: 'Tax' },
   { path: '/tax-alpha',  name: 'Tax Alpha' },
@@ -240,6 +241,12 @@ for (const r of routePaths) {
     new RegExp(`<Route path="${r.path.replace(/[/-]/g, m => '\\' + m)}">`).test(appSrc),
   );
 }
+// The /risk short alias must resolve to the same RiskRadarPage component as
+// /risk-radar so QA cannot land on the 404 page by typing the short URL.
+assert(
+  '/risk alias targets RiskRadarPage (same component as /risk-radar)',
+  /<Route path="\/risk">\s*<ProtectedRoute component=\{RiskRadarPage\}/.test(appSrc),
+);
 // The four Deep Analysis cards must point to LIVE routes (no 404 placeholders).
 const cardRoutes = ['/ai-forecast-engine', '/risk-radar', '/decision', '/tax-alpha'];
 for (const r of cardRoutes) {

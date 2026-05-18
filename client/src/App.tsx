@@ -235,6 +235,11 @@ function AppRouter() {
         <Route path="/risk-radar">
           <ProtectedRoute component={RiskRadarPage} title="Risk Radar" />
         </Route>
+        {/* /risk short alias — same target as /risk-radar so direct-typed URLs
+            and any legacy links never land on the 404 page. */}
+        <Route path="/risk">
+          <ProtectedRoute component={RiskRadarPage} title="Risk Radar" />
+        </Route>
         {/* Tax Strategy — Tax Alpha breakdown surfaced from Deep Analysis cards */}
         <Route path="/tax-alpha">
           <ProtectedRoute component={TaxAlphaPage} title="Tax Strategy" />
