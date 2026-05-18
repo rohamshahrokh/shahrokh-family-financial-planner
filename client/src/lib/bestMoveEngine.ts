@@ -770,7 +770,10 @@ function buildLedgerInputs(
 
 export async function computeBestMoveV2(cfg: BestMoveConfig = {}): Promise<BestMoveResult> {
   const _cfg = {
-    mortgageRate:         cfg.mortgageRate         ?? 0.0625,
+    // TODAY snapshot uses the LIVE current PPOR rate (5.82% as of May 2026).
+    // Do NOT use a forecast / blended rate here — Best Move evaluates current
+    // reality only. Forecast rates belong in the Monte Carlo / Forecast Engine.
+    mortgageRate:         cfg.mortgageRate         ?? 0.0582,
     etfExpectedReturn:    cfg.etfExpectedReturn     ?? 0.095,
     cryptoExpectedReturn: cfg.cryptoExpectedReturn  ?? 0.20,
     sgRate:               cfg.sgRate               ?? 0.115,
@@ -952,7 +955,17 @@ export async function computeBestMoveV2(cfg: BestMoveConfig = {}): Promise<BestM
     properties:           Array.isArray(propRows) ? propRows : [],
     emergencyBuffer,
     maxRefinanceLVR:      _cfg.maxLvr / 100,
-    mortgageRate:         _cfg.mortgageRate,
+    // Prefer the LIVE current PPOR rate from sf_snapshot.mortgage_rate (the
+    // TODAY value the user actually pays). Fall back to the config default
+    // (5.82%) only when missing. Forecast/blended rates must never reach the
+    // Best Move ledger — they belong to the Monte Carlo / Forecast Engine.
+    mortgageRate:         (() => {
+      const live = safeNum(snap.mortgage_rate);
+      // snap.mortgage_rate is stored as PERCENT (e.g. 5.82); ledger expects decimal.
+      if (live > 0 && live < 1) return live;        // already decimal
+      if (live >= 1) return live / 100;
+      return _cfg.mortgageRate;
+    })(),
     etfExpectedReturn:    _cfg.etfExpectedReturn,
     cryptoExpectedReturn: _cfg.cryptoExpectedReturn,
     lowestFutureCash,

@@ -238,7 +238,10 @@ const deepModuleSignals = [
   { name: 'Ledger Audit section',      pattern: /db-section-ledger/ },
   { name: 'ROI Action Table',          pattern: /ROI Action Table/ },
   { name: 'Net Worth Reconciliation',  pattern: /Net Worth Reconciliation/ },
-  { name: 'Wealth Decision Center',    pattern: /Wealth Decision Center/ },
+  // NOTE: the Wealth Decision Center has been RESTORED inside the cockpit
+  // (CASH / EVENTS / WEALTH / RISK tabs) per the FWL restore pass — it is
+  // rendered by ExecutiveDashboard.tsx, never as a standalone homepage stack.
+  // We therefore no longer assert its absence on the dashboard homepage.
   { name: 'Deterministic baseline table', pattern: /Deterministic baseline \(advanced\)/ },
   { name: 'Canonical MC Wealth Projection homepage block', pattern: /db-section-monte-carlo/ },
   // Visual-QA blocker fixes — the duplicate welcome / KPI / journey stack

@@ -293,6 +293,12 @@ export function fromDebtPrefsDebts(rawDebts: any[] | undefined | null): Partial<
         type: d.type,
         expiryDateISO: d.expiryDateISO,
         taxDeductible: d.taxDeductible === true,
+        // Preserve planned/future markers so the recommendation engine can
+        // partition CURRENT vs PLANNED debt. The Best Move surface only ever
+        // looks at the CURRENT partition.
+        planned: d.planned === true || d.settlementDateISO != null
+          || /planned|forecast/i.test(String(d.id ?? '') + ' ' + String(d.name ?? '')),
+        settlementDateISO: d.settlementDateISO,
       };
     })
     .filter(d => d.balance > 0);

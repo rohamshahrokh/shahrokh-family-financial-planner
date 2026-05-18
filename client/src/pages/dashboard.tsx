@@ -1986,6 +1986,17 @@ export default function DashboardPage() {
     // The dashboard reads `sf_snapshot.mortgage_rate` directly via the snap
     // memo above, so the Hero "today" caption shows the actual current rate.
     livePporRate: snap.mortgage_rate ?? null,
+    // CURRENT debt breakdown — settled liabilities only. Planned IP loans and
+    // forecast leverage are intentionally excluded. This is the single source
+    // the Today snapshot / Best Move / Strategic Debt Monitor consume.
+    currentDebt: {
+      pporMortgage:    safeNum(snap.mortgage),
+      settledIpLoans:  ipLoanBalanceSettled,
+      otherDebts:      safeNum(snap.other_debts),
+      total:           safeNum(snap.mortgage) + ipLoanBalanceSettled + safeNum(snap.other_debts),
+    },
+    // PLANNED debt — surfaced ONLY in the Events tab, never in Today snapshot.
+    plannedDebt: ipLoanBalancePlanned,
     // Canonical Monte Carlo trajectory data — single source for the homepage
     // wealth trajectory panel.
     monteCarloFanData: monteCarloResult?.fan_data ?? null,
@@ -2007,27 +2018,39 @@ export default function DashboardPage() {
     // Mini summary metrics surfaced above the chart — sourced from the
     // canonical deposit-power engine result so they always match the
     // figures the Best Move and Decision Engine use.
-    depositPowerSummary: depositPowerResult ? {
-      pporLvrPct:         depositPowerResult.pporEquity
-                            ? depositPowerResult.pporEquity.currentLVR * 100
-                            : null,
-      ipReadinessPct:     depositPowerResult.readinessPct,
-      annualNetCashflow:  (cashFlowAnnual?.[0]?.netCashFlow ?? 0),
-      taxRefundPerYear:   ngSummary.totalAnnualTaxBenefit,
-      cashToday:          totalLiquidCash,
-      readyNow:           depositPowerResult.isReady,
-      totalDepositPower:  depositPowerResult.totalDepositPower,
-      isEquityRichCashPoor: !!depositPowerResult.isEquityRichCashPoor,
-      // Cash + Offset (live) — engine exposes `cashAndOffset` directly.
-      cashAndOffset:      (depositPowerResult as any).cashAndOffset
-                            ?? (snap.cash + snap.offset_balance),
-      // Final-year cash anchors the "{YYYY} Cash" tile in the 2x2 grid.
-      finalYearCash:      cashFlowAnnual?.[cashFlowAnnual.length - 1]?.endingBalance
-                            ?? null,
-      finalYearLabel:     cashFlowAnnual?.[cashFlowAnnual.length - 1]?.year
-                            ? String(cashFlowAnnual[cashFlowAnnual.length - 1].year)
-                            : null,
-    } : {
+    depositPowerSummary: depositPowerResult ? (() => {
+      const cashAndOffset = (depositPowerResult as any).cashAndOffset
+                              ?? (snap.cash + snap.offset_balance);
+      const pporUsableEquity = depositPowerResult.pporEquity?.usableEquity ?? 0;
+      const ipUsableEquity   = (depositPowerResult as any).ipUsableEquity
+                              ?? Math.max(0, (depositPowerResult.totalUsableEquity ?? 0) - pporUsableEquity);
+      const grossTotal       = cashAndOffset + pporUsableEquity + ipUsableEquity;
+      return {
+        pporLvrPct:         depositPowerResult.pporEquity
+                              ? depositPowerResult.pporEquity.currentLVR * 100
+                              : null,
+        ipReadinessPct:     depositPowerResult.readinessPct,
+        annualNetCashflow:  (cashFlowAnnual?.[0]?.netCashFlow ?? 0),
+        taxRefundPerYear:   ngSummary.totalAnnualTaxBenefit,
+        cashToday:          totalLiquidCash,
+        readyNow:           depositPowerResult.isReady,
+        totalDepositPower:  depositPowerResult.totalDepositPower,
+        isEquityRichCashPoor: !!depositPowerResult.isEquityRichCashPoor,
+        // Cash + Offset (live) — engine exposes `cashAndOffset` directly.
+        cashAndOffset,
+        // Canonical breakdown rows for the Wealth Decision Center CASH tab.
+        pporUsableEquity,
+        ipUsableEquity,
+        grossTotal,
+        emergencyBuffer,
+        // Final-year cash anchors the "{YYYY} Cash" tile in the 2x2 grid.
+        finalYearCash:      cashFlowAnnual?.[cashFlowAnnual.length - 1]?.endingBalance
+                              ?? null,
+        finalYearLabel:     cashFlowAnnual?.[cashFlowAnnual.length - 1]?.year
+                              ? String(cashFlowAnnual[cashFlowAnnual.length - 1].year)
+                              : null,
+      };
+    })() : {
       cashToday: totalLiquidCash,
       annualNetCashflow: cashFlowAnnual?.[0]?.netCashFlow ?? 0,
       taxRefundPerYear: ngSummary.totalAnnualTaxBenefit,

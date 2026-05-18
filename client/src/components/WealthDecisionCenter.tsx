@@ -1,0 +1,560 @@
+/**
+ * WealthDecisionCenter.tsx — restored CASH / EVENTS / WEALTH / RISK tabs.
+ *
+ * Sits inside the Executive Overview cockpit as the operational decision
+ * surface between the Projection Table and Financial Health strip:
+ *
+ *   • CASH    — Deposit Power & Usable Equity breakdown table + Plan
+ *               Execution Capacity chart (all controls preserved).
+ *   • EVENTS  — Strategy timeline / roadmap (deposit build, IP purchases,
+ *               stock DCA, crypto allocation, refinance, FIRE target) with
+ *               planned / active / completed status.
+ *   • WEALTH  — Monte Carlo trajectory (P10 / P50 / P90) + projection table.
+ *   • RISK    — Liquidity / leverage / downside / survivability summary.
+ *
+ * Source-of-truth invariants:
+ *   • CURRENT debt is the only debt figure shown in the Hero / Today / CASH
+ *     liquidity context. Planned and forecast leverage appear ONLY in the
+ *     Events tab, clearly labelled as planned.
+ *   • Live PPOR mortgage rate (5.82%) flows from `snap.mortgage_rate` — never
+ *     a forecast / blended rate.
+ *   • Reuses the existing DepositPowerTrajectoryPanel, MonteCarloTrajectoryChart
+ *     and CompactProjectionTable from ExecutiveDashboard.tsx — no duplicate
+ *     recommendation engines, no parallel intelligence.
+ */
+
+import { useMemo, useState } from 'react';
+import { Link } from 'wouter';
+import {
+  Wallet, Calendar, TrendingUp, Shield,
+  Home, Building2, LineChart as LineChartIcon, Coins as CoinsIcon,
+  Repeat, Banknote, Flame, Sparkles, CheckCircle2, Clock, CircleDot,
+} from 'lucide-react';
+import { formatCurrency } from '@/lib/finance';
+import { useAppStore } from '@/lib/store';
+import { maskValue } from '@/components/PrivacyMask';
+import type {
+  ExecutiveDashboardProps,
+  RoadmapEvent,
+  DepositPowerSummary,
+} from './ExecutiveDashboard';
+
+type TabKey = 'CASH' | 'EVENTS' | 'WEALTH' | 'RISK';
+
+const TAB_DEFS: { key: TabKey; label: string; Icon: any; description: string }[] = [
+  { key: 'CASH',   label: 'CASH',   Icon: Wallet,   description: 'Deposit Power · liquidity execution' },
+  { key: 'EVENTS', label: 'EVENTS', Icon: Calendar, description: 'Strategy roadmap · planned events' },
+  { key: 'WEALTH', label: 'WEALTH', Icon: TrendingUp, description: 'Monte Carlo · P10 / P50 / P90' },
+  { key: 'RISK',   label: 'RISK',   Icon: Shield,   description: 'Liquidity · leverage · downside' },
+];
+
+const ROADMAP_ICON: Record<string, any> = {
+  'deposit-build':  Wallet,
+  'ip-purchase':    Building2,
+  'stock-dca':      LineChartIcon,
+  'stock-buy':      LineChartIcon,
+  'crypto-buy':     CoinsIcon,
+  'crypto-dca':     CoinsIcon,
+  'refinance':      Repeat,
+  'debt-reduction': Banknote,
+  'fire-target':    Flame,
+  'default':        Sparkles,
+};
+
+const STATUS_CFG: Record<RoadmapEvent['status'], { label: string; tone: string; Icon: any }> = {
+  planned:   { label: 'Planned',   tone: 'hsl(43,90%,55%)',  Icon: Clock },
+  active:    { label: 'Active',    tone: 'hsl(195,80%,60%)', Icon: CircleDot },
+  completed: { label: 'Completed', tone: 'hsl(142,60%,55%)', Icon: CheckCircle2 },
+};
+
+// ─── Default roadmap derivation ─────────────────────────────────────────────
+// If the caller has no explicit roadmap, synthesise a deterministic premium
+// roadmap from snapshot signals so the EVENTS tab never renders empty.
+function defaultRoadmap(props: ExecutiveDashboardProps): RoadmapEvent[] {
+  const thisYear = new Date().getFullYear();
+  const dp = props.depositPowerSummary;
+  const ipReadiness = dp?.ipReadinessPct ?? 0;
+  const dpAmt = dp?.totalDepositPower ?? 0;
+  const finalYear = dp?.finalYearLabel ?? `${thisYear + 10}`;
+
+  const events: RoadmapEvent[] = [];
+
+  events.push({
+    id: 'deposit-build',
+    year: `${thisYear}`,
+    kind: 'deposit-build',
+    title: 'Deposit Power Build',
+    description: 'Grow liquid deposit power via offset + surplus deployment.',
+    amount: dpAmt,
+    amountLabel: dpAmt > 0 ? `Deposit power ${formatCurrency(dpAmt, true)}` : null,
+    status: 'active',
+  });
+
+  events.push({
+    id: 'first-ip',
+    year: `${thisYear + (ipReadiness >= 100 ? 0 : 1)}`,
+    kind: 'ip-purchase',
+    title: 'First Investment Property',
+    description: 'Acquire first IP once deposit + buffer + serviceability align.',
+    amountLabel: 'Plan loan ~80% LVR · settled when ready',
+    status: ipReadiness >= 100 ? 'active' : 'planned',
+  });
+
+  events.push({
+    id: 'stock-dca',
+    year: `${thisYear}`,
+    kind: 'stock-dca',
+    title: 'Stock DCA Plan',
+    description: 'Dollar-cost averaging into global / Aussie ETFs after buffer.',
+    amountLabel: 'Monthly allocation when surplus available',
+    status: 'active',
+  });
+
+  events.push({
+    id: 'crypto-allocation',
+    year: `${thisYear}`,
+    kind: 'crypto-buy',
+    title: 'Crypto Allocation',
+    description: 'Long-horizon BTC / ETH satellite allocation.',
+    amountLabel: 'Disciplined % of portfolio',
+    status: 'planned',
+  });
+
+  events.push({
+    id: 'refinance-review',
+    year: `${thisYear + 1}`,
+    kind: 'refinance',
+    title: 'Refinance Review',
+    description: 'Re-shop the PPOR mortgage if rates drop > 0.5%.',
+    amountLabel: typeof props.livePporRate === 'number' ? `Today PPOR ${props.livePporRate.toFixed(2)}%` : null,
+    status: 'planned',
+  });
+
+  events.push({
+    id: 'second-ip',
+    year: `${thisYear + 3}`,
+    kind: 'ip-purchase',
+    title: 'Second Investment Property',
+    description: 'Second IP after equity from first IP recycles.',
+    amountLabel: 'Plan loan from recycled equity',
+    status: 'planned',
+  });
+
+  events.push({
+    id: 'debt-reduction',
+    year: `${thisYear + 5}`,
+    kind: 'debt-reduction',
+    title: 'Debt Reduction Phase',
+    description: 'Switch from acquisition to principal reduction.',
+    amountLabel: 'Target offset = mortgage',
+    status: 'planned',
+  });
+
+  events.push({
+    id: 'fire-target',
+    year: finalYear,
+    kind: 'fire-target',
+    title: 'FIRE Readiness Target',
+    description: 'Passive income ≥ lifestyle expenses · safe withdrawal cleared.',
+    amountLabel: `${Math.round(props.fireProgressPct ?? 0)}% of target today`,
+    status: 'planned',
+  });
+
+  return events;
+}
+
+// ─── Deposit Power breakdown table ──────────────────────────────────────────
+// The full canonical breakdown. The rows are non-negotiable:
+//   Cash + Offset · PPOR Usable Equity · IP Usable Equity · Gross Total ·
+//   Emergency Buffer · Total Deposit Power.
+function DepositPowerBreakdownTable({
+  summary,
+  privacyMode,
+}: {
+  summary: DepositPowerSummary | null | undefined;
+  privacyMode: boolean;
+}) {
+  const mv = (v: string) => maskValue(v, privacyMode);
+  const cashAndOffset = summary?.cashAndOffset ?? summary?.cashToday ?? 0;
+  const ppor = summary?.pporUsableEquity ?? 0;
+  const ip = summary?.ipUsableEquity ?? 0;
+  const buffer = summary?.emergencyBuffer ?? 0;
+  const gross = summary?.grossTotal ?? (cashAndOffset + ppor + ip);
+  const total = summary?.totalDepositPower ?? Math.max(0, gross - buffer);
+
+  const rows: { label: string; value: number; sign?: 'plus' | 'minus'; emphasis?: boolean }[] = [
+    { label: 'Cash + Offset',       value: cashAndOffset, sign: 'plus' },
+    { label: 'PPOR Usable Equity',  value: ppor,          sign: 'plus' },
+    { label: 'IP Usable Equity',    value: ip,            sign: 'plus' },
+    { label: 'Gross Total',         value: gross,         emphasis: true },
+    { label: 'Emergency Buffer',    value: buffer,        sign: 'minus' },
+    { label: 'Total Deposit Power', value: total,         emphasis: true },
+  ];
+
+  return (
+    <div
+      className="rounded-xl border border-border/40 overflow-hidden"
+      data-testid="wdc-deposit-power-breakdown"
+    >
+      <header className="px-4 py-2.5 border-b border-border/30 flex items-center justify-between">
+        <div>
+          <h3 className="text-xs font-bold text-foreground uppercase tracking-widest">
+            Deposit Power Breakdown
+          </h3>
+          <p className="text-[10px] text-muted-foreground">
+            Canonical liquidity + usable equity stack
+          </p>
+        </div>
+      </header>
+      <table className="w-full text-sm" data-testid="wdc-deposit-power-table">
+        <tbody className="divide-y divide-border/30">
+          {rows.map((r) => {
+            const isTotal = r.label === 'Total Deposit Power';
+            const isGross = r.label === 'Gross Total';
+            const tone = isTotal
+              ? 'text-amber-300 font-extrabold'
+              : isGross
+              ? 'text-foreground font-bold'
+              : 'text-foreground';
+            return (
+              <tr
+                key={r.label}
+                data-testid={`wdc-breakdown-row-${r.label.toLowerCase().replace(/[^a-z]+/g, '-')}`}
+                className={isTotal ? 'bg-amber-500/5' : ''}
+              >
+                <td className={`px-4 py-2 text-[12px] ${isTotal ? 'font-extrabold uppercase tracking-widest text-amber-200' : 'text-muted-foreground'}`}>
+                  {r.label}
+                </td>
+                <td className={`px-4 py-2 text-right tabular-nums font-mono text-[13px] ${tone}`}>
+                  {r.sign === 'minus' ? '−' : ''}{mv(formatCurrency(Math.abs(r.value), true))}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Events timeline ────────────────────────────────────────────────────────
+function EventsTimeline({
+  events,
+  plannedDebt,
+  privacyMode,
+}: {
+  events: RoadmapEvent[];
+  plannedDebt?: number | null;
+  privacyMode: boolean;
+}) {
+  const mv = (v: string) => maskValue(v, privacyMode);
+  // Group by year for the marker rail.
+  const grouped = useMemo(() => {
+    const map = new Map<string, RoadmapEvent[]>();
+    for (const e of events) {
+      const arr = map.get(e.year) ?? [];
+      arr.push(e);
+      map.set(e.year, arr);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [events]);
+
+  return (
+    <div className="space-y-3" data-testid="wdc-events-timeline">
+      {plannedDebt != null && plannedDebt > 0 && (
+        <div
+          className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200"
+          data-testid="wdc-events-planned-debt-banner"
+        >
+          Planned future leverage on this roadmap totals{' '}
+          <span className="font-bold tabular-nums">{mv(formatCurrency(plannedDebt, true))}</span>.
+          This is <span className="font-bold">planned</span> — not current debt. It is excluded
+          from the Today snapshot and Best Move evaluation.
+        </div>
+      )}
+      {grouped.length === 0 ? (
+        <div className="rounded-lg border border-border/40 px-4 py-6 text-center text-xs text-muted-foreground">
+          No roadmap events yet. Add planned moves from /wealth-strategy.
+        </div>
+      ) : (
+        <ol className="relative pl-6" data-testid="wdc-events-list">
+          <span
+            className="absolute left-2 top-1 bottom-1 w-px"
+            style={{ background: 'hsl(var(--border) / 0.65)' }}
+            aria-hidden="true"
+          />
+          {grouped.map(([year, items]) => (
+            <li key={year} className="mb-4" data-testid={`wdc-events-year-${year}`}>
+              <div className="flex items-center gap-2 mb-2 -ml-6">
+                <span
+                  className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold"
+                  style={{ background: 'hsl(var(--gold))', color: 'hsl(var(--primary-foreground))' }}
+                  aria-hidden="true"
+                >
+                  •
+                </span>
+                <span className="text-[10px] uppercase tracking-widest font-bold text-amber-200">
+                  {year}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {items.map((e) => {
+                  const Icon = ROADMAP_ICON[e.kind] ?? ROADMAP_ICON.default;
+                  const status = STATUS_CFG[e.status];
+                  const SIcon = status.Icon;
+                  return (
+                    <div
+                      key={e.id}
+                      data-testid={`wdc-event-${e.id}`}
+                      className="rounded-lg border border-border/40 bg-card/40 px-3 py-2.5 flex items-start gap-3"
+                    >
+                      <div
+                        className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center"
+                        style={{ background: 'hsl(var(--gold-surface) / 0.45)', border: '1px solid hsl(var(--gold-dim) / 0.4)' }}
+                      >
+                        <Icon className="w-4 h-4" style={{ color: 'hsl(var(--gold))' }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <p className="text-[13px] font-semibold text-foreground leading-snug">
+                            {e.title}
+                          </p>
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest"
+                            style={{ color: status.tone, border: `1px solid ${status.tone}55`, background: `${status.tone}10` }}
+                            data-testid={`wdc-event-${e.id}-status`}
+                          >
+                            <SIcon className="w-2.5 h-2.5" />
+                            {status.label}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
+                          {e.description}
+                        </p>
+                        {(e.amountLabel || (typeof e.amount === 'number' && e.amount > 0)) && (
+                          <p className="text-[11px] text-emerald-300 font-mono mt-1 tabular-nums">
+                            {e.amountLabel ?? (e.amount ? mv(formatCurrency(e.amount, true)) : null)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+// ─── Risk summary ───────────────────────────────────────────────────────────
+function RiskTabSummary({ props, privacyMode }: { props: ExecutiveDashboardProps; privacyMode: boolean }) {
+  const mv = (v: string) => maskValue(v, privacyMode);
+  const liquidityMonths = props.monthlyExpenses > 0
+    ? props.totalLiquidCash / props.monthlyExpenses
+    : null;
+  const leverageLVR = props.totalPropertyValue > 0
+    ? (props.totalMortgage / props.totalPropertyValue) * 100
+    : null;
+  const downsideExposure = (props.currentDebt?.total ?? props.totalMortgage)
+    / Math.max(1, props.totalAssets);
+  const survivabilityMonths = props.monthlyExpenses > 0
+    ? (props.totalLiquidCash + (props.passiveIncome - props.monthlyExpenses) * 12 * 0.5)
+        / props.monthlyExpenses
+    : null;
+
+  const tone = (good: boolean, warn: boolean) =>
+    good ? 'hsl(142,60%,55%)' : warn ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)';
+
+  const cells: { label: string; value: string; tone: string; hint: string }[] = [
+    {
+      label: 'Liquidity Runway',
+      value: liquidityMonths == null ? '—' : `${liquidityMonths.toFixed(1)} mo`,
+      tone: tone((liquidityMonths ?? 0) >= 6, (liquidityMonths ?? 0) >= 3),
+      hint: 'Months of expenses covered by cash + offset',
+    },
+    {
+      label: 'Leverage (LVR)',
+      value: leverageLVR == null ? '—' : `${leverageLVR.toFixed(1)}%`,
+      tone: tone((leverageLVR ?? 0) <= 60, (leverageLVR ?? 0) <= 80),
+      hint: 'Current LVR — settled property only',
+    },
+    {
+      label: 'Downside Exposure',
+      value: `${(downsideExposure * 100).toFixed(1)}%`,
+      tone: tone(downsideExposure <= 0.4, downsideExposure <= 0.6),
+      hint: 'Current debt as a % of total assets',
+    },
+    {
+      label: 'Survivability',
+      value: survivabilityMonths == null ? '—' : `${survivabilityMonths.toFixed(0)} mo`,
+      tone: tone((survivabilityMonths ?? 0) >= 18, (survivabilityMonths ?? 0) >= 9),
+      hint: 'Months covered after income shock (50% surplus haircut)',
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="wdc-risk-grid">
+      {cells.map((c) => (
+        <div
+          key={c.label}
+          className="rounded-xl border border-border/40 bg-card/40 p-3"
+          data-testid={`wdc-risk-cell-${c.label.toLowerCase().replace(/[^a-z]+/g, '-')}`}
+        >
+          <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">{c.label}</p>
+          <p className="text-xl font-extrabold tabular-nums mt-1" style={{ color: c.tone }}>{c.value}</p>
+          <p className="text-[10px] text-muted-foreground mt-1 leading-snug">{c.hint}</p>
+        </div>
+      ))}
+      {props.currentDebt && (
+        <div className="col-span-2 lg:col-span-4 rounded-xl border border-border/40 bg-card/40 p-3" data-testid="wdc-risk-current-debt">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
+            Current Debt (Today)
+          </p>
+          <div className="grid grid-cols-3 gap-3 mt-2 text-sm">
+            <div>
+              <p className="text-[10px] text-muted-foreground">PPOR Mortgage</p>
+              <p className="font-mono tabular-nums text-foreground">{mv(formatCurrency(props.currentDebt.pporMortgage, true))}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-muted-foreground">Settled IP Loans</p>
+              <p className="font-mono tabular-nums text-foreground">{mv(formatCurrency(props.currentDebt.settledIpLoans, true))}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-muted-foreground">Other Debt</p>
+              <p className="font-mono tabular-nums text-foreground">{mv(formatCurrency(props.currentDebt.otherDebts, true))}</p>
+            </div>
+          </div>
+          <div className="border-t border-border/30 mt-3 pt-2 flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-widest font-bold text-amber-200">Total Current Debt</span>
+            <span className="text-base font-extrabold tabular-nums text-amber-200" data-testid="wdc-risk-current-debt-total">
+              {mv(formatCurrency(props.currentDebt.total, true))}
+            </span>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Excludes planned IP loans and forecast/Monte Carlo future leverage.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Public component ──────────────────────────────────────────────────────
+
+export interface WealthDecisionCenterProps {
+  /** Initial active tab. */
+  defaultTab?: TabKey;
+  /** Forwarded executive props so each tab can render its dedicated view. */
+  executiveProps: ExecutiveDashboardProps;
+  /**
+   * Slot renderers — supplied by ExecutiveDashboard.tsx so we reuse the live
+   * Plan Execution Capacity chart, Monte Carlo trajectory and projection
+   * table without duplicating logic.
+   */
+  renderDepositPowerChart: () => React.ReactNode;
+  renderMonteCarlo: () => React.ReactNode;
+  renderProjectionTable: () => React.ReactNode;
+}
+
+export default function WealthDecisionCenter({
+  defaultTab = 'CASH',
+  executiveProps,
+  renderDepositPowerChart,
+  renderMonteCarlo,
+  renderProjectionTable,
+}: WealthDecisionCenterProps) {
+  const [tab, setTab] = useState<TabKey>(defaultTab);
+  const { privacyMode } = useAppStore();
+  const events = useMemo(
+    () => (executiveProps.roadmapEvents && executiveProps.roadmapEvents.length > 0
+      ? executiveProps.roadmapEvents
+      : defaultRoadmap(executiveProps)),
+    [executiveProps],
+  );
+
+  return (
+    <section
+      className="rounded-2xl border border-border bg-card overflow-hidden"
+      data-testid="wealth-decision-center"
+      aria-label="Wealth Decision Center"
+    >
+      <header className="px-5 pt-4 pb-2.5 border-b border-border/30 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-bold text-foreground">Wealth Decision Center</h2>
+          <p className="text-[11px] text-muted-foreground">
+            Operational execution surface · CASH · EVENTS · WEALTH · RISK
+          </p>
+        </div>
+        <nav
+          className="flex flex-wrap gap-1.5"
+          role="tablist"
+          aria-label="Wealth Decision Center tabs"
+          data-testid="wdc-tabs"
+        >
+          {TAB_DEFS.map((t) => {
+            const active = tab === t.key;
+            const Icon = t.Icon;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setTab(t.key)}
+                data-testid={`wdc-tab-${t.key}`}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                  active
+                    ? 'bg-amber-500/15 text-amber-200 border border-amber-500/40'
+                    : 'text-muted-foreground border border-border/40 hover:text-foreground hover:border-border'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {t.label}
+              </button>
+            );
+          })}
+        </nav>
+      </header>
+
+      <div className="p-4 space-y-4">
+        {tab === 'CASH' && (
+          <div className="space-y-4" data-testid="wdc-panel-cash" role="tabpanel">
+            <DepositPowerBreakdownTable
+              summary={executiveProps.depositPowerSummary}
+              privacyMode={privacyMode}
+            />
+            <div>{renderDepositPowerChart()}</div>
+          </div>
+        )}
+        {tab === 'EVENTS' && (
+          <div className="space-y-3" data-testid="wdc-panel-events" role="tabpanel">
+            <EventsTimeline
+              events={events}
+              plannedDebt={executiveProps.plannedDebt ?? null}
+              privacyMode={privacyMode}
+            />
+          </div>
+        )}
+        {tab === 'WEALTH' && (
+          <div className="space-y-4" data-testid="wdc-panel-wealth" role="tabpanel">
+            <div>{renderMonteCarlo()}</div>
+            <div>{renderProjectionTable()}</div>
+          </div>
+        )}
+        {tab === 'RISK' && (
+          <div className="space-y-3" data-testid="wdc-panel-risk" role="tabpanel">
+            <RiskTabSummary props={executiveProps} privacyMode={privacyMode} />
+            <div className="flex items-center justify-end">
+              <Link href="/risk-radar">
+                <span className="text-xs text-primary hover:underline">Open Risk Radar →</span>
+              </Link>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}

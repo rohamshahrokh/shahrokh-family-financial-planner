@@ -54,6 +54,7 @@ import { maskValue } from '@/components/PrivacyMask';
 import { MetricExplainer } from '@/components/intelligence/MetricExplainer';
 import { readMetric, getMetricExplanation, type MetricReading } from '@/lib/metricExplanations';
 import type { MonteCarloFanPoint } from '@/lib/forecastStore';
+import WealthDecisionCenter from '@/components/WealthDecisionCenter';
 
 // ─── Public props ────────────────────────────────────────────────────────────
 
@@ -87,6 +88,30 @@ export interface DepositPowerSummary {
   /** Last-year cash (e.g. "2035 Cash") — read from end of cashflow series. */
   finalYearCash?: number | null;
   finalYearLabel?: string | null;
+  /** PPOR usable equity (80% of value − mortgage), used in the breakdown table. */
+  pporUsableEquity?: number | null;
+  /** IP usable equity across settled IPs (80% of value − loan), breakdown table. */
+  ipUsableEquity?: number | null;
+  /** Gross total (cash + offset + PPOR equity + IP equity), pre-buffer deduction. */
+  grossTotal?: number | null;
+  /** Emergency buffer applied to the deposit power calculation. */
+  emergencyBuffer?: number | null;
+}
+
+/** A single planned-roadmap event surfaced inside the Events tab timeline. */
+export interface RoadmapEvent {
+  id: string;
+  /** Year marker for the timeline (e.g. "2026", "2027 Q3"). */
+  year: string;
+  /** "deposit-build" | "ip-purchase" | "stock-dca" | "crypto-buy" | "refinance" | "debt-reduction" | "fire-target" | etc. */
+  kind: string;
+  title: string;
+  description: string;
+  /** Planned dollar figure attached to the event (deposit, loan, allocation). */
+  amount?: number | null;
+  /** Free-text amount label (e.g. "Plan loan $720K @ 80% LVR"). */
+  amountLabel?: string | null;
+  status: 'planned' | 'active' | 'completed';
 }
 
 export type CashflowChartMode = 'combo' | 'line' | 'candlestick';
@@ -139,6 +164,28 @@ export interface ExecutiveDashboardProps {
   setCashflowViewMode?: (m: CashflowViewMode) => void;
   /** Mini summary metrics above the Deposit Power & Cashflow chart. */
   depositPowerSummary?: DepositPowerSummary | null;
+  /**
+   * Planned-roadmap events for the EVENTS tab in the Wealth Decision Center.
+   * When omitted, the WDC derives a minimal deterministic roadmap from the
+   * snapshot (deposit-build, IP buys, DCA, FIRE target).
+   */
+  roadmapEvents?: RoadmapEvent[] | null;
+  /**
+   * CURRENT debt breakdown for the Today snapshot context. Must include ONLY
+   * settled liabilities (PPOR mortgage + settled IP loans + other debts).
+   * Never include planned IP loans, forecast leverage, or Monte Carlo debt.
+   */
+  currentDebt?: {
+    pporMortgage: number;
+    settledIpLoans: number;
+    otherDebts: number;
+    total: number;
+  } | null;
+  /**
+   * PLANNED debt (sum of future / not-yet-settled liabilities). Surfaced ONLY
+   * inside the Events / Forecast tabs, never in Today snapshot.
+   */
+  plannedDebt?: number | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1614,12 +1661,28 @@ export default function ExecutiveDashboard(props: ExecutiveDashboardProps) {
 
   return (
     <div className="space-y-4" data-testid="executive-dashboard">
+      {/* 1. Hero Snapshot — Today snapshot, live current values only. */}
       <ExecutiveHeroSnapshot {...resolved} result={result} />
+      {/* 2. Future Wealth Path — primary hero (Monte Carlo P10/P50/P90). */}
       <MonteCarloTrajectoryChart {...resolved} />
+      {/* 3. Projection Table — year-by-year P50 + expandable range. */}
       <CompactProjectionTable {...resolved} />
-      <DepositPowerTrajectoryPanel {...resolved} />
+      {/* 4. Wealth Decision Center — operational tabs (CASH/EVENTS/WEALTH/RISK).
+            The Plan Execution Capacity chart lives inside CASH; Monte Carlo +
+            projection table are referenced inside WEALTH; planned roadmap is
+            in EVENTS; liquidity / leverage / downside summary is in RISK. */}
+      <WealthDecisionCenter
+        defaultTab="CASH"
+        executiveProps={resolved}
+        renderDepositPowerChart={() => <DepositPowerTrajectoryPanel {...resolved} />}
+        renderMonteCarlo={() => <MonteCarloTrajectoryChart {...resolved} />}
+        renderProjectionTable={() => <CompactProjectionTable {...resolved} />}
+      />
+      {/* 5. Financial Health — exactly 4 structural indicators. */}
       <ExecutiveHealthStrip {...resolved} />
+      {/* 6. Action Queue — max 3 next-step items. */}
       <ExecutiveActionQueue result={result} />
+      {/* 7. Deep Analysis Cards — four navigation surfaces (no chips). */}
       <DeepAnalysisCards />
     </div>
   );
