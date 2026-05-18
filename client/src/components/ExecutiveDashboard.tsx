@@ -35,9 +35,10 @@ import { Link } from 'wouter';
 import {
   TrendingUp, TrendingDown, Shield, Sparkles, Activity, ArrowRight, ChevronDown, ChevronUp,
   Flame, Wallet, Layers, Target, CheckCircle2, BarChart2, Coins, Compass, Scale, Calculator,
+  DollarSign, Unlock, Lock,
 } from 'lucide-react';
 import {
-  AreaChart, Area, ComposedChart, Bar, Line, XAxis, YAxis,
+  AreaChart, Area, ComposedChart, Bar, Line, LineChart, XAxis, YAxis, Cell,
   CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend,
 } from 'recharts';
 import { useForecastStore } from '@/lib/forecastStore';
@@ -66,6 +67,23 @@ export interface CashflowTrajectoryPoint {
   totalDepositPower: number;
 }
 
+/** Mini summary metrics surfaced above the Deposit Power & Cashflow chart. */
+export interface DepositPowerSummary {
+  pporLvrPct?: number | null;
+  ipReadinessPct?: number | null;
+  annualNetCashflow?: number | null;
+  taxRefundPerYear?: number | null;
+  cashToday?: number | null;
+  readyNow?: boolean | null;
+  totalDepositPower?: number | null;
+  isEquityRichCashPoor?: boolean | null;
+}
+
+export type CashflowChartMode = 'combo' | 'line' | 'candlestick';
+export type CashflowViewMode = 'cash' | 'equity' | 'deposit';
+export type CashflowGranularity = 'annual' | 'monthly';
+export type NgRefundMode = 'lump-sum' | 'payg';
+
 export interface ExecutiveDashboardProps {
   netWorth: number;
   surplus: number;
@@ -93,8 +111,24 @@ export interface ExecutiveDashboardProps {
   /** Canonical Monte Carlo fan data — the only future trajectory representation. */
   monteCarloFanData?: MonteCarloFanPoint[] | null;
   monteCarloSimulations?: number | null;
-  /** Annual cashflow / deposit-power trajectory (10y). */
+  /** Annual cashflow / deposit-power trajectory (10y, condensed). */
   cashflowTrajectory?: CashflowTrajectoryPoint[] | null;
+  /** Full canonical master cashflow data (annual or monthly per granularity). */
+  cashflowMaster?: any[] | null;
+  /** Master granularity in current state. */
+  cashflowGranularity?: CashflowGranularity;
+  setCashflowGranularity?: (g: CashflowGranularity) => void;
+  /** Refund mode controls negative-gearing refund spread. */
+  ngRefundMode?: NgRefundMode;
+  setNgRefundMode?: (m: NgRefundMode) => void;
+  /** Chart mode toggle (Combo / Line / Candlestick). */
+  cashflowChartMode?: CashflowChartMode;
+  setCashflowChartMode?: (m: CashflowChartMode) => void;
+  /** Series view mode (Cash / Equity / Deposit Power). */
+  cashflowViewMode?: CashflowViewMode;
+  setCashflowViewMode?: (m: CashflowViewMode) => void;
+  /** Mini summary metrics above the Deposit Power & Cashflow chart. */
+  depositPowerSummary?: DepositPowerSummary | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -337,8 +371,9 @@ function ExecutiveHeroSnapshot(p: HeroProps) {
 }
 
 // ─── 2. MonteCarloTrajectoryChart ────────────────────────────────────────────
-// The main future visual anchor on the cockpit. A calm P10/P50/P90 confidence
-// band — institutional, premium, dominant. No trading-terminal chrome.
+// The main future visual anchor on the cockpit. P10/P50/P90 confidence band
+// with shaded confidence area, smooth spline lines, year-focus vertical marker,
+// dynamic legend, institutional grid — Bloomberg-Terminal-meets-family-office.
 
 function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
   const { privacyMode } = useAppStore();
@@ -350,9 +385,28 @@ function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
   const traj = hasMcTrajectory
     ? trajectoryFromGrowth(p.netWorth, p.trajectoryP50 as number)
     : { pct: 0, label: 'Monte Carlo pending' };
-  const trajectoryYearLabel = hasMcTrajectory && p.trajectoryYear
-    ? `${p.trajectoryYear} P50`
+  const focusYear = hasMcTrajectory && p.trajectoryYear ? p.trajectoryYear : null;
+  const trajectoryYearLabel = focusYear
+    ? `${focusYear} P50`
     : `${new Date().getFullYear() + 9} horizon`;
+
+  // Composite series — feeds the band as p90 minus p10 so recharts can render
+  // the shaded confidence area natively without stacked layering tricks.
+  const series = useMemo(() => {
+    if (!fan || fan.length === 0) return [] as any[];
+    return fan.map(row => ({
+      year: row.year,
+      p10:    row.p10,
+      median: row.median,
+      p90:    row.p90,
+      // Band lower edge as p10, shaded span as (p90 − p10) used by the
+      // confidence area stack for visual depth.
+      bandBase: row.p10,
+      bandSpan: Math.max(0, row.p90 - row.p10),
+    }));
+  }, [fan]);
+
+  const finalRow = fan && fan.length > 0 ? fan[fan.length - 1] : null;
 
   return (
     <section
@@ -448,65 +502,145 @@ function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
         )}
       </div>
 
-      {/* Chart area — P10/P50/P90 fan. Calm, restrained chrome. */}
+      {/* Chart area — P10/P50/P90 fan. Shaded confidence band, smooth spline,
+          year-focus marker, dynamic legend. */}
       <div className="px-2 pb-3 border-t border-border/30 pt-2" data-testid="trajectory-chart-area">
         {hasMc ? (
-          <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={fan!} margin={{ top: 12, right: 18, left: 0, bottom: 6 }}>
+          <>
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={series} margin={{ top: 12, right: 18, left: 0, bottom: 6 }}>
               <defs>
-                <linearGradient id="mcConfidence" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%"  stopColor="hsl(280,80%,68%)" stopOpacity={0.22} />
-                  <stop offset="100%" stopColor="hsl(280,80%,68%)" stopOpacity={0.04} />
+                <linearGradient id="mcConfidenceBand" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%"  stopColor="hsl(280,80%,68%)" stopOpacity={0.28} />
+                  <stop offset="100%" stopColor="hsl(280,80%,68%)" stopOpacity={0.06} />
+                </linearGradient>
+                <linearGradient id="mcP90Stroke" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%"  stopColor="hsl(142,60%,55%)" stopOpacity={0.9} />
+                  <stop offset="100%" stopColor="hsl(142,60%,55%)" stopOpacity={0.4} />
+                </linearGradient>
+                <linearGradient id="mcP10Stroke" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%"  stopColor="hsl(0,72%,60%)" stopOpacity={0.9} />
+                  <stop offset="100%" stopColor="hsl(0,72%,60%)" stopOpacity={0.4} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border) / 0.35)" />
+              <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border) / 0.32)" vertical={false} />
               <XAxis
                 dataKey="year"
-                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))', fontWeight: 600 }}
                 tickLine={false}
-                axisLine={{ stroke: 'hsl(var(--border) / 0.6)' }}
+                axisLine={{ stroke: 'hsl(var(--border) / 0.5)' }}
+                interval={0}
               />
               <YAxis
                 tickFormatter={(v) => fmtCompact(v)}
                 tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
                 tickLine={false}
                 axisLine={false}
-                width={56}
+                width={58}
               />
               <Tooltip content={<CalmChartTooltip />} cursor={{ stroke: 'hsl(280,80%,55%)', strokeWidth: 1, strokeDasharray: '3 3' }} />
-              {/* Confidence band rendered as P90 area minus P10 area — Recharts layers them stacked. */}
+              {/* Shaded confidence band: stacked invisible base + visible span. */}
+              <Area
+                type="monotone"
+                dataKey="bandBase"
+                stackId="confidence"
+                stroke="none"
+                fill="transparent"
+                fillOpacity={0}
+                isAnimationActive={false}
+                legendType="none"
+              />
+              <Area
+                type="monotone"
+                dataKey="bandSpan"
+                stackId="confidence"
+                name="P10 – P90 band"
+                stroke="hsl(280,80%,60%)"
+                strokeWidth={0}
+                fill="url(#mcConfidenceBand)"
+                fillOpacity={1}
+                isAnimationActive={false}
+              />
+              {/* P90 bull line — smooth spline */}
               <Area
                 type="monotone"
                 dataKey="p90"
                 name="Bull · P90"
-                stroke="hsl(142,60%,55%)"
-                strokeWidth={1}
-                fill="url(#mcConfidence)"
-                fillOpacity={1}
+                stroke="url(#mcP90Stroke)"
+                strokeWidth={1.4}
+                fill="transparent"
                 isAnimationActive={false}
+                dot={false}
               />
+              {/* P10 bear line — smooth spline */}
               <Area
                 type="monotone"
                 dataKey="p10"
                 name="Bear · P10"
-                stroke="hsl(0,72%,60%)"
-                strokeWidth={1}
-                fill="hsl(var(--card))"
-                fillOpacity={1}
+                stroke="url(#mcP10Stroke)"
+                strokeWidth={1.4}
+                fill="transparent"
                 isAnimationActive={false}
+                dot={false}
               />
+              {/* P50 median — bold institutional gold */}
               <Area
                 type="monotone"
                 dataKey="median"
                 name="Median · P50"
                 stroke="hsl(43,90%,60%)"
-                strokeWidth={2.5}
+                strokeWidth={2.6}
                 fill="none"
                 isAnimationActive={false}
+                dot={{ r: 2, fill: 'hsl(43,90%,60%)', stroke: 'hsl(43,90%,60%)' }}
+                activeDot={{ r: 4.5, fill: 'hsl(43,90%,60%)', stroke: 'hsl(var(--card))', strokeWidth: 2 }}
               />
-              <ReferenceLine y={p.netWorth} stroke="hsl(var(--muted-foreground) / 0.5)" strokeDasharray="2 3" label={{ value: 'Today', position: 'insideTopLeft', fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
+              <ReferenceLine
+                y={p.netWorth}
+                stroke="hsl(var(--muted-foreground) / 0.45)"
+                strokeDasharray="2 3"
+                label={{ value: `Today · ${fmtCompact(p.netWorth)}`, position: 'insideTopLeft', fontSize: 9, fill: 'hsl(var(--muted-foreground))', fontWeight: 600 }}
+              />
+              {focusYear && (
+                <ReferenceLine
+                  x={focusYear}
+                  stroke="hsl(43,90%,55%)"
+                  strokeDasharray="4 3"
+                  strokeOpacity={0.55}
+                  label={{ value: `${focusYear} focus`, position: 'top', fontSize: 9, fill: 'hsl(43,90%,55%)', fontWeight: 700 }}
+                />
+              )}
             </AreaChart>
           </ResponsiveContainer>
+
+          {/* Dynamic legend — colour-keyed to the series with live final-row values. */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 px-3 pt-3 pb-1 border-t border-border/25 mt-1">
+            <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(43,90%,62%)' }}>
+              <span className="inline-block w-6 h-0.5 rounded" style={{ background: 'hsl(43,90%,60%)' }} />
+              Median · P50
+              {finalRow && <span className="opacity-70 ml-1 tabular-nums font-mono">{mv(formatCurrency(finalRow.median, true))}</span>}
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(142,60%,55%)' }}>
+              <span className="inline-block w-6 h-0.5 rounded" style={{ background: 'hsl(142,60%,55%)' }} />
+              Bull · P90
+              {finalRow && <span className="opacity-70 ml-1 tabular-nums font-mono">{mv(formatCurrency(finalRow.p90, true))}</span>}
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(0,72%,60%)' }}>
+              <span className="inline-block w-6 h-0.5 rounded" style={{ background: 'hsl(0,72%,60%)' }} />
+              Bear · P10
+              {finalRow && <span className="opacity-70 ml-1 tabular-nums font-mono">{mv(formatCurrency(finalRow.p10, true))}</span>}
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="inline-block w-4 h-2 rounded-sm" style={{ background: 'hsl(280,80%,60% / 0.25)', border: '1px solid hsl(280,80%,60% / 0.45)' }} />
+              Confidence band
+            </div>
+            <div className="ml-auto text-[10px] text-muted-foreground">
+              {p.monteCarloSimulations
+                ? `${p.monteCarloSimulations.toLocaleString()} sims · canonical engine`
+                : 'Canonical engine'}
+            </div>
+          </div>
+          </>
         ) : (
           <div
             className="h-48 mx-3 my-3 rounded-xl border border-dashed flex flex-col items-center justify-center gap-2 px-6 text-center"
@@ -626,18 +760,88 @@ function CompactProjectionTable(p: ExecutiveDashboardProps) {
 }
 
 // ─── 4. DepositPowerTrajectoryPanel ──────────────────────────────────────────
-// "Where does our operational financial motion go?" — annual cashflow combo
-// chart with cash balance trajectory, net cashflow bars, and tax refund as a
-// dedicated channel. Premium, calm, institutional.
+// Restored canonical Deposit Power & Cashflow block:
+//   • Mini summary metrics row (PPOR LVR, IP readiness, annual net CF, tax
+//     refund/year, cash today, ready-now state).
+//   • Granularity (Annual / Monthly), Refund mode (Lump-sum / PAYG),
+//     View mode (Cash / + Equity / Deposit Power) and Chart mode
+//     (Combo / Line / Candlestick) toggles — exposed to the parent via
+//     props so dashboard.tsx remains the canonical state owner.
+//   • Blue cash balance line, green positive net CF bars, red negative net
+//     CF bars, gold tax refund bars, yearly liquidity evolution.
+//   • Dynamic legend, institutional grid, calm tooltip, responsive scaling.
 
 function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
   const { privacyMode } = useAppStore();
   const mv = (v: string) => maskValue(v, privacyMode);
-  const data = p.cashflowTrajectory;
-  const hasData = !!data && data.length > 0;
 
-  const todayPower = hasData ? data![0].totalDepositPower : 0;
-  const yr5Power   = hasData && data!.length >= 5 ? data![4].totalDepositPower : null;
+  // Local state fallbacks so the panel works even if dashboard.tsx hasn't
+  // wired up the setter props yet — the canonical contract still hands the
+  // state up to dashboard.tsx when those setters are provided.
+  const [_localChartMode,  _setLocalChartMode]  = useState<CashflowChartMode>(p.cashflowChartMode  ?? 'combo');
+  const [_localViewMode,   _setLocalViewMode]   = useState<CashflowViewMode>(p.cashflowViewMode    ?? 'cash');
+  const [_localGran,       _setLocalGran]       = useState<CashflowGranularity>(p.cashflowGranularity ?? 'annual');
+  const [_localRefund,     _setLocalRefund]     = useState<NgRefundMode>(p.ngRefundMode            ?? 'lump-sum');
+
+  const chartMode = p.cashflowChartMode  ?? _localChartMode;
+  const viewMode  = p.cashflowViewMode   ?? _localViewMode;
+  const gran      = p.cashflowGranularity ?? _localGran;
+  const refund    = p.ngRefundMode       ?? _localRefund;
+  const setChartMode = p.setCashflowChartMode ?? _setLocalChartMode;
+  const setViewMode  = p.setCashflowViewMode  ?? _setLocalViewMode;
+  const setGran      = p.setCashflowGranularity ?? _setLocalGran;
+  const setRefund    = p.ngRefundMode !== undefined && p.setNgRefundMode ? p.setNgRefundMode : _setLocalRefund;
+
+  // Prefer the rich master data when supplied (full per-period rows with
+  // pporUsableEquity / ipUsableEquity / totalDepositPower etc). Fall back to
+  // the condensed trajectory contract for backwards compatibility.
+  const masterData = p.cashflowMaster && p.cashflowMaster.length > 0 ? p.cashflowMaster : null;
+  const trajData   = p.cashflowTrajectory ?? null;
+  const chartData: any[] = useMemo(() => {
+    if (masterData) {
+      return masterData.map((d: any) => ({
+        ...d,
+        // Normalise field names so the chart can render either shape.
+        cashBalance:       d.cashBalance       ?? d.balance              ?? 0,
+        netCashflow:       d.netCashflow       ?? d.netCF                ?? 0,
+        taxRefund:         d.taxRefund         ?? d.ngRefund             ?? 0,
+        usableEquity:      d.usableEquity      ?? ((d.pporUsableEquity ?? 0) + (d.ipUsableEquity ?? 0)),
+        totalDepositPower: d.totalDepositPower ?? 0,
+      }));
+    }
+    if (trajData) {
+      return trajData.map((d) => ({
+        label:             d.label,
+        cashBalance:       d.cashBalance,
+        balance:           d.cashBalance,
+        netCashflow:       d.netCashflow,
+        netCF:             d.netCashflow,
+        taxRefund:         d.taxRefund,
+        ngRefund:          d.taxRefund,
+        usableEquity:      d.usableEquity,
+        totalDepositPower: d.totalDepositPower,
+      }));
+    }
+    return [];
+  }, [masterData, trajData]);
+  const hasData = chartData.length > 0;
+
+  // Mini summary metrics — prefer explicit summary props, else derive from
+  // the canonical data series so the row never reads zeros when the engine
+  // has run.
+  const firstRow = hasData ? chartData[0] : null;
+  const sum = p.depositPowerSummary ?? {};
+  const annualNetCF = sum.annualNetCashflow ?? firstRow?.netCashflow ?? firstRow?.netCF ?? 0;
+  const taxRefundPerYear = sum.taxRefundPerYear ?? firstRow?.taxRefund ?? firstRow?.ngRefund ?? 0;
+  const cashTodayVal = sum.cashToday ?? p.totalLiquidCash ?? 0;
+  const totalDepositPowerNow = sum.totalDepositPower ?? firstRow?.totalDepositPower ?? 0;
+  const pporLvrPct = sum.pporLvrPct;
+  const ipReadinessPct = sum.ipReadinessPct;
+  const readyNow = sum.readyNow ?? false;
+  const equityRichCashPoor = !!sum.isEquityRichCashPoor;
+
+  const todayPower = hasData ? (chartData[0].totalDepositPower ?? 0) : 0;
+  const yr5Power   = hasData && chartData.length >= 5 ? (chartData[4].totalDepositPower ?? null) : null;
 
   return (
     <section
@@ -657,7 +861,7 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
               Deposit Power &amp; Cashflow
               <MetricExplainer metricId="cashflow-resilience" size={11} />
             </h2>
-            <p className="text-[11px] text-muted-foreground">Annual liquidity · net cashflow · tax refund</p>
+            <p className="text-[11px] text-muted-foreground">Liquidity · net cashflow · tax refund · deposit-power readiness</p>
           </div>
         </div>
         <div className="flex items-center gap-4 text-[11px]">
@@ -681,37 +885,240 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
         </div>
       </header>
 
-      <div className="px-2 py-3" data-testid="deposit-power-chart-area">
+      {/* Mini summary metrics row — institutional, calm, six tiles. */}
+      <div
+        className="px-3 pt-3 pb-1 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2"
+        data-testid="deposit-power-summary-row"
+      >
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">PPOR LVR</div>
+          <div className="text-sm font-bold tabular-nums" style={{ color: 'hsl(188,60%,60%)' }} data-testid="dp-ppor-lvr">
+            {typeof pporLvrPct === 'number' && Number.isFinite(pporLvrPct) ? `${Math.round(pporLvrPct)}%` : '—'}
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">Loan / value</div>
+        </div>
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">IP Readiness</div>
+          <div
+            className="text-sm font-bold tabular-nums"
+            style={{ color: (ipReadinessPct ?? 0) >= 100 ? 'hsl(142,60%,55%)' : 'hsl(43,90%,58%)' }}
+            data-testid="dp-ip-readiness"
+          >
+            {typeof ipReadinessPct === 'number' && Number.isFinite(ipReadinessPct) ? `${Math.round(ipReadinessPct)}%` : '—'}
+          </div>
+          <div className="h-1 rounded-full bg-border mt-1.5 overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all"
+              style={{
+                width: `${Math.min(100, Math.max(0, ipReadinessPct ?? 0))}%`,
+                background: (ipReadinessPct ?? 0) >= 100 ? 'hsl(142,55%,45%)' : 'hsl(43,85%,55%)',
+              }}
+            />
+          </div>
+        </div>
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">{gran === 'monthly' ? 'Monthly Net CF' : 'Annual Net CF'}</div>
+          <div
+            className="text-sm font-bold tabular-nums"
+            style={{ color: annualNetCF >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}
+            data-testid="dp-net-cf"
+          >
+            {mv(formatCurrency(annualNetCF, true))}
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">{gran === 'monthly' ? 'This month' : 'Year 1'}</div>
+        </div>
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">Tax Refund / yr</div>
+          <div className="text-sm font-bold tabular-nums" style={{ color: 'hsl(43,90%,58%)' }} data-testid="dp-tax-refund">
+            +{mv(formatCurrency(taxRefundPerYear, true))}
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">{refund === 'payg' ? 'PAYG spread' : 'Lump-sum'}</div>
+        </div>
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">Cash Today</div>
+          <div className="text-sm font-bold tabular-nums" style={{ color: 'hsl(210,80%,68%)' }} data-testid="dp-cash-today">
+            {mv(formatCurrency(cashTodayVal, true))}
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">All liquid + offset</div>
+        </div>
+        <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-0.5">Ready Now</div>
+          <div
+            className="text-sm font-bold tabular-nums"
+            style={{ color: equityRichCashPoor ? 'hsl(43,90%,60%)' : readyNow ? 'hsl(142,60%,55%)' : 'hsl(215,15%,65%)' }}
+            data-testid="dp-ready-now"
+          >
+            {equityRichCashPoor ? '⚠ Equity Rich' : readyNow ? 'Ready' : 'Building'}
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">{equityRichCashPoor ? '/ Cash Poor' : `Total ${mv(formatCurrency(totalDepositPowerNow, true))}`}</div>
+        </div>
+      </div>
+
+      {/* Toggle bar — Granularity · Refund · View · Chart type */}
+      <div className="px-3 pt-1 pb-2 flex flex-wrap items-center gap-1.5">
+        <div className="flex gap-0.5 rounded-lg border border-border/60 p-0.5 bg-background/40" data-testid="dp-gran-toggle">
+          {([['annual','Annual'],['monthly','Monthly']] as const).map(([m, lbl]) => (
+            <button
+              key={m}
+              onClick={() => setGran(m)}
+              className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${
+                gran === m
+                  ? 'bg-primary/20 text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              data-testid={`dp-gran-${m}`}
+            >{lbl}</button>
+          ))}
+        </div>
+        <div className="w-px h-4 bg-border/60" />
+        <div className="flex gap-0.5 rounded-lg border border-border/60 p-0.5 bg-background/40" data-testid="dp-refund-toggle">
+          {([['lump-sum','Lump-sum'],['payg','PAYG']] as const).map(([m, lbl]) => (
+            <button
+              key={m}
+              onClick={() => setRefund(m as NgRefundMode)}
+              className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${
+                refund === m
+                  ? 'bg-primary/20 text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              data-testid={`dp-refund-${m}`}
+            >{lbl}</button>
+          ))}
+        </div>
+        <div className="w-px h-4 bg-border/60" />
+        <div className="flex gap-0.5 rounded-lg border border-border/60 p-0.5 bg-background/40" data-testid="dp-view-toggle">
+          {([['cash','Cash'],['equity','+ Equity'],['deposit','Deposit Power']] as const).map(([m, lbl]) => (
+            <button
+              key={m}
+              onClick={() => setViewMode(m)}
+              className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${
+                viewMode === m
+                  ? 'bg-primary/20 text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              data-testid={`dp-view-${m}`}
+            >{lbl}</button>
+          ))}
+        </div>
+        <div className="w-px h-4 bg-border/60" />
+        <div className="flex gap-0.5 rounded-lg border border-border/60 p-0.5 bg-background/40" data-testid="dp-chart-toggle">
+          {([['combo','Combo'],['line','Line'],['candlestick','Candlestick']] as const).map(([m, lbl]) => (
+            <button
+              key={m}
+              onClick={() => setChartMode(m)}
+              className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${
+                chartMode === m
+                  ? 'bg-primary/20 text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              data-testid={`dp-chart-${m}`}
+            >{lbl}</button>
+          ))}
+        </div>
+        <span className="ml-2 text-[10px] text-muted-foreground hidden sm:inline">
+          {chartMode === 'combo' ? 'Balance line + Net CF bars' : chartMode === 'line' ? 'Cash balance only' : 'OHLC balance movement'}
+        </span>
+      </div>
+
+      <div className="px-2 pb-3" data-testid="deposit-power-chart-area" style={{ touchAction: 'pan-y', userSelect: 'none' }}>
         {hasData ? (
-          <ResponsiveContainer width="100%" height={260}>
-            <ComposedChart data={data!} margin={{ top: 12, right: 18, left: 0, bottom: 6 }}>
-              <defs>
-                <linearGradient id="dpCashFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%"  stopColor="hsl(188,60%,55%)" stopOpacity={0.25} />
-                  <stop offset="100%" stopColor="hsl(188,60%,55%)" stopOpacity={0.03} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border) / 0.35)" />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                tickLine={false}
-                axisLine={{ stroke: 'hsl(var(--border) / 0.6)' }}
-              />
-              <YAxis
-                tickFormatter={(v) => fmtCompact(v)}
-                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                tickLine={false}
-                axisLine={false}
-                width={56}
-              />
-              <Tooltip content={<CalmChartTooltip />} cursor={{ stroke: 'hsl(188,60%,55%)', strokeWidth: 1, strokeDasharray: '3 3' }} />
-              <Bar dataKey="netCashflow" name="Net Cashflow" fill="hsl(210,80%,55%)" fillOpacity={0.7} radius={[3, 3, 0, 0]} isAnimationActive={false} barSize={14} />
-              <Bar dataKey="taxRefund" name="Tax Refund" fill="hsl(43,90%,58%)" fillOpacity={0.85} radius={[3, 3, 0, 0]} isAnimationActive={false} barSize={10} />
-              <Area type="monotone" dataKey="cashBalance" name="Cash Balance" stroke="hsl(188,60%,65%)" strokeWidth={2.5} fill="url(#dpCashFill)" fillOpacity={1} isAnimationActive={false} />
-              <Line type="monotone" dataKey="totalDepositPower" name="Deposit Power" stroke="hsl(142,60%,55%)" strokeWidth={2} dot={false} isAnimationActive={false} />
-              <ReferenceLine y={0} stroke="hsl(var(--border) / 0.6)" />
-            </ComposedChart>
+          <ResponsiveContainer width="100%" height={300}>
+            {chartMode === 'line' ? (
+              <LineChart data={chartData} margin={{ top: 12, right: 18, left: 0, bottom: 6 }}>
+                <defs>
+                  <linearGradient id="dpCashLineFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"  stopColor="hsl(210,80%,62%)" stopOpacity={0.22} />
+                    <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border) / 0.32)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))', fontWeight: 600 }} tickLine={false} axisLine={{ stroke: 'hsl(var(--border) / 0.5)' }}
+                  interval={gran === 'monthly' ? Math.max(0, Math.floor(chartData.length / 8)) : 0}
+                />
+                <YAxis yAxisId="bal" tickFormatter={(v) => fmtCompact(v)} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} width={56} />
+                <Tooltip content={<CalmChartTooltip />} cursor={{ stroke: 'hsl(210,80%,55%)', strokeWidth: 1, strokeDasharray: '3 3' }} />
+                <Line yAxisId="bal" type="monotone" dataKey="cashBalance" name="Cash Balance"
+                  stroke="hsl(210,80%,68%)" strokeWidth={2.6} dot={false}
+                  activeDot={{ r: 4.5, fill: 'hsl(210,80%,68%)', stroke: 'hsl(var(--card))', strokeWidth: 2 }}
+                  isAnimationActive={false}
+                />
+                {viewMode !== 'cash' && (
+                  <Line yAxisId="bal" type="monotone" dataKey="usableEquity" name="Usable Equity"
+                    stroke="hsl(188,60%,55%)" strokeWidth={1.8} dot={false} strokeDasharray="5 3" isAnimationActive={false}
+                  />
+                )}
+                {viewMode === 'deposit' && (
+                  <Line yAxisId="bal" type="monotone" dataKey="totalDepositPower" name="Deposit Power"
+                    stroke="hsl(43,90%,60%)" strokeWidth={2} dot={false} isAnimationActive={false}
+                  />
+                )}
+              </LineChart>
+            ) : chartMode === 'candlestick' ? (
+              <ComposedChart
+                data={chartData.map((d: any, i: number) => {
+                  const prev = i === 0 ? d.cashBalance : chartData[i-1].cashBalance;
+                  return { ...d, _prevBal: prev, _isUp: d.cashBalance >= prev };
+                })}
+                margin={{ top: 12, right: 18, left: 0, bottom: 6 }}
+              >
+                <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border) / 0.32)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))', fontWeight: 600 }} tickLine={false} axisLine={{ stroke: 'hsl(var(--border) / 0.5)' }}
+                  interval={gran === 'monthly' ? Math.max(0, Math.floor(chartData.length / 8)) : 0}
+                />
+                <YAxis yAxisId="bal" tickFormatter={(v) => fmtCompact(v)} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} width={56} />
+                <Tooltip content={<CalmChartTooltip />} cursor={{ fill: 'hsl(222,15%,16%)', fillOpacity: 0.4 }} />
+                <Bar yAxisId="bal" dataKey="cashBalance" name="Cash Balance" radius={[3,3,0,0]} maxBarSize={28} isAnimationActive={false}>
+                  {chartData.map((d: any, i: number) => {
+                    const prev = i === 0 ? d.cashBalance : chartData[i-1].cashBalance;
+                    const isUp = d.cashBalance >= prev;
+                    return <Cell key={i} fill={isUp ? 'hsl(142,55%,45%)' : 'hsl(0,65%,55%)'} fillOpacity={0.85} />;
+                  })}
+                </Bar>
+                <Line yAxisId="bal" type="monotone" dataKey="cashBalance" name="Trend"
+                  stroke="hsl(210,80%,68%)" strokeWidth={1.5} dot={false} strokeDasharray="3 3" strokeOpacity={0.45} isAnimationActive={false}
+                />
+                <ReferenceLine yAxisId="bal" y={0} stroke="hsl(var(--border) / 0.6)" />
+              </ComposedChart>
+            ) : (
+              // DEFAULT: Combo — Balance area + Net CF bars + Tax refund bars
+              <ComposedChart data={chartData} margin={{ top: 12, right: 18, left: 0, bottom: 6 }}>
+                <defs>
+                  <linearGradient id="dpComboBalFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"  stopColor="hsl(210,80%,62%)" stopOpacity={0.22} />
+                    <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border) / 0.32)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))', fontWeight: 600 }} tickLine={false} axisLine={{ stroke: 'hsl(var(--border) / 0.5)' }}
+                  interval={gran === 'monthly' ? Math.max(0, Math.floor(chartData.length / 8)) : 0}
+                />
+                <YAxis yAxisId="bal" orientation="left" tickFormatter={(v) => fmtCompact(v)} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} width={56} />
+                <YAxis yAxisId="cf"  orientation="right" tickFormatter={(v) => fmtCompact(v)} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} width={48} />
+                <Tooltip content={<CalmChartTooltip />} cursor={{ fill: 'hsl(222,15%,16%)', fillOpacity: 0.4 }} />
+                <ReferenceLine yAxisId="cf" y={0} stroke="hsl(var(--border) / 0.55)" strokeDasharray="3 3" />
+                <Bar yAxisId="cf" dataKey="netCashflow" name="Net Cashflow" radius={[3,3,0,0]} maxBarSize={32} isAnimationActive={false}>
+                  {chartData.map((d: any, i: number) => (
+                    <Cell key={i} fill={(d.netCashflow ?? 0) >= 0 ? 'hsl(142,55%,45%)' : 'hsl(0,65%,55%)'} fillOpacity={0.75} />
+                  ))}
+                </Bar>
+                <Bar yAxisId="cf" dataKey="taxRefund" name="Tax Refund" fill="hsl(43,90%,58%)" fillOpacity={0.85} radius={[3,3,0,0]} maxBarSize={18} isAnimationActive={false} />
+                <Area yAxisId="bal" type="monotone" dataKey="cashBalance" name="Cash Balance"
+                  stroke="hsl(210,80%,68%)" strokeWidth={2.6} fill="url(#dpComboBalFill)" isAnimationActive={false}
+                  activeDot={{ r: 4.5, fill: 'hsl(210,80%,68%)', stroke: 'hsl(var(--card))', strokeWidth: 2 }}
+                  dot={false}
+                />
+                {viewMode !== 'cash' && (
+                  <Line yAxisId="bal" type="monotone" dataKey="usableEquity" name="Usable Equity"
+                    stroke="hsl(188,60%,55%)" strokeWidth={1.8} dot={false} strokeDasharray="5 3" isAnimationActive={false}
+                  />
+                )}
+                {viewMode === 'deposit' && (
+                  <Line yAxisId="bal" type="monotone" dataKey="totalDepositPower" name="Deposit Power"
+                    stroke="hsl(43,90%,60%)" strokeWidth={2} dot={false} isAnimationActive={false}
+                  />
+                )}
+              </ComposedChart>
+            )}
           </ResponsiveContainer>
         ) : (
           <div
@@ -723,6 +1130,43 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
             <p className="text-xs text-muted-foreground max-w-xs">
               Cashflow trajectory will populate once snapshot, expenses and forecast inputs are available.
             </p>
+          </div>
+        )}
+
+        {/* Dynamic legend row */}
+        {hasData && (
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 px-3 pt-3 mt-1 border-t border-border/25">
+            <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(210,80%,68%)' }}>
+              <span className="inline-block w-6 h-0.5 rounded" style={{ background: 'hsl(210,80%,68%)' }} />Cash Balance
+            </div>
+            {viewMode !== 'cash' && (
+              <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(188,60%,60%)' }}>
+                <span className="inline-block w-6 h-0.5 rounded border-current" style={{ borderStyle: 'dashed', borderTopWidth: 2 }} />Usable Equity
+              </div>
+            )}
+            {viewMode === 'deposit' && (
+              <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(43,90%,60%)' }}>
+                <span className="inline-block w-6 h-0.5 rounded" style={{ background: 'hsl(43,90%,60%)' }} />Deposit Power
+              </div>
+            )}
+            {chartMode !== 'line' && (
+              <>
+                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'hsl(142,55%,45%)', opacity: 0.85 }} />{chartMode === 'candlestick' ? 'Up year' : 'Net CF +'}
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'hsl(0,65%,55%)', opacity: 0.85 }} />{chartMode === 'candlestick' ? 'Down year' : 'Net CF −'}
+                </div>
+                {chartMode === 'combo' && (
+                  <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(43,90%,58%)' }}>
+                    <span className="inline-block w-3 h-3 rounded-sm" style={{ background: 'hsl(43,90%,58%)' }} />Tax Refund
+                  </div>
+                )}
+              </>
+            )}
+            <div className="ml-auto text-[10px] text-muted-foreground">
+              {gran === 'monthly' ? 'Monthly granularity · responsive' : 'Annual granularity · 10-year horizon'}
+            </div>
           </div>
         )}
       </div>

@@ -1990,8 +1990,39 @@ export default function DashboardPage() {
     // wealth trajectory panel.
     monteCarloFanData: monteCarloResult?.fan_data ?? null,
     monteCarloSimulations: monteCarloResult?.simulations ?? null,
-    // Annual cashflow trajectory for the Deposit Power & Cashflow panel.
+    // Annual cashflow trajectory (condensed) — used by tests / legacy callers.
     cashflowTrajectory,
+    // Canonical FULL cashflow series (annual or monthly per `chartView`) so
+    // the Deposit Power & Cashflow panel can render the original richer
+    // chart with Combo / Line / Candlestick modes and rich tooltip rows.
+    cashflowMaster: masterCFData,
+    cashflowGranularity: cashFlowView as ('annual' | 'monthly'),
+    setCashflowGranularity: (g: 'annual' | 'monthly') => setChartView(g),
+    ngRefundMode,
+    setNgRefundMode: (m: 'lump-sum' | 'payg') => setNgRefundMode(m),
+    cashflowChartMode: wdcChartType,
+    setCashflowChartMode: setWdcChartType,
+    cashflowViewMode: cfViewMode,
+    setCashflowViewMode: setCfViewMode,
+    // Mini summary metrics surfaced above the chart — sourced from the
+    // canonical deposit-power engine result so they always match the
+    // figures the Best Move and Decision Engine use.
+    depositPowerSummary: depositPowerResult ? {
+      pporLvrPct:         depositPowerResult.pporEquity
+                            ? depositPowerResult.pporEquity.currentLVR * 100
+                            : null,
+      ipReadinessPct:     depositPowerResult.readinessPct,
+      annualNetCashflow:  (cashFlowAnnual?.[0]?.netCashFlow ?? 0),
+      taxRefundPerYear:   ngSummary.totalAnnualTaxBenefit,
+      cashToday:          totalLiquidCash,
+      readyNow:           depositPowerResult.isReady,
+      totalDepositPower:  depositPowerResult.totalDepositPower,
+      isEquityRichCashPoor: !!depositPowerResult.isEquityRichCashPoor,
+    } : {
+      cashToday: totalLiquidCash,
+      annualNetCashflow: cashFlowAnnual?.[0]?.netCashFlow ?? 0,
+      taxRefundPerYear: ngSummary.totalAnnualTaxBenefit,
+    },
   };
 
   return (
