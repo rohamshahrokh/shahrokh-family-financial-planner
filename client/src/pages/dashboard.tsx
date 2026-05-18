@@ -1899,28 +1899,21 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-background text-foreground pb-16">
 
       {/* ══════════════════════════════════════════════════════════════════
-          FWL PHASE 7 (polish) — Top stack uses CSS `order` on mobile so the
-          narrative flow is intelligence-first:
-            mobile  : Smart-assumptions pill → Timeline → Welcome → Executive
-            desktop : (unchanged) Executive → Timeline → Welcome
-          Wrapped in flex-col so children can reorder via order-* classes.
+          EXECUTIVE OVERVIEW REBUILD V2 — calm Family Office Cockpit
+          The homepage shows ONLY:
+            (a) a global Smart-Assumptions chip (forecast mode chrome)
+            (b) the Executive Overview cockpit (hero / trajectory / health
+                / action queue)
+          followed by a non-blocking data-availability banner, a slim
+          Explore nav strip, and the contextual AI Insights card. The
+          legacy welcome / journey / KPI / Accessible-Locked / Wealth
+          Health stacks were removed from the render path — they
+          duplicated cockpit signals and reintroduced
+          dashboard-inside-dashboard density.
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="flex flex-col">
 
-      {/* ──────────────────────────────────────────────────────────────────
-          DASHBOARD HIERARCHY (canonical reconciliation fix)
-          Order on BOTH desktop and mobile (Phase 7 polish):
-            1) Smart-Assumptions pill (contextual header)
-            2) WealthFlowBanner — animated journey header (TODAY → PLAN → FUTURE → MOVE)
-            3) Welcome / family identity card
-            4) Executive Overview  (Daily Briefing, Strategic Priorities,
-               Action Queue and Financial Health are composed inside it)
-            5) Above-fold Hero KPI strip (mobile-first compact view)
-          The lg:order-* values pin this same order on desktop.
-          ────────────────────────────────────────────────────────────────── */}
-
-      {/* (1) Smart-Assumptions / Forecast pill — always visible. */}
-      <div className="px-4 pt-3 pb-1 order-1 lg:order-1 db-section-smart-assumptions">
+      {/* Smart-Assumptions / Forecast pill — global chrome only. */}
+      <div className="px-4 pt-3 pb-1 db-section-smart-assumptions">
         <Link href="/ai-forecast-engine">
           <span
             className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer transition-all hover:brightness-110 ${
@@ -1935,7 +1928,6 @@ export default function DashboardPage() {
                 : "bg-blue-500/10 border border-blue-500/30 text-blue-300"
             }`}
             data-testid="badge-smart-assumptions"
-            title="Tap to change forecast assumptions"
           >
             <Sparkles className="w-3 h-3" />
             <span className="opacity-70">Smart assumptions ·</span>{" "}
@@ -1955,182 +1947,13 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {/* (4) Executive Overview — moved BELOW the journey header and welcome
-          card so the narrative hierarchy reads:
-            assumptions → journey → who we are → executive numbers.
-          Same component, same data — only the desktop `order-*` changed. */}
+      {/* Executive Overview cockpit — the only content surface on the homepage. */}
       <div
-        className="px-4 pt-4 pb-2 order-4 lg:order-4"
+        className="px-4 pt-4 pb-2"
         data-testid="dashboard-executive-section"
       >
         <ExecutiveDashboard {...phase7ExecProps} />
       </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          ABOVE-FOLD KPI STRIP — compact mobile-first summary.
-          4 cards: Net Worth / Cash Today / Monthly Surplus / Deposit Power.
-          Lives BELOW the Executive Overview now so the executive narrative
-          is the first dense numeric block.
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-3 pb-2 db-section-hero-kpis order-5 lg:order-5">
-        <div className="grid grid-cols-2 gap-2 mb-2">
-          {/* Net Worth */}
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400/70 mb-0.5">Net Worth</div>
-            <div className="text-base font-extrabold tabular-nums text-amber-400 leading-tight">{maskValue(formatCurrency(netWorth, true), privacyMode)}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Total · Brisbane QLD</div>
-          </div>
-          {/* Cash Today */}
-          <div className="rounded-xl border border-border bg-card px-3 py-2.5">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">Cash Today</div>
-            <div className="text-base font-extrabold tabular-nums leading-tight" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(totalLiquidCash, true), privacyMode)}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">All liquid cash + offset</div>
-          </div>
-          {/* Monthly Surplus */}
-          <div className="rounded-xl border border-border bg-card px-3 py-2.5">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">Monthly Surplus</div>
-            <div className="text-base font-extrabold tabular-nums leading-tight" style={{ color: surplus >= 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)" }}>{maskValue(formatCurrency(surplus, true), privacyMode)}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">{maskValue(formatCurrency(surplus * 12, true), privacyMode)}/yr</div>
-          </div>
-          {/* Deposit Power */}
-          <div className="rounded-xl border px-3 py-2.5" style={{ borderColor: "hsl(43,90%,30%)", background: "hsl(43,90%,6%)" }}>
-            <div className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: "hsl(43,90%,50%)" }}>Deposit Power</div>
-            <div className="text-base font-extrabold tabular-nums leading-tight" style={{ color: "hsl(43,90%,62%)" }}>{maskValue(formatCurrency(dpTotal, true), privacyMode)}</div>
-            <div className="text-[10px] mt-0.5" style={{ color: "hsl(43,70%,45%)" }}>{Math.round(dpReadiness)}% IP ready</div>
-          </div>
-        </div>
-        {/* Forecast selector badge — always visible */}
-        <Link href="/ai-forecast-engine">
-          <span
-            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer transition-all hover:brightness-110 ${
-              forecastMode === "monte-carlo"
-                ? "bg-purple-500/10 border border-purple-500/30 text-purple-300"
-                : forecastMode === "year-by-year"
-                ? "bg-sky-500/10 border border-sky-500/30 text-sky-300"
-                : profile === "aggressive"
-                ? "bg-rose-500/10 border border-rose-500/30 text-rose-300"
-                : profile === "conservative"
-                ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
-                : "bg-blue-500/10 border border-blue-500/30 text-blue-300"
-            }`}
-            title="Tap to change forecast mode"
-          >
-            <Activity className="w-3 h-3" />
-            Forecast: {
-              forecastMode === "monte-carlo"
-                ? `Monte Carlo${monteCarloResult ? " (median)" : " (not run)"}`
-                : forecastMode === "year-by-year"
-                ? "Year-by-Year (custom)"
-                : profile === "aggressive"
-                ? "Aggressive"
-                : profile === "conservative"
-                ? "Conservative"
-                : "Base (Moderate)"
-            }
-            <ChevronRight className="w-3 h-3 opacity-70" />
-          </span>
-        </Link>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          (2) WEALTH FLOW BANNER (animated intelligence timeline)
-          Journey header — TODAY → PLAN → FUTURE → MOVE.
-          Renders second on BOTH desktop and mobile, after the assumptions
-          pill and before the welcome card.
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section-networth order-2 lg:order-2"><WealthFlowBanner /></div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          (3) HERO SECTION — welcome / family identity
-          Renders third on BOTH desktop and mobile.
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-4 pb-4 db-section-networth order-3 lg:order-3">
-        <div className="flex flex-col lg:flex-row gap-4 items-stretch">
-
-          {/* Left — Family welcome card */}
-          <div className="flex-1 rounded-2xl border border-border bg-card p-5 flex gap-4 items-center min-w-0">
-            {/* Family photo */}
-            <div className="shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 border-amber-500/30">
-              <img src={familyImg} alt="Family" className="w-full h-full object-cover" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-xs font-bold uppercase tracking-widest text-amber-400 mb-0.5">Welcome Back</div>
-              <div className="text-2xl font-extrabold tracking-tight text-foreground leading-tight">Fara &amp; Roham</div>
-              <div className="text-sm font-semibold text-muted-foreground mt-0.5">Family Net Worth Command Center</div>
-              <div className="text-xs text-muted-foreground/70 mt-0.5">Building Wealth for the Kids</div>
-            </div>
-          </div>
-
-          {/* Right — Net worth + controls */}
-          <div className="rounded-2xl border border-border bg-card p-5 flex flex-col justify-between min-w-[260px]">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">Estimated Net Worth</div>
-              <div className="text-4xl font-extrabold text-amber-400 tabular-nums leading-none mb-1">
-                {maskValue(formatCurrency(netWorth, true), privacyMode)}
-              </div>
-              <div className="text-xs text-muted-foreground">Brisbane, QLD · AUD</div>
-            </div>
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={togglePrivacy}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
-              >
-                {privacyMode ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                {privacyMode ? "Show Values" : "Hide Values"}
-              </button>
-              <button
-                onClick={handleSyncFromCloud}
-                disabled={syncing}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
-                Sync From Cloud
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Income source + Forecast Mode badges — hidden on mobile (shown in hero-kpis strip instead) */}
-        <div className="mt-3 flex flex-wrap gap-2 db-hero-badges">
-          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Income source: Income Tracker ({activeIncomeSources > 0 ? activeIncomeSources : 3} active sources · {formatCurrency(snap.monthly_income, true)}/mo)
-          </span>
-          <Link href="/ai-forecast-engine">
-            <span
-              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer transition-all hover:brightness-110 ${
-                forecastMode === "monte-carlo"
-                  ? "bg-purple-500/10 border border-purple-500/30 text-purple-300"
-                  : forecastMode === "year-by-year"
-                  ? "bg-sky-500/10 border border-sky-500/30 text-sky-300"
-                  : profile === "aggressive"
-                  ? "bg-rose-500/10 border border-rose-500/30 text-rose-300"
-                  : profile === "conservative"
-                  ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
-                  : "bg-blue-500/10 border border-blue-500/30 text-blue-300"
-              }`}
-              data-testid="badge-forecast-mode"
-              title="Click to open Forecast Engine"
-            >
-              <Activity className="w-3 h-3" />
-              Forecast: {
-                forecastMode === "monte-carlo"
-                  ? `Monte Carlo${monteCarloResult ? " (median)" : " (not run)"}`
-                  : forecastMode === "year-by-year"
-                  ? "Year-by-Year (custom)"
-                  : profile === "aggressive"
-                  ? "Aggressive"
-                  : profile === "conservative"
-                  ? "Conservative"
-                  : "Base (Moderate)"
-              }
-              <ChevronRight className="w-3 h-3 opacity-70" />
-            </span>
-          </Link>
-        </div>
-      </div>
-
-      </div>{/* /flex-col top stack wrapper */}
 
       {/* ══════════════════════════════════════════════════════════════════
           DATA-AVAILABILITY BANNER
@@ -2160,332 +1983,46 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════
-          KPI CARDS
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-2 db-section-keycards">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <KpiCard
-            label="MONTHLY SURPLUS"
-            value={maskValue(formatCurrency(surplus, true), privacyMode)}
-            subValue={
-              maskValue(
-                // Debt-aware breakdown so users can verify what's in/out.
-                expensesIncludesDebt
-                  ? `Inc ${formatCurrency(monthlyIncomeSOT, true)} − Exp ${formatCurrency(monthlyExpensesSOT, true)} (debt incl.) = ${formatCurrency(surplus, true)}`
-                  : `Inc ${formatCurrency(monthlyIncomeSOT, true)} − Exp ${formatCurrency(monthlyExpensesSOT, true)} − Debt ${formatCurrency(monthlyDebtServiceSOT, true)} = ${formatCurrency(surplus, true)}`,
-                privacyMode,
-              )
-            }
-            trend={surplus >= 0 ? 1 : -1}
-            icon={<PiggyBank />}
-            accent="hsl(142,60%,45%)"
-          />
-          <KpiCard
-            label="TOTAL INVESTMENTS"
-            value={maskValue(formatCurrency(stocksTotal + cryptoTotal + ipCurrentValueSettled, true), privacyMode)}
-            subValue={(() => {
-              // Audit fix P0-3: every dollar amount in a sub-label must
-              // pass through maskValue or it will leak when privacy is on.
-              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
-              const parts: string[] = [];
-              if (ipCurrentValueSettled > 0) parts.push(`IPs ${$(ipCurrentValueSettled)}`);
-              if (stocksTotal > 0)            parts.push(`Stocks ${$(stocksTotal)}`);
-              if (cryptoTotal > 0)            parts.push(`Crypto ${$(cryptoTotal)}`);
-              if (parts.length === 0 && ipCurrentValuePlanned > 0)
-                return `${$(ipCurrentValuePlanned)} planned IP`;
-              return parts.length ? parts.join(" · ") : "— Stocks + Crypto + IP";
-            })()}
-            icon={<BarChart2 />}
-            accent="hsl(210,75%,52%)"
-          />
-          <KpiCard
-            label="PROPERTY EQUITY"
-            value={maskValue(formatCurrency(propertyEquity, true), privacyMode)}
-            subValue={(() => {
-              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
-              const totalPropValue = snap.ppor + ipCurrentValueSettled;
-              if (totalPropValue <= 0) {
-                return ipCurrentValuePlanned > 0
-                  ? `${$(ipCurrentValuePlanned)} planned`
-                  : "No property yet";
-              }
-              const lvr = Math.round((propertyEquity / totalPropValue) * 100);
-              return `${lvr}% equity · ${_settledIPs.length} IP${_settledIPs.length === 1 ? '' : 's'}`;
-            })()}
-            icon={<Home />}
-            accent="hsl(188,60%,48%)"
-          />
-          <KpiCard
-            label="DEBT BALANCE"
-            value={maskValue(formatCurrency(totalLiab, true), privacyMode)}
-            subValue={(() => {
-              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
-              if (totalLiab <= 0 && ipLoanBalancePlanned > 0)
-                return `${$(ipLoanBalancePlanned)} planned`;
-              const segs: string[] = [];
-              if (snap.mortgage > 0)         segs.push(`PPOR ${$(snap.mortgage)}`);
-              if (ipLoanBalanceSettled > 0)  segs.push(`IP ${$(ipLoanBalanceSettled)}`);
-              if (snap.other_debts > 0)      segs.push(`Other ${$(snap.other_debts)}`);
-              return segs.length ? segs.join(" · ") : "Mortgage + Debts";
-            })()}
-            trend={-1}
-            icon={<CreditCard />}
-            accent="hsl(5,70%,52%)"
-          />
-          <KpiCard
-            label="PASSIVE INCOME"
-            value={maskValue(formatCurrency(passiveIncome, true), privacyMode)}
-            subValue={(() => {
-              if (passiveIncome > 0) return "Rental + Dividends (annual)";
-              if (_plannedIPs.length > 0) {
-                const projAnnual = _plannedIPs.reduce((s: number, p: any) => {
-                  const r = safeNum(p.weekly_rent);
-                  const v = safeNum(p.vacancy_rate) || 0;
-                  const m = safeNum(p.management_fee) || 0;
-                  return s + r * 52 * (1 - v / 100) * (1 - m / 100);
-                }, 0);
-                return projAnnual > 0
-                  // Audit fix P0-3: sub-labels must respect privacy mode.
-                  ? `${maskValue(formatCurrency(projAnnual, true), privacyMode)}/yr once IPs settle`
-                  : "None settled yet";
-              }
-              return "No rental / dividend income";
-            })()}
-            icon={<Landmark />}
-            accent="hsl(145,55%,42%)"
-          />
-          <KpiCard
-            label="SUPER (COMBINED)"
-            value={maskValue(formatCurrency(_totalSuperNow, true), privacyMode)}
-            subValue={`At 60: ${maskValue(formatCurrency(_totalSuperNow * Math.pow(1.07, 24), true), privacyMode)}`}
-            icon={<Briefcase />}
-            accent="hsl(43,85%,55%)"
-          />
-        </div>
-
-      </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          ACCESSIBLE / LOCKED / TOTAL NET WORTH + CASH PROJECTIONS
+          EXPLORE DEEPER ANALYSIS — slim subordinate nav (NOT a module)
+          A single horizontal row of pill links so the cockpit above is
+          unambiguously the only content surface on the homepage. The
+          strip carries no headers, no descriptions, no body copy — it
+          only points users to the dedicated deep-analysis pages.
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-4 pb-2 db-section-keycards">
-        {/* 3 wealth split cards */}
-        <div className="grid grid-cols-3 gap-3 mb-3">
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Accessible Wealth</div>
-            <div className="text-xl font-bold text-foreground tabular-nums">{maskValue(formatCurrency(accessibleNW, true), privacyMode)}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">Available now ex-super</div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Locked Retirement Wealth</div>
-            <div className="text-xl font-bold text-amber-400 tabular-nums">{maskValue(formatCurrency(lockedNW, true), privacyMode)}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">Superannuation — access at 60</div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Total Net Worth</div>
-            <div className="text-xl font-bold text-emerald-400 tabular-nums">{maskValue(formatCurrency(netWorth, true), privacyMode)}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">Accessible + Super combined</div>
-          </div>
-        </div>
-
-        {/* cash projection cards */}
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Cash Today</div>
-            <div className="text-lg font-bold tabular-nums mb-2" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(totalLiquidCash, true), privacyMode)}</div>
-            {/* Audit breakdown — reads directly from ledger, no forecast */}
-            <div className="space-y-0.5 border-t border-border/40 pt-2">
-              <div className="flex justify-between text-[11px]">
-                <span className="text-muted-foreground">Everyday Cash</span>
-                <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.cash, true), privacyMode)}</span>
-              </div>
-              {snap.savings_cash > 0 && (
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-muted-foreground">Savings</span>
-                  <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.savings_cash, true), privacyMode)}</span>
-                </div>
-              )}
-              {snap.emergency_cash > 0 && (
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-muted-foreground">Emergency Cash</span>
-                  <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.emergency_cash, true), privacyMode)}</span>
-                </div>
-              )}
-              {_safeOtherCash > 0 && (
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-muted-foreground">Other Cash</span>
-                  <span className="tabular-nums text-foreground">{maskValue(formatCurrency(_safeOtherCash, true), privacyMode)}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-[11px]">
-                <span className="text-muted-foreground">Offset Balance</span>
-                <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.offset_balance, true), privacyMode)}</span>
-              </div>
-              <div className="flex justify-between text-[11px] font-semibold border-t border-border/40 pt-0.5 mt-0.5">
-                <span style={{ color: "hsl(210,80%,65%)" }}>Total Liquid</span>
-                <span className="tabular-nums" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(totalLiquidCash, true), privacyMode)}</span>
-              </div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Next Major Event</div>
-            <div className="text-sm font-bold text-amber-400 truncate">
-              {nextPropEvent ? nextPropEvent.label : "No events scheduled"}
-            </div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              {nextPropEvent ? nextPropEvent.monthKey : "—"}
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          WEALTH HEALTH CARDS (6 cards — paired evenly on mobile & desktop)
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4 db-section-keycards">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {wealthCards.map((card) => (
-            <div
-              key={card.label}
-              className={`rounded-xl border p-4 bg-card ${card.alert ? "border-red-500/30" : "border-border"}`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</span>
-                <card.Icon className={`w-3.5 h-3.5 ${card.alert ? "text-red-400" : "text-muted-foreground"}`} />
-              </div>
-              <div className={`text-lg font-bold tabular-nums ${card.alert ? "text-red-400" : "text-foreground"}`}>
-                {card.value}
-              </div>
-              <div className="text-xs text-muted-foreground mt-0.5">{card.sub}</div>
-            </div>
+      <nav
+        className="px-4 pb-4 pt-2"
+        data-testid="executive-explore-strip"
+        aria-label="Explore deeper analysis"
+      >
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { href: '/ai-forecast-engine', label: 'Forecast' },
+            { href: '/wealth-strategy',    label: 'Strategy' },
+            { href: '/decision',           label: 'Decisions' },
+            { href: '/risk-radar',         label: 'Risk' },
+            { href: '/ledger-audit',       label: 'Audit' },
+            { href: '/tax-alpha',          label: 'Tax' },
+          ].map(item => (
+            <Link key={item.href} href={item.href}>
+              <span
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium text-muted-foreground border border-border/60 bg-background/40 hover:text-foreground hover:border-primary/40 transition-colors cursor-pointer"
+                data-testid={`explore-link-${item.label.toLowerCase()}`}
+              >
+                {item.label}
+                <ChevronRight className="w-3 h-3 opacity-60" />
+              </span>
+            </Link>
           ))}
-          {/* Emergency Buffer — moved here so it pairs with Hidden Money on mobile */}
-          <div className={`rounded-xl border p-4 bg-card ${(totalLiquidCash) < snap.monthly_expenses * 3 ? "border-red-500/30" : "border-border"}`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Emergency Buffer</span>
-              <Shield className={`w-3.5 h-3.5 ${(totalLiquidCash) < snap.monthly_expenses * 3 ? "text-red-400" : "text-muted-foreground"}`} />
-            </div>
-            <div className={`text-lg font-bold ${(totalLiquidCash) >= snap.monthly_expenses * 3 ? "text-emerald-400" : "text-red-400"}`}>
-              {(totalLiquidCash) >= snap.monthly_expenses * 3 ? "Healthy" : "Low"}
-            </div>
-            <div className="text-xs text-muted-foreground mt-0.5">${Math.round(snap.monthly_expenses * 3 / 1000)}k reserve target</div>
-          </div>
         </div>
-      </div>
+      </nav>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          ALERTS / WARNINGS — bills, liquidity stress, quick stats
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-2 db-section-keycards">
-        {hasLiquidityStress && (
-          <div className="mb-2 rounded-xl border border-red-500/40 bg-red-500/8 px-4 py-3 flex items-start gap-2.5">
-            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-            <div>
-              <div className="text-sm font-bold text-red-400">Liquidity Stress Detected</div>
-              <div className="text-xs text-muted-foreground mt-0.5">Cash goes negative in: {negativeCashMonths.join(", ")}</div>
-            </div>
-          </div>
-        )}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
-              <Calendar className="w-3.5 h-3.5 text-amber-400" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-foreground tabular-nums">{upcomingBillsCount}</div>
-              <div className="text-[10px] text-muted-foreground">Upcoming Bills</div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-              <Target className="w-3.5 h-3.5 text-emerald-400" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-foreground tabular-nums">{budgetsSetCount}</div>
-              <div className="text-[10px] text-muted-foreground">Budget Status</div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
-              <Activity className="w-3.5 h-3.5 text-blue-400" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-foreground tabular-nums">{alertsSent24h}</div>
-              <div className="text-[10px] text-muted-foreground">Alerts Sent</div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-              <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-            </div>
-            <div>
-              <div className="text-xs font-bold text-foreground tabular-nums">{maskValue(formatCurrency(cashAfterBills, true), privacyMode)}</div>
-              <div className="text-[10px] text-muted-foreground">Cash After Bills</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          EXPLORE DEEPER ANALYSIS (Executive Overview rebuild V2)
-          The Executive Overview above is intentionally calm — only the
-          essential signals, canonical trajectory and immediate actions.
-          Deep modules (Forecast Engine, Wealth Strategy, Decision Engine,
-          Future Worlds, Ledger Audit, Tax Strategy) live on their own
-          dedicated pages and are reachable here without competing with the
-          cockpit view.
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4" data-testid="executive-explore-strip">
-        <div className="rounded-2xl border border-border bg-card p-4">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <div>
-              <div className="text-sm font-bold text-foreground">Explore deeper analysis</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">
-                Every deep view lives on its own page — the cockpit stays calm.
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-            {[
-              { href: '/ai-forecast-engine', label: 'Forecast Engine', hint: 'Monte Carlo, scenarios, full projection tables' },
-              { href: '/wealth-strategy',    label: 'Wealth Strategy', hint: 'Strategic priorities, FIRE, deposit power' },
-              { href: '/decision',           label: 'Decision Engine', hint: 'Full strategic stack, action centre, narrative' },
-              { href: '/risk-radar',         label: 'Risk Radar',      hint: 'Future Worlds, stress, sensitivity' },
-              { href: '/ledger-audit',       label: 'Ledger Audit',    hint: 'Net worth reconciliation, audit trail' },
-              { href: '/tax-alpha',          label: 'Tax Strategy',    hint: 'Tax alpha, negative gearing, CGT' },
-            ].map(card => (
-              <Link key={card.href} href={card.href}>
-                <div className="rounded-xl border border-border/70 bg-background/40 hover:bg-background/80 hover:border-primary/40 transition-all px-3 py-2.5 cursor-pointer">
-                  <div className="text-xs font-semibold text-foreground flex items-center justify-between">
-                    <span>{card.label}</span>
-                    <ChevronRight className="w-3 h-3 text-muted-foreground" />
-                  </div>
-                  <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{card.hint}</div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          AI INSIGHTS
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4 db-section-ai">
-        <AIInsightsCard
-          pageKey="dashboard"
-          pageLabel="Dashboard Overview"
-          getData={() => ({
-            netWorth, surplus, savingsRate, propertyEquity,
-            totalDebt: totalLiab, passiveIncome,
-            fireProgress: fireProgressPct.toFixed(0),
-            year10NW, ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
-            riskScore, riskLabel,
-          })}
-        />
-      </div>
+      {/* AI Insights body module relocated off the homepage — it surfaced
+          deep-analysis labels (Future Worlds, Ledger Audit, AI Insights)
+          and felt like a content module rather than orientation. The
+          Explore strip above already points users to the dedicated
+          insights surfaces. */}
 
       {/* Mobile bottom-sheet tooltip — renders on tap for screens < 768px */}
       <MobileChartSheet data={mobileTooltipData} onClose={() => setMobileTooltipData(null)} />

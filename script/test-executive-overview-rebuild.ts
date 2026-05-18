@@ -220,12 +220,23 @@ const deepModuleSignals = [
   { name: 'FIREPathCard',              pattern: /<FIREPathCard\s*\/?>/ },
   { name: 'PortfolioLiveReturn',       pattern: /<PortfolioLiveReturn\s*\/?>/ },
   { name: 'DeepDiveSection accordion', pattern: /<DeepDiveSection/ },
+  { name: 'AIInsightsCard module',     pattern: /<AIInsightsCard\b/ },
   { name: 'Ledger Audit section',      pattern: /db-section-ledger/ },
   { name: 'ROI Action Table',          pattern: /ROI Action Table/ },
   { name: 'Net Worth Reconciliation',  pattern: /Net Worth Reconciliation/ },
   { name: 'Wealth Decision Center',    pattern: /Wealth Decision Center/ },
   { name: 'Deterministic baseline table', pattern: /Deterministic baseline \(advanced\)/ },
   { name: 'Canonical MC Wealth Projection homepage block', pattern: /db-section-monte-carlo/ },
+  // Visual-QA blocker fixes — the duplicate welcome / KPI / journey stack
+  // must no longer render on the homepage.
+  { name: 'WealthFlowBanner journey header', pattern: /<WealthFlowBanner\s*\/?>/ },
+  { name: 'Welcome / family-identity card',  pattern: /Welcome Back/ },
+  { name: 'Estimated Net Worth duplicate card', pattern: /Estimated Net Worth/ },
+  { name: 'KpiCard render (MONTHLY SURPLUS / TOTAL INVESTMENTS / etc.)', pattern: /<KpiCard\b/ },
+  { name: 'Accessible Wealth / Locked Retirement Wealth strip', pattern: /Accessible Wealth/ },
+  { name: 'Locked Retirement Wealth tile',  pattern: /Locked Retirement Wealth/ },
+  { name: 'Wealth Health Cards strip',      pattern: /WEALTH HEALTH CARDS/ },
+  { name: 'Alerts / quick-stats KPI strip', pattern: /Cash After Bills/ },
 ];
 for (const { name, pattern } of deepModuleSignals) {
   assert(`${name} no longer renders on the dashboard homepage`, !pattern.test(dashSrc));
@@ -233,25 +244,81 @@ for (const { name, pattern } of deepModuleSignals) {
 
 // Replacement strip must exist so the deep modules remain reachable.
 assert(
-  'Dashboard exposes an Explore Deeper Analysis strip',
+  'Dashboard exposes an Explore deeper-analysis strip',
   dashSrc.includes('data-testid="executive-explore-strip"'),
 );
+// And the strip must be slim subordinate nav, not a content module.
+assert(
+  'Explore strip is rendered as a <nav> element (slim subordinate nav)',
+  /<nav[^>]*data-testid="executive-explore-strip"/.test(dashSrc),
+);
+assert(
+  'Explore strip exposes per-link test ids',
+  /data-testid=\{`explore-link-/.test(dashSrc) ||
+    /data-testid="explore-link-forecast"/.test(dashSrc),
+);
+assert(
+  'Explore strip does NOT carry "module" header / body copy',
+  !/cockpit stays calm/.test(dashSrc) &&
+    !/Every deep view lives on its own page/.test(dashSrc),
+);
 
-// ─── 7. Mobile-first hierarchy — Executive is the first dense block ─────────
-section('Mobile hierarchy — Executive Overview is the dense block');
+// ─── 7. Homepage flow — cockpit-only ────────────────────────────────────────
+section('Homepage flow — Smart-assumptions chip → Executive cockpit → Explore');
 
 assert(
   'Dashboard renders <ExecutiveDashboard …> exactly once',
   (dashSrc.match(/<ExecutiveDashboard\b/g) ?? []).length === 1,
 );
 
-// The dashboard top stack should still order assumptions → journey → welcome →
-// executive on mobile, with executive being the heaviest readable block.
+// The homepage shows the assumptions chip first, then the Executive Overview
+// cockpit, then the Explore strip — no extra content between them.
+const idxAssumptions = dashSrc.indexOf('data-testid="badge-smart-assumptions"');
+const idxExec = dashSrc.indexOf('data-testid="dashboard-executive-section"');
+const idxExplore = dashSrc.indexOf('data-testid="executive-explore-strip"');
 assert(
-  'Top stack uses order-* classes for the mobile-first arrangement',
-  /order-1 lg:order-1/.test(dashSrc) &&
-    /order-3 lg:order-3/.test(dashSrc) &&
-    /order-4 lg:order-4/.test(dashSrc),
+  'Smart-assumptions chip is positioned before the Executive cockpit',
+  idxAssumptions > 0 && idxExec > idxAssumptions,
+);
+assert(
+  'Executive cockpit is positioned before the Explore strip',
+  idxExec > 0 && idxExplore > idxExec,
+);
+
+// ─── 7b. Exactly one Net Worth / Monthly Surplus surface ────────────────────
+section('No duplicate Net Worth / Monthly Surplus surfaces on the homepage');
+
+// Strip comments before counting label occurrences so source-level comments
+// (e.g. `// MONTHLY SURPLUS — derivation`) don't leak into the UI label
+// count. The cockpit's hero owns these labels — they must appear once each
+// in ExecutiveDashboard and zero times as a UI label in dashboard.tsx.
+function stripJsComments(s: string): string {
+  // Remove /* … */ blocks then //... line comments.
+  return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+const dashStripped = stripJsComments(dashSrc);
+const execStripped = stripJsComments(execSrc);
+
+assert(
+  'Dashboard JSX no longer carries a "Net Worth" UI label',
+  !/Net Worth/.test(dashStripped),
+);
+assert(
+  'Dashboard JSX no longer carries a "Monthly Surplus" UI label',
+  !/Monthly Surplus/i.test(dashStripped),
+);
+
+const netWorthInExec = (execStripped.match(/Net Worth/g) ?? []).length;
+const surplusInExec = (execStripped.match(/Monthly Surplus/g) ?? []).length;
+assert(
+  'Exactly one "Net Worth" surface in the Executive Overview source',
+  netWorthInExec === 1,
+  `found ${netWorthInExec}`,
+);
+assert(
+  'Exactly one "Monthly Surplus" surface in the Executive Overview source',
+  surplusInExec === 1,
+  `found ${surplusInExec}`,
 );
 
 // ─── 8. Canonical data wiring — engines, not UI math ─────────────────────────
