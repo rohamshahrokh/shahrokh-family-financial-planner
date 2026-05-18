@@ -129,6 +129,8 @@ import DeepDiveSection from "@/components/DeepDiveSection";
 import { Link, useLocation } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
+import { buildCanonicalMonteCarloInput } from "@/lib/monteCarloCanonical";
+import { runMonteCarloV4 } from "@/lib/monteCarloV4/engineV4";
 import familyImg from "@assets/family.jpeg";
 
 // ─── Chart tooltips ───────────────────────────────────────────────────────────
@@ -608,6 +610,13 @@ export default function DashboardPage() {
   const { chartView, setChartView, privacyMode, togglePrivacy, currentUser } = useAppStore();
   const { forecastMode, profile, monteCarloResult } = useForecastStore();
   const loadForecastFromSupabase = useForecastStore(s => s.loadFromSupabase);
+  // Auto-run setters/state for the canonical Monte Carlo preview the
+  // Executive Overview now renders by default (see auto-run useEffect below).
+  const setMonteCarloResult = useForecastStore(s => s.setMonteCarloResult);
+  const isRunningMC = useForecastStore(s => s.isRunningMC);
+  const setIsRunningMC = useForecastStore(s => s.setIsRunningMC);
+  const mcVolatility = useForecastStore(s => s.mcVolatility);
+  const yearlyAssumptions = useForecastStore(s => s.yearlyAssumptions);
   const fa = useForecastAssumptions();
   const [, navigate] = useLocation();
 
@@ -760,6 +769,61 @@ export default function DashboardPage() {
     mutationFn: (data: any) => apiRequest("PUT", "/api/snapshot", data).then((r) => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/snapshot"] }),
   });
+
+  // ── Auto-run canonical Monte Carlo when missing (Final Reconciliation Pass) ─
+  // The Executive Overview cockpit treats Monte Carlo P10/P50/P90 as the only
+  // canonical forecast. When the store has no MC result (fresh demo session,
+  // localStorage cleared, etc.) we run the canonical V4 engine once via the
+  // SAME `buildCanonicalMonteCarloInput` mapper the Forecast Engine uses —
+  // so the auto-run result is identical to what pressing "Run Monte Carlo"
+  // there would produce. No parallel forecast engine, no deterministic
+  // fallback being labelled official.
+  const mcAutoRunFiredRef = useRef(false);
+  useEffect(() => {
+    if (mcAutoRunFiredRef.current) return;
+    if (monteCarloResult) return;            // already have a canonical result
+    if (isRunningMC) return;                 // user is already running one elsewhere
+    if (!snapshot) return;                   // need snapshot before we can build input
+    mcAutoRunFiredRef.current = true;
+    setIsRunningMC(true);
+    // Defer to a microtask so we never block the first paint.
+    setTimeout(() => {
+      try {
+        const { input } = buildCanonicalMonteCarloInput(
+          {
+            snapshot,
+            properties: properties as any[],
+            stocks: stocks as any[],
+            cryptos: cryptos as any[],
+            holdingsRaw: holdingsRaw as any[],
+            incomeRecords: incomeRecords as any[],
+            expenses: expenses as any[],
+          },
+          {
+            yearlyAssumptions,
+            volatilityParams: mcVolatility,
+            stockTransactions:  stockTransactionsRaw as any[],
+            cryptoTransactions: cryptoTransactionsRaw as any[],
+            stockDCASchedules:  stockDCASchedules as any[],
+            cryptoDCASchedules: cryptoDCASchedules as any[],
+            plannedStockOrders:  ordersRaw as any[],
+            plannedCryptoOrders: cryptoOrdersRaw as any[],
+            bills: billsRaw as any[],
+            simulations: 1000,
+          },
+        );
+        const result = runMonteCarloV4(input, { seed: `fwl-${new Date().getFullYear()}` });
+        setMonteCarloResult(result);
+      } catch {
+        // Silent on the cockpit — the pending visual state still renders if
+        // anything went wrong, and the Forecast Engine can be opened manually.
+        mcAutoRunFiredRef.current = false;
+      } finally {
+        setIsRunningMC(false);
+      }
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot, monteCarloResult]);
 
   // ─── Derived data ─────────────────────────────────────────────────────────
   const plannedStockTx = useMemo(() => (stockTransactionsRaw ?? []).filter((t: any) => t.status === "planned"), [stockTransactionsRaw]);

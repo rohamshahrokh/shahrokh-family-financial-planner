@@ -509,6 +509,28 @@ assert(
   /Today snapshot|live current values/i.test(execSrc),
 );
 
+// ─── 13b. MC auto-run on dashboard mount ─────────────────────────────────────
+section('Canonical MC auto-runs on dashboard mount when missing');
+
+assert(
+  'Dashboard imports buildCanonicalMonteCarloInput from the canonical mapper',
+  /from\s+"@\/lib\/monteCarloCanonical"/.test(dashSrc),
+);
+assert(
+  'Dashboard imports runMonteCarloV4 (same engine as Forecast Engine default)',
+  /from\s+"@\/lib\/monteCarloV4\/engineV4"/.test(dashSrc),
+);
+assert(
+  'Dashboard contains an MC auto-run useEffect gated on snapshot + monteCarloResult',
+  /mcAutoRunFiredRef/.test(dashSrc) &&
+    /if\s*\(monteCarloResult\)\s+return/.test(dashSrc) &&
+    /runMonteCarloV4\s*\(\s*input/.test(dashSrc),
+);
+assert(
+  'MC auto-run gate refuses to fire while another MC run is already in progress',
+  /if\s*\(isRunningMC\)\s+return/.test(dashSrc),
+);
+
 // ─── 14. Cashflow trajectory wiring ──────────────────────────────────────────
 section('Cashflow trajectory wired from canonical cashFlowAnnual');
 

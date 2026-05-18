@@ -42,7 +42,11 @@ export const DEMO_SNAPSHOT: Snapshot = {
 
   // ── Extended fields ──────────────────────────────────────────────────────
   offset_balance:          95_000,
-  mortgage_rate:           6.24,
+  // Live current PPOR mortgage rate (TODAY) — NOT a future blended assumption.
+  // The Executive Overview hero reads this directly via snap.mortgage_rate so
+  // the cockpit caption reads "PPOR 5.82%" today. Forecast scenarios apply
+  // their own blended rates via the Monte Carlo / Year-by-Year engines.
+  mortgage_rate:           5.82,
   max_refinance_lvr:       80,
 
   // Roham = "Alex"
@@ -104,7 +108,7 @@ export const DEMO_PROPERTIES: Property[] = [
     current_value:   1_200_000,
     purchase_date:   "2019-06-15",
     loan_amount:     850_000,
-    interest_rate:   6.24,
+    interest_rate:   5.82,
     loan_type:       "Principal & Interest",
     loan_term:       30,
     weekly_rent:     0,
