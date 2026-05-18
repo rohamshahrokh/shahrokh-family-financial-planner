@@ -1,33 +1,38 @@
 /**
  * Projection Consistency Guard
  *
- * Source-of-truth invariant: the Dashboard must present exactly ONE primary
- * long-term wealth projection — the canonical Monte Carlo table. The
- * deterministic year-by-year table is allowed to remain on Dashboard only
- * as a secondary, collapsed, clearly-labelled "deterministic baseline"
- * disclosure. It must not visually compete with Monte Carlo.
+ * Source-of-truth invariant for the Executive Overview rebuild V2:
  *
- * This test is a static guard on `client/src/pages/dashboard.tsx`. It does
- * not execute the React app — it asserts that the file structure encodes
- * the source-of-truth contract that PR #24/#25 (Monte Carlo canonical +
- * V4) established:
+ *   The homepage must present exactly ONE primary long-term wealth
+ *   projection — the canonical Monte Carlo P10/P50/P90 table — and that
+ *   single table now lives inside `ExecutiveDashboard.tsx`'s
+ *   CanonicalTrajectoryPanel. The dashboard homepage no longer renders any
+ *   parallel/deterministic year-by-year projection table or competing
+ *   Wealth Projection block.
  *
- *   1. Primary "Wealth Projection" <h2> exists and is sourced from
- *      `monteCarloResult.fan_data` (canonical Monte Carlo engine).
- *   2. Dashboard explicitly states it uses probabilistic Monte Carlo
- *      forecasting.
- *   3. Deterministic year-by-year table is gated behind a collapse
- *      toggle (`showDeterministicProjection`) and labelled as
- *      "not the official forecast".
- *   4. No second `<h2>` projection title competes with Monte Carlo.
- *   5. No parallel forecast engine writes to the canonical Dashboard
- *      projection table (only `monteCarloResult.fan_data` feeds it).
+ * Static guards:
+ *
+ *   1. ExecutiveDashboard exposes the canonical MC projection table sourced
+ *      from `monteCarloFanData` (which is the Monte Carlo `fan_data` array
+ *      threaded through from the dashboard selector).
+ *   2. The projection table defaults to Year / P50 / Confidence Range and
+ *      keeps P10 / P90 columns behind an expand toggle.
+ *   3. The dashboard homepage no longer renders any `<h2>Wealth Projection`
+ *      block, no `<h3>Year-by-Year Projection (deterministic)` block, and
+ *      no `monteCarloResult.fan_data.map` loop (single-source-of-truth lives
+ *      inside ExecutiveDashboard now).
+ *   4. The deterministic baseline section is no longer on the homepage.
+ *   5. The MC fan data is wired through the canonical prop, not duplicated.
  */
 import { readFileSync } from "fs";
 import { join } from "path";
 
 const DASHBOARD = readFileSync(
   join(process.cwd(), "client/src/pages/dashboard.tsx"),
+  "utf8",
+);
+const EXEC_DASH = readFileSync(
+  join(process.cwd(), "client/src/components/ExecutiveDashboard.tsx"),
   "utf8",
 );
 
@@ -42,111 +47,75 @@ function run(name: string, cond: boolean, detail?: string) {
   }
 }
 
-// 1. Canonical Monte Carlo banner exists and asserts probabilistic SoT.
+// 1. The canonical Monte Carlo projection table lives inside the rebuilt
+//    Executive Overview, NOT inside the dashboard page directly.
 run(
-  "Dashboard declares Monte Carlo as canonical forecast",
-  /This dashboard uses probabilistic Monte Carlo forecasting\./.test(DASHBOARD),
-  "missing canonical SoT banner copy",
+  "Executive Overview hosts the canonical projection table",
+  /data-testid="trajectory-projection-table"/.test(EXEC_DASH),
+  "canonical trajectory table missing from ExecutiveDashboard",
+);
+run(
+  "Executive Overview renders MC fan data via monteCarloFanData / fan.map",
+  /fan!\.map\(\(row,\s*idx\)\s*=>/.test(EXEC_DASH) || /fan\.map\(\(row/.test(EXEC_DASH),
+  "MC fan data must drive the trajectory table",
 );
 
+// 2. Default columns are Year / P50 / Confidence Range; P10 & P90 expand.
 run(
-  "Dashboard SoT banner has a stable test id",
-  /data-testid=["']dashboard-projection-sot-banner["']/.test(DASHBOARD),
-  "missing data-testid hook",
+  "Projection table defaults to P50 + Confidence Range columns",
+  /Confidence Range/.test(EXEC_DASH) && /P50 \(median\)/.test(EXEC_DASH),
+);
+run(
+  "P10 / P90 columns are gated by the expand toggle",
+  /data-testid="trajectory-expand-range"/.test(EXEC_DASH) &&
+    /expandedRange/.test(EXEC_DASH),
 );
 
-// 2. Primary Wealth Projection <h2> exists and is rendered from
-//    monteCarloResult.fan_data (the canonical Monte Carlo source).
-const wealthH2Match = /<h2[^>]*>\s*Wealth Projection\s*<\/h2>/.test(DASHBOARD);
-run("Primary <h2> 'Wealth Projection' present", wealthH2Match);
-
+// 3. The homepage no longer renders any competing Wealth Projection block.
 run(
-  "Primary projection table is fed by monteCarloResult.fan_data",
-  /monteCarloResult\.fan_data\.map/.test(DASHBOARD),
-  "canonical Monte Carlo array not rendered",
+  "Dashboard homepage no longer renders <h2>Wealth Projection</h2>",
+  !/<h2[^>]*>\s*Wealth Projection\s*<\/h2>/.test(DASHBOARD),
+);
+run(
+  "Dashboard homepage no longer loops over monteCarloResult.fan_data",
+  !/monteCarloResult\.fan_data\.map/.test(DASHBOARD),
+);
+run(
+  "Dashboard homepage no longer renders the SoT banner inline",
+  !/data-testid=["']dashboard-projection-sot-banner["']/.test(DASHBOARD),
 );
 
-// 3. Deterministic table must be collapsed, labelled, and demoted from <h2>
-//    to <h3>.
+// 4. The deterministic baseline table is removed from the homepage.
 run(
-  "Deterministic projection is behind a collapse toggle",
-  /showDeterministicProjection/.test(DASHBOARD),
-  "no `showDeterministicProjection` gate — table is not collapsible",
+  "Deterministic baseline table is no longer on the homepage",
+  !/Deterministic baseline \(advanced\)/.test(DASHBOARD) &&
+    !/data-testid=["']dashboard-deterministic-toggle["']/.test(DASHBOARD),
 );
-
 run(
-  "Deterministic toggle has stable test id",
-  /data-testid=["']dashboard-deterministic-toggle["']/.test(DASHBOARD),
-  "missing toggle test id",
-);
-
-run(
-  "Deterministic table is labelled 'not the official forecast'",
-  /not the official forecast/i.test(DASHBOARD),
-  "missing demotion label",
-);
-
-run(
-  "Deterministic baseline uses <h3> (demoted) — not <h2>",
-  /<h3[^>]*>\s*Year-by-Year Projection \(deterministic\)\s*<\/h3>/.test(
+  "No <h3>Year-by-Year Projection (deterministic)</h3> on homepage",
+  !/<h3[^>]*>\s*Year-by-Year Projection \(deterministic\)\s*<\/h3>/.test(
     DASHBOARD,
   ),
-  "deterministic header must not be a competing <h2>",
 );
 
-// 4. There must NOT be a second <h2> projection title competing with
-//    Monte Carlo. Specifically, the old "Year-by-Year Projection
-//    (deterministic)" <h2> must be gone.
+// 5. The MC fan data flows through the canonical prop wiring — no parallel
+//    forecast engines, no duplicated array.
 run(
-  "No <h2> 'Year-by-Year Projection (deterministic)' header remains",
-  !/<h2[^>]*>\s*Year-by-Year Projection \(deterministic\)\s*<\/h2>/.test(
+  "Dashboard passes monteCarloFanData prop to ExecutiveDashboard",
+  /monteCarloFanData:\s*monteCarloResult\?\.fan_data\s*\?\?\s*null/.test(
     DASHBOARD,
   ),
-  "competing <h2> still present",
 );
-
 run(
-  "No duplicate <h2>'Wealth Projection' headers",
-  (DASHBOARD.match(/<h2[^>]*>\s*Wealth Projection[^<]*<\/h2>/g) || []).length ===
-    1,
-  "exactly one canonical Wealth Projection <h2> expected",
+  "Dashboard passes monteCarloSimulations prop to ExecutiveDashboard",
+  /monteCarloSimulations:\s*monteCarloResult\?\.simulations\s*\?\?\s*null/.test(
+    DASHBOARD,
+  ),
 );
-
-// 5. Monte Carlo result remains the only source feeding the primary table.
-//    Specifically: `projectNetWorth` output (deterministic engine) must not
-//    feed the canonical Monte Carlo projection block. We assert that the
-//    Monte Carlo section does not reference `projection.map` / `projection[`
-//    inside its block. (A loose proxy: the Monte Carlo header text and the
-//    fan_data render must occur in the same section, and the deterministic
-//    projection array must NOT appear between them.)
-const mcStart = DASHBOARD.indexOf("WEALTH PROJECTION — CANONICAL");
-const mcEnd = DASHBOARD.indexOf("YEAR-BY-YEAR TABLE", mcStart);
 run(
-  "Canonical Monte Carlo section anchors are present",
-  mcStart > 0 && mcEnd > mcStart,
-  `mcStart=${mcStart} mcEnd=${mcEnd}`,
-);
-
-if (mcStart > 0 && mcEnd > mcStart) {
-  const mcBlock = DASHBOARD.slice(mcStart, mcEnd);
-  run(
-    "Canonical MC section does NOT render deterministic `projection.map`",
-    !/projection\.map\b/.test(mcBlock),
-    "deterministic projection leaked into canonical block",
-  );
-  run(
-    "Canonical MC section renders `monteCarloResult.fan_data.map`",
-    /monteCarloResult\.fan_data\.map/.test(mcBlock),
-  );
-}
-
-// 6. The canonical Monte Carlo source is shared (single SoT) — assert the
-//    explicit SoT statement is present so future refactors keep the
-//    promise visible to users.
-run(
-  "Header copy states 'single source of truth' for canonical projection",
-  /single source of truth/i.test(DASHBOARD),
-  "SoT language must remain in canonical header",
+  "Executive Overview does NOT also import the dashboard's fan data loop",
+  !/<h2[^>]*>\s*Wealth Projection\s*<\/h2>/.test(EXEC_DASH),
+  "Executive uses its own compact projection header, not the legacy h2",
 );
 
 if (fail > 0) {

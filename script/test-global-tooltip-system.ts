@@ -197,10 +197,19 @@ const wiringChecks: Array<[string, string, string]> = [
   ['FinancialOSCentre wires behavioural-drift', 'FinancialOSCentre.tsx', 'behavioural-drift'],
   ['FinancialOSCentre wires autonomous-os', 'FinancialOSCentre.tsx', 'autonomous-os'],
   ['TaxAlphaCard wires tax-efficiency', 'TaxAlphaCard.tsx', 'tax-efficiency'],
-  ['ExecutiveDashboard wires recommendation-engine', 'ExecutiveDashboard.tsx', 'recommendation-engine'],
-  ['ExecutiveDashboard wires strategic-priorities', 'ExecutiveDashboard.tsx', 'strategic-priorities'],
+  // Executive Overview rebuild V2 wires the canonical hero + trajectory +
+  // health + action-queue metric ids. The prior Daily Briefing / Strategic
+  // Priorities surfaces were removed from the homepage in the rebuild.
+  ['ExecutiveDashboard wires best-move', 'ExecutiveDashboard.tsx', 'best-move'],
+  ['ExecutiveDashboard wires monte-carlo-probability', 'ExecutiveDashboard.tsx', 'monte-carlo-probability'],
+  ['ExecutiveDashboard wires p10-p50-p90', 'ExecutiveDashboard.tsx', 'p10-p50-p90'],
   ['ExecutiveDashboard wires net-worth-reconciliation', 'ExecutiveDashboard.tsx', 'net-worth-reconciliation'],
-  ['ExecutiveDashboard wires safe-surplus', 'ExecutiveDashboard.tsx', 'safe-surplus'],
+  ['ExecutiveDashboard wires dca-recommendation', 'ExecutiveDashboard.tsx', 'dca-recommendation'],
+  ['ExecutiveDashboard wires risk-state', 'ExecutiveDashboard.tsx', 'risk-state'],
+  ['ExecutiveDashboard wires fire-progress', 'ExecutiveDashboard.tsx', 'fire-progress'],
+  ['ExecutiveDashboard wires liquidity', 'ExecutiveDashboard.tsx', 'liquidity'],
+  ['ExecutiveDashboard wires leverage', 'ExecutiveDashboard.tsx', 'leverage'],
+  ['ExecutiveDashboard wires cashflow-resilience', 'ExecutiveDashboard.tsx', 'cashflow-resilience'],
 ];
 
 for (const [name, file, id] of wiringChecks) {
@@ -209,7 +218,13 @@ for (const [name, file, id] of wiringChecks) {
     'utf8',
   );
   const hit =
-    src.includes(`metricId="${id}"`) || src.includes(`metricId='${id}'`);
+    src.includes(`metricId="${id}"`) ||
+    src.includes(`metricId='${id}'`) ||
+    // Allow the wiring to come through a `metricId: 'foo'` indicator config
+    // (used by the rebuilt ExecutiveHealthStrip which renders its explainers
+    // from a typed indicator array rather than hardcoded literals).
+    src.includes(`metricId: '${id}'`) ||
+    src.includes(`metricId: "${id}"`);
   assert(name, hit, `'${id}' not wired in ${file}`);
 }
 

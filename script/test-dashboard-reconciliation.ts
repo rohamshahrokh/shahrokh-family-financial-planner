@@ -220,104 +220,56 @@ section('Validation 5: Deterministic forecast never shown as official trajectory
     /Monte Carlo pending/.test(src));
   assert('Executive header has a "Run Monte Carlo" CTA in the fallback',
     /Run Monte Carlo/.test(src));
+  // Executive Overview rebuild V2: the no-MC fallback uses a single neutral
+  // copy block + CTA, NOT a labelled deterministic secondary figure (the
+  // deterministic figure is removed from the homepage altogether in the
+  // rebuild).
   assert('Executive header source line names the no-MC state explicitly',
-    /Monte Carlo not yet run/.test(src));
+    /Open the Forecast Engine to run/.test(src));
 
   // The PRIMARY trajectory dollar value must be guarded by hasMcTrajectory.
   // We assert the source does NOT contain a primary trajectory render that
-  // pulls year10NW unguarded (which would re-create the bug).
+  // pulls year10NW unguarded.
   const primaryDeterministicRegex =
-    /executive-trajectory-value[^}]*formatCurrency\([^)]*year10NW/;
+    /data-testid="trajectory-p50-value"[\s\S]{0,200}formatCurrency\([^)]*year10NW/;
   assert('no primary trajectory render reads year10NW as the canonical figure',
     !primaryDeterministicRegex.test(src));
 
-  // Any deterministic figure that DOES appear in the no-MC branch must be
-  // labelled "non-canonical" so it cannot be mistaken for the official one.
-  const determSecondaryRegex =
-    /executive-trajectory-deterministic-secondary[\s\S]{0,300}non-canonical/;
-  assert('any deterministic figure in the fallback is labelled "non-canonical"',
-    determSecondaryRegex.test(src));
-
-  // And the badge must read "PENDING" (not "DET") when MC is absent so the
-  // user immediately understands the headline figure is intentionally absent.
-  const pendingBadgeRegex =
-    /executive-trajectory-source-badge[\s\S]{0,400}PENDING/;
-  assert('source badge reads "PENDING" when MC is absent (not "DET")',
-    pendingBadgeRegex.test(src));
+  // The rebuild does NOT emit any deterministic dollar value in the
+  // trajectory panel at all — neither primary nor secondary. The pending
+  // state is a calm copy block + Run Monte Carlo CTA.
+  assert('the trajectory pending state shows a "Run Monte Carlo" CTA',
+    /data-testid="trajectory-pending-cta"/.test(src));
 }
 
-// ─── Test 7b: Visual polish pass — collapsed deterministic + contrast ──────
-section('Visual polish: deterministic baseline collapsed, source line legible');
+// ─── Test 7b: Visual polish pass — rebuild contract ────────────────────────
+// Executive Overview rebuild V2 removes the deterministic baseline disclosure
+// AND the Strategic Priorities section from the homepage. The pending state
+// is a calm copy block — not a labelled deterministic figure. We assert the
+// new contract instead.
+section('Visual polish: rebuild homepage is calm and decision-grade');
 {
   const file = resolve(__dirname, '..', 'client', 'src', 'components', 'ExecutiveDashboard.tsx');
   const src = readFileSync(file, 'utf8');
 
-  // Deterministic baseline must live inside a <details> disclosure so it is
-  // hidden by default, not visible inline.
-  assert('deterministic baseline is wrapped in a <details> disclosure',
-    /<details[\s\S]{0,200}executive-trajectory-deterministic-details/.test(src));
-  assert('disclosure summary copy is "Show deterministic baseline (non-canonical)"',
-    /Show deterministic baseline \(non-canonical\)/.test(src));
+  // Trajectory panel uses a single dominant P50 readout with bear/bull
+  // framing — confirming we did not bring back the legacy 5-tile header.
+  assert('trajectory panel renders a single dominant P50 value',
+    /data-testid="trajectory-p50-value"/.test(src));
 
-  // Source line must use a foreground/* tone (not the very low-contrast
-  // muted-foreground/70 used previously) so mobile readers can read it.
-  // The `style={{ color: ... }}` attribute precedes `data-testid` in JSX,
-  // so we scan a window AROUND the testid (both directions) for a
-  // foreground/0.NN value where NN >= 50.
-  // The `executive-trajectory-source` testid appears twice (the MC-available
-  // path and the no-MC fallback path). Both must use a high-contrast
-  // foreground/0.NN >= 0.50 tone — the bug was muted-foreground/0.70 / 0.80
-  // which clipped contrast on dark backgrounds. We scan both occurrences
-  // and require BOTH to satisfy the contrast contract.
-  const sourceMatches = src.match(/data-testid="executive-trajectory-source"/g) ?? [];
-  assert(`executive-trajectory-source render block exists (found ${sourceMatches.length})`,
-    sourceMatches.length >= 2);
-  let lastIdx = 0;
-  let bothReadable = true;
-  for (let n = 0; n < 2; n++) {
-    const idx = src.indexOf('data-testid="executive-trajectory-source"', lastIdx);
-    if (idx === -1) { bothReadable = false; break; }
-    const windowSrc = src.slice(Math.max(0, idx - 400), idx + 200);
-    // Reject the legacy "muted-foreground" tones and require a readable
-    // foreground/0.NN where NN is between 50 and 99.
-    // The hsl() syntax in the source reads `hsl(var(--foreground) / 0.NN)`
-    // — note the closing paren before the slash. The regex must tolerate
-    // that paren and any whitespace.
-    const usesReadable = /foreground\)?\s*\/\s*0\.(5\d|6\d|7\d|8\d|9\d)/.test(windowSrc)
-      && !/text-muted-foreground\/(?:60|70|80)/.test(windowSrc);
-    if (!usesReadable) { bothReadable = false; break; }
-    lastIdx = idx + 1;
-  }
-  assert('both fallback and MC-active source lines use readable foreground tone',
-    bothReadable);
+  // Compact projection table — Year, P50, Confidence Range by default; P10
+  // and P90 columns expand on demand.
+  assert('projection table shows P50 and Confidence Range by default',
+    /Confidence Range/.test(src) && /P50 \(median\)/.test(src));
+  assert('projection table hides P10/P90 columns behind an expand toggle',
+    /data-testid="trajectory-expand-range"/.test(src));
 
-  // The 10y Trajectory label + badge sit in a flex-wrap row so the PENDING
-  // badge can drop below the label on narrow screens instead of overlapping.
-  assert('label/badge row uses flex-wrap to avoid crowding the "10y Trajectory" label',
-    /flex flex-wrap items-center gap-x-2 gap-y-1 mb-1/.test(src));
-}
-
-// ─── Test 7c: Strategic Priorities truncation safety ────────────────────────
-section('Visual polish: Strategic Priorities card copy never cuts mid-sentence');
-{
-  const file = resolve(__dirname, '..', 'client', 'src', 'components', 'ExecutiveDashboard.tsx');
-  const src = readFileSync(file, 'utf8');
-
-  // The card body must call the new priorityPreview helper, not the raw
-  // reasoning paragraph (which embeds the full reconciliation explanation
-  // and visibly truncates mid-sentence under line-clamp-2).
-  assert('Strategic Priorities top-3 card renders priorityPreview(r), not r.reasoning',
-    /line-clamp-2[\s\S]{0,200}priorityPreview\(r\)/.test(src));
-  assert('Strategic Priorities expanded list also renders priorityPreview(r)',
-    /line-clamp-1[\s\S]{0,200}priorityPreview\(r\)/.test(src));
-
-  // The helper itself: DCA recommendations must collapse to a single
-  // reconciled sentence and everything else must terminate cleanly at the
-  // first sentence boundary.
-  assert('priorityPreview emits a single reconciled sentence for DCA',
-    /priorityPreview[\s\S]{0,2000}recommendedMonthlyAmount[\s\S]{0,200}safeDeployableSurplus/.test(src));
-  assert('priorityPreview falls back to first complete sentence',
-    /priorityPreview[\s\S]{0,2000}\[\^\.\!\?\]\+\[\.\!\?\]/.test(src));
+  // The rebuild removed the Strategic Priorities surface from the homepage —
+  // strategic stack now lives on /wealth-strategy and /decision pages.
+  assert('Strategic Priorities surface no longer on Executive Overview',
+    !/data-testid="strategic-priorities"/.test(src));
+  assert('Daily Briefing surface no longer on Executive Overview',
+    !/data-testid="daily-briefing"/.test(src));
 }
 
 // ─── Test 8: No deterministic dollar trajectory is marked official ──────────
