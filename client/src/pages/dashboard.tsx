@@ -1870,6 +1870,33 @@ export default function DashboardPage() {
   const trajectoryP50: number | null = mcTrajectoryRow ? mcTrajectoryRow.median : null;
   const trajectoryYear: number | null = mcTrajectoryRow ? mcTrajectoryRow.year : null;
 
+  // ── Annual cashflow / deposit-power trajectory (Final Reconciliation Pass) ─
+  // Build a calm 10-year annual series for the Deposit Power & Cashflow panel
+  // on the Executive Overview. We reuse `cashFlowAnnual` and the canonical
+  // equityTimeline already computed above — no parallel engine, no duplicated
+  // recommendation system.
+  const cashflowTrajectory = useMemo(() => {
+    if (!Array.isArray(cashFlowAnnual) || cashFlowAnnual.length === 0) return null;
+    const equityByYear = new Map<number, number>();
+    (equityTimeline ?? []).forEach((pt: any) => {
+      equityByYear.set(pt.year, (pt.ppor_usable_equity ?? 0) + (pt.ip_usable_equity ?? 0));
+    });
+    return cashFlowAnnual.slice(0, 10).map((a: any, idx: number) => {
+      const yr = a.year as number;
+      const cash = a.endingBalance ?? 0;
+      const usableEquity = equityByYear.get(yr) ?? 0;
+      const dp = Math.max(0, cash + usableEquity - emergencyBuffer);
+      return {
+        label: String(yr),
+        cashBalance: cash,
+        netCashflow: a.netCashFlow ?? 0,
+        taxRefund: a.ngTaxBenefit ?? 0,
+        usableEquity,
+        totalDepositPower: dp,
+      };
+    });
+  }, [cashFlowAnnual, equityTimeline, emergencyBuffer]);
+
   const phase7ExecProps = {
     netWorth,
     surplus,
@@ -1889,10 +1916,16 @@ export default function DashboardPage() {
     totalMortgage: snap.mortgage,
     totalPropertyValue: snap.ppor + ipCurrentValueSettled,
     totalAssets,
+    // Live PPOR mortgage rate (TODAY snapshot — NOT a forecast / blended rate).
+    // The dashboard reads `sf_snapshot.mortgage_rate` directly via the snap
+    // memo above, so the Hero "today" caption shows the actual current rate.
+    livePporRate: snap.mortgage_rate ?? null,
     // Canonical Monte Carlo trajectory data — single source for the homepage
     // wealth trajectory panel.
     monteCarloFanData: monteCarloResult?.fan_data ?? null,
     monteCarloSimulations: monteCarloResult?.simulations ?? null,
+    // Annual cashflow trajectory for the Deposit Power & Cashflow panel.
+    cashflowTrajectory,
   };
 
   return (
@@ -1984,39 +2017,12 @@ export default function DashboardPage() {
       )}
 
 
-      {/* ══════════════════════════════════════════════════════════════════
-          EXPLORE DEEPER ANALYSIS — slim subordinate nav (NOT a module)
-          A single horizontal row of pill links so the cockpit above is
-          unambiguously the only content surface on the homepage. The
-          strip carries no headers, no descriptions, no body copy — it
-          only points users to the dedicated deep-analysis pages.
-          ═════════════════════════════════════════════════════════════════ */}
-      <nav
-        className="px-4 pb-4 pt-2"
-        data-testid="executive-explore-strip"
-        aria-label="Explore deeper analysis"
-      >
-        <div className="flex flex-wrap gap-1.5">
-          {[
-            { href: '/ai-forecast-engine', label: 'Forecast' },
-            { href: '/wealth-strategy',    label: 'Strategy' },
-            { href: '/decision',           label: 'Decisions' },
-            { href: '/risk-radar',         label: 'Risk' },
-            { href: '/ledger-audit',       label: 'Audit' },
-            { href: '/tax-alpha',          label: 'Tax' },
-          ].map(item => (
-            <Link key={item.href} href={item.href}>
-              <span
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium text-muted-foreground border border-border/60 bg-background/40 hover:text-foreground hover:border-primary/40 transition-colors cursor-pointer"
-                data-testid={`explore-link-${item.label.toLowerCase()}`}
-              >
-                {item.label}
-                <ChevronRight className="w-3 h-3 opacity-60" />
-              </span>
-            </Link>
-          ))}
-        </div>
-      </nav>
+      {/* Deep Analysis surfaces are now rendered inside the cockpit as a
+          dedicated DeepAnalysisCards section (four premium cards). The
+          previous weak filter-chip strip was removed per the Executive
+          Overview Final Reconciliation Pass. Routes for Risk Radar & Tax
+          Strategy are now registered in App.tsx so the cards never lead to
+          router-not-found errors. */}
 
       {/* AI Insights body module relocated off the homepage — it surfaced
           deep-analysis labels (Future Worlds, Ledger Audit, AI Insights)

@@ -50,6 +50,8 @@ import ScenarioComparePage     from "./pages/scenario-compare";
 import ScenarioCompareV2Page   from "./pages/scenario-compare-v2";
 import WhatIfScenariosPage     from "./pages/what-if-scenarios";
 import DecisionPage            from "./pages/decision";
+import RiskRadarPage           from "./pages/risk-radar";
+import TaxAlphaPage            from "./pages/tax-alpha";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -228,6 +230,17 @@ function AppRouter() {
         </Route>
         <Route path="/what-if-scenarios">
           <ProtectedRoute component={WhatIfScenariosPage} title="What-If Scenarios" />
+        </Route>
+        {/* Risk Radar — surfaced from Deep Analysis cards & sidebar nav */}
+        <Route path="/risk-radar">
+          <ProtectedRoute component={RiskRadarPage} title="Risk Radar" />
+        </Route>
+        {/* Tax Strategy — Tax Alpha breakdown surfaced from Deep Analysis cards */}
+        <Route path="/tax-alpha">
+          <ProtectedRoute component={TaxAlphaPage} title="Tax Strategy" />
+        </Route>
+        <Route path="/tax-strategy">
+          <ProtectedRoute component={TaxAlphaPage} title="Tax Strategy" />
         </Route>
         {/* 404 */}
         <Route component={NotFound} />

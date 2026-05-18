@@ -1,19 +1,21 @@
 /**
- * Executive Overview Rebuild V2 — validation tests.
+ * Executive Overview FINAL Reconciliation Pass — validation tests.
  *
  * Pure Node validation suite — runs with:
  *   npx tsx script/test-executive-overview-rebuild.ts
  *
- * Asserts the contract of the Executive Overview rebuild without requiring
- * a DOM. The rebuild replaces the prior Phase-7 Executive Dashboard
- * (Header + Daily Briefing + Strategic Priorities + 6-metric Health Strip
- * + Action Queue) with a tighter four-section IA:
+ * Asserts the cockpit contract for the Final Reconciliation Pass which
+ * restored visual intelligence (Monte Carlo fan chart anchor, Deposit Power
+ * & Cashflow operational motion, premium Deep Analysis navigation cards)
+ * without returning the cluttered V1 stack. The cockpit IA is:
  *
- *   1. ExecutiveHeroSnapshot      — Net Worth, Surplus, Risk, FIRE + 1 Best Move
- *   2. CanonicalTrajectoryPanel   — Monte Carlo P50 + compact P10/P50/P90 table
- *   3. ExecutiveHealthStrip       — exactly 4 metrics (liquidity, leverage,
- *                                    cashflow, fire-progress)
- *   4. ExecutiveActionQueue       — maximum 3 actionable items
+ *   1. ExecutiveHeroSnapshot           — Net Worth, Surplus, Risk, FIRE + 1 Best Move
+ *   2. MonteCarloTrajectoryChart       — main future visual anchor (P10/P50/P90)
+ *   3. CompactProjectionTable          — Year · P50 · Confidence Range
+ *   4. DepositPowerTrajectoryPanel     — annual cashflow / deposit power motion
+ *   5. ExecutiveHealthStrip            — exactly 4 structural indicators
+ *   6. ExecutiveActionQueue            — maximum 3 actionable items
+ *   7. DeepAnalysisCards               — four premium navigation cards
  *
  * Contracts validated:
  *   • Only one Best Move surface on Executive Overview (no duplicated
@@ -71,8 +73,16 @@ assert(
   execSrc.includes('data-testid="executive-hero-snapshot"'),
 );
 assert(
-  'CanonicalTrajectoryPanel is rendered',
+  'MonteCarloTrajectoryChart is rendered (visual future anchor)',
+  execSrc.includes('data-testid="monte-carlo-trajectory-chart"'),
+);
+assert(
+  'CompactProjectionTable / canonical trajectory panel is rendered',
   execSrc.includes('data-testid="canonical-trajectory-panel"'),
+);
+assert(
+  'DepositPowerTrajectoryPanel is rendered (operational motion)',
+  execSrc.includes('data-testid="deposit-power-trajectory-panel"'),
 );
 assert(
   'ExecutiveHealthStrip is rendered',
@@ -81,6 +91,10 @@ assert(
 assert(
   'ExecutiveActionQueue is rendered',
   execSrc.includes('data-testid="executive-action-queue"'),
+);
+assert(
+  'DeepAnalysisCards is rendered (premium navigation)',
+  execSrc.includes('data-testid="deep-analysis-cards"'),
 );
 
 // Old phase-7 sections must be removed — they violated the new IA.
@@ -242,29 +256,41 @@ for (const { name, pattern } of deepModuleSignals) {
   assert(`${name} no longer renders on the dashboard homepage`, !pattern.test(dashSrc));
 }
 
-// Replacement strip must exist so the deep modules remain reachable.
+// The Final Reconciliation Pass replaces the weak "Explore" filter chip
+// strip with a premium DeepAnalysisCards block rendered inside the cockpit.
+// The old strip must NOT be present on the dashboard homepage.
 assert(
-  'Dashboard exposes an Explore deeper-analysis strip',
-  dashSrc.includes('data-testid="executive-explore-strip"'),
-);
-// And the strip must be slim subordinate nav, not a content module.
-assert(
-  'Explore strip is rendered as a <nav> element (slim subordinate nav)',
-  /<nav[^>]*data-testid="executive-explore-strip"/.test(dashSrc),
+  'Weak Explore filter chip strip is removed from the dashboard homepage',
+  !/data-testid="executive-explore-strip"/.test(dashSrc),
 );
 assert(
-  'Explore strip exposes per-link test ids',
-  /data-testid=\{`explore-link-/.test(dashSrc) ||
-    /data-testid="explore-link-forecast"/.test(dashSrc),
+  'Dashboard no longer renders per-link Explore filter chips',
+  !/data-testid=\{`explore-link-/.test(dashSrc) &&
+    !/data-testid="explore-link-forecast"/.test(dashSrc),
 );
+
+// Deep Analysis cards live inside the cockpit (ExecutiveDashboard) and must
+// expose exactly four premium navigation surfaces.
 assert(
-  'Explore strip does NOT carry "module" header / body copy',
-  !/cockpit stays calm/.test(dashSrc) &&
-    !/Every deep view lives on its own page/.test(dashSrc),
+  'Deep Analysis cards block is rendered inside the cockpit',
+  execSrc.includes('data-testid="deep-analysis-cards"'),
+);
+const deepCardIds = ['forecast-engine', 'risk-radar', 'decision-engine', 'tax-strategy'];
+for (const id of deepCardIds) {
+  assert(
+    `Deep Analysis cards include "${id}"`,
+    new RegExp(`data-testid="deep-analysis-card-${id}"|id:\\s*'${id}'`).test(execSrc),
+  );
+}
+const deepCardConfigCount = (execSrc.match(/id:\s*'(forecast-engine|risk-radar|decision-engine|tax-strategy)'/g) ?? []).length;
+assert(
+  'Deep Analysis cards has exactly four entries (no chip drift)',
+  deepCardConfigCount === 4,
+  `found ${deepCardConfigCount}`,
 );
 
 // ─── 7. Homepage flow — cockpit-only ────────────────────────────────────────
-section('Homepage flow — Smart-assumptions chip → Executive cockpit → Explore');
+section('Homepage flow — Smart-assumptions chip → Executive cockpit');
 
 assert(
   'Dashboard renders <ExecutiveDashboard …> exactly once',
@@ -272,17 +298,12 @@ assert(
 );
 
 // The homepage shows the assumptions chip first, then the Executive Overview
-// cockpit, then the Explore strip — no extra content between them.
+// cockpit which now hosts the DeepAnalysisCards block at its tail.
 const idxAssumptions = dashSrc.indexOf('data-testid="badge-smart-assumptions"');
 const idxExec = dashSrc.indexOf('data-testid="dashboard-executive-section"');
-const idxExplore = dashSrc.indexOf('data-testid="executive-explore-strip"');
 assert(
   'Smart-assumptions chip is positioned before the Executive cockpit',
   idxAssumptions > 0 && idxExec > idxAssumptions,
-);
-assert(
-  'Executive cockpit is positioned before the Explore strip',
-  idxExec > 0 && idxExplore > idxExec,
 );
 
 // ─── 7b. Exactly one Net Worth / Monthly Surplus surface ────────────────────
@@ -409,6 +430,103 @@ assert(
 assert(
   'Health strip uses cyan intelligence accent',
   /hsl\(188,60%/.test(execSrc),
+);
+
+// ─── 11. Route registration — Deep Analysis surfaces never crash ─────────────
+section('Route registration — Risk Radar & Tax Strategy targets resolved');
+
+const appSrc = readFileSync(
+  resolve(repoRoot, 'client/src/App.tsx'),
+  'utf8',
+);
+
+assert(
+  'Risk Radar page is imported in App.tsx',
+  /import\s+RiskRadarPage\s+from\s+["']\.\/pages\/risk-radar["']/.test(appSrc),
+);
+assert(
+  'Tax Strategy / Tax Alpha page is imported in App.tsx',
+  /import\s+TaxAlphaPage\s+from\s+["']\.\/pages\/tax-alpha["']/.test(appSrc),
+);
+assert(
+  'Risk Radar route /risk-radar is registered',
+  /path="\/risk-radar"/.test(appSrc) && /component=\{RiskRadarPage\}/.test(appSrc),
+);
+assert(
+  'Tax Strategy route /tax-alpha is registered',
+  /path="\/tax-alpha"/.test(appSrc) && /component=\{TaxAlphaPage\}/.test(appSrc),
+);
+assert(
+  'Tax Strategy alias /tax-strategy is registered',
+  /path="\/tax-strategy"/.test(appSrc) && /component=\{TaxAlphaPage\}/.test(appSrc),
+);
+
+// ─── 12. Visual anchors — MC chart + Deposit Power presence ─────────────────
+section('Visual anchors — Monte Carlo chart + Deposit Power chart visible');
+
+assert(
+  'Monte Carlo trajectory chart uses Recharts AreaChart',
+  /<AreaChart\b[\s\S]*?dataKey="median"/.test(execSrc) ||
+    /AreaChart[\s\S]{0,400}?median/.test(execSrc),
+);
+assert(
+  'MC chart band uses P10 + P90 series',
+  /dataKey="p10"/.test(execSrc) && /dataKey="p90"/.test(execSrc),
+);
+assert(
+  'Deposit Power & Cashflow chart uses Recharts ComposedChart',
+  /<ComposedChart\b/.test(execSrc),
+);
+assert(
+  'Deposit Power chart wires cashBalance + netCashflow + taxRefund channels',
+  /dataKey="cashBalance"/.test(execSrc) &&
+    /dataKey="netCashflow"/.test(execSrc) &&
+    /dataKey="taxRefund"/.test(execSrc),
+);
+assert(
+  'MC pending state preserves the chart area / identity',
+  /data-testid="trajectory-chart-pending"|trajectory-chart-area/.test(execSrc),
+);
+
+// ─── 13. Current vs forecast source separation ───────────────────────────────
+section('Today snapshot uses live current values — not blended forecast');
+
+assert(
+  'Hero exposes a live PPOR mortgage rate prop',
+  /livePporRate/.test(execSrc),
+);
+assert(
+  'Dashboard passes the LIVE snap.mortgage_rate (today) into the cockpit',
+  /livePporRate:\s*snap\.mortgage_rate/.test(dashSrc),
+);
+assert(
+  'Today snapshot caption labels the live mortgage rate ("PPOR …%")',
+  /PPOR \$\{liveRate\}%|PPOR \$\{liveRate\}\s*%|PPOR\s*\$\{liveRate\}%|PPOR.*liveRate/.test(execSrc) ||
+    /PPOR\s+\$\{liveRate\}%/.test(execSrc),
+);
+assert(
+  'Today snapshot copy frames cockpit as live / current (not forecast)',
+  /Today snapshot|live current values/i.test(execSrc),
+);
+
+// ─── 14. Cashflow trajectory wiring ──────────────────────────────────────────
+section('Cashflow trajectory wired from canonical cashFlowAnnual');
+
+assert(
+  'Dashboard builds a cashflowTrajectory memo from cashFlowAnnual + equityTimeline',
+  /cashflowTrajectory[\s\S]{0,400}?cashFlowAnnual/.test(dashSrc) &&
+    /equityTimeline/.test(dashSrc),
+);
+assert(
+  'Dashboard passes cashflowTrajectory to ExecutiveDashboard',
+  /cashflowTrajectory,?$/m.test(dashSrc) || /cashflowTrajectory\s*[,}]/.test(dashSrc),
+);
+assert(
+  'cashflowTrajectory shape carries cashBalance / netCashflow / taxRefund / totalDepositPower',
+  /cashBalance:\s*cash/.test(dashSrc) &&
+    /netCashflow:\s*a\.netCashFlow/.test(dashSrc) &&
+    /taxRefund:\s*a\.ngTaxBenefit/.test(dashSrc) &&
+    /totalDepositPower:\s*dp/.test(dashSrc),
 );
 
 // ─── Summary ────────────────────────────────────────────────────────────────
