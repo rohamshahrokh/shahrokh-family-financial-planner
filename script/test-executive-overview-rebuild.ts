@@ -244,10 +244,11 @@ const deepModuleSignals = [
   // We therefore no longer assert its absence on the dashboard homepage.
   { name: 'Deterministic baseline table', pattern: /Deterministic baseline \(advanced\)/ },
   { name: 'Canonical MC Wealth Projection homepage block', pattern: /db-section-monte-carlo/ },
-  // Visual-QA blocker fixes — the duplicate welcome / KPI / journey stack
-  // must no longer render on the homepage.
-  { name: 'WealthFlowBanner journey header', pattern: /<WealthFlowBanner\s*\/?>/ },
-  { name: 'Welcome / family-identity card',  pattern: /Welcome Back/ },
+  // Visual-QA blocker fixes — the duplicate KPI stacks must not return. The
+  // animated journey header (WealthFlowBanner) and the family welcome card
+  // were INTENTIONALLY restored by the FWL Restore Hero Header Experience
+  // pass and are now asserted to be present below — they no longer appear
+  // in this "must not render" list.
   { name: 'Estimated Net Worth duplicate card', pattern: /Estimated Net Worth/ },
   { name: 'KpiCard render (MONTHLY SURPLUS / TOTAL INVESTMENTS / etc.)', pattern: /<KpiCard\b/ },
   { name: 'Accessible Wealth / Locked Retirement Wealth strip', pattern: /Accessible Wealth/ },
@@ -258,6 +259,90 @@ const deepModuleSignals = [
 for (const { name, pattern } of deepModuleSignals) {
   assert(`${name} no longer renders on the dashboard homepage`, !pattern.test(dashSrc));
 }
+
+// ─── FWL Restore Hero Header Experience — atmospheric top layer ─────────────
+// The dashboard restores a compact animated journey hero/header and a family
+// welcome/mission card ABOVE the Executive Overview, in this exact order:
+//   1. Smart-Assumptions / Forecast pill
+//   2. Compact animated journey hero (TODAY · PLAN · FUTURE · MOVE)
+//   3. Welcome / family mission card
+//   4. Executive Overview cockpit
+section('FWL Restore — animated hero/header + family mission card');
+
+assert(
+  'Compact animated journey hero (WealthFlowBanner) renders on the dashboard',
+  /<WealthFlowBanner\s*\/?>/.test(dashSrc),
+);
+assert(
+  'Journey hero is wrapped with test id `dashboard-journey-header`',
+  /data-testid="dashboard-journey-header"/.test(dashSrc),
+);
+assert(
+  'Family mission / welcome card renders on the dashboard',
+  /data-testid="dashboard-family-mission-card"/.test(dashSrc),
+);
+assert(
+  'Family mission card surfaces the "Welcome Back" eyebrow',
+  /data-testid="family-welcome-eyebrow"/.test(dashSrc) &&
+    /Welcome Back/.test(dashSrc),
+);
+assert(
+  'Family mission card surfaces the family identity (Fara & Roham)',
+  /data-testid="family-identity-name"/.test(dashSrc) &&
+    /Fara\s*&amp;\s*Roham/.test(dashSrc),
+);
+assert(
+  'Family mission card surfaces the wealth mission subtitle',
+  /Family Net Worth Command Center/.test(dashSrc) &&
+    /Building wealth for the kids/.test(dashSrc),
+);
+
+// The canonical four journey labels + sublabels must be present in the
+// rendered WealthFlowBanner stage definitions.
+const wfbSrc = readFileSync(
+  resolve(repoRoot, 'client/src/components/WealthFlowBanner.tsx'),
+  'utf8',
+);
+for (const word of ['TODAY', 'PLAN', 'FUTURE', 'MOVE']) {
+  assert(
+    `WealthFlowBanner exposes canonical journey word "${word}"`,
+    new RegExp(`word:\\s*"${word}"`).test(wfbSrc),
+  );
+}
+for (const sub of ['Snapshot', 'Strategy', 'Forecast', 'Action']) {
+  assert(
+    `WealthFlowBanner exposes canonical journey sublabel "${sub}"`,
+    new RegExp(`sub:\\s*"${sub}"`).test(wfbSrc),
+  );
+}
+
+// Order assertion — journey header → mission card → Executive Overview.
+const idxJourneyHeader = dashSrc.indexOf('data-testid="dashboard-journey-header"');
+const idxMissionCard   = dashSrc.indexOf('data-testid="dashboard-family-mission-card"');
+const idxExecSection   = dashSrc.indexOf('data-testid="dashboard-executive-section"');
+assert(
+  'Journey header appears BEFORE the family mission card in JSX order',
+  idxJourneyHeader > 0 && idxMissionCard > idxJourneyHeader,
+);
+assert(
+  'Family mission card appears BEFORE the Executive Overview in JSX order',
+  idxMissionCard > 0 && idxExecSection > idxMissionCard,
+);
+
+// Order assertion — Executive Overview still precedes Future Wealth Path
+// (rendered inside the cockpit) and Wealth Decision Center (also inside the
+// cockpit). Both surfaces remain present so the restore is purely UI/top.
+const execSrcForOrder = execSrc; // alias for clarity
+const idxFutureWealth = execSrcForOrder.indexOf('Future Wealth Path');
+const idxDecisionCtr  = execSrcForOrder.search(/Wealth Decision Center|WealthDecisionCenter/);
+assert(
+  'Future Wealth Path remains present inside the Executive Overview cockpit',
+  idxFutureWealth > 0,
+);
+assert(
+  'Wealth Decision Center remains present inside the Executive Overview cockpit',
+  idxDecisionCtr > 0,
+);
 
 // The Final Reconciliation Pass replaces the weak "Explore" filter chip
 // strip with a premium DeepAnalysisCards block rendered inside the cockpit.
@@ -323,9 +408,18 @@ function stripJsComments(s: string): string {
 const dashStripped = stripJsComments(dashSrc);
 const execStripped = stripJsComments(execSrc);
 
+// The family mission subtitle ("Family Net Worth Command Center") is an
+// intentional identity tagline, not a duplicate of the cockpit's "Net Worth"
+// KPI tile. Strip just that phrase before counting so it doesn't trip the
+// duplicate-label guard.
+const dashStrippedForLabels = dashStripped.replace(
+  /Family Net Worth Command Center/g,
+  '',
+);
+
 assert(
   'Dashboard JSX no longer carries a "Net Worth" UI label',
-  !/Net Worth/.test(dashStripped),
+  !/Net Worth/.test(dashStrippedForLabels),
 );
 assert(
   'Dashboard JSX no longer carries a "Monthly Surplus" UI label',

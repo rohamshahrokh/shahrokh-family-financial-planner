@@ -124,6 +124,7 @@ import TaxAlphaCard from "@/components/TaxAlphaCard";
 import RiskRadarCard from "@/components/RiskRadarCard";
 import KpiCard from "@/components/KpiCard";
 import WealthFlowBanner from "@/components/WealthFlowBanner";
+import familyImg from "@assets/family.jpeg";
 import ExecutiveDashboard from "@/components/ExecutiveDashboard";
 import DeepDiveSection from "@/components/DeepDiveSection";
 import { Link, useLocation } from "wouter";
@@ -2114,9 +2115,74 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {/* Executive Overview cockpit — the only content surface on the homepage. */}
+      {/* ══════════════════════════════════════════════════════════════════
+          FWL RESTORE — Compact animated journey hero/header
+          TODAY · Snapshot → PLAN · Strategy → FUTURE · Forecast → MOVE · Action
+          Calm animated timeline that gives the dashboard an atmospheric top
+          layer before the Executive Overview cockpit. Component owns its own
+          height (clamp 70–90px) — kept compact and low-noise. Restored after
+          the Phase 7 cockpit rebuild removed it; this is the middle-ground
+          re-introduction (no oversized hero, no flashy crypto-glow).
+          ═════════════════════════════════════════════════════════════════ */}
       <div
-        className="px-4 pt-4 pb-2"
+        className="db-section-networth"
+        data-testid="dashboard-journey-header"
+      >
+        <WealthFlowBanner />
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          FWL RESTORE — Family mission / welcome card
+          Restores the emotional/identity top layer. Compact (single row on
+          desktop, stacks on mobile). Premium family-office tone — gold accent,
+          warm "Welcome Back" eyebrow, family avatar, short wealth mission.
+          Sits between the journey header and the Executive Overview so the
+          dashboard reads as: atmosphere → identity → intelligence.
+          ═════════════════════════════════════════════════════════════════ */}
+      <div
+        className="px-4 pt-2 pb-3 db-section-networth"
+        data-testid="dashboard-family-mission-card"
+      >
+        <div className="rounded-2xl border border-amber-500/20 bg-gradient-to-r from-amber-500/[0.04] via-card to-card p-4 flex items-center gap-4 shadow-[0_4px_24px_rgba(0,0,0,0.18)]">
+          {/* Family avatar */}
+          <div className="shrink-0 w-14 h-14 rounded-xl overflow-hidden border-2 border-amber-500/30 ring-1 ring-amber-500/10">
+            <img
+              src={familyImg}
+              alt="Fara & Roham family"
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          </div>
+          {/* Identity + mission */}
+          <div className="min-w-0 flex-1">
+            <div
+              className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-400/90"
+              data-testid="family-welcome-eyebrow"
+            >
+              Welcome Back
+            </div>
+            <div
+              className="text-lg sm:text-xl font-extrabold tracking-tight text-foreground leading-tight"
+              data-testid="family-identity-name"
+            >
+              Fara &amp; Roham
+            </div>
+            <div
+              className="text-[12px] sm:text-sm font-semibold text-muted-foreground mt-0.5"
+              data-testid="family-mission-subtitle"
+            >
+              Family Net Worth Command Center
+            </div>
+            <div className="text-[11px] text-muted-foreground/70 mt-0.5">
+              Building wealth for the kids · Brisbane, QLD
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Executive Overview cockpit — primary content surface on the homepage. */}
+      <div
+        className="px-4 pt-2 pb-2"
         data-testid="dashboard-executive-section"
       >
         <ExecutiveDashboard {...phase7ExecProps} />
