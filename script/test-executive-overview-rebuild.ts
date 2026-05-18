@@ -488,6 +488,42 @@ assert(
   /data-testid="trajectory-chart-pending"|trajectory-chart-area/.test(execSrc),
 );
 
+// ─── 12b. Chart hierarchy & purpose — strategic vs operational ───────────────
+section('Chart hierarchy — Future Wealth Path (hero) + Plan Execution Capacity (operational)');
+
+assert(
+  'Hero chart renamed to "Future Wealth Path"',
+  /Future Wealth Path/.test(execSrc),
+);
+assert(
+  'Hero chart subtitle describes the Monte Carlo future net-worth engine',
+  /Monte Carlo future net-worth engine.*probabilistic projection/.test(execSrc),
+);
+assert(
+  'Operational chart renamed to "Plan Execution Capacity"',
+  /Plan Execution Capacity/.test(execSrc),
+);
+assert(
+  'Operational chart subtitle describes liquidity · deposit power · cashflow survivability',
+  /Liquidity.*deposit power.*cashflow survivability/.test(execSrc),
+);
+assert(
+  'Legacy "Wealth Trajectory" label no longer used as the hero chart title',
+  !/>\s*Wealth Trajectory\s*</.test(execSrc),
+);
+assert(
+  'Legacy "Deposit Power &amp; Cashflow" label no longer used as the operational chart title',
+  !/>\s*Deposit Power &amp; Cashflow\s*</.test(execSrc),
+);
+assert(
+  'Plan Execution Capacity panel feels operational — chart height reduced ~25% (≤230)',
+  /data-testid="deposit-power-chart-area"[\s\S]{0,400}?<ResponsiveContainer[^>]*height=\{(?:1\d\d|2[0-2]\d)\}/.test(execSrc),
+);
+assert(
+  'Future Wealth Path keeps generous hero height (≥300)',
+  /data-testid="trajectory-chart-area"[\s\S]{0,400}?<ResponsiveContainer[^>]*height=\{(?:3\d\d|4\d\d|5\d\d)\}/.test(execSrc),
+);
+
 // ─── 13. Current vs forecast source separation ───────────────────────────────
 section('Today snapshot uses live current values — not blended forecast');
 

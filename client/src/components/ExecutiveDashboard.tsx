@@ -6,12 +6,17 @@
  * or repeated recommendation systems. The information architecture is:
  *
  *     1. Hero Snapshot               → Net Worth · Surplus · Risk · FIRE · 1 Best Move
- *     2. Monte Carlo Trajectory      → MAIN future visual anchor (P10/P50/P90 band)
+ *     2. Future Wealth Path          → Strategic future-wealth engine (Monte Carlo P10/P50/P90)
  *     3. Compact Projection Table    → Year · P50 · Confidence Range (P10/P90 expand)
- *     4. Deposit Power & Cashflow    → Liquidity / equity / tax-refund operational motion
+ *     4. Plan Execution Capacity     → Operational execution engine (liquidity · deposit power · cashflow)
  *     5. Financial Health            → Exactly four structural indicators
  *     6. Action Queue                → Maximum 3 actions, calm operational rhythm
  *     7. Deep Analysis Cards         → Four premium navigation cards (no chips)
+ *
+ * Visual hierarchy contract:
+ *   • Future Wealth Path is the dashboard hero — large, aspirational, premium.
+ *   • Plan Execution Capacity is operational/tactical — compact, grounded, secondary.
+ *   • Together they form one strategic future engine + one operational execution engine.
  *
  * Source-of-truth invariants preserved:
  *   • Monte Carlo P50 is the ONLY canonical trajectory representation. The
@@ -427,11 +432,11 @@ function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
             <Activity className="w-4 h-4" style={{ color: 'hsl(280,80%,72%)' }} />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-foreground flex items-center gap-1.5">
-              Wealth Trajectory
+            <h2 className="text-base font-bold text-foreground flex items-center gap-1.5">
+              Future Wealth Path
               <MetricExplainer metricId="monte-carlo-probability" size={11} />
             </h2>
-            <p className="text-[11px] text-muted-foreground">Monte Carlo · canonical forecast · P10 / P50 / P90 band</p>
+            <p className="text-[11px] text-muted-foreground">Monte Carlo future net-worth engine · probabilistic projection</p>
           </div>
         </div>
         <Link href="/ai-forecast-engine">
@@ -509,11 +514,11 @@ function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
 
       {/* Chart area — P10/P50/P90 fan. Shaded confidence band, smooth spline,
           year-focus marker, dynamic legend. */}
-      <div className="px-2 pb-3 border-t border-border/30 pt-2" data-testid="trajectory-chart-area">
+      <div className="px-2 pb-4 border-t border-border/30 pt-3" data-testid="trajectory-chart-area">
         {hasMc ? (
           <>
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={series} margin={{ top: 12, right: 18, left: 0, bottom: 6 }}>
+          <ResponsiveContainer width="100%" height={340} minHeight={300}>
+            <AreaChart data={series} margin={{ top: 14, right: 18, left: 0, bottom: 6 }}>
               <defs>
                 <linearGradient id="mcConfidenceBand" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%"  stopColor="hsl(280,80%,68%)" stopOpacity={0.28} />
@@ -764,8 +769,11 @@ function CompactProjectionTable(p: ExecutiveDashboardProps) {
   );
 }
 
-// ─── 4. DepositPowerTrajectoryPanel ──────────────────────────────────────────
-// Restored canonical Deposit Power & Cashflow block:
+// ─── 4. PlanExecutionCapacityPanel (DepositPowerTrajectoryPanel) ─────────────
+// Operational execution engine — secondary to Future Wealth Path. Same canonical
+// Deposit Power & Cashflow surface, but tightened spacing and ~25% smaller
+// chart so the dashboard reads as "1 strategic engine + 1 operational engine"
+// instead of two competing forecast widgets:
 //   • Mini summary metrics row (PPOR LVR, IP readiness, annual net CF, tax
 //     refund/year, cash today, ready-now state).
 //   • Granularity (Annual / Monthly), Refund mode (Lump-sum / PAYG),
@@ -865,23 +873,24 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
 
   return (
     <section
-      className="rounded-2xl border border-border bg-card overflow-hidden"
+      className="rounded-2xl border border-border/80 bg-card/95 overflow-hidden"
       data-testid="deposit-power-trajectory-panel"
+      aria-label="Plan Execution Capacity"
     >
-      <header className="px-5 pt-5 pb-3 flex items-center justify-between flex-wrap gap-2 border-b border-border/30">
-        <div className="flex items-center gap-2.5">
+      <header className="px-4 pt-3.5 pb-2 flex items-center justify-between flex-wrap gap-2 border-b border-border/30">
+        <div className="flex items-center gap-2">
           <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            className="w-7 h-7 rounded-lg flex items-center justify-center"
             style={{ background: 'hsl(188,60%,10%)', border: '1px solid hsl(188,60%,28%)' }}
           >
-            <BarChart2 className="w-4 h-4" style={{ color: 'hsl(188,60%,65%)' }} />
+            <BarChart2 className="w-3.5 h-3.5" style={{ color: 'hsl(188,60%,65%)' }} />
           </div>
           <div>
             <h2 className="text-sm font-bold text-foreground flex items-center gap-1.5">
-              Deposit Power &amp; Cashflow
+              Plan Execution Capacity
               <MetricExplainer metricId="cashflow-resilience" size={11} />
             </h2>
-            <p className="text-[11px] text-muted-foreground">Liquidity · net cashflow · tax refund · deposit-power readiness</p>
+            <p className="text-[10px] text-muted-foreground">Liquidity · deposit power · cashflow survivability</p>
           </div>
         </div>
         {hasData && yr5Power !== null && (
@@ -908,17 +917,17 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
             Right tile: Ready Now headline + "Deposit ready" subtitle.
             Followed by a single Cash + Offset line in blue. */}
       <div
-        className="px-3 pt-3 pb-1 grid grid-cols-2 gap-2"
+        className="px-3 pt-2 pb-1 grid grid-cols-2 gap-2"
         data-testid="deposit-power-readiness-row"
       >
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
-          <div className="text-lg sm:text-xl font-extrabold tabular-nums leading-none"
+        <div className="rounded-lg bg-background/60 border border-border px-2.5 py-1.5">
+          <div className="text-base sm:text-lg font-extrabold tabular-nums leading-none"
             style={{ color: (ipReadinessPct ?? 0) >= 100 ? 'hsl(142,60%,55%)' : 'hsl(43,90%,58%)' }}
             data-testid="dp-ip-readiness"
           >
             {typeof ipReadinessPct === 'number' && Number.isFinite(ipReadinessPct) ? `${Math.round(ipReadinessPct)}%` : '—'}
           </div>
-          <div className="h-1.5 rounded-full bg-border mt-2 overflow-hidden">
+          <div className="h-1 rounded-full bg-border mt-1.5 overflow-hidden">
             <div
               className="h-full rounded-full transition-all"
               style={{
@@ -928,15 +937,15 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
             />
           </div>
         </div>
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
+        <div className="rounded-lg bg-background/60 border border-border px-2.5 py-1.5">
           <div
-            className="text-base sm:text-lg font-extrabold leading-tight"
+            className="text-sm sm:text-base font-extrabold leading-tight"
             style={{ color: equityRichCashPoor ? 'hsl(43,90%,60%)' : readyNow ? 'hsl(142,60%,55%)' : 'hsl(215,15%,65%)' }}
             data-testid="dp-ready-now"
           >
             {equityRichCashPoor ? '⚠ Equity Rich' : readyNow ? 'Ready Now' : 'Building'}
           </div>
-          <div className="text-[11px] text-muted-foreground mt-1">
+          <div className="text-[10px] text-muted-foreground mt-0.5">
             {equityRichCashPoor ? '/ Cash Poor — release equity' : readyNow ? 'Deposit ready' : 'Approaching deposit'}
           </div>
         </div>
@@ -944,14 +953,14 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
 
       {/* Cash / Offset liquidity line — single-row info strip, blue accent. */}
       <div
-        className="px-3 pt-2 pb-1 flex items-center gap-1.5 text-[12px]"
+        className="px-3 pt-1.5 pb-0.5 flex items-center gap-1.5 text-[11px] flex-wrap"
         style={{ color: 'hsl(210,80%,68%)' }}
         data-testid="dp-cash-offset"
       >
-        <DollarSign className="w-3.5 h-3.5" />
+        <DollarSign className="w-3 h-3" />
         <span className="font-semibold">Cash / Offset:</span>
         <span className="tabular-nums font-mono font-semibold">{mv(formatCurrency(cashAndOffsetVal, true))}</span>
-        <span className="ml-3 text-[10px] text-muted-foreground tabular-nums">
+        <span className="ml-2 text-[10px] text-muted-foreground tabular-nums">
           PPOR LVR {typeof pporLvrPct === 'number' && Number.isFinite(pporLvrPct) ? `${Math.round(pporLvrPct)}%` : '—'}
           {' · '}
           Total deposit power {mv(formatCurrency(totalDepositPowerNow, true))}
@@ -960,45 +969,45 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
 
       {/* 2×2 summary metric grid — Cash Today · Final-year Cash · Net CF · Tax Refund. */}
       <div
-        className="px-3 pt-2 pb-1 grid grid-cols-2 gap-2"
+        className="px-3 pt-1.5 pb-1 grid grid-cols-2 sm:grid-cols-4 gap-1.5"
         data-testid="deposit-power-summary-row"
       >
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
-          <div className="text-[11px] text-muted-foreground mb-1">Cash Today</div>
-          <div className="text-base sm:text-lg font-extrabold tabular-nums leading-tight" style={{ color: 'hsl(210,80%,68%)' }} data-testid="dp-cash-today">
+        <div className="rounded-lg bg-background/60 border border-border px-2.5 py-1.5">
+          <div className="text-[10px] text-muted-foreground mb-0.5">Cash Today</div>
+          <div className="text-sm sm:text-[15px] font-extrabold tabular-nums leading-tight" style={{ color: 'hsl(210,80%,68%)' }} data-testid="dp-cash-today">
             {mv(formatCurrency(cashTodayVal, true))}
           </div>
         </div>
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
-          <div className="text-[11px] text-muted-foreground mb-1">{finalYearLabel} Cash</div>
+        <div className="rounded-lg bg-background/60 border border-border px-2.5 py-1.5">
+          <div className="text-[10px] text-muted-foreground mb-0.5">{finalYearLabel} Cash</div>
           <div
-            className="text-base sm:text-lg font-extrabold tabular-nums leading-tight"
+            className="text-sm sm:text-[15px] font-extrabold tabular-nums leading-tight"
             style={{ color: (finalYearCash ?? 0) >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}
             data-testid="dp-final-year-cash"
           >
             {mv(formatCurrency(finalYearCash ?? 0, true))}
           </div>
         </div>
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
-          <div className="text-[11px] text-muted-foreground mb-1">{gran === 'monthly' ? 'Monthly Net CF' : 'Annual Net CF'}</div>
+        <div className="rounded-lg bg-background/60 border border-border px-2.5 py-1.5">
+          <div className="text-[10px] text-muted-foreground mb-0.5">{gran === 'monthly' ? 'Monthly Net CF' : 'Annual Net CF'}</div>
           <div
-            className="text-base sm:text-lg font-extrabold tabular-nums leading-tight"
+            className="text-sm sm:text-[15px] font-extrabold tabular-nums leading-tight"
             style={{ color: annualNetCF >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}
             data-testid="dp-net-cf"
           >
             {mv(formatCurrency(annualNetCF, true))}
           </div>
         </div>
-        <div className="rounded-xl bg-background/60 border border-border px-3 py-2.5">
-          <div className="text-[11px] text-muted-foreground mb-1">Tax Refund/yr</div>
-          <div className="text-base sm:text-lg font-extrabold tabular-nums leading-tight" style={{ color: 'hsl(43,90%,58%)' }} data-testid="dp-tax-refund">
+        <div className="rounded-lg bg-background/60 border border-border px-2.5 py-1.5">
+          <div className="text-[10px] text-muted-foreground mb-0.5">Tax Refund/yr</div>
+          <div className="text-sm sm:text-[15px] font-extrabold tabular-nums leading-tight" style={{ color: 'hsl(43,90%,58%)' }} data-testid="dp-tax-refund">
             +{mv(formatCurrency(taxRefundPerYear, true))}
           </div>
         </div>
       </div>
 
       {/* Toggle bar — Granularity · Refund · View · Chart type */}
-      <div className="px-3 pt-1 pb-2 flex flex-wrap items-center gap-1.5">
+      <div className="px-3 pt-1 pb-1.5 flex flex-wrap items-center gap-1.5">
         <div className="flex gap-0.5 rounded-lg border border-border/60 p-0.5 bg-background/40" data-testid="dp-gran-toggle">
           {([['annual','Annual'],['monthly','Monthly']] as const).map(([m, lbl]) => (
             <button
@@ -1063,9 +1072,9 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
         </span>
       </div>
 
-      <div className="px-2 pb-3" data-testid="deposit-power-chart-area" style={{ touchAction: 'pan-y', userSelect: 'none' }}>
+      <div className="px-2 pb-2" data-testid="deposit-power-chart-area" style={{ touchAction: 'pan-y', userSelect: 'none' }}>
         {hasData ? (
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height={225} minHeight={205}>
             {chartMode === 'line' ? (
               <LineChart data={chartData} margin={{ top: 12, right: 18, left: 0, bottom: 6 }}>
                 <defs>
@@ -1201,7 +1210,7 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
 
         {/* Dynamic legend row 1 — chart series. */}
         {hasData && (
-          <div className="px-3 pt-3 mt-1 border-t border-border/25 space-y-1.5" data-testid="dp-legend">
+          <div className="px-3 pt-2 mt-0.5 border-t border-border/25 space-y-1" data-testid="dp-legend">
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
               <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'hsl(210,80%,68%)' }}>
                 <span className="inline-block w-6 h-0.5 rounded" style={{ background: 'hsl(210,80%,68%)' }} />Cash Balance
