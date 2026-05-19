@@ -47,12 +47,13 @@ section('Executive Overview — final section order');
 // Order is asserted by reading the final composition block in ExecutiveDashboard.tsx
 // (the `return ( <div ... ) part of the default export). Each section renders
 // a known component name in a strict order: Hero · MonteCarloTrajectoryChart ·
-// CompactProjectionTable · WealthDecisionCenter · ExecutiveHealthStrip ·
-// ExecutiveActionQueue · DeepAnalysisCards.
+// WealthProjectionTable (richer analytical table, post Projection Cleanup) ·
+// WealthDecisionCenter · ExecutiveHealthStrip · ExecutiveActionQueue ·
+// DeepAnalysisCards.
 const orderedRenders = [
   '<ExecutiveHeroSnapshot',
   '<MonteCarloTrajectoryChart',
-  '<CompactProjectionTable',
+  '<WealthProjectionTable',
   '<WealthDecisionCenter',
   '<ExecutiveHealthStrip',
   '<ExecutiveActionQueue',
@@ -71,25 +72,31 @@ for (let i = 1; i < positions.length; i++) {
   if (positions[i] < positions[i - 1]) { ordered = false; break; }
 }
 assert(
-  'Section order: Hero → Future Wealth Path → Projection Table → Wealth Decision Center → Financial Health → Action Queue → Deep Analysis',
+  'Section order: Hero → Strategic Wealth Projection → Richer Analytical Table → Wealth Decision Center → Financial Health → Action Queue → Deep Analysis',
   ordered,
 );
 
-// Future Wealth Path remains the hero, Plan Execution Capacity (deposit power)
-// remains the secondary chart inside the WDC CASH tab.
+// Strategic Wealth Projection (promoted from former Future Wealth Path) is the
+// single primary strategic visualization. Plan Execution Capacity (deposit
+// power) remains the secondary chart inside the WDC CASH tab.
 assert(
-  'Future Wealth Path label preserved as primary hero chart',
-  /Future Wealth Path/.test(execSrc),
+  'Strategic Wealth Projection label is the promoted primary chart title',
+  /Strategic Wealth Projection/.test(execSrc),
 );
 assert(
   'Plan Execution Capacity label preserved (inside Wealth Decision Center CASH tab)',
   /Plan Execution Capacity/.test(execSrc),
 );
 
-// ─── 2. Wealth Decision Center — four tabs + breakdown + events ──────────────
+// ─── 2. Wealth Decision Center — operational tabs + breakdown + events ──────
 section('Wealth Decision Center — tabs / breakdown table / events timeline');
 
-const tabIds = ['CASH', 'EVENTS', 'WEALTH', 'RISK'];
+// After the Executive Overview Projection Cleanup, the WDC keeps the three
+// operational tabs (CASH · EVENTS · RISK). The old WEALTH tab — which
+// re-rendered the Monte Carlo chart + compact projection table — is removed
+// because the promoted Strategic Wealth Projection above is now the single
+// primary strategic surface.
+const tabIds = ['CASH', 'EVENTS', 'RISK'];
 assert(
   'WDC uses a template-literal data-testid for each tab (wdc-tab-${t.key})',
   /data-testid=\{`wdc-tab-\$\{t\.key\}`\}/.test(wdcSrc),

@@ -38,7 +38,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
 import {
-  TrendingUp, TrendingDown, Shield, Sparkles, Activity, ArrowRight, ChevronDown, ChevronUp,
+  TrendingUp, TrendingDown, Shield, Sparkles, Activity, ArrowRight,
   Flame, Wallet, Layers, Target, CheckCircle2, BarChart2, Coins, Compass, Scale, Calculator,
   DollarSign, Unlock, Lock,
 } from 'lucide-react';
@@ -186,6 +186,31 @@ export interface ExecutiveDashboardProps {
    * inside the Events / Forecast tabs, never in Today snapshot.
    */
   plannedDebt?: number | null;
+  /**
+   * Canonical year-by-year wealth projection rows (10 years). Used by the
+   * Strategic Wealth Projection panel as the single richer analytical table.
+   * Sourced from `projectNetWorth` in /lib/finance — same engine the Wealth
+   * Strategy hub uses. Avoids fabricating column values.
+   */
+  projectionRows?: WealthProjectionRow[] | null;
+}
+
+/**
+ * Decision-grade yearly progression row consumed by the Strategic Wealth
+ * Projection table. Each field maps 1:1 to a column header in the UI.
+ */
+export interface WealthProjectionRow {
+  year: number;
+  accessibleNetWorth: number;
+  totalNetWorth: number;
+  cagrPct: number;
+  growth: number;
+  cash: number;
+  liabilities: number;
+  propertyEquity: number;
+  stocks: number;
+  crypto: number;
+  superTotal: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -479,11 +504,11 @@ function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
             <Activity className="w-4 h-4" style={{ color: 'hsl(280,80%,72%)' }} />
           </div>
           <div>
-            <h2 className="text-base font-bold text-foreground flex items-center gap-1.5">
-              Future Wealth Path
+            <h2 className="text-base md:text-lg font-bold text-foreground flex items-center gap-1.5" data-testid="strategic-wealth-projection-title">
+              Strategic Wealth Projection
               <MetricExplainer metricId="monte-carlo-probability" size={11} />
             </h2>
-            <p className="text-[11px] text-muted-foreground">Monte Carlo future net-worth engine · probabilistic projection</p>
+            <p className="text-[11px] text-muted-foreground">Primary strategic visualization · Monte Carlo P10 / P50 / P90 future net-worth engine</p>
           </div>
         </div>
         <Link href="/ai-forecast-engine">
@@ -716,101 +741,121 @@ function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
   );
 }
 
-// ─── 3. CompactProjectionTable ───────────────────────────────────────────────
-// Year · P50 · Confidence Range (P10/P90 columns behind expand).
+// ─── 3. WealthProjectionTable ────────────────────────────────────────────────
+// Richer decision-grade year-by-year analytical table. Columns surface the
+// canonical projection breakdown (Accessible NW, Total NW, CAGR, Growth, Cash,
+// Liabilities, Property equity, Stocks, Crypto, Super). Sourced from the same
+// `projectNetWorth` engine the Wealth Strategy hub uses — no parallel maths.
+//
+// Replaces the prior CompactProjectionTable (Year · P50 · Confidence Range)
+// which duplicated the Monte Carlo fan. The fan chart above already carries
+// the probabilistic story; this table carries the deterministic asset-mix
+// progression decision-makers need.
 
-function CompactProjectionTable(p: ExecutiveDashboardProps) {
+function WealthProjectionTable(p: ExecutiveDashboardProps) {
   const { privacyMode } = useAppStore();
   const mv = (v: string) => maskValue(v, privacyMode);
-  const [expandedRange, setExpandedRange] = useState(false);
-  const fan = p.monteCarloFanData;
-  if (!fan || fan.length === 0) return null;
+  const rows = p.projectionRows;
+  if (!rows || rows.length === 0) {
+    return (
+      <section
+        className="rounded-2xl border border-border bg-card overflow-hidden"
+        data-testid="wealth-projection-table-panel"
+      >
+        <header className="px-5 pt-4 pb-3 border-b border-border/30">
+          <h2 className="text-sm font-bold text-foreground">Strategic Wealth Projection</h2>
+          <p className="text-[11px] text-muted-foreground">Year-by-year canonical asset breakdown</p>
+        </header>
+        <div className="px-5 py-8 text-center text-xs text-muted-foreground">
+          Projection data is not yet available. Open the snapshot to populate it.
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section
       className="rounded-2xl border border-border bg-card overflow-hidden"
-      data-testid="canonical-trajectory-panel"
+      data-testid="wealth-projection-table-panel"
     >
       <header className="px-5 pt-4 pb-3 flex items-center justify-between flex-wrap gap-2 border-b border-border/30">
         <div>
           <h2 className="text-sm font-bold text-foreground flex items-center gap-1.5">
-            Projection Table
-            <MetricExplainer metricId="p10-p50-p90" size={11} />
+            Strategic Wealth Projection
+            <MetricExplainer metricId="net-worth-reconciliation" size={11} />
           </h2>
-          <p className="text-[11px] text-muted-foreground">Year-by-year Monte Carlo · canonical fan</p>
+          <p className="text-[11px] text-muted-foreground">
+            Decision-grade year-by-year canonical engine · Accessible vs Total NW · asset mix
+          </p>
         </div>
         <span className="text-[10px] text-muted-foreground">
-          {p.monteCarloSimulations
-            ? `${p.monteCarloSimulations.toLocaleString()} simulations`
-            : 'Canonical forecast'}
+          Canonical engine · 10-year horizon
         </span>
       </header>
       <div className="overflow-x-auto">
-        <table className="w-full text-xs" data-testid="trajectory-projection-table">
+        <table className="w-full text-xs" data-testid="wealth-projection-table">
           <thead>
             <tr className="border-b border-border/40 bg-muted/10">
-              <th className="px-4 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest">Year</th>
-              <th className="px-4 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest">
-                <span className="inline-flex items-center gap-1 justify-end w-full">
-                  P50 (median)
-                  <MetricExplainer metricId="p10-p50-p90" size={10} />
-                </span>
-              </th>
-              <th className="px-4 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest">
-                Confidence Range
-              </th>
-              {expandedRange && (
-                <>
-                  <th className="px-4 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest">Bear · P10</th>
-                  <th className="px-4 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest">Bull · P90</th>
-                </>
-              )}
+              <th className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest">Year</th>
+              <th className="px-3 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest" data-testid="col-accessible-nw">Accessible NW</th>
+              <th className="px-3 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest" data-testid="col-total-nw">Total NW</th>
+              <th className="px-3 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest" data-testid="col-cagr">CAGR</th>
+              <th className="px-3 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest" data-testid="col-growth">Growth</th>
+              <th className="px-3 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest" data-testid="col-cash">Cash</th>
+              <th className="px-3 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest" data-testid="col-liabilities">Liabilities</th>
+              <th className="px-3 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest" data-testid="col-property-equity">Property equity</th>
+              <th className="px-3 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest" data-testid="col-stocks">Stocks</th>
+              <th className="px-3 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest" data-testid="col-crypto">Crypto</th>
+              <th className="px-3 py-2 text-right font-semibold text-muted-foreground whitespace-nowrap text-[10px] uppercase tracking-widest" data-testid="col-super">Super</th>
             </tr>
           </thead>
           <tbody>
-            {fan.map((row, idx) => {
-              const band = row.p90 - row.p10;
-              const bandPct = row.median > 0 ? (band / Math.max(1, row.median)) * 100 : 0;
-              return (
-                <tr key={row.year} className={`border-b border-border/20 hover:bg-purple-500/[0.04] ${idx === 0 ? 'bg-purple-500/[0.03]' : ''}`}>
-                  <td className="px-4 py-2 font-bold text-foreground whitespace-nowrap">
-                    {row.year}{idx === 0 ? ' ★' : ''}
-                  </td>
-                  <td
-                    className="px-4 py-2 font-mono font-bold tabular-nums whitespace-nowrap text-right"
-                    style={{ color: 'hsl(43,90%,62%)' }}
-                    data-testid={`trajectory-row-${row.year}-p50`}
-                  >
-                    {mv(formatCurrency(row.median, true))}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-muted-foreground tabular-nums whitespace-nowrap text-right">
-                    {mv(formatCurrency(band, true))} <span className="text-[10px] opacity-70">({bandPct.toFixed(0)}%)</span>
-                  </td>
-                  {expandedRange && (
-                    <>
-                      <td className="px-4 py-2 font-mono tabular-nums whitespace-nowrap text-right" style={{ color: 'hsl(0,72%,60%)' }}>
-                        {mv(formatCurrency(row.p10, true))}
-                      </td>
-                      <td className="px-4 py-2 font-mono tabular-nums whitespace-nowrap text-right" style={{ color: 'hsl(142,60%,55%)' }}>
-                        {mv(formatCurrency(row.p90, true))}
-                      </td>
-                    </>
-                  )}
-                </tr>
-              );
-            })}
+            {rows.map((row, idx) => (
+              <tr
+                key={row.year}
+                className={`border-b border-border/20 hover:bg-amber-500/[0.04] ${idx === 0 ? 'bg-amber-500/[0.03]' : ''}`}
+                data-testid={`wealth-projection-row-${row.year}`}
+              >
+                <td className="px-3 py-2 font-bold text-foreground whitespace-nowrap">
+                  {row.year}{idx === 0 ? ' ★' : ''}
+                </td>
+                <td className="px-3 py-2 font-mono font-bold tabular-nums whitespace-nowrap text-right" style={{ color: 'hsl(195,80%,68%)' }}>
+                  {mv(formatCurrency(row.accessibleNetWorth, true))}
+                </td>
+                <td className="px-3 py-2 font-mono font-bold tabular-nums whitespace-nowrap text-right" style={{ color: 'hsl(43,90%,62%)' }}>
+                  {mv(formatCurrency(row.totalNetWorth, true))}
+                </td>
+                <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right" style={{ color: row.cagrPct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
+                  {row.cagrPct.toFixed(2)}%
+                </td>
+                <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right" style={{ color: row.growth >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
+                  {row.growth >= 0 ? '+' : ''}{mv(formatCurrency(row.growth, true))}
+                </td>
+                <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right text-foreground">
+                  {mv(formatCurrency(row.cash, true))}
+                </td>
+                <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right" style={{ color: 'hsl(0,72%,60%)' }}>
+                  −{mv(formatCurrency(Math.abs(row.liabilities), true))}
+                </td>
+                <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right text-foreground">
+                  {mv(formatCurrency(row.propertyEquity, true))}
+                </td>
+                <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right text-foreground">
+                  {mv(formatCurrency(row.stocks, true))}
+                </td>
+                <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right text-foreground">
+                  {mv(formatCurrency(row.crypto, true))}
+                </td>
+                <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right text-foreground">
+                  {mv(formatCurrency(row.superTotal, true))}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
-      <div className="px-4 py-2 border-t border-border/30 flex items-center justify-between flex-wrap gap-2 bg-muted/[0.05]">
-        <button
-          onClick={() => setExpandedRange(v => !v)}
-          className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-          data-testid="trajectory-expand-range"
-        >
-          {expandedRange ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          {expandedRange ? 'Hide P10 / P90 columns' : 'Show P10 / P90 columns'}
-        </button>
+      <div className="px-5 py-2 border-t border-border/30 bg-muted/[0.04] text-[10px] text-muted-foreground">
+        Accessible NW excludes Super · CAGR compounded from today · canonical projection engine
       </div>
     </section>
   );
@@ -1663,20 +1708,27 @@ export default function ExecutiveDashboard(props: ExecutiveDashboardProps) {
     <div className="space-y-4" data-testid="executive-dashboard">
       {/* 1. Hero Snapshot — Today snapshot, live current values only. */}
       <ExecutiveHeroSnapshot {...resolved} result={result} />
-      {/* 2. Future Wealth Path — primary hero (Monte Carlo P10/P50/P90). */}
+      {/* 2. Strategic Wealth Projection — promoted PRIMARY strategic
+            visualization. The Monte Carlo P10/P50/P90 fan is the single
+            decision-grade future-wealth surface on the Executive Overview.
+            The prior duplicate "Future Wealth Path" block above the Wealth
+            Decision Center is removed in this Executive Overview cleanup
+            pass — one chart, one table, one source of truth. */}
       <MonteCarloTrajectoryChart {...resolved} />
-      {/* 3. Projection Table — year-by-year P50 + expandable range. */}
-      <CompactProjectionTable {...resolved} />
+      {/* 3. Richer Analytical Table — Accessible NW · Total NW · CAGR · Growth ·
+            Cash · Liabilities · Property equity · Stocks · Crypto · Super.
+            Replaces the previous compact P10/P50/P90 projection table — that
+            duplicated the fan chart above. */}
+      <WealthProjectionTable {...resolved} />
       {/* 4. Wealth Decision Center — operational tabs (CASH/EVENTS/WEALTH/RISK).
-            The Plan Execution Capacity chart lives inside CASH; Monte Carlo +
-            projection table are referenced inside WEALTH; planned roadmap is
-            in EVENTS; liquidity / leverage / downside summary is in RISK. */}
+            The Plan Execution Capacity chart lives inside CASH; planned roadmap
+            is in EVENTS; liquidity / leverage / downside summary is in RISK.
+            The WEALTH tab now points users to the strategic projection above
+            (no duplicate Monte Carlo + projection render). */}
       <WealthDecisionCenter
         defaultTab="CASH"
         executiveProps={resolved}
         renderDepositPowerChart={() => <DepositPowerTrajectoryPanel {...resolved} />}
-        renderMonteCarlo={() => <MonteCarloTrajectoryChart {...resolved} />}
-        renderProjectionTable={() => <CompactProjectionTable {...resolved} />}
       />
       {/* 5. Financial Health — exactly 4 structural indicators. */}
       <ExecutiveHealthStrip {...resolved} />

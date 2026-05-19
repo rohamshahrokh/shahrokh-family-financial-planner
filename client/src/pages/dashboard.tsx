@@ -2061,6 +2061,23 @@ export default function DashboardPage() {
                         ? String(cashFlowAnnual[cashFlowAnnual.length - 1].year)
                         : null,
     },
+    // Decision-grade year-by-year projection rows for the Strategic Wealth
+    // Projection table (the single richer analytical table on Executive
+    // Overview). Mapped from the canonical `projection` engine (same engine
+    // the Wealth Strategy hub uses) — no parallel computation.
+    projectionRows: (projection ?? []).map((row: any) => ({
+      year:               row.year,
+      accessibleNetWorth: row.accessibleNetWorth ?? (row.endNetWorth - (row.totalSuper ?? 0)),
+      totalNetWorth:      row.endNetWorth,
+      cagrPct:            row.cagr ?? 0,
+      growth:             row.growth ?? 0,
+      cash:               row.cash ?? 0,
+      liabilities:        row.totalLiabilities ?? 0,
+      propertyEquity:     row.propertyEquity ?? 0,
+      stocks:             row.stockValue ?? 0,
+      crypto:             row.cryptoValue ?? 0,
+      superTotal:         row.totalSuper ?? 0,
+    })),
   };
 
   return (

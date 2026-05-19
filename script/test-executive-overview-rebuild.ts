@@ -77,8 +77,8 @@ assert(
   execSrc.includes('data-testid="monte-carlo-trajectory-chart"'),
 );
 assert(
-  'CompactProjectionTable / canonical trajectory panel is rendered',
-  execSrc.includes('data-testid="canonical-trajectory-panel"'),
+  'WealthProjectionTable / strategic wealth projection panel is rendered (replaces compact P50 table)',
+  execSrc.includes('data-testid="wealth-projection-table-panel"'),
 );
 assert(
   'DepositPowerTrajectoryPanel is rendered (operational motion)',
@@ -157,26 +157,59 @@ assert(
   !/data-testid="trajectory-deterministic"/.test(execSrc),
 );
 
-// Compact projection table — Year, P50, Confidence Range by default.
+// Richer analytical table — decision-grade columns from canonical engine.
+// (Replaces the prior compact Year · P50 · Confidence Range table — that
+// duplicated the Monte Carlo fan above and was removed in the Executive
+// Overview Projection Cleanup pass.)
 assert(
-  'Projection table data-testid is present',
-  execSrc.includes('data-testid="trajectory-projection-table"'),
+  'Richer projection table data-testid is present',
+  execSrc.includes('data-testid="wealth-projection-table"'),
+);
+const richColumnIds = [
+  'col-accessible-nw',
+  'col-total-nw',
+  'col-cagr',
+  'col-growth',
+  'col-cash',
+  'col-liabilities',
+  'col-property-equity',
+  'col-stocks',
+  'col-crypto',
+  'col-super',
+];
+for (const id of richColumnIds) {
+  assert(
+    `Richer table includes column "${id}"`,
+    execSrc.includes(`data-testid="${id}"`),
+  );
+}
+const richColumnLabels = [
+  'Accessible NW',
+  'Total NW',
+  'CAGR',
+  'Growth',
+  'Cash',
+  'Liabilities',
+  'Property equity',
+  'Stocks',
+  'Crypto',
+  'Super',
+];
+for (const label of richColumnLabels) {
+  assert(
+    `Richer table surfaces column label "${label}"`,
+    execSrc.includes(`>${label}<`),
+  );
+}
+assert(
+  'Compact P50 projection table is no longer rendered on Executive Overview',
+  !execSrc.includes('data-testid="trajectory-projection-table"') &&
+    !execSrc.includes('data-testid="trajectory-expand-range"'),
 );
 assert(
-  'Projection table has a P50 column header',
-  /P50\s*\(median\)|P50 — most-likely|P50 \(median\)/i.test(execSrc),
+  'Compact "Confidence Range" column header is no longer rendered',
+  !/>Confidence Range</.test(execSrc),
 );
-assert(
-  'Projection table has a Confidence Range column header',
-  /Confidence Range/.test(execSrc),
-);
-assert(
-  'P10 / P90 columns are hidden behind an expand toggle',
-  execSrc.includes('data-testid="trajectory-expand-range"') &&
-    /Show P10 \/ P90 columns|Hide P10 \/ P90 columns/.test(execSrc),
-);
-
-// No deep diagnostics on the projection table (key-risk column, audit copy).
 assert(
   'Projection table no longer shows the "Key risk" audit column',
   !/Key risk\b/.test(execSrc),
@@ -329,15 +362,15 @@ assert(
   idxMissionCard > 0 && idxExecSection > idxMissionCard,
 );
 
-// Order assertion — Executive Overview still precedes Future Wealth Path
-// (rendered inside the cockpit) and Wealth Decision Center (also inside the
-// cockpit). Both surfaces remain present so the restore is purely UI/top.
+// Order assertion — Executive Overview still hosts the promoted Strategic
+// Wealth Projection chart and the Wealth Decision Center inside the cockpit.
+// Both surfaces remain present so the cleanup is purely an IA reorganisation.
 const execSrcForOrder = execSrc; // alias for clarity
-const idxFutureWealth = execSrcForOrder.indexOf('Future Wealth Path');
+const idxStrategicChart = execSrcForOrder.indexOf('Strategic Wealth Projection');
 const idxDecisionCtr  = execSrcForOrder.search(/Wealth Decision Center|WealthDecisionCenter/);
 assert(
-  'Future Wealth Path remains present inside the Executive Overview cockpit',
-  idxFutureWealth > 0,
+  'Strategic Wealth Projection (promoted primary chart) is present inside the cockpit',
+  idxStrategicChart > 0,
 );
 assert(
   'Wealth Decision Center remains present inside the Executive Overview cockpit',
@@ -585,16 +618,21 @@ assert(
   /data-testid="trajectory-chart-pending"|trajectory-chart-area/.test(execSrc),
 );
 
-// ─── 12b. Chart hierarchy & purpose — strategic vs operational ───────────────
-section('Chart hierarchy — Future Wealth Path (hero) + Plan Execution Capacity (operational)');
+// ─── 12b. Chart hierarchy & purpose — single strategic visualization ─────────
+section('Chart hierarchy — Strategic Wealth Projection (primary) + Plan Execution Capacity (operational)');
 
 assert(
-  'Hero chart renamed to "Future Wealth Path"',
-  /Future Wealth Path/.test(execSrc),
+  'Promoted strategic chart renamed to "Strategic Wealth Projection"',
+  /Strategic Wealth Projection/.test(execSrc) &&
+    /data-testid="strategic-wealth-projection-title"/.test(execSrc),
 );
 assert(
-  'Hero chart subtitle describes the Monte Carlo future net-worth engine',
-  /Monte Carlo future net-worth engine.*probabilistic projection/.test(execSrc),
+  'Strategic chart subtitle frames it as the primary strategic visualization',
+  /Primary strategic visualization.*Monte Carlo.*P10.*P50.*P90.*future net-worth engine/.test(execSrc),
+);
+assert(
+  'Legacy "Future Wealth Path" hero title removed from the cockpit display',
+  !/>\s*Future Wealth Path\s*</.test(execSrc),
 );
 assert(
   'Operational chart renamed to "Plan Execution Capacity"',
@@ -617,8 +655,22 @@ assert(
   /data-testid="deposit-power-chart-area"[\s\S]{0,400}?<ResponsiveContainer[^>]*height=\{(?:1\d\d|2[0-2]\d)\}/.test(execSrc),
 );
 assert(
-  'Future Wealth Path keeps generous hero height (≥300)',
+  'Strategic Wealth Projection keeps generous hero height (≥300)',
   /data-testid="trajectory-chart-area"[\s\S]{0,400}?<ResponsiveContainer[^>]*height=\{(?:3\d\d|4\d\d|5\d\d)\}/.test(execSrc),
+);
+
+// Exactly ONE primary strategic projection visualization remains.
+const mcChartCount = (execSrc.match(/data-testid="monte-carlo-trajectory-chart"/g) ?? []).length;
+const mcRenderCount = (execSrc.match(/<MonteCarloTrajectoryChart\b/g) ?? []).length;
+assert(
+  'Exactly one MonteCarloTrajectoryChart render site on Executive Overview',
+  mcRenderCount === 1,
+  `found ${mcRenderCount}`,
+);
+assert(
+  'Strategic Wealth Projection chart is rendered exactly once (no upper/lower duplicate)',
+  mcChartCount === 1,
+  `found ${mcChartCount}`,
 );
 
 // ─── 13. Current vs forecast source separation ───────────────────────────────

@@ -47,28 +47,33 @@ function run(name: string, cond: boolean, detail?: string) {
   }
 }
 
-// 1. The canonical Monte Carlo projection table lives inside the rebuilt
-//    Executive Overview, NOT inside the dashboard page directly.
+// 1. After the Executive Overview Projection Cleanup, the single canonical
+//    analytical table on the homepage is the WealthProjectionTable — sourced
+//    from `projectionRows` (canonical projectNetWorth engine). The Monte
+//    Carlo P10/P50/P90 fan still drives the chart above; the compact P50
+//    projection table is gone because it duplicated the fan.
 run(
-  "Executive Overview hosts the canonical projection table",
-  /data-testid="trajectory-projection-table"/.test(EXEC_DASH),
-  "canonical trajectory table missing from ExecutiveDashboard",
+  "Executive Overview hosts the richer wealth projection table",
+  /data-testid="wealth-projection-table-panel"/.test(EXEC_DASH),
+  "Strategic Wealth Projection table missing from ExecutiveDashboard",
 );
 run(
-  "Executive Overview renders MC fan data via monteCarloFanData / fan.map",
-  /fan!\.map\(\(row,\s*idx\)\s*=>/.test(EXEC_DASH) || /fan\.map\(\(row/.test(EXEC_DASH),
-  "MC fan data must drive the trajectory table",
+  "Executive Overview renders projection rows (canonical engine) via rows.map",
+  /rows\.map\(\(row,\s*idx\)\s*=>/.test(EXEC_DASH),
+  "Richer table must iterate canonical projection rows",
 );
 
-// 2. Default columns are Year / P50 / Confidence Range; P10 & P90 expand.
+// 2. Richer table exposes decision-grade columns sourced from the canonical
+//    projectNetWorth engine (no parallel maths).
 run(
-  "Projection table defaults to P50 + Confidence Range columns",
-  /Confidence Range/.test(EXEC_DASH) && /P50 \(median\)/.test(EXEC_DASH),
+  "Richer table surfaces Accessible NW + Total NW + CAGR + Growth columns",
+  /Accessible NW/.test(EXEC_DASH) && /Total NW/.test(EXEC_DASH) &&
+    /CAGR/.test(EXEC_DASH) && />Growth</.test(EXEC_DASH),
 );
 run(
-  "P10 / P90 columns are gated by the expand toggle",
-  /data-testid="trajectory-expand-range"/.test(EXEC_DASH) &&
-    /expandedRange/.test(EXEC_DASH),
+  "Compact P50 projection table (and its expand toggle) are fully removed",
+  !/data-testid="trajectory-projection-table"/.test(EXEC_DASH) &&
+    !/data-testid="trajectory-expand-range"/.test(EXEC_DASH),
 );
 
 // 3. The homepage no longer renders any competing Wealth Projection block.

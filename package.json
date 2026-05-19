@@ -17,6 +17,7 @@
     "test:global-tooltip-system": "tsx script/test-global-tooltip-system.ts",
     "test:future-worlds-rebuild": "tsx script/test-future-worlds-rebuild.ts",
     "test:executive-overview-rebuild": "tsx script/test-executive-overview-rebuild.ts",
+    "test:executive-overview-projection-cleanup": "tsx script/test-executive-overview-projection-cleanup.ts",
     "test:fwl-restore-events-debt-logic": "tsx script/test-fwl-restore-events-debt-logic.ts",
     "test:debt-classification-current-vs-planned": "tsx script/test-debt-classification-current-vs-planned.ts",
     "test:phase6": "tsx script/test-phase6-family-office.ts",

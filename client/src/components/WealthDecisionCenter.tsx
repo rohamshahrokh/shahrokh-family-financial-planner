@@ -1,16 +1,23 @@
 /**
- * WealthDecisionCenter.tsx — restored CASH / EVENTS / WEALTH / RISK tabs.
+ * WealthDecisionCenter.tsx — operational CASH / EVENTS / RISK surface.
  *
- * Sits inside the Executive Overview cockpit as the operational decision
- * surface between the Projection Table and Financial Health strip:
+ * Sits inside the Executive Overview cockpit BELOW the promoted Strategic
+ * Wealth Projection (chart) and richer analytical table, as the operational
+ * decision surface:
  *
  *   • CASH    — Deposit Power & Usable Equity breakdown table + Plan
  *               Execution Capacity chart (all controls preserved).
  *   • EVENTS  — Strategy timeline / roadmap (deposit build, IP purchases,
  *               stock DCA, crypto allocation, refinance, FIRE target) with
  *               planned / active / completed status.
- *   • WEALTH  — Monte Carlo trajectory (P10 / P50 / P90) + projection table.
  *   • RISK    — Liquidity / leverage / downside / survivability summary.
+ *
+ * NOTE: The prior WEALTH tab — which re-rendered the Monte Carlo trajectory
+ * chart + projection table — was removed in the Executive Overview Projection
+ * Cleanup pass. The promoted Strategic Wealth Projection panel above is now
+ * the single primary strategic visualization, paired with the single richer
+ * analytical table. The deep Forecast Engine remains one click away via the
+ * panel link.
  *
  * Source-of-truth invariants:
  *   • CURRENT debt is the only debt figure shown in the Hero / Today / CASH
@@ -18,15 +25,14 @@
  *     Events tab, clearly labelled as planned.
  *   • Live PPOR mortgage rate (5.82%) flows from `snap.mortgage_rate` — never
  *     a forecast / blended rate.
- *   • Reuses the existing DepositPowerTrajectoryPanel, MonteCarloTrajectoryChart
- *     and CompactProjectionTable from ExecutiveDashboard.tsx — no duplicate
- *     recommendation engines, no parallel intelligence.
+ *   • Reuses the existing DepositPowerTrajectoryPanel from ExecutiveDashboard
+ *     via a single render slot — no duplicate intelligence.
  */
 
 import { useMemo, useState } from 'react';
 import { Link } from 'wouter';
 import {
-  Wallet, Calendar, TrendingUp, Shield,
+  Wallet, Calendar, Shield,
   Home, Building2, LineChart as LineChartIcon, Coins as CoinsIcon,
   Repeat, Banknote, Flame, Sparkles, CheckCircle2, Clock, CircleDot,
 } from 'lucide-react';
@@ -39,12 +45,11 @@ import type {
   DepositPowerSummary,
 } from './ExecutiveDashboard';
 
-type TabKey = 'CASH' | 'EVENTS' | 'WEALTH' | 'RISK';
+type TabKey = 'CASH' | 'EVENTS' | 'RISK';
 
 const TAB_DEFS: { key: TabKey; label: string; Icon: any; description: string }[] = [
   { key: 'CASH',   label: 'CASH',   Icon: Wallet,   description: 'Deposit Power · liquidity execution' },
   { key: 'EVENTS', label: 'EVENTS', Icon: Calendar, description: 'Strategy roadmap · planned events' },
-  { key: 'WEALTH', label: 'WEALTH', Icon: TrendingUp, description: 'Monte Carlo · P10 / P50 / P90' },
   { key: 'RISK',   label: 'RISK',   Icon: Shield,   description: 'Liquidity · leverage · downside' },
 ];
 
@@ -450,21 +455,20 @@ export interface WealthDecisionCenterProps {
   /** Forwarded executive props so each tab can render its dedicated view. */
   executiveProps: ExecutiveDashboardProps;
   /**
-   * Slot renderers — supplied by ExecutiveDashboard.tsx so we reuse the live
-   * Plan Execution Capacity chart, Monte Carlo trajectory and projection
-   * table without duplicating logic.
+   * Slot renderer for the Plan Execution Capacity chart, supplied by
+   * ExecutiveDashboard.tsx so the live operational chart renders without
+   * duplicating logic. The prior WEALTH tab's Monte Carlo + projection
+   * renderers were removed in the Executive Overview Projection Cleanup
+   * pass — the promoted Strategic Wealth Projection above is the single
+   * primary surface for those.
    */
   renderDepositPowerChart: () => React.ReactNode;
-  renderMonteCarlo: () => React.ReactNode;
-  renderProjectionTable: () => React.ReactNode;
 }
 
 export default function WealthDecisionCenter({
   defaultTab = 'CASH',
   executiveProps,
   renderDepositPowerChart,
-  renderMonteCarlo,
-  renderProjectionTable,
 }: WealthDecisionCenterProps) {
   const [tab, setTab] = useState<TabKey>(defaultTab);
   const { privacyMode } = useAppStore();
@@ -485,7 +489,7 @@ export default function WealthDecisionCenter({
         <div>
           <h2 className="text-sm font-bold text-foreground">Wealth Decision Center</h2>
           <p className="text-[11px] text-muted-foreground">
-            Operational execution surface · CASH · EVENTS · WEALTH · RISK
+            Operational execution surface · CASH · EVENTS · RISK
           </p>
         </div>
         <nav
@@ -536,12 +540,6 @@ export default function WealthDecisionCenter({
               plannedDebt={executiveProps.plannedDebt ?? null}
               privacyMode={privacyMode}
             />
-          </div>
-        )}
-        {tab === 'WEALTH' && (
-          <div className="space-y-4" data-testid="wdc-panel-wealth" role="tabpanel">
-            <div>{renderMonteCarlo()}</div>
-            <div>{renderProjectionTable()}</div>
           </div>
         )}
         {tab === 'RISK' && (
