@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import DepositPowerCard from "@/components/DepositPowerCard";
 import { ModellingAssumptionsChip } from "@/components/taxRegime/ModellingAssumptionsChip";
+import { PropertyTaxImpactBlock } from "@/components/taxRegime/PropertyTaxImpactBlock";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -486,9 +487,10 @@ interface PropertyCardProps {
   selected: boolean;
   onToggleSelect: (id: number) => void;
   privacyMode: boolean;
+  wageIncome?: number;
 }
 
-function PropertyCard({ prop, onDelete, selected, onToggleSelect, privacyMode }: PropertyCardProps) {
+function PropertyCard({ prop, onDelete, selected, onToggleSelect, privacyMode, wageIncome = 0 }: PropertyCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState<any>(null);
@@ -775,6 +777,11 @@ function PropertyCard({ prop, onDelete, selected, onToggleSelect, privacyMode }:
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Tax Reform Impact (live from taxRulesEngine) — IPs only ─────── */}
+      {!editing && prop.type !== "ppor" && prop.type !== "land" && (
+        <PropertyTaxImpactBlock property={prop} wageIncome={wageIncome} />
       )}
 
       {/* Edit form */}
@@ -1559,6 +1566,7 @@ export default function PropertyPage() {
                 selected={selected.has(p.id)}
                 onToggleSelect={toggleSelect}
                 privacyMode={privacyMode}
+                wageIncome={safeNum((snapshot as any)?.monthly_income) * 12}
               />
               {/* Funding Source Selector — only for investment properties */}
               {(p.type === 'investment' || p.property_type === 'IP') && (

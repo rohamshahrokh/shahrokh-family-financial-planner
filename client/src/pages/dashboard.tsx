@@ -126,6 +126,7 @@ import KpiCard from "@/components/KpiCard";
 import WealthFlowBanner from "@/components/WealthFlowBanner";
 import familyImg from "@assets/family.jpeg";
 import ExecutiveDashboard from "@/components/ExecutiveDashboard";
+import { FutureReformImpactCard } from "@/components/taxRegime/FutureReformImpactCard";
 import DeepDiveSection from "@/components/DeepDiveSection";
 import { Link, useLocation } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
@@ -2203,6 +2204,14 @@ export default function DashboardPage() {
         data-testid="dashboard-executive-section"
       >
         <ExecutiveDashboard {...phase7ExecProps} />
+      </div>
+
+      {/* ── Future Reform Impact — live tax-reform delta from taxRulesEngine ── */}
+      <div className="px-4 pt-1 pb-2" data-testid="dashboard-future-reform-impact">
+        <FutureReformImpactCard
+          properties={properties as any}
+          wageIncome={snap.monthly_income * 12}
+        />
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════

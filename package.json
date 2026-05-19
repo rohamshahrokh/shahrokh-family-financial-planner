@@ -20,6 +20,7 @@
     "test:executive-overview-projection-cleanup": "tsx script/test-executive-overview-projection-cleanup.ts",
     "test:fwl-restore-events-debt-logic": "tsx script/test-fwl-restore-events-debt-logic.ts",
     "test:tax-rules-engine": "tsx script/test-tax-rules-engine.ts",
+    "test:fwl-tax-reform-live-integration": "tsx script/test-fwl-tax-reform-live-integration.ts",
     "test:debt-classification-current-vs-planned": "tsx script/test-debt-classification-current-vs-planned.ts",
     "test:phase6": "tsx script/test-phase6-family-office.ts",
     "test:projection-consistency": "tsx script/test-projection-consistency.ts",

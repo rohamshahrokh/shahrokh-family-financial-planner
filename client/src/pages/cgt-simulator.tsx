@@ -36,6 +36,8 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
   CartesianGrid, Cell,
 } from "recharts";
+import { CGTReformWaterfall } from "@/components/taxRegime/CGTReformWaterfall";
+import { ModellingAssumptionsChip } from "@/components/taxRegime/ModellingAssumptionsChip";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -1350,6 +1352,19 @@ function ResultsPanel({ s, res, mv, onForecast, saving }: {
         </div>
       </div>
 
+      {/* ── REFORM CGT WATERFALL (live from taxRulesEngine) ───────────────── */}
+      <CGTReformWaterfall
+        purchaseDate={s.purchaseDate}
+        saleDate={s.saleDate}
+        purchasePrice={s.purchasePrice}
+        buyingCosts={s.buyingCosts}
+        salePrice={s.salePrice}
+        sellingCosts={s.sellingCosts}
+        wageIncome={s.owner1Income + s.owner2Income}
+        propertyType="ESTABLISHED"
+        lossBankAtSale={0}
+      />
+
       {/* ── HOLDING PERIOD CASHFLOW ────────────────────────────────────────── */}
       <HoldingSummaryCard res={res} mv={mv} />
 
@@ -1853,6 +1868,11 @@ export default function CGTSimulatorPage() {
       </div>
 
       <div className="max-w-6xl mx-auto px-4 pt-6 space-y-6">
+
+        {/* Contextual tax regime chip — only on tax/property/CGT/assumptions surfaces. */}
+        <div className="flex items-center justify-end" data-testid="cgt-regime-chip-row">
+          <ModellingAssumptionsChip />
+        </div>
 
         {/* Disclaimer */}
         <div className="rounded-xl px-4 py-3 flex items-start gap-3"

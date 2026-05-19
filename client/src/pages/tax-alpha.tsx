@@ -21,6 +21,8 @@ import {
 import { useAppStore } from '@/lib/store';
 import { maskValue } from '@/components/PrivacyMask';
 import { formatCurrency } from '@/lib/finance';
+import { TaxStrategyAuditTable } from '@/components/taxRegime/TaxStrategyAuditTable';
+import { ModellingAssumptionsChip } from '@/components/taxRegime/ModellingAssumptionsChip';
 import {
   Zap, Shield, AlertTriangle, CheckCircle2,
   ChevronDown, ChevronUp, Info, DollarSign,
@@ -339,6 +341,18 @@ export default function TaxAlphaPage() {
           ))}
         </div>
       </div>
+
+      {/* ── Property Tax Reform — Master Audit (live from taxRulesEngine) ── */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          Property Tax Reform — Master Audit
+        </div>
+        <ModellingAssumptionsChip />
+      </div>
+      <TaxStrategyAuditTable
+        properties={properties as any}
+        wageIncome={input.roham_annual_income + input.fara_annual_income}
+      />
 
       {/* ── Strategy cards ─────────────────────────────────────────────────── */}
       <div>
