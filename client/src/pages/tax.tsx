@@ -19,6 +19,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import TaxAlphaPage from "./tax-alpha";
+import { ModellingAssumptionsChip } from "@/components/taxRegime/ModellingAssumptionsChip";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, safeNum } from "@/lib/finance";
@@ -551,9 +552,14 @@ export default function Tax() {
           label="Save Tax Profile"
         />
       </div>
-        <div className="flex items-center gap-1 px-2 py-1 bg-emerald-950/40 border border-emerald-800/30 rounded-md">
-          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-          <span className="text-xs text-emerald-400 font-medium">ATO Verified</span>
+        <div className="flex items-center gap-2">
+          {/* FWL_TAX_REFORM_ENGINE: contextual Tax & Policy Scenario selector
+              (moved here from the global navbar). */}
+          <ModellingAssumptionsChip />
+          <div className="flex items-center gap-1 px-2 py-1 bg-emerald-950/40 border border-emerald-800/30 rounded-md">
+            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+            <span className="text-xs text-emerald-400 font-medium">ATO Verified</span>
+          </div>
         </div>
       </div>
 

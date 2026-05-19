@@ -17,6 +17,7 @@ import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import DepositPowerCard from "@/components/DepositPowerCard";
+import { ModellingAssumptionsChip } from "@/components/taxRegime/ModellingAssumptionsChip";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -1230,12 +1231,16 @@ export default function PropertyPage() {
             Australian Investment Property Simulator — Queensland focus
           </p>
         </div>
-        <Button
-          onClick={() => {
-            setShowAdd(true);
-            setDraft({ ...EMPTY_PROPERTY });
-          }}
-          className="gap-2"
+        <div className="flex items-center gap-2">
+          {/* FWL_TAX_REFORM_ENGINE: contextual Tax & Policy Scenario selector
+              (moved here from the global navbar). */}
+          <ModellingAssumptionsChip />
+          <Button
+            onClick={() => {
+              setShowAdd(true);
+              setDraft({ ...EMPTY_PROPERTY });
+            }}
+            className="gap-2"
           style={{
             background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))",
             color: "hsl(224,40%,8%)",
@@ -1245,6 +1250,7 @@ export default function PropertyPage() {
         >
           <Plus className="w-4 h-4" /> Add Property
         </Button>
+        </div>
       </div>
 
       {/* Deposit Power — usable equity (PPOR + IPs) + deployable cash */}
