@@ -26,6 +26,13 @@ import {
   type TaxBreakdown,
 } from './australianTax';
 import { safeNum } from './finance';
+// Centralized tax engine (FWL_TAX_REFORM_MODELLING_ENGINE) — the strategy
+// generator delegates per-property regime classification here so it cannot
+// recommend invalid NG deductions for quarantined post-cutoff IPs.
+import {
+  classifyPropertyTaxRegime,
+  type PropertyTaxClassification,
+} from './tax/taxRulesEngine';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,7 +45,14 @@ export type TaxAlphaCategory =
   | 'bracket'
   | 'medicare'
   | 'debt_structure'
-  | 'spouse_split';
+  | 'spouse_split'
+  // Regime-aware (reform) categories — surface alternatives when NG is
+  // quarantined for post-cutoff established IPs.
+  | 'new_build_strategy'
+  | 'yield_optimisation'
+  | 'hold_period_optimisation'
+  | 'loss_bank_exit'
+  | 'future_cgt_offset';
 
 export interface TaxAlphaStrategy {
   id:             string;
@@ -88,7 +102,23 @@ export interface TaxAlphaInput {
     insurance:      number;       // annual
     maintenance:    number;       // annual
     body_corporate: number;       // annual
+    // Regime-aware fields — drive grandfathering / carve-out logic via
+    // taxRulesEngine.classifyPropertyTaxRegime. Optional for back-compat.
+    id?:             string | number;
+    property_type?:  string;      // ESTABLISHED | NEW_BUILD | UNKNOWN
+    contract_date?:  string;      // ISO YYYY-MM-DD
+    purchase_date?:  string;      // ISO YYYY-MM-DD
+    settlement_date?:string;      // ISO YYYY-MM-DD
+    annual_depreciation?: number;
   }>;
+  /**
+   * Active tax-policy scenario. When "proposed_reform", quarantined
+   * post-cutoff established IPs do NOT generate a wage-deductible NG
+   * refund — the strategy engine surfaces loss-bank-aware alternatives
+   * (new-build, yield, hold-period, future CGT offset, exit planning)
+   * instead of the invalid current-law NG suggestion.
+   */
+  active_scenario?: 'current_law' | 'proposed_reform' | 'custom';
   // PPOR mortgage
   mortgage_balance:     number;
   mortgage_rate:        number;   // percent e.g. 6.5
@@ -230,48 +260,291 @@ function detectSpouseContribSplit(inp: TaxAlphaInput): TaxAlphaStrategy {
   };
 }
 
-// ─── Strategy 3: Negative Gearing ────────────────────────────────────────────
+// ─── Strategy 3: Negative Gearing (regime-aware) ─────────────────────────────
+//
+// SINGLE SOURCE OF TRUTH: taxRulesEngine.classifyPropertyTaxRegime.
+//
+// Under "current_law" — behaviour unchanged: combined NG loss across IPs
+// generates a wage-deductible refund at the marginal rate.
+//
+// Under "proposed_reform" — every property is classified individually.
+// Quarantined post-cutoff established IPs do NOT generate a wage refund;
+// the loss accrues to the per-property loss bank. The strategy only
+// surfaces NG benefit for IPs that remain eligible (grandfathered or
+// carve-out). Quarantined IPs trigger the regime-aware alternative
+// strategies (new build, yield, hold period, future CGT offset, exit).
+
+interface NgClassifiedProperty {
+  loss: number;
+  classification: PropertyTaxClassification;
+  raw: TaxAlphaInput['properties'][number];
+}
+
+function classifyIpsForScenario(inp: TaxAlphaInput): NgClassifiedProperty[] {
+  const scenario = inp.active_scenario ?? 'current_law';
+  const out: NgClassifiedProperty[] = [];
+  for (const p of inp.properties) {
+    if (p.is_ppor) continue;
+    const rentalAnn   = safeNum(p.weekly_rent) * 52;
+    const interestAnn = safeNum(p.loan_amount) * (safeNum(p.interest_rate) || 6.5) / 100;
+    const mgmtFee     = (safeNum(p.management_fee) / 100) * rentalAnn;
+    const costsAnn    = mgmtFee + safeNum(p.council_rates) + safeNum(p.insurance) +
+                        safeNum(p.maintenance) + safeNum(p.body_corporate);
+    const depreciation = safeNum(p.annual_depreciation);
+    const taxableResult = rentalAnn - interestAnn - costsAnn - depreciation;
+    const ngLoss = taxableResult < 0 ? -taxableResult : 0;
+    const classification = classifyPropertyTaxRegime(
+      {
+        propertyId: String(p.id ?? `ip-${out.length}`),
+        contractDate: p.contract_date ?? p.purchase_date,
+        purchaseDate: p.purchase_date,
+        settlementDate: p.settlement_date,
+        propertyType: (p.property_type as any) ?? 'ESTABLISHED',
+        annualRent: rentalAnn,
+        annualHoldingCosts: costsAnn,
+        annualInterest: interestAnn,
+        annualDepreciation: depreciation,
+        annualWageIncome: inp.roham_annual_income + inp.fara_annual_income,
+      },
+      scenario,
+    );
+    out.push({ loss: ngLoss, classification, raw: p });
+  }
+  return out;
+}
 
 function detectNegativeGearing(inp: TaxAlphaInput): TaxAlphaStrategy {
   const annualIncome   = inp.roham_annual_income;
   const marginalRate   = calcMarginalRate(annualIncome, '2025-26') + 0.02; // +Medicare
   const dataReliable   = inp.properties.length > 0 && annualIncome > 0;
+  const scenario       = inp.active_scenario ?? 'current_law';
 
-  let totalNGLoss = 0;
-  const propertyDetails: string[] = [];
+  const classified = classifyIpsForScenario(inp);
 
-  for (const p of inp.properties) {
-    if (p.is_ppor) continue; // PPOR costs not deductible
-    const rentalAnn   = safeNum(p.weekly_rent) * 52;
-    const interestAnn = safeNum(p.loan_amount) * (safeNum(p.interest_rate) || 6.5) / 100;
-    const mgmtFee     = (safeNum(p.management_fee) / 100) * rentalAnn;
-    const costsAnn    = mgmtFee + safeNum(p.council_rates) + safeNum(p.insurance) + safeNum(p.maintenance) + safeNum(p.body_corporate);
-    const ngLoss      = interestAnn + costsAnn - rentalAnn;
-    if (ngLoss > 0) {
-      totalNGLoss += ngLoss;
-      propertyDetails.push(`NG loss ${fmt(Math.round(ngLoss))}/yr on IP loan of ${fmt(Math.round(p.loan_amount))}`);
-    }
+  // Only properties that remain wage-deductible under the active scenario
+  // are eligible for a current-style NG refund. Quarantined IPs return 0.
+  const eligibleLosses = classified.filter(c =>
+    c.loss > 0 && c.classification.negativeGearingEligible,
+  );
+  const quarantinedLosses = classified.filter(c =>
+    c.loss > 0 && !c.classification.negativeGearingEligible,
+  );
+
+  const totalEligibleLoss = eligibleLosses.reduce((s, c) => s + c.loss, 0);
+  const totalQuarantinedLoss = quarantinedLosses.reduce((s, c) => s + c.loss, 0);
+  const saving = totalEligibleLoss > 0 ? totalEligibleLoss * marginalRate : 0;
+
+  const reformActive = scenario === 'proposed_reform';
+  const hasQuarantined = quarantinedLosses.length > 0;
+
+  // Build action / impact lines.
+  const ngDetail = eligibleLosses.length > 0
+    ? eligibleLosses
+        .map(c => `NG loss ${fmt(Math.round(c.loss))}/yr (${c.classification.status.isGrandfathered ? 'grandfathered' : 'carve-out'})`)
+        .join('; ')
+    : '';
+
+  let action: string;
+  let impact: string;
+  let compliance: string;
+
+  if (reformActive && hasQuarantined && totalEligibleLoss === 0) {
+    // All loss-making IPs are quarantined — the current-law NG suggestion
+    // is INVALID under reform. Surface the loss bank instead and point at
+    // the regime-aware alternative strategies.
+    action = `Reform: NG quarantined on ${quarantinedLosses.length} IP(s) — loss bank +${fmt(Math.round(totalQuarantinedLoss))}/yr accumulates instead of refund`;
+    impact = `Under the proposed 2027 reform, post-cutoff established dwellings cannot offset rental losses against wages. Your ${quarantinedLosses.length} affected IP(s) accumulate ${fmt(Math.round(totalQuarantinedLoss))} in the per-property loss bank this year. The bank consumes against future rental profit or the eventual CGT gain. See the New-build / Yield / Hold-period / CGT-offset / Exit-planning strategies below.`;
+    compliance = 'Proposed 2027 reform: established-dwelling losses quarantined to the property. Indexed cost-base on disposal. New builds, BTR and affordable housing remain carved out. Modelling only — not personal tax advice.';
+  } else if (reformActive && hasQuarantined && totalEligibleLoss > 0) {
+    action = `Claim ${fmt(Math.round(totalEligibleLoss))} eligible NG loss → ${fmt(Math.round(saving))} refund (${quarantinedLosses.length} IP(s) quarantined)`;
+    impact = `Reform-eligible IPs (grandfathered / carve-outs) contribute ${fmt(Math.round(totalEligibleLoss))} in deductible loss this year — refund ~${fmt(Math.round(saving))}. ${quarantinedLosses.length} post-cutoff IP(s) are quarantined (${fmt(Math.round(totalQuarantinedLoss))}/yr to the loss bank). ${ngDetail}`;
+    compliance = 'Eligible deductions: grandfathered (acquired ≤ 12 May 2026 19:30 AEST) and post-reform new-build/BTR/affordable carve-outs. Quarantined IPs deferred to loss bank.';
+  } else if (totalEligibleLoss > 0) {
+    action = `Claim ${fmt(Math.round(totalEligibleLoss))} net rental loss → ${fmt(Math.round(saving))} tax reduction`;
+    impact = `Investment property interest + costs exceed rental income by ${fmt(Math.round(totalEligibleLoss))}/year. This loss offsets your taxable income at your ${(marginalRate * 100).toFixed(0)}% combined rate, reducing tax by ~${fmt(Math.round(saving))}. ${ngDetail}`;
+    compliance = 'ATO: only deductible for investment properties, not PPOR. Interest, management fees, council rates, insurance, repairs, body corporate are deductible. Depreciation (Div 43 / 40) further reduces taxable income — get a quantity surveyor report.';
+  } else {
+    action = dataReliable ? 'Properties are cash-flow positive — no NG benefit' : 'Add IP details in Property page';
+    impact = 'Your IPs are positively geared — all income and profit is taxable but the positive cashflow is a net benefit.';
+    compliance = 'ATO: only deductible for investment properties, not PPOR.';
   }
 
-  const saving = totalNGLoss > 0 ? totalNGLoss * marginalRate : 0;
+  const labelText = saving > 0
+    ? savingLabel(saving)
+    : (reformActive && hasQuarantined ? 'Quarantined under reform' : (dataReliable ? 'Cash-flow positive' : 'Needs IP data'));
 
   return {
     id:             'negative_gearing',
     category:       'negative_gearing',
-    title:          'Negative Gearing Deduction',
-    action:         totalNGLoss > 0
-      ? `Claim ${fmt(Math.round(totalNGLoss))} net rental loss → ${fmt(Math.round(saving))} tax reduction`
-      : dataReliable ? 'Properties are cash-flow positive — no NG benefit' : 'Add IP details in Property page',
+    title:          reformActive && hasQuarantined && totalEligibleLoss === 0
+      ? 'Negative Gearing — Quarantined Under Reform'
+      : 'Negative Gearing Deduction',
+    action,
     annual_saving:  saving,
-    annual_saving_label: saving > 0 ? savingLabel(saving) : (dataReliable ? 'Cash-flow positive' : 'Needs IP data'),
-    impact: totalNGLoss > 0
-      ? `Investment property interest + costs exceed rental income by ${fmt(Math.round(totalNGLoss))}/year. This loss offsets your taxable income at your ${(marginalRate * 100).toFixed(0)}% combined rate, reducing tax by ~${fmt(Math.round(saving))}. ` +
-        propertyDetails.join('; ')
-      : 'Your IPs are positively geared — all income and profit is taxable but the positive cashflow is a net benefit.',
-    compliance:     'ATO: only deductible for investment properties, not PPOR. Interest, management fees, council rates, insurance, repairs, body corporate are deductible. Depreciation (Div 43 / 40) further reduces taxable income — get a quantity surveyor report.',
-    risk:           'Low',
+    annual_saving_label: labelText,
+    impact,
+    compliance,
+    risk:           reformActive && hasQuarantined ? 'Medium' : 'Low',
     data_reliable:  dataReliable,
     priority:       2,
+  };
+}
+
+// ─── Regime-aware alternatives (active when reform quarantines losses) ──────
+
+function detectNewBuildStrategy(inp: TaxAlphaInput): TaxAlphaStrategy {
+  const scenario = inp.active_scenario ?? 'current_law';
+  const classified = classifyIpsForScenario(inp);
+  const quarantined = classified.filter(c => c.loss > 0 && !c.classification.negativeGearingEligible);
+  const dataReliable = inp.properties.length > 0 && inp.roham_annual_income > 0;
+  const marginalRate = calcMarginalRate(inp.roham_annual_income, '2025-26') + 0.02;
+
+  // The carve-out preserves a refund equal to what the quarantined IPs lose.
+  const reformActive = scenario === 'proposed_reform';
+  const quarantinedLoss = quarantined.reduce((s, c) => s + c.loss, 0);
+  const potentialRefund = reformActive ? quarantinedLoss * marginalRate : 0;
+
+  return {
+    id:             'new_build_strategy',
+    category:       'new_build_strategy',
+    title:          'New-Build / BTR Carve-Out Strategy',
+    action: reformActive && quarantined.length > 0
+      ? `Direct next acquisition to new builds / BTR / affordable to preserve up to ${fmt(Math.round(potentialRefund))}/yr in wage-deductible NG`
+      : reformActive
+        ? 'Future acquisitions in new-build / BTR / affordable retain current-law NG and 50% CGT discount'
+        : 'New-build advantage relevant only under proposed reform',
+    annual_saving:  potentialRefund,
+    annual_saving_label: reformActive && potentialRefund > 0
+      ? savingLabel(potentialRefund, 'Up to ')
+      : (reformActive ? 'Reserve future acquisitions' : 'Not active under current law'),
+    impact: reformActive
+      ? `Under the proposed reform, only new builds, BTR, and affordable housing keep wage-deductible negative gearing and the 50% CGT discount. Pivoting future buys into these carve-outs recovers refund capacity lost on the ${quarantined.length} quarantined IP(s).`
+      : 'Carve-out is meaningful only when reform is active. Under current law all IPs already qualify for wage-deductible NG and the 50% CGT discount.',
+    compliance:     'Carve-out scope per the proposed reform: NEW_BUILD, BUILD_TO_RENT, AFFORDABLE_HOUSING. Confirm contracts and property-type certification before relying on the carve-out.',
+    risk:           'Low',
+    data_reliable:  dataReliable,
+    priority:       reformActive ? 2 : 8,
+  };
+}
+
+function detectYieldOptimisation(inp: TaxAlphaInput): TaxAlphaStrategy {
+  const scenario = inp.active_scenario ?? 'current_law';
+  const classified = classifyIpsForScenario(inp);
+  const quarantined = classified.filter(c => c.loss > 0 && !c.classification.negativeGearingEligible);
+  const reformActive = scenario === 'proposed_reform';
+  const dataReliable = inp.properties.length > 0;
+
+  // Estimate the rent uplift required to neutralise the quarantined loss.
+  const totalQuarantinedLoss = quarantined.reduce((s, c) => s + c.loss, 0);
+  const weeklyUplift = totalQuarantinedLoss > 0
+    ? Math.ceil((totalQuarantinedLoss / 52) / Math.max(1, quarantined.length))
+    : 0;
+
+  return {
+    id:             'yield_optimisation',
+    category:       'yield_optimisation',
+    title:          'Yield Optimisation on Quarantined IPs',
+    action: reformActive && quarantined.length > 0
+      ? `Lift average rent ~${fmt(weeklyUplift)}/week per quarantined IP to neutralise the ${fmt(Math.round(totalQuarantinedLoss))}/yr loss bank growth`
+      : 'Yield optimisation always beneficial — quarantine adds urgency under reform',
+    annual_saving:  reformActive ? totalQuarantinedLoss : 0,
+    annual_saving_label: reformActive && totalQuarantinedLoss > 0
+      ? savingLabel(totalQuarantinedLoss, 'Neutralises ')
+      : 'Indirect benefit',
+    impact: reformActive
+      ? `Quarantined IPs lose the wage refund — net cashflow is purely rent − costs. Lifting yield (rent reviews, value-add reno, depreciation refresh, vacancy reduction) is the single highest-leverage lever, because every dollar lifts cashflow AND avoids further loss-bank growth.`
+      : 'Even under current law, lifting yield improves post-tax cashflow — but the lost refund cushion is missing under reform.',
+    compliance:     'Tenancy law: rent reviews must comply with state-specific notice/frequency rules. Capex and depreciation schedules (Div 43/40) refresh requires a quantity surveyor.',
+    risk:           'Low',
+    data_reliable:  dataReliable,
+    priority:       reformActive && quarantined.length > 0 ? 2 : 7,
+  };
+}
+
+function detectHoldPeriodOptimisation(inp: TaxAlphaInput): TaxAlphaStrategy {
+  const scenario = inp.active_scenario ?? 'current_law';
+  const classified = classifyIpsForScenario(inp);
+  const reformActive = scenario === 'proposed_reform';
+  const quarantined = classified.filter(c => !c.classification.negativeGearingEligible);
+  const dataReliable = inp.properties.length > 0;
+
+  return {
+    id:             'hold_period_optimisation',
+    category:       'hold_period_optimisation',
+    title:          'Hold-Period Optimisation (Indexed Cost Base)',
+    action: reformActive && quarantined.length > 0
+      ? 'Lengthen hold period to maximise indexation uplift on the cost base and accumulate loss-bank credits used on disposal'
+      : 'Hold ≥ 12 months under current law to retain the 50% CGT discount',
+    annual_saving:  0, // saving accrues at disposal, not annually
+    annual_saving_label: reformActive
+      ? 'Disposal-time benefit'
+      : '50% CGT discount @ 12mo',
+    impact: reformActive
+      ? `Reform replaces the 50% CGT discount with an indexed cost base. Each additional year of hold inflates the cost base by the indexation factor — and lets more of the loss bank consume against the final capital gain. Short holds are the worst outcome under reform.`
+      : 'Holding > 12 months unlocks the 50% CGT discount under current law.',
+    compliance:     'Indexation rate is set by the proposed reform regime — refer to taxRulesEngine. Loss bank applies against the indexed gain on disposal (not against unrelated income).',
+    risk:           'Low',
+    data_reliable:  dataReliable,
+    priority:       reformActive ? 3 : 8,
+  };
+}
+
+function detectFutureCgtOffset(inp: TaxAlphaInput): TaxAlphaStrategy {
+  const scenario = inp.active_scenario ?? 'current_law';
+  const classified = classifyIpsForScenario(inp);
+  const reformActive = scenario === 'proposed_reform';
+  const quarantined = classified.filter(c => c.loss > 0 && !c.classification.negativeGearingEligible);
+  const totalQuarantinedLoss = quarantined.reduce((s, c) => s + c.loss, 0);
+  const dataReliable = inp.properties.length > 0;
+  // Marginal benefit when the loss bank is applied against an eventual gain.
+  const marginalRate = calcMarginalRate(inp.roham_annual_income, '2025-26') + 0.02;
+  const deferredBenefit = reformActive ? totalQuarantinedLoss * marginalRate : 0;
+
+  return {
+    id:             'future_cgt_offset',
+    category:       'future_cgt_offset',
+    title:          'Future CGT Offset via Loss Bank',
+    action: reformActive && quarantined.length > 0
+      ? `Plan disposals so accumulated ${fmt(Math.round(totalQuarantinedLoss))}/yr loss bank consumes against the indexed capital gain at sale`
+      : 'No quarantined loss bank under current law',
+    annual_saving:  deferredBenefit,
+    annual_saving_label: reformActive && deferredBenefit > 0
+      ? savingLabel(deferredBenefit, 'Deferred ')
+      : 'Not applicable',
+    impact: reformActive
+      ? `The annual ${fmt(Math.round(totalQuarantinedLoss))} quarantined loss does not disappear — it accrues to the per-property loss bank and consumes against the indexed gain at disposal. Sequencing high-gain disposals against the IP with the largest bank converts deferred losses into a tax credit on capital gains.`
+      : 'Loss bank is only created when reform quarantines a loss. Under current law NG losses flow against wages immediately, with no deferred CGT credit.',
+    compliance:     'Per the proposed reform, loss bank applies against the indexed capital gain on disposal of the SAME property. Cross-property pooling is NOT permitted.',
+    risk:           'Medium',
+    data_reliable:  dataReliable,
+    priority:       reformActive && quarantined.length > 0 ? 3 : 8,
+  };
+}
+
+function detectLossBankExit(inp: TaxAlphaInput): TaxAlphaStrategy {
+  const scenario = inp.active_scenario ?? 'current_law';
+  const classified = classifyIpsForScenario(inp);
+  const reformActive = scenario === 'proposed_reform';
+  const quarantined = classified.filter(c => c.loss > 0 && !c.classification.negativeGearingEligible);
+  const dataReliable = inp.properties.length > 0;
+  const totalQuarantinedLoss = quarantined.reduce((s, c) => s + c.loss, 0);
+
+  return {
+    id:             'loss_bank_exit',
+    category:       'loss_bank_exit',
+    title:          'Loss-Bank-Aware Exit Planning',
+    action: reformActive && quarantined.length > 0
+      ? `Audit each quarantined IP's loss-bank trajectory; trigger disposal when bank ≈ projected capital gain to maximise CGT offset`
+      : 'No quarantined IPs — exit planning driven by ordinary equity / cashflow goals',
+    annual_saving:  0,
+    annual_saving_label: reformActive ? 'Disposal-time planning' : 'Not applicable',
+    impact: reformActive
+      ? `An IP that is bleeding cashflow AND quarantined is the worst held asset on the portfolio. Modelling each IP's projected loss bank vs projected capital gain (via the CGT simulator) reveals the optimal disposal year — when the bank fully offsets the indexed gain. Holding past that point destroys value.`
+      : 'Under current law, exit planning is dominated by yield, leverage and lifestyle goals; no loss bank to balance against the gain.',
+    compliance:     'Modelling only — actual disposal triggers stamp duty, agent fees, capital gains and potential mortgage break costs. Engage a registered tax agent before transacting.',
+    risk:           'Medium',
+    data_reliable:  dataReliable,
+    priority:       reformActive && quarantined.length > 0 ? 3 : 9,
   };
 }
 
@@ -506,7 +779,10 @@ export function computeTaxAlpha(inp: TaxAlphaInput): TaxAlphaResult {
   const faraTax  = inp.fara_annual_income > 0 ? calcAustralianTax(faraTaxInput) : calcAustralianTax({ ...faraTaxInput, grossSalary: 0 });
   const householdTax = rohamTax.totalDeductions + faraTax.totalDeductions;
 
-  // Run all strategies
+  // Run all strategies. Regime-aware alternatives are appended and
+  // self-gate to priority 8/9 under current law (so they don't pollute
+  // the top-3 unless reform is actually active).
+  const scenario = inp.active_scenario ?? 'current_law';
   const strategies: TaxAlphaStrategy[] = [
     detectSuperConcessional(inp),
     detectNegativeGearing(inp),
@@ -516,7 +792,18 @@ export function computeTaxAlpha(inp: TaxAlphaInput): TaxAlphaResult {
     detectMLSSaving(inp),
     detectDebtStructure(inp),
     detectBracketOptimisation(inp),
-  ].sort((a, b) => b.annual_saving - a.annual_saving);
+    detectNewBuildStrategy(inp),
+    detectYieldOptimisation(inp),
+    detectHoldPeriodOptimisation(inp),
+    detectFutureCgtOffset(inp),
+    detectLossBankExit(inp),
+  ].sort((a, b) => {
+    // Reform scenario: prefer regime-aware alternatives over current-law
+    // NG suggestions when NG has been quarantined to zero.
+    if (a.annual_saving === b.annual_saving) return a.priority - b.priority;
+    return b.annual_saving - a.annual_saving;
+  });
+  void scenario;
 
   // Top 3 by saving, reliable only
   const top3 = strategies
@@ -708,15 +995,22 @@ export function buildTaxAlphaInput(
     fara_employer_sg_rate:          pickNum(tp.fara_super_rate,       snap.fara_employer_contrib) || 12,
     fara_salary_sacrifice_monthly:  pickNum(tp.fara_salary_sacrifice,  snap.fara_salary_sacrifice),
     properties: (properties || []).map((p: any) => ({
-      is_ppor:        p.is_ppor || p.property_type === 'PPOR' || false,
-      weekly_rent:    n(p.weekly_rent),
-      loan_amount:    n(p.loan_balance || p.loan_amount || p.mortgage_balance || 0),
-      interest_rate:  n(p.interest_rate) || 6.5,
-      management_fee: n(p.management_fee) || 8,
-      council_rates:  n(p.council_rates)  || 1_800,
-      insurance:      n(p.insurance)      || 1_200,
-      maintenance:    n(p.maintenance)    || 1_500,
-      body_corporate: n(p.body_corporate) || 0,
+      id:              p.id,
+      is_ppor:         p.is_ppor || p.property_type === 'PPOR' || p.type === 'ppor' || false,
+      weekly_rent:     n(p.weekly_rent),
+      loan_amount:     n(p.loan_balance || p.loan_amount || p.mortgage_balance || 0),
+      interest_rate:   n(p.interest_rate) || 6.5,
+      management_fee:  n(p.management_fee) || 8,
+      council_rates:   n(p.council_rates)  || 1_800,
+      insurance:       n(p.insurance)      || 1_200,
+      maintenance:     n(p.maintenance)    || 1_500,
+      body_corporate:  n(p.body_corporate) || 0,
+      // Regime-aware fields passed through to taxRulesEngine.
+      property_type:   p.property_type,
+      contract_date:   p.contract_date,
+      purchase_date:   p.purchase_date,
+      settlement_date: p.settlement_date,
+      annual_depreciation: n(p.annual_depreciation),
     })),
     mortgage_balance:  n(snap.mortgage),
     mortgage_rate:     n(snap.mortgage_rate) || 6.5,

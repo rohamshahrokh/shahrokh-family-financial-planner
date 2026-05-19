@@ -193,6 +193,23 @@ export interface ExecutiveDashboardProps {
    * Strategy hub uses. Avoids fabricating column values.
    */
   projectionRows?: WealthProjectionRow[] | null;
+  /**
+   * Live planned property acquisitions (rows with contract / settlement /
+   * purchase date in the future). The Events tab Timeline derives IP2 /
+   * IP3 year markers from THIS list — never from a static +3y assumption —
+   * so the timeline always reflects the actual property plan. Required by
+   * FWL_TAX_REFORM_INTEGRITY_FIX.
+   */
+  plannedAcquisitions?: Array<{
+    id?: number | string;
+    name?: string;
+    contract_date?: string | null;
+    settlement_date?: string | null;
+    purchase_date?: string | null;
+    purchase_price?: number | null;
+    property_type?: string | null;
+    type?: string | null;
+  }> | null;
 }
 
 /**

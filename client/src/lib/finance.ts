@@ -1,5 +1,11 @@
 // ─── Financial Calculation Engine ───────────────────────────────────
 
+// Single-source-of-truth tax engine. calcNegativeGearing delegates to this
+// for per-property regime classification (current-law vs proposed reform vs
+// custom). DO NOT add a parallel tax-policy formula in this file — extend
+// taxRulesEngine instead. (See FWL_TAX_REFORM_MODELLING_ENGINE spec.)
+import { classifyPropertyTaxRegime } from "@/lib/tax/taxRulesEngine";
+
 /**
  * safeNum — converts any value to a finite number.
  * undefined / null / "" / NaN all become 0.
@@ -1521,21 +1527,33 @@ export interface NGAnalysis {
   annualDepreciation: number;     // Div 43 estimate
   taxableRentalResult: number;    // income - interest - expenses - depreciation  (negative = loss)
   isNegativelyGeared: boolean;
-  annualTaxBenefit: number;       // marginalRate × |loss|  (positive = $ refund)
+  annualTaxBenefit: number;       // marginalRate × |loss|  (positive = $ refund). ZERO when quarantined under reform.
   monthlyTaxBenefit: number;      // annualTaxBenefit / 12  (for PAYG spread)
   monthlyCashLoss: number;        // net rental income − full loan repayment − expenses/12
   netAfterTaxMonthlyCost: number; // monthlyCashLoss + monthlyTaxBenefit
   ownershipShare: number;         // 0–1
+  // Regime-aware fields (live from taxRulesEngine.classifyPropertyTaxRegime):
+  regimeScenario: 'current_law' | 'proposed_reform' | 'custom';
+  isQuarantined: boolean;         // true = loss can NOT offset wage; accumulates in loss bank
+  isGrandfathered: boolean;       // acquired ≤ 12 May 2026 19:30 AEST
+  isPostReformCarveOut: boolean;  // new build / BTR carve-out — current rules continue
+  lossAccumulatedThisYear: number;// loss added to per-property loss bank this FY
+  lossBankBalance: number;        // running loss bank for this property after this FY
 }
 
 export interface NGSummary {
   properties: NGAnalysis[];
+  perProperty?: NGAnalysis[];     // alias used by some surfaces (e.g. dashboard)
   totalAnnualTaxBenefit: number;
   totalMonthlyCashLoss: number;
   totalNetAfterTaxMonthlyCost: number;
   totalTaxableRentalResult: number;
+  totalLossAccumulatedThisYear: number;  // sum of per-property loss-bank growth this FY
+  totalLossBankBalance: number;          // sum of per-property loss-bank balance
   marginalRate: number;
   refundMode: 'lump-sum' | 'payg';
+  /** Active scenario the NG summary was computed against. */
+  scenario: 'current_law' | 'proposed_reform' | 'custom';
 }
 
 export function calcNegativeGearing(params: {
@@ -1563,13 +1581,29 @@ export function calcNegativeGearing(params: {
     depreciation_enabled?: boolean;
     settlement_date?: string;
     purchase_date?: string;
+    contract_date?: string;
+    property_type?: string;
     rental_start_date?: string;
+    /** Loss bank carried forward into this FY (positive). */
+    loss_bank_balance?: number;
   }>;
   annualSalaryIncome: number; // combined household gross salary
   refundMode?: 'lump-sum' | 'payg';
   jointOwnership?: boolean;    // if true, income split 50/50 before bracket calc
+  /**
+   * Active tax-policy scenario. Drives per-property regime classification
+   * via the centralized `taxRulesEngine` (single source of truth):
+   *   - "current_law":     all properties retain wage-deductible NG.
+   *   - "proposed_reform": post-cutoff established dwellings lose NG —
+   *                        annualTaxBenefit = 0, loss is quarantined to the
+   *                        per-property loss bank instead.
+   *   - "custom":          uses the active custom regime overrides.
+   * Defaults to "current_law" so legacy callers behave identically.
+   */
+  scenario?: 'current_law' | 'proposed_reform' | 'custom';
 }): NGSummary {
   const mode = params.refundMode ?? 'lump-sum';
+  const scenario = params.scenario ?? 'current_law';
   const salaryForBracket = params.jointOwnership
     ? params.annualSalaryIncome / 2
     : params.annualSalaryIncome;
@@ -1619,9 +1653,41 @@ export function calcNegativeGearing(params: {
     // The rental loss offsets salary income → refund = loss × marginalRate
     const effectiveIncome = salaryForBracket + Math.max(0, taxableRentalResult); // add profit if positive; 0 if loss (ATO offsets)
     const marginalRate = auMarginalRate(effectiveIncome);
-    const annualTaxBenefit = isNegativelyGeared
+    const currentLawTaxBenefit = isNegativelyGeared
       ? Math.abs(taxableRentalResult) * marginalRate
       : 0;
+
+    // ── Regime classification (single source of truth) ──────────────────────
+    // Delegates to taxRulesEngine.classifyPropertyTaxRegime via the portfolio
+    // adapter contract. Under reform, quarantined post-cutoff established
+    // dwellings produce $0 PAYG refund — losses accrue to the loss bank.
+    const classification = classifyPropertyTaxRegime(
+      {
+        propertyId:   String(prop.id),
+        contractDate: prop.contract_date ?? prop.purchase_date,
+        purchaseDate: prop.purchase_date,
+        settlementDate: prop.settlement_date,
+        propertyType: (prop.property_type as any) ?? 'ESTABLISHED',
+        annualRent:           annualRentalIncome,
+        annualHoldingCosts:   annualDeductibleExpenses,
+        annualInterest,
+        annualDepreciation,
+        annualWageIncome:     params.annualSalaryIncome,
+        quarantinedLossBank:  safeNum(prop.loss_bank_balance),
+      },
+      scenario,
+    );
+    const isQuarantined =
+      classification.status.effectiveNegativeGearing === 'QUARANTINE_TO_PROPERTY';
+    const isGrandfathered = classification.status.isGrandfathered === true;
+    const isPostReformCarveOut = classification.status.isPostReformCarveOut === true;
+
+    // Apply quarantine: zero out PAYG refund, accumulate loss into the bank.
+    const annualTaxBenefit = isQuarantined ? 0 : currentLawTaxBenefit;
+    const lossAccumulatedThisYear = isQuarantined && isNegativelyGeared
+      ? Math.abs(taxableRentalResult)
+      : 0;
+    const lossBankBalance = safeNum(prop.loss_bank_balance) + lossAccumulatedThisYear;
 
     // Actual monthly cash loss (before tax benefit) — uses full loan repayment (principal + interest)
     const fullMonthlyLoanRepayment = isIO
@@ -1645,6 +1711,12 @@ export function calcNegativeGearing(params: {
       monthlyCashLoss:          Math.round(monthlyCashLoss),
       netAfterTaxMonthlyCost:   Math.round(monthlyCashLoss + annualTaxBenefit / 12),
       ownershipShare:           ownerShare,
+      regimeScenario:           scenario,
+      isQuarantined,
+      isGrandfathered,
+      isPostReformCarveOut,
+      lossAccumulatedThisYear:  Math.round(lossAccumulatedThisYear),
+      lossBankBalance:          Math.round(lossBankBalance),
     };
   });
 
@@ -1652,16 +1724,22 @@ export function calcNegativeGearing(params: {
   const totalMonthlyCashLoss         = analyses.reduce((s, a) => s + a.monthlyCashLoss, 0);
   const totalNetAfterTaxMonthlyCost  = analyses.reduce((s, a) => s + a.netAfterTaxMonthlyCost, 0);
   const totalTaxableRentalResult     = analyses.reduce((s, a) => s + a.taxableRentalResult, 0);
+  const totalLossAccumulatedThisYear = analyses.reduce((s, a) => s + a.lossAccumulatedThisYear, 0);
+  const totalLossBankBalance         = analyses.reduce((s, a) => s + a.lossBankBalance, 0);
   const marginalRate                 = auMarginalRate(salaryForBracket);
 
   return {
     properties: analyses,
+    perProperty: analyses,
     totalAnnualTaxBenefit,
     totalMonthlyCashLoss,
     totalNetAfterTaxMonthlyCost,
     totalTaxableRentalResult,
+    totalLossAccumulatedThisYear,
+    totalLossBankBalance,
     marginalRate,
     refundMode: mode,
+    scenario,
   };
 }
 

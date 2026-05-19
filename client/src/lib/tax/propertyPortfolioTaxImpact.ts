@@ -21,6 +21,7 @@
 import {
   classifyPropertyTaxRegime,
   calculateAnnualPropertyTaxImpact,
+  calculateLossBank,
   compareTaxImpactVsCurrentLaw,
   type PropertyTaxInput,
   type AnnualPropertyTaxImpact,
@@ -51,6 +52,8 @@ export interface PortfolioPropertyRow {
   current_value?: number;
   purchase_price?: number;
   annual_depreciation?: number;
+  /** Loss bank carried forward (positive dollars). 0 when none. */
+  loss_bank_balance?: number;
 }
 
 export interface PortfolioImpactRow {
@@ -64,6 +67,20 @@ export interface PortfolioImpactRow {
   cashflowDelta: number;
   /** New loss accumulated this FY under reform. */
   lossBankDelta: number;
+  /**
+   * Per-property loss bank state under reform. Required UI surface
+   * (FWL_TAX_REFORM_INTEGRITY_FIX). All four numbers are positive dollars:
+   *   - lossBankBalance   = current bank carried into this FY
+   *   - lossBankAccumulated = bank + lossAddedThisFY (before any consumption)
+   *   - lossBankConsumed  = portion of the bank applied against this-FY profit
+   *   - lossBankRemaining = bank after this FY (i.e. closing balance)
+   */
+  lossBank: {
+    lossBankBalance: number;
+    lossBankAccumulated: number;
+    lossBankConsumed: number;
+    lossBankRemaining: number;
+  };
 }
 
 export interface PortfolioImpactSummary {
@@ -135,6 +152,7 @@ function buildPropertyTaxInput(
     annualWageIncome: wageIncome,
     hasPrivateHospitalCover: marginalIncomeForMedicareCheck < 0,
     hasHelpDebt: false,
+    quarantinedLossBank: safeNum(row.loss_bank_balance),
   };
 }
 
@@ -178,6 +196,24 @@ export function computePortfolioTaxImpact(
       comparison.proposedReform.classification ??
       classifyPropertyTaxRegime(taxInput, "proposed_reform");
 
+    // Per-property loss bank (FWL_TAX_REFORM_INTEGRITY_FIX requirement).
+    // Mirrors taxRulesEngine.calculateLossBank semantics but is computed
+    // here per-row so the UI can expose balance / accumulated / consumed
+    // / remaining without re-deriving anything locally.
+    const previousBank = safeNum(row.loss_bank_balance);
+    const lossBankStep = calculateLossBank({
+      previousBank,
+      taxableRentalProfit: comparison.proposedReform.taxableNetPropertyIncome,
+      scenario: "proposed_reform",
+      classification,
+    });
+    const lossBank = {
+      lossBankBalance:     previousBank,
+      lossBankAccumulated: previousBank + lossBankStep.lossAdded,
+      lossBankConsumed:    lossBankStep.lossApplied,
+      lossBankRemaining:   lossBankStep.newBank,
+    };
+
     rows.push({
       id: taxInput.propertyId,
       name: row.name ?? `Property ${taxInput.propertyId}`,
@@ -187,6 +223,7 @@ export function computePortfolioTaxImpact(
       proposedReform: comparison.proposedReform,
       cashflowDelta: comparison.cashflowDelta,
       lossBankDelta: comparison.lossBankDelta,
+      lossBank,
     });
 
     currentLawRefund += comparison.currentLaw.paygRefundThisYear;

@@ -11,6 +11,17 @@ import {
   type NGSummary,
 } from "@/lib/finance";
 import { runCashEngine, getCashKPICards, type CashEvent } from "@/lib/cashEngine";
+import { useActiveRegime } from "@/hooks/useActiveRegime";
+// Map the active regime selector → calcNegativeGearing scenario value.
+// The 4-value selector enum from taxPolicyEngine collapses to the 3-value
+// scenario enum used by taxRulesEngine: AUTO_DETECT defaults to current_law
+// (per-property classification then applies inside the engine when the
+// scenario is reform).
+function selectorToScenario(selector: string): 'current_law' | 'proposed_reform' | 'custom' {
+  if (selector === 'PROPOSED_2027_REFORM') return 'proposed_reform';
+  if (selector === 'CUSTOM_STRESS_TEST')   return 'custom';
+  return 'current_law';
+}
 import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import { calcDepositPower, projectEquityTimeline } from "@/lib/equityEngine";
@@ -608,7 +619,13 @@ const YearDetailPanel = ({ row, privacyMode, checkDelta, checkOk }: {
 };
 
 export default function DashboardPage() {
+  // Active tax regime — used to make NG / refund / loss bank flows
+  // regime-aware. The dashboard is purely a CONSUMER of taxRulesEngine
+  // outputs; the policy decision (current_law vs reform) lives in the
+  // engine — never duplicated here.
   const qc = useQueryClient();
+  const { selector: activeRegimeSelector } = useActiveRegime();
+  const activeScenario = selectorToScenario(activeRegimeSelector);
   const { chartView, setChartView, privacyMode, togglePrivacy, currentUser } = useAppStore();
   const { forecastMode, profile, monteCarloResult } = useForecastStore();
   const loadForecastFromSupabase = useForecastStore(s => s.loadFromSupabase);
@@ -1103,10 +1120,29 @@ export default function DashboardPage() {
   snap.monthly_expenses = monthlyExpensesSOT;
 
   // ─── NG Summary ───────────────────────────────────────────────────────────
+  // Reactive to the active tax-policy scenario. Under reform, quarantined
+  // post-cutoff established IPs return $0 PAYG refund and the loss accrues
+  // to the per-property loss bank — see taxRulesEngine.
   const ngSummary = useMemo<NGSummary>(() => {
-    if (!snapshot) return { totalAnnualTaxBenefit: 0, perProperty: [] } as NGSummary;
-    return calcNegativeGearing({ properties, annualSalaryIncome: snap.monthly_income * 12, refundMode: ngRefundMode });
-  }, [snapshot, properties, snap.monthly_income, ngRefundMode]);
+    if (!snapshot) return {
+      properties: [], perProperty: [],
+      totalAnnualTaxBenefit: 0,
+      totalMonthlyCashLoss: 0,
+      totalNetAfterTaxMonthlyCost: 0,
+      totalTaxableRentalResult: 0,
+      totalLossAccumulatedThisYear: 0,
+      totalLossBankBalance: 0,
+      marginalRate: 0,
+      refundMode: 'lump-sum',
+      scenario: activeScenario,
+    } as NGSummary;
+    return calcNegativeGearing({
+      properties,
+      annualSalaryIncome: snap.monthly_income * 12,
+      refundMode: ngRefundMode,
+      scenario: activeScenario,
+    });
+  }, [snapshot, properties, snap.monthly_income, ngRefundMode, activeScenario]);
 
   // ─── Projection ───────────────────────────────────────────────────────────
   // BUG FIX: previously did NOT pass forecast assumptions → dashboard ignored
@@ -2079,6 +2115,26 @@ export default function DashboardPage() {
       crypto:             row.cryptoValue ?? 0,
       superTotal:         row.totalSuper ?? 0,
     })),
+    // Live planned acquisitions (settlement / contract / purchase date in
+    // the future) — drives the Events Timeline IP2/IP3 year markers so the
+    // timeline reflects the actual property plan, not a static +3y guess.
+    plannedAcquisitions: (properties ?? [])
+      .filter((p: any) => {
+        if (p.type === 'ppor' || p.type === 'owner_occupied') return false;
+        const raw = p.contract_date ?? p.settlement_date ?? p.purchase_date;
+        if (!raw) return false;
+        return String(raw) > todayStr;
+      })
+      .map((p: any) => ({
+        id:              p.id,
+        name:            p.name ?? p.address ?? `IP ${p.id}`,
+        contract_date:   p.contract_date ?? null,
+        settlement_date: p.settlement_date ?? null,
+        purchase_date:   p.purchase_date ?? null,
+        purchase_price:  p.purchase_price ?? p.current_value ?? null,
+        property_type:   p.property_type ?? null,
+        type:            p.type ?? null,
+      })),
   };
 
   return (

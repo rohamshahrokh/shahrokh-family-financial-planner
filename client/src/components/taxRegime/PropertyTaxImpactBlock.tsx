@@ -37,7 +37,7 @@ export function PropertyTaxImpactBlock({
   );
   if (!impact) return null;
 
-  const { classification, currentLaw, proposedReform } = impact;
+  const { classification, currentLaw, proposedReform, lossBank } = impact;
   const status = classification.status;
 
   // Pick the tone / label triad
@@ -112,6 +112,35 @@ export function PropertyTaxImpactBlock({
           label="After-tax / mo (reform)"
           value={fmtAud(reformAfterTaxMonthly)}
           tone={reformAfterTaxMonthly < 0 ? "bad" : "good"}
+        />
+      </div>
+
+      {/* Per-property loss bank — required by FWL_TAX_REFORM_INTEGRITY_FIX.
+          Always rendered for IP rows; values collapse to $0 when not under
+          reform / not quarantined. */}
+      <div
+        className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] mt-2 border-t border-border/40 pt-2"
+        data-testid={`property-loss-bank-${impact.id}`}
+      >
+        <Stat
+          label="Loss bank balance"
+          value={fmtAud(lossBank.lossBankBalance)}
+          tone={lossBank.lossBankBalance > 0 ? "warn" : "soft"}
+        />
+        <Stat
+          label="Accumulated this FY"
+          value={fmtAud(lossBank.lossBankAccumulated)}
+          tone={lossBank.lossBankAccumulated > 0 ? "warn" : "soft"}
+        />
+        <Stat
+          label="Consumed this FY"
+          value={fmtAud(lossBank.lossBankConsumed)}
+          tone={lossBank.lossBankConsumed > 0 ? "good" : "soft"}
+        />
+        <Stat
+          label="Loss bank remaining"
+          value={fmtAud(lossBank.lossBankRemaining)}
+          tone={lossBank.lossBankRemaining > 0 ? "warn" : "soft"}
         />
       </div>
 

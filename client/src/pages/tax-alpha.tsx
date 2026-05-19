@@ -19,6 +19,7 @@ import {
   describeHouseholdTaxSource,
 } from '@/lib/householdTaxInputs';
 import { useAppStore } from '@/lib/store';
+import { useActiveRegime } from '@/hooks/useActiveRegime';
 import { maskValue } from '@/components/PrivacyMask';
 import { formatCurrency } from '@/lib/finance';
 import { TaxStrategyAuditTable } from '@/components/taxRegime/TaxStrategyAuditTable';
@@ -194,6 +195,7 @@ function SavingsChart({ strategies, mv }: { strategies: TaxAlphaStrategy[]; mv: 
 export default function TaxAlphaPage() {
   const privacyMode = useAppStore(s => s.privacyMode);
   const mv = (v: string) => maskValue(v, privacyMode);
+  const { selector: activeRegimeSelector } = useActiveRegime();
 
   const { data: snap } = useQuery<any>({ queryKey: ['/api/snapshot'] });
   const { data: properties = [] } = useQuery<any[]>({ queryKey: ['/api/properties'] });
@@ -228,7 +230,17 @@ export default function TaxAlphaPage() {
   );
   const canonicalIncome = household.canonicalIncome;
 
-  const input  = buildTaxAlphaInput(snap, properties, taxProfile, canonicalIncome, household);
+  // Wire the active tax-policy scenario into the strategy engine so the
+  // Action Planner gates negative gearing recommendations and surfaces
+  // regime-aware alternatives under reform (FWL_TAX_REFORM_INTEGRITY_FIX).
+  const activeScenario: 'current_law' | 'proposed_reform' | 'custom' =
+    activeRegimeSelector === 'PROPOSED_2027_REFORM' ? 'proposed_reform'
+    : activeRegimeSelector === 'CUSTOM_STRESS_TEST' ? 'custom'
+    : 'current_law';
+  const input  = {
+    ...buildTaxAlphaInput(snap, properties, taxProfile, canonicalIncome, household),
+    active_scenario: activeScenario,
+  };
   const result = computeTaxAlpha(input);
 
   const overrideActive = household.overrideActive;

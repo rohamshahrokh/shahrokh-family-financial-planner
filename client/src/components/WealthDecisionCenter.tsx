@@ -73,14 +73,45 @@ const STATUS_CFG: Record<RoadmapEvent['status'], { label: string; tone: string; 
 };
 
 // ─── Default roadmap derivation ─────────────────────────────────────────────
-// If the caller has no explicit roadmap, synthesise a deterministic premium
-// roadmap from snapshot signals so the EVENTS tab never renders empty.
+// If the caller has no explicit roadmap, synthesise a deterministic roadmap
+// from snapshot signals + the live property plan (acquisition / settlement /
+// contract dates) so the EVENTS tab reflects the ACTUAL property plan and
+// not a static +3y assumption. Required by FWL_TAX_REFORM_INTEGRITY_FIX:
+// IP2 must show 2028 when the plan has IP2 acquisition in 2028.
+//
+// The "planned IPs" list is read from `props.plannedAcquisitions` when the
+// host page wires it (dashboard now does — sourced from /api/properties
+// rows with settlement_date / purchase_date / contract_date in the future).
+function plannedAcquisitionYear(
+  p: NonNullable<ExecutiveDashboardProps['plannedAcquisitions']>[number],
+): number | null {
+  const raw = p.contract_date ?? p.settlement_date ?? p.purchase_date ?? null;
+  if (!raw) return null;
+  const y = parseInt(String(raw).slice(0, 4), 10);
+  return Number.isFinite(y) && y > 1900 ? y : null;
+}
+
 function defaultRoadmap(props: ExecutiveDashboardProps): RoadmapEvent[] {
   const thisYear = new Date().getFullYear();
   const dp = props.depositPowerSummary;
   const ipReadiness = dp?.ipReadinessPct ?? 0;
   const dpAmt = dp?.totalDepositPower ?? 0;
   const finalYear = dp?.finalYearLabel ?? `${thisYear + 10}`;
+
+  // ── Live property plan derivation ──
+  // Sort planned acquisitions by their target year. The FIRST entry feeds
+  // the "First Investment Property" event; the SECOND entry feeds "Second
+  // Investment Property". When the plan is empty we fall back to readiness
+  // signals (first IP) and to NULL for IP2 (we skip it rather than fake a
+  // static +3y entry — fakery is what this fix exists to remove).
+  const plan = (props.plannedAcquisitions ?? [])
+    .map(p => ({ entry: p, year: plannedAcquisitionYear(p) }))
+    .filter(x => x.year !== null)
+    .sort((a, b) => (a.year as number) - (b.year as number));
+
+  const firstIpYear: number =
+    plan[0]?.year ?? (thisYear + (ipReadiness >= 100 ? 0 : 1));
+  const secondIpYear: number | null = plan[1]?.year ?? null;
 
   const events: RoadmapEvent[] = [];
 
@@ -97,11 +128,15 @@ function defaultRoadmap(props: ExecutiveDashboardProps): RoadmapEvent[] {
 
   events.push({
     id: 'first-ip',
-    year: `${thisYear + (ipReadiness >= 100 ? 0 : 1)}`,
+    year: `${firstIpYear}`,
     kind: 'ip-purchase',
     title: 'First Investment Property',
-    description: 'Acquire first IP once deposit + buffer + serviceability align.',
-    amountLabel: 'Plan loan ~80% LVR · settled when ready',
+    description: plan[0]?.entry?.name
+      ? `Acquire ${plan[0].entry.name} per property plan.`
+      : 'Acquire first IP once deposit + buffer + serviceability align.',
+    amountLabel: plan[0]?.entry?.purchase_price
+      ? `Plan price ${formatCurrency(plan[0].entry.purchase_price, true)} · ~80% LVR`
+      : 'Plan loan ~80% LVR · settled when ready',
     status: ipReadiness >= 100 ? 'active' : 'planned',
   });
 
@@ -135,25 +170,36 @@ function defaultRoadmap(props: ExecutiveDashboardProps): RoadmapEvent[] {
     status: 'planned',
   });
 
-  events.push({
-    id: 'second-ip',
-    year: `${thisYear + 3}`,
-    kind: 'ip-purchase',
-    title: 'Second Investment Property',
-    description: 'Second IP after equity from first IP recycles.',
-    amountLabel: 'Plan loan from recycled equity',
-    status: 'planned',
-  });
+  if (secondIpYear !== null) {
+    events.push({
+      id: 'second-ip',
+      year: `${secondIpYear}`,
+      kind: 'ip-purchase',
+      title: 'Second Investment Property',
+      description: plan[1]?.entry?.name
+        ? `Acquire ${plan[1].entry.name} per property plan.`
+        : 'Second IP after equity from first IP recycles.',
+      amountLabel: plan[1]?.entry?.purchase_price
+        ? `Plan price ${formatCurrency(plan[1].entry.purchase_price, true)} · recycled equity`
+        : 'Plan loan from recycled equity',
+      status: 'planned',
+    });
+  }
 
-  events.push({
-    id: 'debt-reduction',
-    year: `${thisYear + 5}`,
-    kind: 'debt-reduction',
-    title: 'Debt Reduction Phase',
-    description: 'Switch from acquisition to principal reduction.',
-    amountLabel: 'Target offset = mortgage',
-    status: 'planned',
-  });
+  // Debt-reduction and FIRE target use the deposit power final year as the
+  // calm "long horizon" anchor (no hardcoded +5y / +10y offsets).
+  const finalYearNum = parseInt(String(finalYear).slice(0, 4), 10);
+  if (Number.isFinite(finalYearNum)) {
+    events.push({
+      id: 'debt-reduction',
+      year: `${Math.max(firstIpYear + 1, finalYearNum - 5)}`,
+      kind: 'debt-reduction',
+      title: 'Debt Reduction Phase',
+      description: 'Switch from acquisition to principal reduction.',
+      amountLabel: 'Target offset = mortgage',
+      status: 'planned',
+    });
+  }
 
   events.push({
     id: 'fire-target',
