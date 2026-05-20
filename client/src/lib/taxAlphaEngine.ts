@@ -78,6 +78,13 @@ export interface TaxAlphaResult {
   household_tax_now:     number;
   data_coverage:         'full' | 'partial' | 'minimal'; // how much data we had
   fy:                    string;               // '2025-26'
+  // FOLLOW_UP: Active scenario the strategy list was computed against.
+  // Drives the visible scenario banner in tax-alpha.tsx so the user can
+  // see at a glance whether the recommendations reflect current law or
+  // the proposed 2027 reform.
+  active_scenario:       'current_law' | 'proposed_reform' | 'custom';
+  /** True iff any IP is quarantined under the active scenario. */
+  reform_has_quarantined_ips: boolean;
 }
 
 export interface TaxAlphaInput {
@@ -348,17 +355,22 @@ function detectNegativeGearing(inp: TaxAlphaInput): TaxAlphaStrategy {
   let impact: string;
   let compliance: string;
 
-  if (reformActive && hasQuarantined && totalEligibleLoss === 0) {
-    // All loss-making IPs are quarantined — the current-law NG suggestion
-    // is INVALID under reform. Surface the loss bank instead and point at
-    // the regime-aware alternative strategies.
-    action = `Reform: NG quarantined on ${quarantinedLosses.length} IP(s) — loss bank +${fmt(Math.round(totalQuarantinedLoss))}/yr accumulates instead of refund`;
-    impact = `Under the proposed 2027 reform, post-cutoff established dwellings cannot offset rental losses against wages. Your ${quarantinedLosses.length} affected IP(s) accumulate ${fmt(Math.round(totalQuarantinedLoss))} in the per-property loss bank this year. The bank consumes against future rental profit or the eventual CGT gain. See the New-build / Yield / Hold-period / CGT-offset / Exit-planning strategies below.`;
-    compliance = 'Proposed 2027 reform: established-dwelling losses quarantined to the property. Indexed cost-base on disposal. New builds, BTR and affordable housing remain carved out. Modelling only — not personal tax advice.';
-  } else if (reformActive && hasQuarantined && totalEligibleLoss > 0) {
-    action = `Claim ${fmt(Math.round(totalEligibleLoss))} eligible NG loss → ${fmt(Math.round(saving))} refund (${quarantinedLosses.length} IP(s) quarantined)`;
-    impact = `Reform-eligible IPs (grandfathered / carve-outs) contribute ${fmt(Math.round(totalEligibleLoss))} in deductible loss this year — refund ~${fmt(Math.round(saving))}. ${quarantinedLosses.length} post-cutoff IP(s) are quarantined (${fmt(Math.round(totalQuarantinedLoss))}/yr to the loss bank). ${ngDetail}`;
-    compliance = 'Eligible deductions: grandfathered (acquired ≤ 12 May 2026 19:30 AEST) and post-reform new-build/BTR/affordable carve-outs. Quarantined IPs deferred to loss bank.';
+  // FOLLOW_UP: Under proposed reform, whenever ANY IP is quarantined, the
+  // visible card must be the "Quarantined Under Reform" variant — even when
+  // other IPs remain eligible. The current-law "Claim ... rental loss →
+  // tax reduction" wording is invalid under reform regardless of whether
+  // a separate carve-out refund exists; that smaller refund is surfaced as
+  // a sub-line and the user is pointed to the regime-aware alternatives.
+  if (reformActive && hasQuarantined) {
+    if (totalEligibleLoss > 0) {
+      action = `Reform: NG quarantined on ${quarantinedLosses.length} IP(s) — loss bank +${fmt(Math.round(totalQuarantinedLoss))}/yr. Carve-out IP(s) still refund ${fmt(Math.round(saving))}.`;
+      impact = `Under the proposed 2027 reform, post-cutoff established dwellings cannot offset rental losses against wages. ${quarantinedLosses.length} of your IP(s) are quarantined and accumulate ${fmt(Math.round(totalQuarantinedLoss))}/yr in the per-property loss bank. ${eligibleLosses.length} carve-out / grandfathered IP(s) still produce a wage refund of ~${fmt(Math.round(saving))}. See the New-build / Yield / Hold-period / CGT-offset / Exit-planning strategies below for the regime-aware playbook.`;
+      compliance = 'Proposed 2027 reform: established-dwelling losses quarantined to the property. Indexed cost-base on disposal. New builds, BTR and affordable housing remain carved out. Modelling only — not personal tax advice.';
+    } else {
+      action = `Reform: NG quarantined on ${quarantinedLosses.length} IP(s) — loss bank +${fmt(Math.round(totalQuarantinedLoss))}/yr accumulates instead of refund`;
+      impact = `Under the proposed 2027 reform, post-cutoff established dwellings cannot offset rental losses against wages. Your ${quarantinedLosses.length} affected IP(s) accumulate ${fmt(Math.round(totalQuarantinedLoss))} in the per-property loss bank this year. The bank consumes against future rental profit or the eventual CGT gain. See the New-build / Yield / Hold-period / CGT-offset / Exit-planning strategies below.`;
+      compliance = 'Proposed 2027 reform: established-dwelling losses quarantined to the property. Indexed cost-base on disposal. New builds, BTR and affordable housing remain carved out. Modelling only — not personal tax advice.';
+    }
   } else if (totalEligibleLoss > 0) {
     action = `Claim ${fmt(Math.round(totalEligibleLoss))} net rental loss → ${fmt(Math.round(saving))} tax reduction`;
     impact = `Investment property interest + costs exceed rental income by ${fmt(Math.round(totalEligibleLoss))}/year. This loss offsets your taxable income at your ${(marginalRate * 100).toFixed(0)}% combined rate, reducing tax by ~${fmt(Math.round(saving))}. ${ngDetail}`;
@@ -376,7 +388,7 @@ function detectNegativeGearing(inp: TaxAlphaInput): TaxAlphaStrategy {
   return {
     id:             'negative_gearing',
     category:       'negative_gearing',
-    title:          reformActive && hasQuarantined && totalEligibleLoss === 0
+    title:          reformActive && hasQuarantined
       ? 'Negative Gearing — Quarantined Under Reform'
       : 'Negative Gearing Deduction',
     action,
@@ -849,6 +861,13 @@ export function computeTaxAlpha(inp: TaxAlphaInput): TaxAlphaResult {
     /* eslint-enable no-console */
   }
 
+  // Detect whether the current-scenario classification produced any
+  // quarantined IPs — used for the visible scenario banner + tests.
+  const reformHasQuarantined = scenario === 'proposed_reform' &&
+    classifyIpsForScenario(inp).some(
+      c => c.loss > 0 && !c.classification.negativeGearingEligible,
+    );
+
   return {
     strategies,
     top3,
@@ -859,6 +878,8 @@ export function computeTaxAlpha(inp: TaxAlphaInput): TaxAlphaResult {
     household_tax_now:    householdTax,
     data_coverage:        dataCoverage,
     fy:                   FY,
+    active_scenario:      scenario,
+    reform_has_quarantined_ips: reformHasQuarantined,
   };
 }
 

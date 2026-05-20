@@ -717,6 +717,15 @@ export default function DashboardPage() {
     queryKey: ["/api/properties"],
     queryFn: () => apiRequest("GET", "/api/properties").then((r) => r.json()),
   });
+  // FOLLOW_UP: pull the fire-scenario config so the EVENTS tab can surface
+  // the Second IP year from the execution roadmap when /api/properties has
+  // fewer than 2 future acquisitions. We tolerate failure: the route is
+  // optional for users who haven't configured a scenario yet, in which case
+  // the Second IP event simply degrades gracefully (no static fallback).
+  const { data: fireScenarioConfig = [] } = useQuery<any[]>({
+    queryKey: ["/api/fire-scenario-config"],
+    queryFn: () => apiRequest("GET", "/api/fire-scenario-config").then((r) => r.json()).catch(() => []),
+  });
   const { data: stocks = [] } = useQuery({
     queryKey: ["/api/stocks"],
     queryFn: () => apiRequest("GET", "/api/stocks").then((r) => r.json()),
@@ -2135,6 +2144,58 @@ export default function DashboardPage() {
         property_type:   p.property_type ?? null,
         type:            p.type ?? null,
       })),
+    // FOLLOW_UP: Second IP year fallback from the execution roadmap.
+    // When /api/properties has fewer than 2 future acquisitions, the Events
+    // Timeline reads this prop so the Second IP event still renders. We
+    // source from the fire-scenario config: the largest ip_target_year
+    // across scenarios with num_planned_ips >= 2 is the engine's best
+    // estimate of the second-IP target year. We intentionally do NOT fall
+    // back to a static +N year if no roadmap signal exists — the event is
+    // skipped in that case, per the integrity-fix invariant.
+    roadmapSecondIpYear: (() => {
+      const cfgs = Array.isArray(fireScenarioConfig) ? fireScenarioConfig : [];
+      // Candidate years from scenarios that plan at least 2 IPs.
+      const candidates = cfgs
+        .filter((c: any) => Number(c?.num_planned_ips ?? 0) >= 2 && c?.ip_target_year != null)
+        .map((c: any) => parseInt(String(c.ip_target_year), 10))
+        .filter((y: number) => Number.isFinite(y));
+      if (candidates.length > 0) {
+        // Prefer the SECOND-IP target year. Convention: scenarios that
+        // plan multiple IPs encode the *second* IP target year in
+        // ip_target_year (the first IP year comes from plannedAcquisitions).
+        return Math.max(...candidates);
+      }
+      // Soft fallback when the user has a single planned IP in /api/properties
+      // and a scenario that plans more than one but only sets a single year:
+      // the engine assumes IP2 = max(ip_target_year across scenarios with
+      // num_planned_ips >= 1) where it exceeds the first IP year.
+      const allYears = cfgs
+        .filter((c: any) => c?.ip_target_year != null)
+        .map((c: any) => parseInt(String(c.ip_target_year), 10))
+        .filter((y: number) => Number.isFinite(y));
+      const futureProps = (properties ?? []).filter((p: any) => {
+        if (p.type === 'ppor' || p.type === 'owner_occupied') return false;
+        const raw = p.contract_date ?? p.settlement_date ?? p.purchase_date;
+        return raw && String(raw) > todayStr;
+      });
+      if (allYears.length > 0 && futureProps.length < 2) {
+        const firstIpYear = futureProps[0]
+          ? parseInt(
+              String(
+                futureProps[0].contract_date ??
+                  futureProps[0].settlement_date ??
+                  futureProps[0].purchase_date,
+              ).slice(0, 4),
+              10,
+            )
+          : null;
+        const above = firstIpYear != null
+          ? allYears.filter((y: number) => y > firstIpYear)
+          : allYears;
+        if (above.length > 0) return Math.min(...above);
+      }
+      return null;
+    })(),
   };
 
   return (

@@ -210,6 +210,16 @@ export interface ExecutiveDashboardProps {
     property_type?: string | null;
     type?: string | null;
   }> | null;
+
+  /**
+   * FOLLOW_UP: explicit roadmap-derived second IP year. Used as the IP2
+   * fallback when `plannedAcquisitions` has fewer than 2 entries (e.g. the
+   * live demo only has 1 IP row in /api/properties). Sourced from the
+   * execution roadmap / fire-scenario `ip_target_year` field by the host
+   * page so the EVENTS tab still surfaces the Second IP year the engine
+   * knows about — never a static +3y guess.
+   */
+  roadmapSecondIpYear?: number | null;
 }
 
 /**

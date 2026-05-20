@@ -111,7 +111,18 @@ function defaultRoadmap(props: ExecutiveDashboardProps): RoadmapEvent[] {
 
   const firstIpYear: number =
     plan[0]?.year ?? (thisYear + (ipReadiness >= 100 ? 0 : 1));
-  const secondIpYear: number | null = plan[1]?.year ?? null;
+  // FOLLOW_UP: when the live /api/properties feed has fewer than 2 planned
+  // IPs, fall back to the explicit roadmap-derived year supplied by the
+  // host page (sourced from the execution roadmap / fire-scenario engine).
+  // The Second IP event must still render so the user sees the planned
+  // acquisition the engine knows about — never a static +3y guess.
+  const roadmapIp2: number | null =
+    typeof props.roadmapSecondIpYear === 'number' &&
+    Number.isFinite(props.roadmapSecondIpYear)
+      ? props.roadmapSecondIpYear
+      : null;
+  const secondIpYear: number | null = plan[1]?.year ?? roadmapIp2 ?? null;
+  const secondIpFromRoadmap = plan[1]?.year == null && roadmapIp2 !== null;
 
   const events: RoadmapEvent[] = [];
 
@@ -178,10 +189,14 @@ function defaultRoadmap(props: ExecutiveDashboardProps): RoadmapEvent[] {
       title: 'Second Investment Property',
       description: plan[1]?.entry?.name
         ? `Acquire ${plan[1].entry.name} per property plan.`
-        : 'Second IP after equity from first IP recycles.',
+        : (secondIpFromRoadmap
+            ? 'Second IP per execution roadmap (acquisition engine target year).'
+            : 'Second IP after equity from first IP recycles.'),
       amountLabel: plan[1]?.entry?.purchase_price
         ? `Plan price ${formatCurrency(plan[1].entry.purchase_price, true)} · recycled equity`
-        : 'Plan loan from recycled equity',
+        : (secondIpFromRoadmap
+            ? 'Roadmap target year · plan loan from recycled equity'
+            : 'Plan loan from recycled equity'),
       status: 'planned',
     });
   }
