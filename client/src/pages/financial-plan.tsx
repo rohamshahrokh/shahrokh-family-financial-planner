@@ -46,6 +46,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import {
+  CashAllocationSection,
+  SuperSection as SuperAllocationSection,
+} from "@/components/financial-plan/CashAndSuperSections";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -538,22 +542,32 @@ export default function MyFinancialPlan() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════
+          Cash Allocation — moved out of Settings (canonical input surface).
+      ═══════════════════════════════════════════════════════════════════ */}
+      <CashAllocationSection />
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          Superannuation — moved out of Settings (canonical input surface).
+      ═══════════════════════════════════════════════════════════════════ */}
+      <SuperAllocationSection />
+
+      {/* ═══════════════════════════════════════════════════════════════════
           SECTION 1 — Assets
       ═══════════════════════════════════════════════════════════════════ */}
       <SectionCard title="Assets" icon={<Wallet className="w-4 h-4 text-primary" />}>
         <div className="pt-3">
-          {/* SoT advisory — prevents users entering the same \$ amount in two places. */}
+          {/* SoT advisory — Settings no longer hosts financial inputs. */}
           <div className="mb-3 rounded-md border border-sky-500/30 bg-sky-500/10 p-2.5 text-[11px] text-sky-100/90 flex gap-2">
             <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-sky-300" />
             <span>
-              Cash buckets <strong>Savings / Emergency / Other</strong> are owned by
-              <strong> Settings → Cash Allocation</strong>. Entering the same amount
-              here AND there double-counts on the Dashboard.
+              Cash buckets <strong>Savings / Emergency / Other</strong> live in the
+              <strong> Cash Allocation</strong> card on this page (below) — Settings is now
+              for non-financial preferences only.
             </span>
           </div>
 
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2">Liquid Cash</p>
-          <FieldRow label="Cash / Transaction Account" value={draft.cash} onChange={upd("cash")} hint="Checking only — savings/emergency/other are in Settings" />
+          <FieldRow label="Cash / Transaction Account" value={draft.cash} onChange={upd("cash")} hint="Checking only — savings/emergency/other are in the Cash Allocation card below" />
           <FieldRow label="Offset Account Balance" value={draft.offset_balance} onChange={upd("offset_balance")} hint="Mortgage offset account" />
 
           {/* Read-only total cash (derived) so the user sees the single number
