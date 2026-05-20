@@ -33,12 +33,13 @@ import { useMemo, useState } from 'react';
 import { Link } from 'wouter';
 import {
   Wallet, Calendar, Shield,
-  Home, Building2, LineChart as LineChartIcon, Coins as CoinsIcon,
+  Building2, LineChart as LineChartIcon, Coins as CoinsIcon,
   Repeat, Banknote, Flame, Sparkles, CheckCircle2, Clock, CircleDot,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/finance';
 import { useAppStore } from '@/lib/store';
 import { maskValue } from '@/components/PrivacyMask';
+import CanonicalRiskSurface from '@/components/CanonicalRiskSurface';
 import type {
   ExecutiveDashboardProps,
   RoadmapEvent,
@@ -415,97 +416,25 @@ function EventsTimeline({
   );
 }
 
-// ─── Risk summary ───────────────────────────────────────────────────────────
-function RiskTabSummary({ props, privacyMode }: { props: ExecutiveDashboardProps; privacyMode: boolean }) {
-  const mv = (v: string) => maskValue(v, privacyMode);
-  const liquidityMonths = props.monthlyExpenses > 0
-    ? props.totalLiquidCash / props.monthlyExpenses
-    : null;
-  const leverageLVR = props.totalPropertyValue > 0
-    ? (props.totalMortgage / props.totalPropertyValue) * 100
-    : null;
-  const downsideExposure = (props.currentDebt?.total ?? props.totalMortgage)
-    / Math.max(1, props.totalAssets);
-  const survivabilityMonths = props.monthlyExpenses > 0
-    ? (props.totalLiquidCash + (props.passiveIncome - props.monthlyExpenses) * 12 * 0.5)
-        / props.monthlyExpenses
-    : null;
-
-  const tone = (good: boolean, warn: boolean) =>
-    good ? 'hsl(142,60%,55%)' : warn ? 'hsl(43,90%,55%)' : 'hsl(0,72%,60%)';
-
-  const cells: { label: string; value: string; tone: string; hint: string }[] = [
-    {
-      label: 'Liquidity Runway',
-      value: liquidityMonths == null ? '—' : `${liquidityMonths.toFixed(1)} mo`,
-      tone: tone((liquidityMonths ?? 0) >= 6, (liquidityMonths ?? 0) >= 3),
-      hint: 'Months of expenses covered by cash + offset',
-    },
-    {
-      label: 'Leverage (LVR)',
-      value: leverageLVR == null ? '—' : `${leverageLVR.toFixed(1)}%`,
-      tone: tone((leverageLVR ?? 0) <= 60, (leverageLVR ?? 0) <= 80),
-      hint: 'Current LVR — settled property only',
-    },
-    {
-      label: 'Downside Exposure',
-      value: `${(downsideExposure * 100).toFixed(1)}%`,
-      tone: tone(downsideExposure <= 0.4, downsideExposure <= 0.6),
-      hint: 'Current debt as a % of total assets',
-    },
-    {
-      label: 'Survivability',
-      value: survivabilityMonths == null ? '—' : `${survivabilityMonths.toFixed(0)} mo`,
-      tone: tone((survivabilityMonths ?? 0) >= 18, (survivabilityMonths ?? 0) >= 9),
-      hint: 'Months covered after income shock (50% surplus haircut)',
-    },
-  ];
-
-  return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="wdc-risk-grid">
-      {cells.map((c) => (
-        <div
-          key={c.label}
-          className="rounded-xl border border-border/40 bg-card/40 p-3"
-          data-testid={`wdc-risk-cell-${c.label.toLowerCase().replace(/[^a-z]+/g, '-')}`}
-        >
-          <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">{c.label}</p>
-          <p className="text-xl font-extrabold tabular-nums mt-1" style={{ color: c.tone }}>{c.value}</p>
-          <p className="text-[10px] text-muted-foreground mt-1 leading-snug">{c.hint}</p>
-        </div>
-      ))}
-      {props.currentDebt && (
-        <div className="col-span-2 lg:col-span-4 rounded-xl border border-border/40 bg-card/40 p-3" data-testid="wdc-risk-current-debt">
-          <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
-            Current Debt (Today)
-          </p>
-          <div className="grid grid-cols-3 gap-3 mt-2 text-sm">
-            <div>
-              <p className="text-[10px] text-muted-foreground">PPOR Mortgage</p>
-              <p className="font-mono tabular-nums text-foreground">{mv(formatCurrency(props.currentDebt.pporMortgage, true))}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-muted-foreground">Settled IP Loans</p>
-              <p className="font-mono tabular-nums text-foreground">{mv(formatCurrency(props.currentDebt.settledIpLoans, true))}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-muted-foreground">Other Debt</p>
-              <p className="font-mono tabular-nums text-foreground">{mv(formatCurrency(props.currentDebt.otherDebts, true))}</p>
-            </div>
-          </div>
-          <div className="border-t border-border/30 mt-3 pt-2 flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-widest font-bold text-amber-200">Total Current Debt</span>
-            <span className="text-base font-extrabold tabular-nums text-amber-200" data-testid="wdc-risk-current-debt-total">
-              {mv(formatCurrency(props.currentDebt.total, true))}
-            </span>
-          </div>
-          <p className="text-[10px] text-muted-foreground mt-1">
-            Excludes planned IP loans and forecast/Monte Carlo future leverage.
-          </p>
-        </div>
-      )}
-    </div>
-  );
+// ─── Risk tab ───────────────────────────────────────────────────────────────
+// The Risk tab renders the canonical 8-axis radar, stress matrix and FIRE
+// fragility gauge ONLY. The prior liquidity / leverage / survivability /
+// current-debt cards have been removed: they duplicated Financial Health and
+// added no decision value on this surface. See `CanonicalRiskSurface`.
+function RiskTabBody({ props }: { props: ExecutiveDashboardProps }) {
+  if (!props.riskSurface) {
+    return (
+      <div
+        className="rounded-xl border border-border/40 bg-card/40 px-4 py-6 text-center"
+        data-testid="wdc-risk-pending"
+      >
+        <p className="text-xs text-muted-foreground">
+          Risk surface is computing — open the dashboard once more to refresh.
+        </p>
+      </div>
+    );
+  }
+  return <CanonicalRiskSurface surface={props.riskSurface} />;
 }
 
 // ─── Public component ──────────────────────────────────────────────────────
@@ -605,10 +534,10 @@ export default function WealthDecisionCenter({
         )}
         {tab === 'RISK' && (
           <div className="space-y-3" data-testid="wdc-panel-risk" role="tabpanel">
-            <RiskTabSummary props={executiveProps} privacyMode={privacyMode} />
+            <RiskTabBody props={executiveProps} />
             <div className="flex items-center justify-end">
               <Link href="/risk-radar">
-                <span className="text-xs text-primary hover:underline">Open Risk Radar →</span>
+                <span className="text-xs text-primary hover:underline">Open full Risk Radar →</span>
               </Link>
             </div>
           </div>

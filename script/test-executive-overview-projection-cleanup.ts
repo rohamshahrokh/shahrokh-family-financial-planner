@@ -85,16 +85,24 @@ assert(
   `found ${mcChartTestIdCount}`,
 );
 assert(
-  'Strategic Wealth Projection title test id present',
-  execSrc.includes('data-testid="strategic-wealth-projection-title"'),
+  'Probabilistic Projection (Monte Carlo Adjusted) title test id present',
+  execSrc.includes('data-testid="probabilistic-projection-title"'),
 );
 assert(
-  'Promoted strategic chart positioned BEFORE the Wealth Decision Center',
+  'Deterministic Projection (Assumption-Based) title test id present',
+  execSrc.includes('data-testid="deterministic-projection-title"'),
+);
+assert(
+  'Reconciliation card title present',
+  execSrc.includes('data-testid="reconciliation-card-title"'),
+);
+assert(
+  'Probabilistic chart positioned BEFORE the Wealth Decision Center',
   execSrc.indexOf('<MonteCarloTrajectoryChart') <
     execSrc.search(/<WealthDecisionCenter\b/),
 );
 assert(
-  'Promoted strategic chart positioned AFTER the Hero Snapshot',
+  'Probabilistic chart positioned AFTER the Hero Snapshot',
   execSrc.indexOf('<ExecutiveHeroSnapshot') <
     execSrc.indexOf('<MonteCarloTrajectoryChart'),
 );
@@ -126,13 +134,22 @@ for (const { id, label } of requiredColumns) {
     execSrc.includes(`data-testid="${id}"`) && execSrc.includes(`>${label}<`),
   );
 }
+// Architecture rebuild: Deterministic projection now comes FIRST, then the
+// Reconciliation card, then the Probabilistic (Monte Carlo) chart. This
+// matches the new canonical contract: "deterministic and probabilistic
+// projections separated properly".
 assert(
-  'Richer table positioned AFTER the Strategic Wealth Projection chart',
-  execSrc.indexOf('<MonteCarloTrajectoryChart') <
-    execSrc.indexOf('<WealthProjectionTable'),
+  'Deterministic table positioned BEFORE the Probabilistic (Monte Carlo) chart',
+  execSrc.indexOf('<WealthProjectionTable') <
+    execSrc.indexOf('<MonteCarloTrajectoryChart'),
 );
 assert(
-  'Richer table positioned BEFORE the Wealth Decision Center',
+  'Reconciliation card sits between the deterministic and probabilistic sections',
+  execSrc.indexOf('<WealthProjectionTable') < execSrc.indexOf('<ReconciliationCard') &&
+    execSrc.indexOf('<ReconciliationCard') < execSrc.indexOf('<MonteCarloTrajectoryChart'),
+);
+assert(
+  'Deterministic table positioned BEFORE the Wealth Decision Center',
   execSrc.indexOf('<WealthProjectionTable') <
     execSrc.search(/<WealthDecisionCenter\b/),
 );
@@ -230,10 +247,19 @@ assert(
   'WDC Events timeline test id still rendered',
   /data-testid="wdc-events-timeline"/.test(wdcSrc),
 );
+// Architecture rebuild: the WDC Risk tab no longer renders a current-debt
+// summary card — that duplication has been removed. The current debt
+// breakdown is still surfaced on the Today snapshot and Strategic Debt
+// Monitor; the Risk tab now hosts the canonical visual risk surface
+// (radar + stress matrix + fragility gauge) only.
 assert(
-  'WDC Risk tab still surfaces current-debt block (not planned debt)',
-  /data-testid="wdc-risk-current-debt"/.test(wdcSrc) &&
-    /Excludes planned IP loans and forecast\/Monte Carlo future leverage/.test(wdcSrc),
+  'WDC Risk tab no longer duplicates the current-debt summary card',
+  !/data-testid="wdc-risk-current-debt"/.test(wdcSrc),
+);
+assert(
+  'WDC Risk tab renders the canonical visual risk surface',
+  /CanonicalRiskSurface/.test(wdcSrc) &&
+    /data-testid="wdc-panel-risk"/.test(wdcSrc),
 );
 assert(
   'Dashboard still wires CURRENT debt breakdown to the cockpit',
@@ -266,12 +292,13 @@ assert(
 );
 
 // ─── 10. Layout order inside cockpit ────────────────────────────────────────
-section('Cockpit sequence — Hero → Strategic Chart → Richer Table → WDC → Health → Action → Deep');
+section('Cockpit sequence — Hero → Deterministic → Reconciliation → Probabilistic → WDC → Health → Action → Deep');
 
 const order = [
   '<ExecutiveHeroSnapshot',
-  '<MonteCarloTrajectoryChart',
   '<WealthProjectionTable',
+  '<ReconciliationCard',
+  '<MonteCarloTrajectoryChart',
   '<WealthDecisionCenter',
   '<ExecutiveHealthStrip',
   '<ExecutiveActionQueue',

@@ -50,10 +50,13 @@ section('Executive Overview — final section order');
 // WealthProjectionTable (richer analytical table, post Projection Cleanup) ·
 // WealthDecisionCenter · ExecutiveHealthStrip · ExecutiveActionQueue ·
 // DeepAnalysisCards.
+// Canonical dashboard rebuild: Deterministic projection now precedes the
+// Probabilistic (Monte Carlo) chart, with a Reconciliation card between.
 const orderedRenders = [
   '<ExecutiveHeroSnapshot',
-  '<MonteCarloTrajectoryChart',
   '<WealthProjectionTable',
+  '<ReconciliationCard',
+  '<MonteCarloTrajectoryChart',
   '<WealthDecisionCenter',
   '<ExecutiveHealthStrip',
   '<ExecutiveActionQueue',
@@ -72,16 +75,19 @@ for (let i = 1; i < positions.length; i++) {
   if (positions[i] < positions[i - 1]) { ordered = false; break; }
 }
 assert(
-  'Section order: Hero → Strategic Wealth Projection → Richer Analytical Table → Wealth Decision Center → Financial Health → Action Queue → Deep Analysis',
+  'Section order: Hero → Deterministic → Reconciliation → Probabilistic → WDC → Health → Action → Deep',
   ordered,
 );
 
-// Strategic Wealth Projection (promoted from former Future Wealth Path) is the
-// single primary strategic visualization. Plan Execution Capacity (deposit
-// power) remains the secondary chart inside the WDC CASH tab.
+// Canonical projection split: Deterministic (assumption-based) and
+// Probabilistic (Monte Carlo Adjusted) are now separate, reconciled visuals.
 assert(
-  'Strategic Wealth Projection label is the promoted primary chart title',
-  /Strategic Wealth Projection/.test(execSrc),
+  'Probabilistic Projection (Monte Carlo Adjusted) label is present',
+  /Probabilistic Projection \(Monte Carlo Adjusted\)/.test(execSrc),
+);
+assert(
+  'Deterministic Projection (Assumption-Based) label is present',
+  /Deterministic Projection \(Assumption-Based\)/.test(execSrc),
 );
 assert(
   'Plan Execution Capacity label preserved (inside Wealth Decision Center CASH tab)',
@@ -186,9 +192,13 @@ assert(
   'Wealth Decision Center surfaces planned debt only in the Events tab',
   /wdc-events-planned-debt-banner/.test(wdcSrc),
 );
+// Canonical dashboard rebuild: the WDC Risk tab no longer renders a duplicate
+// current-debt summary card. Risk is now the single canonical visual surface
+// (radar + stress + fragility); the current-debt total is still surfaced on
+// the Today snapshot and Strategic Debt Monitor.
 assert(
-  'Wealth Decision Center Risk tab renders CURRENT debt total only',
-  /wdc-risk-current-debt-total/.test(wdcSrc),
+  'WDC Risk tab no longer duplicates the current-debt summary card',
+  !/wdc-risk-current-debt-total/.test(wdcSrc),
 );
 
 // Defensive: the literal "$2.40M" must NOT be hard-coded anywhere as a debt label.

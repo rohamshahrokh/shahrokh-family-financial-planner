@@ -25,6 +25,8 @@ function selectorToScenario(selector: string): 'current_law' | 'proposed_reform'
 import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import { calcDepositPower, projectEquityTimeline } from "@/lib/equityEngine";
+import { computeWealthLayers } from "@/lib/canonicalWealth";
+import { buildCanonicalRiskSurface } from "@/lib/canonicalRiskSurface";
 // Authoritative dashboard source-of-truth bindings + selectors. See
 // docs/DASHBOARD_DATA_CONTRACT.md and client/src/lib/dashboardDataContract.ts.
 // The regression check (`npm run test:dashboard-contract`) fails the build
@@ -2010,6 +2012,26 @@ export default function DashboardPage() {
   const trajectoryP50: number | null = mcTrajectoryRow ? mcTrajectoryRow.median : null;
   const trajectoryYear: number | null = mcTrajectoryRow ? mcTrajectoryRow.year : null;
 
+  // ── Canonical wealth layers + risk surface ──────────────────────────────
+  // Both are pure projections over `_contractInputs` (the same ledger every
+  // other widget on this page consumes) plus the active tax regime. They are
+  // the SINGLE source the Executive Overview projection + WDC Risk tab read.
+  const wealthLayers = useMemo(
+    () => computeWealthLayers(_contractInputs, activeScenario),
+    [_contractInputs, activeScenario],
+  );
+  const riskSurface = useMemo(
+    () => buildCanonicalRiskSurface({
+      inputs: _contractInputs,
+      scenario: activeScenario,
+      mortgageRate: snap.mortgage_rate ?? null,
+      lossBank: ngSummary.totalLossBankBalance ?? 0,
+      fireProgressPct,
+      fireTargetCapital: fireTargetAmt,
+    }),
+    [_contractInputs, activeScenario, snap.mortgage_rate, ngSummary.totalLossBankBalance, fireProgressPct, fireTargetAmt],
+  );
+
   const phase7ExecProps = {
     netWorth,
     surplus,
@@ -2152,6 +2174,13 @@ export default function DashboardPage() {
     // estimate of the second-IP target year. We intentionally do NOT fall
     // back to a static +N year if no roadmap signal exists — the event is
     // skipped in that case, per the integrity-fix invariant.
+    // Canonical wealth layers + 8-axis risk surface + active tax regime —
+    // single source of truth for the Executive Overview projection and the
+    // Wealth Decision Center Risk tab. Every widget on the dashboard reads
+    // from these objects (no parallel risk/wealth engines).
+    wealthLayers,
+    riskSurface,
+    activeScenario,
     roadmapSecondIpYear: (() => {
       const cfgs = Array.isArray(fireScenarioConfig) ? fireScenarioConfig : [];
       // Candidate years from scenarios that plan at least 2 IPs.
