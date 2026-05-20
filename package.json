@@ -24,6 +24,7 @@
     "test:debt-classification-current-vs-planned": "tsx script/test-debt-classification-current-vs-planned.ts",
     "test:phase6": "tsx script/test-phase6-family-office.ts",
     "test:projection-consistency": "tsx script/test-projection-consistency.ts",
+    "test:settings-input-consolidation": "tsx script/test-settings-input-consolidation.ts",
     "test:monte-carlo-canonical": "tsx script/test-monte-carlo-canonical.ts",
     "test:monte-carlo-v4": "tsx script/test-monte-carlo-v4.ts",
     "test:monte-carlo-v5": "tsx script/test-monte-carlo-v5.ts",
