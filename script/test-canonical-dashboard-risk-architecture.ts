@@ -329,6 +329,49 @@ test("Reconciliation card derives drivers from canonical inputs", () => {
   assert(src.includes("Interest-rate uncertainty"), "interest rate driver");
 });
 
+// ─── 9. Hook-order safety in dashboard.tsx (regression for React #310) ──────
+//
+// The canonical-architecture wiring introduces two new useMemo calls on the
+// Dashboard page. They MUST live above the `if (snapLoading || !snapshot)`
+// early return, otherwise the first render (no snapshot) skips the hooks and
+// the second render (snapshot loaded) calls them — that hook-count delta is
+// what produced React minified error #310 on the demo preview.
+
+test("Dashboard places wealthLayers + riskSurface useMemo before the snapshot guard", () => {
+  const src = fs.readFileSync(
+    path.resolve("client/src/pages/dashboard.tsx"),
+    "utf8",
+  );
+  const wealthIdx = src.indexOf("const wealthLayers = useMemo(");
+  const riskIdx = src.indexOf("const riskSurface = useMemo(");
+  const guardIdx = src.indexOf("if (snapLoading || !snapshot) {");
+  assert(wealthIdx > 0, "wealthLayers useMemo present");
+  assert(riskIdx > 0, "riskSurface useMemo present");
+  assert(guardIdx > 0, "snapshot guard present");
+  assert(
+    wealthIdx < guardIdx,
+    "wealthLayers useMemo must be before the snapshot early-return guard",
+  );
+  assert(
+    riskIdx < guardIdx,
+    "riskSurface useMemo must be before the snapshot early-return guard",
+  );
+});
+
+test("Dashboard does NOT redeclare wealthLayers / riskSurface after the snapshot guard", () => {
+  const src = fs.readFileSync(
+    path.resolve("client/src/pages/dashboard.tsx"),
+    "utf8",
+  );
+  const guardIdx = src.indexOf("if (snapLoading || !snapshot) {");
+  const after = src.slice(guardIdx);
+  // No second declaration of either name in the post-guard region.
+  const wealthCount = (after.match(/const wealthLayers = useMemo\(/g) ?? []).length;
+  const riskCount = (after.match(/const riskSurface = useMemo\(/g) ?? []).length;
+  assert(wealthCount === 0, `wealthLayers must not be redeclared after the guard (found ${wealthCount})`);
+  assert(riskCount === 0, `riskSurface must not be redeclared after the guard (found ${riskCount})`);
+});
+
 // ─── Runner ─────────────────────────────────────────────────────────────────
 
 for (const t of tests) {

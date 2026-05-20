@@ -1916,6 +1916,28 @@ export default function DashboardPage() {
     }));
   }, [inlineBestMove_hook]);
 
+  // ── Canonical wealth layers + risk surface ──────────────────────────────
+  // MUST be declared BEFORE any conditional early return below to preserve
+  // hook order (React #310). Both are pure projections over `_contractInputs`
+  // (the same ledger every other widget on this page consumes) plus the
+  // active tax regime. They are the SINGLE source the Executive Overview
+  // projection + WDC Risk tab read.
+  const wealthLayers = useMemo(
+    () => computeWealthLayers(_contractInputs, activeScenario),
+    [_contractInputs, activeScenario],
+  );
+  const riskSurface = useMemo(
+    () => buildCanonicalRiskSurface({
+      inputs: _contractInputs,
+      scenario: activeScenario,
+      mortgageRate: snap.mortgage_rate ?? null,
+      lossBank: ngSummary.totalLossBankBalance ?? 0,
+      fireProgressPct,
+      fireTargetCapital: fireTargetAmt,
+    }),
+    [_contractInputs, activeScenario, snap.mortgage_rate, ngSummary.totalLossBankBalance, fireProgressPct, fireTargetAmt],
+  );
+
   if (snapLoading || !snapshot) {
     return (
       <div className="db-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
@@ -2011,26 +2033,6 @@ export default function DashboardPage() {
     : null;
   const trajectoryP50: number | null = mcTrajectoryRow ? mcTrajectoryRow.median : null;
   const trajectoryYear: number | null = mcTrajectoryRow ? mcTrajectoryRow.year : null;
-
-  // ── Canonical wealth layers + risk surface ──────────────────────────────
-  // Both are pure projections over `_contractInputs` (the same ledger every
-  // other widget on this page consumes) plus the active tax regime. They are
-  // the SINGLE source the Executive Overview projection + WDC Risk tab read.
-  const wealthLayers = useMemo(
-    () => computeWealthLayers(_contractInputs, activeScenario),
-    [_contractInputs, activeScenario],
-  );
-  const riskSurface = useMemo(
-    () => buildCanonicalRiskSurface({
-      inputs: _contractInputs,
-      scenario: activeScenario,
-      mortgageRate: snap.mortgage_rate ?? null,
-      lossBank: ngSummary.totalLossBankBalance ?? 0,
-      fireProgressPct,
-      fireTargetCapital: fireTargetAmt,
-    }),
-    [_contractInputs, activeScenario, snap.mortgage_rate, ngSummary.totalLossBankBalance, fireProgressPct, fireTargetAmt],
-  );
 
   const phase7ExecProps = {
     netWorth,
