@@ -26,7 +26,7 @@ import { sbTaxProfile } from "./supabaseClient";
 import { sbMCFireSettings, sbMCFireResults, sbMCFirePresets } from "./supabaseClient";
 import {
   getDemoDataset,
-  DEMO_FIRE_SETTINGS, DEMO_APP_SETTINGS, DEMO_TAX_PROFILE,
+  DEMO_FIRE_SETTINGS, DEMO_FIRE_SCENARIO_CONFIG, DEMO_APP_SETTINGS, DEMO_TAX_PROFILE,
   DEMO_ALERT_LOGS, DEMO_FAMILY_MSG, DEMO_PLANNED_INVESTMENTS, DEMO_SCENARIOS,
 } from "./demoData";
 
@@ -281,7 +281,10 @@ async function handleDemoRequest(method: string, path: string, body?: unknown): 
     if (m === "PUT") return DEMO_FIRE_SETTINGS;
   }
   if (path === "/api/fire-scenario-config") {
-    if (m === "GET") return [];
+    // Demo seed: returns scenarios with num_planned_ips + ip_target_year set
+    // so the WDC Events timeline can derive the Second IP year (2028) when
+    // /api/properties only carries IP1. See demoData.DEMO_FIRE_SCENARIO_CONFIG.
+    if (m === "GET") return DEMO_FIRE_SCENARIO_CONFIG;
     if (m === "PUT") return { success: true };
   }
   if (path === "/api/fire-year-assumptions") {

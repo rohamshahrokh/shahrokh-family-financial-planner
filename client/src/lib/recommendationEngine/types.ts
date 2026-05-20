@@ -268,6 +268,15 @@ export interface UnifiedSignals {
     type?: string;
     expiryDateISO?: string;
     taxDeductible?: boolean;
+    /**
+     * TRUE for planned/forecast/future debt (e.g. loans tied to a planned IP
+     * purchase). The engine partitions CURRENT vs PLANNED debt and never
+     * surfaces planned amounts in Best Move / Today snapshots / current
+     * leverage. Planned debt belongs to Events / Forecast Engine surfaces.
+     */
+    planned?: boolean;
+    /** Optional ISO date — > today → treated as planned. */
+    settlementDateISO?: string;
   }>;
 
   /**

@@ -42,7 +42,11 @@ export const DEMO_SNAPSHOT: Snapshot = {
 
   // ── Extended fields ──────────────────────────────────────────────────────
   offset_balance:          95_000,
-  mortgage_rate:           6.24,
+  // Live current PPOR mortgage rate (TODAY) — NOT a future blended assumption.
+  // The Executive Overview hero reads this directly via snap.mortgage_rate so
+  // the cockpit caption reads "PPOR 5.82%" today. Forecast scenarios apply
+  // their own blended rates via the Monte Carlo / Year-by-Year engines.
+  mortgage_rate:           5.82,
   max_refinance_lvr:       80,
 
   // Roham = "Alex"
@@ -104,7 +108,7 @@ export const DEMO_PROPERTIES: Property[] = [
     current_value:   1_200_000,
     purchase_date:   "2019-06-15",
     loan_amount:     850_000,
-    interest_rate:   6.24,
+    interest_rate:   5.82,
     loan_type:       "Principal & Interest",
     loan_term:       30,
     weekly_rent:     0,
@@ -564,6 +568,33 @@ export const DEMO_PLANNED_INVESTMENTS = [
 // ─── Scenarios (empty for demo) ───────────────────────────────────────────────
 
 export const DEMO_SCENARIOS: any[] = [];
+
+// ─── FIRE Scenario Config — execution roadmap source for planned IPs ─────────
+// The Wealth Decision Center EVENTS tab reads ip_target_year from here when
+// /api/properties carries fewer future-dated IP rows than the user actually
+// plans. The demo only ships one IP row (IP1, planned 2027), so the second
+// IP year must come from this roadmap source. Without these rows, the
+// EVENTS tab silently omits the Second Investment Property event — see
+// FOLLOW_UP_VERIFICATION_2.md.
+export const DEMO_FIRE_SCENARIO_CONFIG = [
+  {
+    scenario_id: "property",
+    pct_to_property: 25, pct_to_etf: 30, pct_to_crypto: 0,
+    pct_to_super: 0, pct_to_offset: 30, pct_to_cash: 15,
+    custom_return_pct: null, leverage_allowed: true,
+    num_planned_ips: 2,             // ← demo plan: IP1 (already in DEMO_PROPERTIES) + IP2 in 2028
+    ip_target_year: 2028,           // ← the Second IP target year the EVENTS timeline must surface
+    ip_deposit_pct: 20, ip_expected_yield: 4.5,
+  },
+  {
+    scenario_id: "mixed",
+    pct_to_property: 15, pct_to_etf: 40, pct_to_crypto: 0,
+    pct_to_super: 10, pct_to_offset: 25, pct_to_cash: 10,
+    custom_return_pct: null, leverage_allowed: false,
+    num_planned_ips: 1, ip_target_year: 2027,
+    ip_deposit_pct: 20, ip_expected_yield: 4.0,
+  },
+];
 
 // ─── Alert Logs / Family Msg (empty stubs) ────────────────────────────────────
 

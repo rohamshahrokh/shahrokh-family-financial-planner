@@ -11,6 +11,17 @@ import {
   type NGSummary,
 } from "@/lib/finance";
 import { runCashEngine, getCashKPICards, type CashEvent } from "@/lib/cashEngine";
+import { useActiveRegime } from "@/hooks/useActiveRegime";
+// Map the active regime selector → calcNegativeGearing scenario value.
+// The 4-value selector enum from taxPolicyEngine collapses to the 3-value
+// scenario enum used by taxRulesEngine: AUTO_DETECT defaults to current_law
+// (per-property classification then applies inside the engine when the
+// scenario is reform).
+function selectorToScenario(selector: string): 'current_law' | 'proposed_reform' | 'custom' {
+  if (selector === 'PROPOSED_2027_REFORM') return 'proposed_reform';
+  if (selector === 'CUSTOM_STRESS_TEST')   return 'custom';
+  return 'current_law';
+}
 import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import { calcDepositPower, projectEquityTimeline } from "@/lib/equityEngine";
@@ -124,11 +135,15 @@ import TaxAlphaCard from "@/components/TaxAlphaCard";
 import RiskRadarCard from "@/components/RiskRadarCard";
 import KpiCard from "@/components/KpiCard";
 import WealthFlowBanner from "@/components/WealthFlowBanner";
+import familyImg from "@assets/family.jpeg";
 import ExecutiveDashboard from "@/components/ExecutiveDashboard";
+import { FutureReformImpactCard } from "@/components/taxRegime/FutureReformImpactCard";
 import DeepDiveSection from "@/components/DeepDiveSection";
 import { Link, useLocation } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
+import { buildCanonicalMonteCarloInput } from "@/lib/monteCarloCanonical";
+import { runMonteCarloV4 } from "@/lib/monteCarloV4/engineV4";
 import familyImg from "@assets/family.jpeg";
 
 // ─── Chart tooltips ───────────────────────────────────────────────────────────
@@ -604,10 +619,23 @@ const YearDetailPanel = ({ row, privacyMode, checkDelta, checkOk }: {
 };
 
 export default function DashboardPage() {
+  // Active tax regime — used to make NG / refund / loss bank flows
+  // regime-aware. The dashboard is purely a CONSUMER of taxRulesEngine
+  // outputs; the policy decision (current_law vs reform) lives in the
+  // engine — never duplicated here.
   const qc = useQueryClient();
+  const { selector: activeRegimeSelector } = useActiveRegime();
+  const activeScenario = selectorToScenario(activeRegimeSelector);
   const { chartView, setChartView, privacyMode, togglePrivacy, currentUser } = useAppStore();
   const { forecastMode, profile, monteCarloResult } = useForecastStore();
   const loadForecastFromSupabase = useForecastStore(s => s.loadFromSupabase);
+  // Auto-run setters/state for the canonical Monte Carlo preview the
+  // Executive Overview now renders by default (see auto-run useEffect below).
+  const setMonteCarloResult = useForecastStore(s => s.setMonteCarloResult);
+  const isRunningMC = useForecastStore(s => s.isRunningMC);
+  const setIsRunningMC = useForecastStore(s => s.setIsRunningMC);
+  const mcVolatility = useForecastStore(s => s.mcVolatility);
+  const yearlyAssumptions = useForecastStore(s => s.yearlyAssumptions);
   const fa = useForecastAssumptions();
   const [, navigate] = useLocation();
 
@@ -689,6 +717,15 @@ export default function DashboardPage() {
     queryKey: ["/api/properties"],
     queryFn: () => apiRequest("GET", "/api/properties").then((r) => r.json()),
   });
+  // FOLLOW_UP: pull the fire-scenario config so the EVENTS tab can surface
+  // the Second IP year from the execution roadmap when /api/properties has
+  // fewer than 2 future acquisitions. We tolerate failure: the route is
+  // optional for users who haven't configured a scenario yet, in which case
+  // the Second IP event simply degrades gracefully (no static fallback).
+  const { data: fireScenarioConfig = [] } = useQuery<any[]>({
+    queryKey: ["/api/fire-scenario-config"],
+    queryFn: () => apiRequest("GET", "/api/fire-scenario-config").then((r) => r.json()).catch(() => []),
+  });
   const { data: stocks = [] } = useQuery({
     queryKey: ["/api/stocks"],
     queryFn: () => apiRequest("GET", "/api/stocks").then((r) => r.json()),
@@ -760,6 +797,61 @@ export default function DashboardPage() {
     mutationFn: (data: any) => apiRequest("PUT", "/api/snapshot", data).then((r) => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/snapshot"] }),
   });
+
+  // ── Auto-run canonical Monte Carlo when missing (Final Reconciliation Pass) ─
+  // The Executive Overview cockpit treats Monte Carlo P10/P50/P90 as the only
+  // canonical forecast. When the store has no MC result (fresh demo session,
+  // localStorage cleared, etc.) we run the canonical V4 engine once via the
+  // SAME `buildCanonicalMonteCarloInput` mapper the Forecast Engine uses —
+  // so the auto-run result is identical to what pressing "Run Monte Carlo"
+  // there would produce. No parallel forecast engine, no deterministic
+  // fallback being labelled official.
+  const mcAutoRunFiredRef = useRef(false);
+  useEffect(() => {
+    if (mcAutoRunFiredRef.current) return;
+    if (monteCarloResult) return;            // already have a canonical result
+    if (isRunningMC) return;                 // user is already running one elsewhere
+    if (!snapshot) return;                   // need snapshot before we can build input
+    mcAutoRunFiredRef.current = true;
+    setIsRunningMC(true);
+    // Defer to a microtask so we never block the first paint.
+    setTimeout(() => {
+      try {
+        const { input } = buildCanonicalMonteCarloInput(
+          {
+            snapshot,
+            properties: properties as any[],
+            stocks: stocks as any[],
+            cryptos: cryptos as any[],
+            holdingsRaw: holdingsRaw as any[],
+            incomeRecords: incomeRecords as any[],
+            expenses: expenses as any[],
+          },
+          {
+            yearlyAssumptions,
+            volatilityParams: mcVolatility,
+            stockTransactions:  stockTransactionsRaw as any[],
+            cryptoTransactions: cryptoTransactionsRaw as any[],
+            stockDCASchedules:  stockDCASchedules as any[],
+            cryptoDCASchedules: cryptoDCASchedules as any[],
+            plannedStockOrders:  ordersRaw as any[],
+            plannedCryptoOrders: cryptoOrdersRaw as any[],
+            bills: billsRaw as any[],
+            simulations: 1000,
+          },
+        );
+        const result = runMonteCarloV4(input, { seed: `fwl-${new Date().getFullYear()}` });
+        setMonteCarloResult(result);
+      } catch {
+        // Silent on the cockpit — the pending visual state still renders if
+        // anything went wrong, and the Forecast Engine can be opened manually.
+        mcAutoRunFiredRef.current = false;
+      } finally {
+        setIsRunningMC(false);
+      }
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot, monteCarloResult]);
 
   // ─── Derived data ─────────────────────────────────────────────────────────
   const plannedStockTx = useMemo(() => (stockTransactionsRaw ?? []).filter((t: any) => t.status === "planned"), [stockTransactionsRaw]);
@@ -1037,10 +1129,29 @@ export default function DashboardPage() {
   snap.monthly_expenses = monthlyExpensesSOT;
 
   // ─── NG Summary ───────────────────────────────────────────────────────────
+  // Reactive to the active tax-policy scenario. Under reform, quarantined
+  // post-cutoff established IPs return $0 PAYG refund and the loss accrues
+  // to the per-property loss bank — see taxRulesEngine.
   const ngSummary = useMemo<NGSummary>(() => {
-    if (!snapshot) return { totalAnnualTaxBenefit: 0, perProperty: [] } as NGSummary;
-    return calcNegativeGearing({ properties, annualSalaryIncome: snap.monthly_income * 12, refundMode: ngRefundMode });
-  }, [snapshot, properties, snap.monthly_income, ngRefundMode]);
+    if (!snapshot) return {
+      properties: [], perProperty: [],
+      totalAnnualTaxBenefit: 0,
+      totalMonthlyCashLoss: 0,
+      totalNetAfterTaxMonthlyCost: 0,
+      totalTaxableRentalResult: 0,
+      totalLossAccumulatedThisYear: 0,
+      totalLossBankBalance: 0,
+      marginalRate: 0,
+      refundMode: 'lump-sum',
+      scenario: activeScenario,
+    } as NGSummary;
+    return calcNegativeGearing({
+      properties,
+      annualSalaryIncome: snap.monthly_income * 12,
+      refundMode: ngRefundMode,
+      scenario: activeScenario,
+    });
+  }, [snapshot, properties, snap.monthly_income, ngRefundMode, activeScenario]);
 
   // ─── Projection ───────────────────────────────────────────────────────────
   // BUG FIX: previously did NOT pass forecast assumptions → dashboard ignored
@@ -1699,6 +1810,35 @@ export default function DashboardPage() {
     .slice(0, 5)
     .map((m: any) => m.label || m.monthKey);
 
+  // ── Annual cashflow / deposit-power trajectory (Final Reconciliation Pass) ─
+  // Build a calm 10-year annual series for the Deposit Power & Cashflow panel
+  // on the Executive Overview. We reuse `cashFlowAnnual` and the canonical
+  // `equityTimeline` already computed above — no parallel engine, no
+  // duplicated recommendation system. This useMemo MUST live before the
+  // loading guard below so the hook is never conditionally skipped (Rules of
+  // Hooks — React error #310).
+  const cashflowTrajectory = useMemo(() => {
+    if (!Array.isArray(cashFlowAnnual) || cashFlowAnnual.length === 0) return null;
+    const equityByYear = new Map<number, number>();
+    (equityTimeline ?? []).forEach((pt: any) => {
+      equityByYear.set(pt.year, (pt.ppor_usable_equity ?? 0) + (pt.ip_usable_equity ?? 0));
+    });
+    return cashFlowAnnual.slice(0, 10).map((a: any) => {
+      const yr = a.year as number;
+      const cash = a.endingBalance ?? 0;
+      const usableEquity = equityByYear.get(yr) ?? 0;
+      const dp = Math.max(0, cash + usableEquity - emergencyBuffer);
+      return {
+        label: String(yr),
+        cashBalance: cash,
+        netCashflow: a.netCashFlow ?? 0,
+        taxRefund: a.ngTaxBenefit ?? 0,
+        usableEquity,
+        totalDepositPower: dp,
+      };
+    });
+  }, [cashFlowAnnual, equityTimeline, emergencyBuffer]);
+
   // ─── Best Move V2 useMemo — MUST be before loading guard (Rules of Hooks) ──────────
   const inlineBestMove_hook = useMemo(() => {
     if (!snapshot) return null;
@@ -1889,10 +2029,173 @@ export default function DashboardPage() {
     totalMortgage: snap.mortgage,
     totalPropertyValue: snap.ppor + ipCurrentValueSettled,
     totalAssets,
+    // Live PPOR mortgage rate (TODAY snapshot — NOT a forecast / blended rate).
+    // The dashboard reads `sf_snapshot.mortgage_rate` directly via the snap
+    // memo above, so the Hero "today" caption shows the actual current rate.
+    livePporRate: snap.mortgage_rate ?? null,
+    // CURRENT debt breakdown — settled liabilities only. Planned IP loans and
+    // forecast leverage are intentionally excluded. This is the single source
+    // the Today snapshot / Best Move / Strategic Debt Monitor consume.
+    currentDebt: {
+      pporMortgage:    safeNum(snap.mortgage),
+      settledIpLoans:  ipLoanBalanceSettled,
+      otherDebts:      safeNum(snap.other_debts),
+      total:           safeNum(snap.mortgage) + ipLoanBalanceSettled + safeNum(snap.other_debts),
+    },
+    // PLANNED debt — surfaced ONLY in the Events tab, never in Today snapshot.
+    plannedDebt: ipLoanBalancePlanned,
     // Canonical Monte Carlo trajectory data — single source for the homepage
     // wealth trajectory panel.
     monteCarloFanData: monteCarloResult?.fan_data ?? null,
     monteCarloSimulations: monteCarloResult?.simulations ?? null,
+    // Annual cashflow trajectory (condensed) — used by tests / legacy callers.
+    cashflowTrajectory,
+    // Canonical FULL cashflow series (annual or monthly per `chartView`) so
+    // the Deposit Power & Cashflow panel can render the original richer
+    // chart with Combo / Line / Candlestick modes and rich tooltip rows.
+    cashflowMaster: masterCFData,
+    cashflowGranularity: cashFlowView as ('annual' | 'monthly'),
+    setCashflowGranularity: (g: 'annual' | 'monthly') => setChartView(g),
+    ngRefundMode,
+    setNgRefundMode: (m: 'lump-sum' | 'payg') => setNgRefundMode(m),
+    cashflowChartMode: wdcChartType,
+    setCashflowChartMode: setWdcChartType,
+    cashflowViewMode: cfViewMode,
+    setCashflowViewMode: setCfViewMode,
+    // Mini summary metrics surfaced above the chart — sourced from the
+    // canonical deposit-power engine result so they always match the
+    // figures the Best Move and Decision Engine use.
+    depositPowerSummary: depositPowerResult ? (() => {
+      const cashAndOffset = (depositPowerResult as any).cashAndOffset
+                              ?? (snap.cash + snap.offset_balance);
+      const pporUsableEquity = depositPowerResult.pporEquity?.usableEquity ?? 0;
+      const ipUsableEquity   = (depositPowerResult as any).ipUsableEquity
+                              ?? Math.max(0, (depositPowerResult.totalUsableEquity ?? 0) - pporUsableEquity);
+      const grossTotal       = cashAndOffset + pporUsableEquity + ipUsableEquity;
+      return {
+        pporLvrPct:         depositPowerResult.pporEquity
+                              ? depositPowerResult.pporEquity.currentLVR * 100
+                              : null,
+        ipReadinessPct:     depositPowerResult.readinessPct,
+        annualNetCashflow:  (cashFlowAnnual?.[0]?.netCashFlow ?? 0),
+        taxRefundPerYear:   ngSummary.totalAnnualTaxBenefit,
+        cashToday:          totalLiquidCash,
+        readyNow:           depositPowerResult.isReady,
+        totalDepositPower:  depositPowerResult.totalDepositPower,
+        isEquityRichCashPoor: !!depositPowerResult.isEquityRichCashPoor,
+        // Cash + Offset (live) — engine exposes `cashAndOffset` directly.
+        cashAndOffset,
+        // Canonical breakdown rows for the Wealth Decision Center CASH tab.
+        pporUsableEquity,
+        ipUsableEquity,
+        grossTotal,
+        emergencyBuffer,
+        // Final-year cash anchors the "{YYYY} Cash" tile in the 2x2 grid.
+        finalYearCash:      cashFlowAnnual?.[cashFlowAnnual.length - 1]?.endingBalance
+                              ?? null,
+        finalYearLabel:     cashFlowAnnual?.[cashFlowAnnual.length - 1]?.year
+                              ? String(cashFlowAnnual[cashFlowAnnual.length - 1].year)
+                              : null,
+      };
+    })() : {
+      cashToday: totalLiquidCash,
+      annualNetCashflow: cashFlowAnnual?.[0]?.netCashFlow ?? 0,
+      taxRefundPerYear: ngSummary.totalAnnualTaxBenefit,
+      cashAndOffset: snap.cash + snap.offset_balance,
+      finalYearCash: cashFlowAnnual?.[cashFlowAnnual.length - 1]?.endingBalance ?? null,
+      finalYearLabel: cashFlowAnnual?.[cashFlowAnnual.length - 1]?.year
+                        ? String(cashFlowAnnual[cashFlowAnnual.length - 1].year)
+                        : null,
+    },
+    // Decision-grade year-by-year projection rows for the Strategic Wealth
+    // Projection table (the single richer analytical table on Executive
+    // Overview). Mapped from the canonical `projection` engine (same engine
+    // the Wealth Strategy hub uses) — no parallel computation.
+    projectionRows: (projection ?? []).map((row: any) => ({
+      year:               row.year,
+      accessibleNetWorth: row.accessibleNetWorth ?? (row.endNetWorth - (row.totalSuper ?? 0)),
+      totalNetWorth:      row.endNetWorth,
+      cagrPct:            row.cagr ?? 0,
+      growth:             row.growth ?? 0,
+      cash:               row.cash ?? 0,
+      liabilities:        row.totalLiabilities ?? 0,
+      propertyEquity:     row.propertyEquity ?? 0,
+      stocks:             row.stockValue ?? 0,
+      crypto:             row.cryptoValue ?? 0,
+      superTotal:         row.totalSuper ?? 0,
+    })),
+    // Live planned acquisitions (settlement / contract / purchase date in
+    // the future) — drives the Events Timeline IP2/IP3 year markers so the
+    // timeline reflects the actual property plan, not a static +3y guess.
+    plannedAcquisitions: (properties ?? [])
+      .filter((p: any) => {
+        if (p.type === 'ppor' || p.type === 'owner_occupied') return false;
+        const raw = p.contract_date ?? p.settlement_date ?? p.purchase_date;
+        if (!raw) return false;
+        return String(raw) > todayStr;
+      })
+      .map((p: any) => ({
+        id:              p.id,
+        name:            p.name ?? p.address ?? `IP ${p.id}`,
+        contract_date:   p.contract_date ?? null,
+        settlement_date: p.settlement_date ?? null,
+        purchase_date:   p.purchase_date ?? null,
+        purchase_price:  p.purchase_price ?? p.current_value ?? null,
+        property_type:   p.property_type ?? null,
+        type:            p.type ?? null,
+      })),
+    // FOLLOW_UP: Second IP year fallback from the execution roadmap.
+    // When /api/properties has fewer than 2 future acquisitions, the Events
+    // Timeline reads this prop so the Second IP event still renders. We
+    // source from the fire-scenario config: the largest ip_target_year
+    // across scenarios with num_planned_ips >= 2 is the engine's best
+    // estimate of the second-IP target year. We intentionally do NOT fall
+    // back to a static +N year if no roadmap signal exists — the event is
+    // skipped in that case, per the integrity-fix invariant.
+    roadmapSecondIpYear: (() => {
+      const cfgs = Array.isArray(fireScenarioConfig) ? fireScenarioConfig : [];
+      // Candidate years from scenarios that plan at least 2 IPs.
+      const candidates = cfgs
+        .filter((c: any) => Number(c?.num_planned_ips ?? 0) >= 2 && c?.ip_target_year != null)
+        .map((c: any) => parseInt(String(c.ip_target_year), 10))
+        .filter((y: number) => Number.isFinite(y));
+      if (candidates.length > 0) {
+        // Prefer the SECOND-IP target year. Convention: scenarios that
+        // plan multiple IPs encode the *second* IP target year in
+        // ip_target_year (the first IP year comes from plannedAcquisitions).
+        return Math.max(...candidates);
+      }
+      // Soft fallback when the user has a single planned IP in /api/properties
+      // and a scenario that plans more than one but only sets a single year:
+      // the engine assumes IP2 = max(ip_target_year across scenarios with
+      // num_planned_ips >= 1) where it exceeds the first IP year.
+      const allYears = cfgs
+        .filter((c: any) => c?.ip_target_year != null)
+        .map((c: any) => parseInt(String(c.ip_target_year), 10))
+        .filter((y: number) => Number.isFinite(y));
+      const futureProps = (properties ?? []).filter((p: any) => {
+        if (p.type === 'ppor' || p.type === 'owner_occupied') return false;
+        const raw = p.contract_date ?? p.settlement_date ?? p.purchase_date;
+        return raw && String(raw) > todayStr;
+      });
+      if (allYears.length > 0 && futureProps.length < 2) {
+        const firstIpYear = futureProps[0]
+          ? parseInt(
+              String(
+                futureProps[0].contract_date ??
+                  futureProps[0].settlement_date ??
+                  futureProps[0].purchase_date,
+              ).slice(0, 4),
+              10,
+            )
+          : null;
+        const above = firstIpYear != null
+          ? allYears.filter((y: number) => y > firstIpYear)
+          : allYears;
+        if (above.length > 0) return Math.min(...above);
+      }
+      return null;
+    })(),
   };
 
   return (
@@ -1947,12 +2250,85 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {/* Executive Overview cockpit — the only content surface on the homepage. */}
+      {/* ══════════════════════════════════════════════════════════════════
+          FWL RESTORE — Compact animated journey hero/header
+          TODAY · Snapshot → PLAN · Strategy → FUTURE · Forecast → MOVE · Action
+          Calm animated timeline that gives the dashboard an atmospheric top
+          layer before the Executive Overview cockpit. Component owns its own
+          height (clamp 70–90px) — kept compact and low-noise. Restored after
+          the Phase 7 cockpit rebuild removed it; this is the middle-ground
+          re-introduction (no oversized hero, no flashy crypto-glow).
+          ═════════════════════════════════════════════════════════════════ */}
       <div
-        className="px-4 pt-4 pb-2"
+        className="db-section-networth"
+        data-testid="dashboard-journey-header"
+      >
+        <WealthFlowBanner />
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          FWL RESTORE — Family mission / welcome card
+          Restores the emotional/identity top layer. Compact (single row on
+          desktop, stacks on mobile). Premium family-office tone — gold accent,
+          warm "Welcome Back" eyebrow, family avatar, short wealth mission.
+          Sits between the journey header and the Executive Overview so the
+          dashboard reads as: atmosphere → identity → intelligence.
+          ═════════════════════════════════════════════════════════════════ */}
+      <div
+        className="px-4 pt-2 pb-3 db-section-networth"
+        data-testid="dashboard-family-mission-card"
+      >
+        <div className="rounded-2xl border border-amber-500/20 bg-gradient-to-r from-amber-500/[0.04] via-card to-card p-4 flex items-center gap-4 shadow-[0_4px_24px_rgba(0,0,0,0.18)]">
+          {/* Family avatar */}
+          <div className="shrink-0 w-14 h-14 rounded-xl overflow-hidden border-2 border-amber-500/30 ring-1 ring-amber-500/10">
+            <img
+              src={familyImg}
+              alt="Fara & Roham family"
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          </div>
+          {/* Identity + mission */}
+          <div className="min-w-0 flex-1">
+            <div
+              className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-400/90"
+              data-testid="family-welcome-eyebrow"
+            >
+              Welcome Back
+            </div>
+            <div
+              className="text-lg sm:text-xl font-extrabold tracking-tight text-foreground leading-tight"
+              data-testid="family-identity-name"
+            >
+              Fara &amp; Roham
+            </div>
+            <div
+              className="text-[12px] sm:text-sm font-semibold text-muted-foreground mt-0.5"
+              data-testid="family-mission-subtitle"
+            >
+              Family Net Worth Command Center
+            </div>
+            <div className="text-[11px] text-muted-foreground/70 mt-0.5">
+              Building wealth for the kids · Brisbane, QLD
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Executive Overview cockpit — primary content surface on the homepage. */}
+      <div
+        className="px-4 pt-2 pb-2"
         data-testid="dashboard-executive-section"
       >
         <ExecutiveDashboard {...phase7ExecProps} />
+      </div>
+
+      {/* ── Future Reform Impact — live tax-reform delta from taxRulesEngine ── */}
+      <div className="px-4 pt-1 pb-2" data-testid="dashboard-future-reform-impact">
+        <FutureReformImpactCard
+          properties={properties as any}
+          wageIncome={snap.monthly_income * 12}
+        />
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
@@ -1984,39 +2360,12 @@ export default function DashboardPage() {
       )}
 
 
-      {/* ══════════════════════════════════════════════════════════════════
-          EXPLORE DEEPER ANALYSIS — slim subordinate nav (NOT a module)
-          A single horizontal row of pill links so the cockpit above is
-          unambiguously the only content surface on the homepage. The
-          strip carries no headers, no descriptions, no body copy — it
-          only points users to the dedicated deep-analysis pages.
-          ═════════════════════════════════════════════════════════════════ */}
-      <nav
-        className="px-4 pb-4 pt-2"
-        data-testid="executive-explore-strip"
-        aria-label="Explore deeper analysis"
-      >
-        <div className="flex flex-wrap gap-1.5">
-          {[
-            { href: '/ai-forecast-engine', label: 'Forecast' },
-            { href: '/wealth-strategy',    label: 'Strategy' },
-            { href: '/decision',           label: 'Decisions' },
-            { href: '/risk-radar',         label: 'Risk' },
-            { href: '/ledger-audit',       label: 'Audit' },
-            { href: '/tax-alpha',          label: 'Tax' },
-          ].map(item => (
-            <Link key={item.href} href={item.href}>
-              <span
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium text-muted-foreground border border-border/60 bg-background/40 hover:text-foreground hover:border-primary/40 transition-colors cursor-pointer"
-                data-testid={`explore-link-${item.label.toLowerCase()}`}
-              >
-                {item.label}
-                <ChevronRight className="w-3 h-3 opacity-60" />
-              </span>
-            </Link>
-          ))}
-        </div>
-      </nav>
+      {/* Deep Analysis surfaces are now rendered inside the cockpit as a
+          dedicated DeepAnalysisCards section (four premium cards). The
+          previous weak filter-chip strip was removed per the Executive
+          Overview Final Reconciliation Pass. Routes for Risk Radar & Tax
+          Strategy are now registered in App.tsx so the cards never lead to
+          router-not-found errors. */}
 
       {/* AI Insights body module relocated off the homepage — it surfaced
           deep-analysis labels (Future Worlds, Ledger Audit, AI Insights)

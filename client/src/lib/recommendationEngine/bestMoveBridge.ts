@@ -37,7 +37,7 @@ function ledgerFromInputs(b: BestMoveResult): Partial<BestMoveLedger> {
     superContribAnnual: 0,
     etfExpectedReturn: 0.095,
     cryptoExpectedReturn: 0.20,
-    mortgageRate: 0.0625,
+    mortgageRate: 0.0582, // live current PPOR rate — NOT a forecast/blended rate.
     ppor: 0,
     depositPowerResult: {
       totalDepositPower: li.depositPower,

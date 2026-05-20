@@ -30,7 +30,13 @@ import type {
   RiskLevel,
 } from './types';
 import { debtVsETF, cashVsInvest } from './opportunityCost';
-import { classifyDebtPortfolio, type DebtRecord, type DebtPortfolioSummary } from './debtClassification';
+import {
+  classifyCurrentDebtPortfolio,
+  partitionCurrentVsPlanned,
+  isPlannedDebt,
+  type DebtRecord,
+  type DebtPortfolioSummary,
+} from './debtClassification';
 
 const PILLAR_RANK: Record<StrategicPillar, number> = {
   prevent_failure: 1,
@@ -211,18 +217,25 @@ function buildEmergencyBuffer(s: UnifiedSignals, signals: SourceSignal[]): Recom
  */
 function buildDebtPortfolio(s: UnifiedSignals): DebtPortfolioSummary {
   const records: DebtRecord[] = [];
+  let portfolioCarriesMortgage = false;
 
   if (Array.isArray(s.debtPortfolio) && s.debtPortfolio.length > 0) {
     for (const d of s.debtPortfolio) {
+      const planned = (d as any).planned === true;
+      const settlementDateISO = (d as any).settlementDateISO as string | undefined;
+      const type = (d.type as DebtRecord['type']) ?? 'other';
+      if (type === 'mortgage') portfolioCarriesMortgage = true;
       records.push({
         id: d.id,
         name: d.name ?? 'Debt',
         balance: typeof d.balance === 'number' ? d.balance : 0,
         ratePct: d.ratePct,                          // preserve null/undefined/0 verbatim
         minPaymentMonthly: d.minPaymentMonthly,
-        type: (d.type as DebtRecord['type']) ?? 'other',
+        type,
         expiryDateISO: d.expiryDateISO,
         taxDeductible: d.taxDeductible,
+        planned,
+        settlementDateISO,
       });
     }
   } else {
@@ -243,9 +256,13 @@ function buildDebtPortfolio(s: UnifiedSignals): DebtPortfolioSummary {
     }
   }
 
-  // Add mortgage as a classified record for strategic evaluation.
+  // Add mortgage as a classified record for strategic evaluation — but ONLY
+  // when the user-supplied debtPortfolio doesn't already carry a mortgage line.
+  // Otherwise PPOR mortgage gets double-counted (once via debt_prefs, once via
+  // s.mortgage), inflating "Strategic debt monitored" by the full mortgage
+  // balance and leaking the look of "$2.40M current debt".
   const mortgageBalance = num(s.mortgage);
-  if (mortgageBalance > 0) {
+  if (mortgageBalance > 0 && !portfolioCarriesMortgage) {
     records.push({
       id: 'mortgage_primary',
       name: 'Home Mortgage',
@@ -255,7 +272,11 @@ function buildDebtPortfolio(s: UnifiedSignals): DebtPortfolioSummary {
     });
   }
 
-  return classifyDebtPortfolio(records);
+  // CURRENT-ONLY classification. Planned IP loans, future leverage events
+  // and forecast debt are filtered out of the Best Move, Strategic Debt
+  // Monitor, and every "today" surface. Planned debt belongs to the Events
+  // / Forecast Engine surfaces, never to current liabilities.
+  return classifyCurrentDebtPortfolio(records);
 }
 
 /**

@@ -17,6 +17,8 @@ import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import DepositPowerCard from "@/components/DepositPowerCard";
+import { ModellingAssumptionsChip } from "@/components/taxRegime/ModellingAssumptionsChip";
+import { PropertyTaxImpactBlock } from "@/components/taxRegime/PropertyTaxImpactBlock";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -485,9 +487,10 @@ interface PropertyCardProps {
   selected: boolean;
   onToggleSelect: (id: number) => void;
   privacyMode: boolean;
+  wageIncome?: number;
 }
 
-function PropertyCard({ prop, onDelete, selected, onToggleSelect, privacyMode }: PropertyCardProps) {
+function PropertyCard({ prop, onDelete, selected, onToggleSelect, privacyMode, wageIncome = 0 }: PropertyCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState<any>(null);
@@ -774,6 +777,11 @@ function PropertyCard({ prop, onDelete, selected, onToggleSelect, privacyMode }:
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Tax Reform Impact (live from taxRulesEngine) — IPs only ─────── */}
+      {!editing && prop.type !== "ppor" && prop.type !== "land" && (
+        <PropertyTaxImpactBlock property={prop} wageIncome={wageIncome} />
       )}
 
       {/* Edit form */}
@@ -1230,12 +1238,16 @@ export default function PropertyPage() {
             Australian Investment Property Simulator — Queensland focus
           </p>
         </div>
-        <Button
-          onClick={() => {
-            setShowAdd(true);
-            setDraft({ ...EMPTY_PROPERTY });
-          }}
-          className="gap-2"
+        <div className="flex items-center gap-2">
+          {/* FWL_TAX_REFORM_ENGINE: contextual Tax & Policy Scenario selector
+              (moved here from the global navbar). */}
+          <ModellingAssumptionsChip />
+          <Button
+            onClick={() => {
+              setShowAdd(true);
+              setDraft({ ...EMPTY_PROPERTY });
+            }}
+            className="gap-2"
           style={{
             background: "linear-gradient(135deg, hsl(43,85%,55%), hsl(43,70%,42%))",
             color: "hsl(224,40%,8%)",
@@ -1245,6 +1257,7 @@ export default function PropertyPage() {
         >
           <Plus className="w-4 h-4" /> Add Property
         </Button>
+        </div>
       </div>
 
       {/* Deposit Power — usable equity (PPOR + IPs) + deployable cash */}
@@ -1553,6 +1566,7 @@ export default function PropertyPage() {
                 selected={selected.has(p.id)}
                 onToggleSelect={toggleSelect}
                 privacyMode={privacyMode}
+                wageIncome={safeNum((snapshot as any)?.monthly_income) * 12}
               />
               {/* Funding Source Selector — only for investment properties */}
               {(p.type === 'investment' || p.property_type === 'IP') && (

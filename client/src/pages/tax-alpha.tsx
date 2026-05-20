@@ -19,8 +19,11 @@ import {
   describeHouseholdTaxSource,
 } from '@/lib/householdTaxInputs';
 import { useAppStore } from '@/lib/store';
+import { useActiveRegime } from '@/hooks/useActiveRegime';
 import { maskValue } from '@/components/PrivacyMask';
 import { formatCurrency } from '@/lib/finance';
+import { TaxStrategyAuditTable } from '@/components/taxRegime/TaxStrategyAuditTable';
+import { ModellingAssumptionsChip } from '@/components/taxRegime/ModellingAssumptionsChip';
 import {
   Zap, Shield, AlertTriangle, CheckCircle2,
   ChevronDown, ChevronUp, Info, DollarSign,
@@ -192,6 +195,7 @@ function SavingsChart({ strategies, mv }: { strategies: TaxAlphaStrategy[]; mv: 
 export default function TaxAlphaPage() {
   const privacyMode = useAppStore(s => s.privacyMode);
   const mv = (v: string) => maskValue(v, privacyMode);
+  const { selector: activeRegimeSelector } = useActiveRegime();
 
   const { data: snap } = useQuery<any>({ queryKey: ['/api/snapshot'] });
   const { data: properties = [] } = useQuery<any[]>({ queryKey: ['/api/properties'] });
@@ -226,7 +230,17 @@ export default function TaxAlphaPage() {
   );
   const canonicalIncome = household.canonicalIncome;
 
-  const input  = buildTaxAlphaInput(snap, properties, taxProfile, canonicalIncome, household);
+  // Wire the active tax-policy scenario into the strategy engine so the
+  // Action Planner gates negative gearing recommendations and surfaces
+  // regime-aware alternatives under reform (FWL_TAX_REFORM_INTEGRITY_FIX).
+  const activeScenario: 'current_law' | 'proposed_reform' | 'custom' =
+    activeRegimeSelector === 'PROPOSED_2027_REFORM' ? 'proposed_reform'
+    : activeRegimeSelector === 'CUSTOM_STRESS_TEST' ? 'custom'
+    : 'current_law';
+  const input  = {
+    ...buildTaxAlphaInput(snap, properties, taxProfile, canonicalIncome, household),
+    active_scenario: activeScenario,
+  };
   const result = computeTaxAlpha(input);
 
   const overrideActive = household.overrideActive;
@@ -237,7 +251,33 @@ export default function TaxAlphaPage() {
         : 'Using income ledger');
   const variancePct = canonicalIncome.taxProfileVariance?.pct ?? 0;
   const { strategies, top3, total_annual_saving, total_saving_label,
-    roham_tax_now, fara_tax_now, household_tax_now, data_coverage, fy } = result;
+    roham_tax_now, fara_tax_now, household_tax_now, data_coverage, fy,
+    active_scenario, reform_has_quarantined_ips } = result;
+
+  // FOLLOW_UP: visible scenario context for the strategy list.
+  const scenarioBanner: { label: string; tone: string; sub: string } = (() => {
+    if (active_scenario === 'proposed_reform') {
+      return {
+        label: 'Strategy list scope: PROPOSED 2027 REFORM',
+        tone:  'border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300',
+        sub:   reform_has_quarantined_ips
+          ? 'Post-cutoff established IPs are quarantined — NG card surfaces the loss bank, not a wage refund.'
+          : 'No quarantined IPs detected for the current portfolio. Recommendations match reform rules.',
+      };
+    }
+    if (active_scenario === 'custom') {
+      return {
+        label: 'Strategy list scope: CUSTOM STRESS TEST',
+        tone:  'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+        sub:   'Recommendations reflect the active custom regime overrides.',
+      };
+    }
+    return {
+      label: 'Strategy list scope: CURRENT LAW',
+      tone:  'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+      sub:   'Switch the tax regime selector to model the proposed 2027 reform impact.',
+    };
+  })();
 
   return (
     <div className="space-y-5">
@@ -338,6 +378,30 @@ export default function TaxAlphaPage() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* ── Property Tax Reform — Master Audit (live from taxRulesEngine) ── */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          Property Tax Reform — Master Audit
+        </div>
+        <ModellingAssumptionsChip />
+      </div>
+      <TaxStrategyAuditTable
+        properties={properties as any}
+        wageIncome={input.roham_annual_income + input.fara_annual_income}
+      />
+
+      {/* ── Scenario banner (FOLLOW_UP) ─────────────────────────────────────
+          Makes the active tax-policy scenario explicit so the user can see
+          at a glance whether the strategy list is current law or reform. */}
+      <div
+        data-testid="tax-alpha-scenario-banner"
+        data-active-scenario={active_scenario}
+        className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-xs ${scenarioBanner.tone}`}
+      >
+        <span className="font-bold uppercase tracking-wider">{scenarioBanner.label}</span>
+        <span className="opacity-80">· {scenarioBanner.sub}</span>
       </div>
 
       {/* ── Strategy cards ─────────────────────────────────────────────────── */}
