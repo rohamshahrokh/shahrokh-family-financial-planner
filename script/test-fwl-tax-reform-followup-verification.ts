@@ -212,6 +212,77 @@ test("PR10: pure roadmap derivation produces Second IP year 2028 from fixture", 
   eq(secondIpYear, 2028, "second IP year falls back to roadmapSecondIpYear when plannedAcquisitions has < 2 entries");
 });
 
+// ─── F4b. Preview-path: demo /api/fire-scenario-config seeds IP2 = 2028 ────
+//
+// Root cause of the FOLLOW-UP-2 failure: the demo deployment's
+// /api/fire-scenario-config endpoint returned [], so the dashboard's
+// roadmapSecondIpYear derivation produced null and the EVENTS tab silently
+// omitted the Second IP event. This test pins the demo seed shape and the
+// algorithm that maps it to 2028.
+
+test("PR12: DEMO_FIRE_SCENARIO_CONFIG ships a scenario with num_planned_ips >= 2 and ip_target_year = 2028", async () => {
+  const mod = await import("../client/src/lib/demoData");
+  const cfg = (mod as any).DEMO_FIRE_SCENARIO_CONFIG;
+  truthy(Array.isArray(cfg), "DEMO_FIRE_SCENARIO_CONFIG exported");
+  truthy(cfg.length > 0, "demo config is not empty");
+  const multiIp = cfg.find((s: any) => s.num_planned_ips >= 2 && s.ip_target_year != null);
+  truthy(multiIp, "at least one scenario plans >= 2 IPs with a target year");
+  eq(multiIp.ip_target_year, 2028,
+    "demo's multi-IP scenario targets IP2 in 2028 — the value the EVENTS tab must surface");
+});
+
+test("PR13: queryClient demo branch returns DEMO_FIRE_SCENARIO_CONFIG for GET /api/fire-scenario-config", async () => {
+  const src = await readFile("client/src/lib/queryClient.ts", "utf8");
+  truthy(/DEMO_FIRE_SCENARIO_CONFIG/.test(src),
+    "queryClient imports DEMO_FIRE_SCENARIO_CONFIG");
+  // The demo branch must serve the seed, not an empty array literal.
+  const demoBlock = src.match(/path === "\/api\/fire-scenario-config"[\s\S]*?if \(m === "GET"\) return [^;]+;/);
+  truthy(demoBlock, "demo-branch fire-scenario-config block found");
+  truthy(/DEMO_FIRE_SCENARIO_CONFIG/.test(demoBlock![0]),
+    "demo branch serves DEMO_FIRE_SCENARIO_CONFIG (not [])");
+});
+
+test("PR14: pure derivation against DEMO seed + 1-property fixture yields roadmapSecondIpYear = 2028", async () => {
+  const mod = await import("../client/src/lib/demoData");
+  const cfgs = (mod as any).DEMO_FIRE_SCENARIO_CONFIG as Array<any>;
+  // Reproduce the dashboard.tsx derivation locally.
+  const candidates = cfgs
+    .filter(c => Number(c?.num_planned_ips ?? 0) >= 2 && c?.ip_target_year != null)
+    .map(c => parseInt(String(c.ip_target_year), 10))
+    .filter(y => Number.isFinite(y));
+  const roadmapSecondIpYear = candidates.length > 0 ? Math.max(...candidates) : null;
+  eq(roadmapSecondIpYear, 2028,
+    "derivation matches the value the WDC events timeline must render");
+});
+
+test("PR15: WDC defaultRoadmap pushes Second Investment Property event when /api/properties has 1 IP and roadmap fallback is 2028", async () => {
+  // Pure-algorithm reproduction of WealthDecisionCenter.defaultRoadmap
+  // for the IP2 fallback path. Mirrors the source change so the event
+  // is emitted whenever plannedAcquisitions has < 2 entries but a
+  // roadmap-derived year exists.
+  const plannedAcquisitions = [
+    { name: 'IP1 — Everton Park', contract_date: null, settlement_date: null, purchase_date: '2027-03-01' },
+  ];
+  const roadmapSecondIpYear = 2028;
+
+  const plan = plannedAcquisitions
+    .map(p => ({ entry: p, year: parseInt(String(p.contract_date ?? p.settlement_date ?? p.purchase_date).slice(0, 4), 10) }))
+    .filter(x => Number.isFinite(x.year));
+  const firstIpYear  = plan[0]?.year ?? null;
+  const secondIpYear = plan[1]?.year ?? roadmapSecondIpYear;
+  const secondIpFromRoadmap = plan[1]?.year == null && roadmapSecondIpYear != null;
+
+  eq(firstIpYear, 2027,  "first IP from plannedAcquisitions");
+  eq(secondIpYear, 2028, "second IP from roadmap fallback");
+  eq(secondIpFromRoadmap, true, "secondIpFromRoadmap flag is true when roadmap supplies the value");
+
+  // The WDC code must emit a 'second-ip' event with this year. Source
+  // contract test:
+  const src = await readFile("client/src/components/WealthDecisionCenter.tsx", "utf8");
+  truthy(/id:\s*['"]second-ip['"]/.test(src), "WDC pushes second-ip event");
+  truthy(/year:\s*`\$\{secondIpYear\}`/.test(src), "year bound to derived secondIpYear");
+});
+
 // ─── F5. preserve prior contract tests (still green) ────────────────────────
 
 test("PR11: still imports classifyPropertyTaxRegime in taxAlphaEngine and finance", async () => {

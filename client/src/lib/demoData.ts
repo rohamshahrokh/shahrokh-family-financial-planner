@@ -569,6 +569,33 @@ export const DEMO_PLANNED_INVESTMENTS = [
 
 export const DEMO_SCENARIOS: any[] = [];
 
+// ─── FIRE Scenario Config — execution roadmap source for planned IPs ─────────
+// The Wealth Decision Center EVENTS tab reads ip_target_year from here when
+// /api/properties carries fewer future-dated IP rows than the user actually
+// plans. The demo only ships one IP row (IP1, planned 2027), so the second
+// IP year must come from this roadmap source. Without these rows, the
+// EVENTS tab silently omits the Second Investment Property event — see
+// FOLLOW_UP_VERIFICATION_2.md.
+export const DEMO_FIRE_SCENARIO_CONFIG = [
+  {
+    scenario_id: "property",
+    pct_to_property: 25, pct_to_etf: 30, pct_to_crypto: 0,
+    pct_to_super: 0, pct_to_offset: 30, pct_to_cash: 15,
+    custom_return_pct: null, leverage_allowed: true,
+    num_planned_ips: 2,             // ← demo plan: IP1 (already in DEMO_PROPERTIES) + IP2 in 2028
+    ip_target_year: 2028,           // ← the Second IP target year the EVENTS timeline must surface
+    ip_deposit_pct: 20, ip_expected_yield: 4.5,
+  },
+  {
+    scenario_id: "mixed",
+    pct_to_property: 15, pct_to_etf: 40, pct_to_crypto: 0,
+    pct_to_super: 10, pct_to_offset: 25, pct_to_cash: 10,
+    custom_return_pct: null, leverage_allowed: false,
+    num_planned_ips: 1, ip_target_year: 2027,
+    ip_deposit_pct: 20, ip_expected_yield: 4.0,
+  },
+];
+
 // ─── Alert Logs / Family Msg (empty stubs) ────────────────────────────────────
 
 export const DEMO_ALERT_LOGS: any[] = [];
