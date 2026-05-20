@@ -795,6 +795,138 @@ function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
 // the probabilistic story; this table carries the deterministic asset-mix
 // progression decision-makers need.
 
+// Mobile-only expandable card for a single projection year.
+// Reuses the canonical projection row (no parallel maths). FIRE Capital and
+// Liquidatable Wealth are derived display values: today's canonical ratio
+// (layers.fireCapital / layers.grossNetWorth, layers.liquidatableWealth /
+// layers.grossNetWorth) applied to the row's totalNetWorth. The engine is
+// unchanged — these ratios come from the same `WealthLayers` already feeding
+// the layers strip at the top of this section.
+function MobileProjectionCard({
+  row,
+  isFirst,
+  layers,
+  startNW,
+  mv,
+}: {
+  row: WealthProjectionRow;
+  isFirst: boolean;
+  layers: WealthLayers | null;
+  startNW: number;
+  mv: (v: string) => string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const liqRatio =
+    layers && layers.grossNetWorth > 0
+      ? layers.liquidatableWealth / layers.grossNetWorth
+      : 1;
+  const fireRatio =
+    layers && layers.grossNetWorth > 0
+      ? layers.fireCapital / layers.grossNetWorth
+      : 1;
+  const rowLiquidatable = row.totalNetWorth * liqRatio;
+  const rowFire = row.totalNetWorth * fireRatio;
+
+  // CAGR pct may already be on the row; fall back to a fresh compute against
+  // today's start NW so it never reads as blank on the collapsed header.
+  const yearsFromNow = row.year - new Date().getFullYear();
+  const cagrPct =
+    Number.isFinite(row.cagrPct) && row.cagrPct !== 0
+      ? row.cagrPct
+      : startNW > 0 && yearsFromNow > 0
+        ? (Math.pow(row.totalNetWorth / startNW, 1 / yearsFromNow) - 1) * 100
+        : 0;
+
+  return (
+    <div
+      className={`px-4 py-2.5 ${isFirst ? 'bg-amber-500/[0.03]' : ''}`}
+      data-testid={`wealth-projection-mobile-row-${row.year}`}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        className="w-full text-left flex items-center justify-between gap-2"
+        data-testid={`wealth-projection-mobile-summary-${row.year}`}
+      >
+        <span className="font-bold text-foreground tabular-nums text-[12px] shrink-0">
+          {row.year}{isFirst ? ' ★' : ''}
+        </span>
+        <span className="flex items-center gap-2.5 text-[10.5px] flex-wrap justify-end">
+          <span className="tabular-nums font-mono" style={{ color: 'hsl(43,90%,62%)' }} data-testid="mobile-summary-total-nw">
+            {mv(formatCurrency(row.totalNetWorth, true))}
+          </span>
+          <span className="tabular-nums font-mono" style={{ color: 'hsl(195,80%,68%)' }} data-testid="mobile-summary-accessible-nw">
+            {mv(formatCurrency(row.accessibleNetWorth, true))}
+          </span>
+          <span
+            className="tabular-nums font-mono"
+            style={{ color: cagrPct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}
+            data-testid="mobile-summary-cagr"
+          >
+            {cagrPct.toFixed(1)}%
+          </span>
+          <span
+            className="tabular-nums font-mono"
+            style={{ color: row.growth >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}
+            data-testid="mobile-summary-growth"
+          >
+            {row.growth >= 0 ? '+' : ''}{mv(formatCurrency(row.growth, true))}
+          </span>
+          <span
+            className={`text-muted-foreground transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+            aria-hidden="true"
+          >▸</span>
+        </span>
+      </button>
+      {/* Grid-rows 0fr→1fr trick: smooth height transition with no JS measure. */}
+      <div
+        className="grid transition-[grid-template-rows] duration-200 ease-out"
+        style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
+        data-testid={`wealth-projection-mobile-expand-${row.year}`}
+      >
+        <div className="overflow-hidden">
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1 mt-2 text-[10.5px]">
+            <dt className="text-muted-foreground">Cash</dt>
+            <dd className="text-right tabular-nums font-mono text-foreground">
+              {mv(formatCurrency(row.cash, true))}
+            </dd>
+            <dt className="text-muted-foreground">Debt</dt>
+            <dd className="text-right tabular-nums font-mono" style={{ color: 'hsl(0,72%,60%)' }}>
+              −{mv(formatCurrency(Math.abs(row.liabilities), true))}
+            </dd>
+            <dt className="text-muted-foreground">Property equity</dt>
+            <dd className="text-right tabular-nums font-mono text-foreground">
+              {mv(formatCurrency(row.propertyEquity, true))}
+            </dd>
+            <dt className="text-muted-foreground">Stocks</dt>
+            <dd className="text-right tabular-nums font-mono text-foreground">
+              {mv(formatCurrency(row.stocks, true))}
+            </dd>
+            <dt className="text-muted-foreground">Crypto</dt>
+            <dd className="text-right tabular-nums font-mono text-foreground">
+              {mv(formatCurrency(row.crypto, true))}
+            </dd>
+            <dt className="text-muted-foreground">Super</dt>
+            <dd className="text-right tabular-nums font-mono text-foreground">
+              {mv(formatCurrency(row.superTotal, true))}
+            </dd>
+            <dt className="text-muted-foreground">FIRE Capital</dt>
+            <dd className="text-right tabular-nums font-mono" style={{ color: 'hsl(var(--gold))' }}>
+              {mv(formatCurrency(rowFire, true))}
+            </dd>
+            <dt className="text-muted-foreground">Liquidatable Wealth</dt>
+            <dd className="text-right tabular-nums font-mono" style={{ color: 'hsl(var(--gold))' }}>
+              {mv(formatCurrency(rowLiquidatable, true))}
+            </dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WealthProjectionTable(p: ExecutiveDashboardProps) {
   const { privacyMode } = useAppStore();
   const mv = (v: string) => maskValue(v, privacyMode);
@@ -851,10 +983,10 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
       </header>
 
       {/* Four canonical wealth layers — single source of truth used by every
-          surface on this page. */}
+          surface on this page. Mobile: clean 2×2 metric grid. Desktop: 1×4. */}
       {layers && (
         <div
-          className="grid grid-cols-2 md:grid-cols-4 gap-0 divide-x divide-border/25 border-b border-border/30"
+          className="grid grid-cols-2 md:grid-cols-4 md:divide-x md:divide-border/25 border-b border-border/30"
           data-testid="wealth-layers-strip"
         >
           {[
@@ -862,10 +994,16 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
             { id: 'accessible', label: 'Accessible NW', value: layers.accessibleNetWorth, blurb: 'Excludes super / Iran property / cars' },
             { id: 'liquidatable', label: 'Liquidatable Wealth', value: layers.liquidatableWealth, blurb: 'After ~3.5% property selling cost' },
             { id: 'fire', label: 'FIRE Capital', value: layers.fireCapital, blurb: 'Post-CGT · post-regime drag' },
-          ].map(layer => (
+          ].map((layer, i) => (
             <div
               key={layer.id}
-              className="px-4 py-3"
+              className={
+                // Mobile: 2×2 grid with cell borders so rows/cols separate cleanly.
+                // Desktop: dividers come from the row-level `md:divide-x`.
+                `px-4 py-3 ` +
+                `${i % 2 === 0 ? 'border-r border-border/25 md:border-r-0' : ''} ` +
+                `${i < 2 ? 'border-b border-border/25 md:border-b-0' : ''}`
+              }
               data-testid={`wealth-layer-${layer.id}`}
             >
               <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">{layer.label}</p>
@@ -878,65 +1016,21 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
         </div>
       )}
 
-      {/* Mobile: stacked expandable rows. Desktop: full table. */}
+      {/* Mobile: expandable yearly projection cards. Same canonical projection
+          rows the desktop table consumes — no parallel data path. */}
       <div
         className="md:hidden divide-y divide-border/30"
         data-testid="wealth-projection-mobile"
       >
         {rows.map((row, idx) => (
-          <details
+          <MobileProjectionCard
             key={row.year}
-            className={`px-4 py-2.5 ${idx === 0 ? 'bg-amber-500/[0.03]' : ''}`}
-            data-testid={`wealth-projection-mobile-row-${row.year}`}
-          >
-            <summary className="flex items-center justify-between cursor-pointer list-none">
-              <span className="font-bold text-foreground tabular-nums text-[12px]">
-                {row.year}{idx === 0 ? ' ★' : ''}
-              </span>
-              <span className="flex items-center gap-3 text-[11px]">
-                <span className="tabular-nums font-mono" style={{ color: 'hsl(195,80%,68%)' }}>
-                  {mv(formatCurrency(row.accessibleNetWorth, true))}
-                </span>
-                <span className="tabular-nums font-mono" style={{ color: 'hsl(43,90%,62%)' }}>
-                  {mv(formatCurrency(row.totalNetWorth, true))}
-                </span>
-              </span>
-            </summary>
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-1 mt-2 text-[10.5px]">
-              <dt className="text-muted-foreground">Accessible NW</dt>
-              <dd className="text-right tabular-nums font-mono" style={{ color: 'hsl(195,80%,68%)' }}>
-                {mv(formatCurrency(row.accessibleNetWorth, true))}
-              </dd>
-              <dt className="text-muted-foreground">Total NW</dt>
-              <dd className="text-right tabular-nums font-mono" style={{ color: 'hsl(43,90%,62%)' }}>
-                {mv(formatCurrency(row.totalNetWorth, true))}
-              </dd>
-              <dt className="text-muted-foreground">CAGR</dt>
-              <dd className="text-right tabular-nums font-mono" style={{ color: row.cagrPct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
-                {row.cagrPct.toFixed(2)}%
-              </dd>
-              <dt className="text-muted-foreground">Growth</dt>
-              <dd className="text-right tabular-nums font-mono" style={{ color: row.growth >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
-                {row.growth >= 0 ? '+' : ''}{mv(formatCurrency(row.growth, true))}
-              </dd>
-              <dt className="text-muted-foreground">Liquid (Cash)</dt>
-              <dd className="text-right tabular-nums font-mono text-foreground">
-                {mv(formatCurrency(row.cash, true))}
-              </dd>
-              <dt className="text-muted-foreground">Property equity</dt>
-              <dd className="text-right tabular-nums font-mono text-foreground">
-                {mv(formatCurrency(row.propertyEquity, true))}
-              </dd>
-              <dt className="text-muted-foreground">Super</dt>
-              <dd className="text-right tabular-nums font-mono text-foreground">
-                {mv(formatCurrency(row.superTotal, true))}
-              </dd>
-              <dt className="text-muted-foreground">Debt</dt>
-              <dd className="text-right tabular-nums font-mono" style={{ color: 'hsl(0,72%,60%)' }}>
-                −{mv(formatCurrency(Math.abs(row.liabilities), true))}
-              </dd>
-            </dl>
-          </details>
+            row={row}
+            isFirst={idx === 0}
+            layers={layers}
+            startNW={startNW}
+            mv={mv}
+          />
         ))}
       </div>
       <div className="hidden md:block overflow-x-auto">
