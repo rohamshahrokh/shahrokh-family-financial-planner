@@ -329,6 +329,83 @@ test("Reconciliation card derives drivers from canonical inputs", () => {
   assert(src.includes("Interest-rate uncertainty"), "interest rate driver");
 });
 
+// ─── 8b. Mobile radar label contract (no clipping, contrast, full names) ────
+//
+// QA reported that on mobile (390px width) the "Tax Reform" axis label was
+// truncating to "ix Reform". Root cause was insufficient SVG margin on the
+// RadarChart and a default-anchored axis tick that overflowed the SVG box.
+// These tests pin the fix: short labels on the chart for mobile, full
+// canonical names in the detail list below, generous margins, and the
+// angle-aware custom PolarTick renderer.
+
+test("Risk radar maps each axis to a full canonical name and a short mobile label", () => {
+  const src = fs.readFileSync(
+    path.resolve("client/src/components/CanonicalRiskSurface.tsx"),
+    "utf8",
+  );
+  // Full conceptual names (shown in the detail list below the chart).
+  const fullNames = [
+    "Liquidity Risk",
+    "Leverage Risk",
+    "Cashflow Risk",
+    "Concentration Risk",
+    "Property Exposure",
+    "Interest Rate Sensitivity",
+    "Tax Reform Exposure",
+    "FIRE Delay Risk",
+  ];
+  for (const n of fullNames) {
+    assert(src.includes(`"${n}"`), `full canonical axis name "${n}" present`);
+  }
+  // Short labels (rendered ON the radar chart on mobile so no label clips).
+  // Just check the ones at risk of clipping (right + left edges).
+  assert(src.includes('"Tax Reform": "Tax"'), 'short label for "Tax Reform" is "Tax"');
+  assert(src.includes('"Interest Rate": "Int. Rate"'), 'short label for "Interest Rate" is "Int. Rate"');
+  assert(src.includes('Concentration: "Concen."'), 'short label for "Concentration" is "Concen."');
+  assert(src.includes('"Property Exposure": "Property"'), 'short label for "Property Exposure" is "Property"');
+});
+
+test("Risk radar uses a custom angle-aware PolarTick renderer + responsive mobile margins", () => {
+  const src = fs.readFileSync(
+    path.resolve("client/src/components/CanonicalRiskSurface.tsx"),
+    "utf8",
+  );
+  // The custom tick renderer exists and is angle-aware (textAnchor switches).
+  assert(src.includes("function PolarTick("), "PolarTick custom renderer exists");
+  assert(
+    /textAnchor:[\s\S]*?\?\s*"start"\s*:\s*"end"/.test(src),
+    "PolarTick anchors text per angle (start/end/middle)",
+  );
+  // Mobile and desktop margins both bumped vs the prior clipping margin.
+  // Mobile right margin must be ≥ 40px; desktop ≥ 60px.
+  assert(
+    /isMobile[\s\S]*?right:\s*4[4-9]|right:\s*[5-9]\d/.test(src),
+    "mobile RadarChart right margin ≥ 44px",
+  );
+  assert(
+    /right:\s*7[2-9]|right:\s*[8-9]\d/.test(src),
+    "desktop RadarChart right margin ≥ 72px",
+  );
+  // The tick component is wired to the PolarAngleAxis (not the old object
+  // form which produced the clipped middle-anchored labels).
+  assert(
+    /<PolarAngleAxis[\s\S]*?tick=\{[^}]*PolarTick[^}]*\}/.test(src),
+    "PolarAngleAxis uses the custom PolarTick component",
+  );
+});
+
+test("Risk radar improves label contrast (foreground, not muted-foreground)", () => {
+  const src = fs.readFileSync(
+    path.resolve("client/src/components/CanonicalRiskSurface.tsx"),
+    "utf8",
+  );
+  // Pin contrast: the PolarTick fills with the higher-contrast foreground.
+  assert(
+    /fill=\"hsl\(var\(--foreground\)\)\"\s+fillOpacity=\{0\.88\}/.test(src),
+    "PolarTick uses foreground @ 0.88 opacity for contrast",
+  );
+});
+
 // ─── 9. Hook-order safety in dashboard.tsx (regression for React #310) ──────
 //
 // The canonical-architecture wiring introduces two new useMemo calls on the

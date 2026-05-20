@@ -11,7 +11,7 @@
  * The host (WDC) supplies the canonical surface; this file is presentational.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   RadarChart,
   Radar,
@@ -46,8 +46,97 @@ function fmtAud(n: number): string {
 }
 
 // ─── Radar ───────────────────────────────────────────────────────────────────
+//
+// Required canonical axes (UI labels). Engine axes in canonicalRiskSurface.ts
+// stay short for compactness; this component maps each to its full
+// conceptual name (shown in the detail list below) and a short label (shown
+// on the radar itself so nothing clips on mobile).
+const AXIS_FULL_LABEL: Record<string, string> = {
+  Liquidity: "Liquidity Risk",
+  Leverage: "Leverage Risk",
+  Cashflow: "Cashflow Risk",
+  Concentration: "Concentration Risk",
+  "Property Exposure": "Property Exposure",
+  "Interest Rate": "Interest Rate Sensitivity",
+  "Tax Reform": "Tax Reform Exposure",
+  "FIRE Delay": "FIRE Delay Risk",
+};
+const AXIS_SHORT_LABEL: Record<string, string> = {
+  Liquidity: "Liquidity",
+  Leverage: "Leverage",
+  Cashflow: "Cashflow",
+  Concentration: "Concen.",
+  "Property Exposure": "Property",
+  "Interest Rate": "Int. Rate",
+  "Tax Reform": "Tax",
+  "FIRE Delay": "FIRE",
+};
+
+/**
+ * Custom tick renderer for the polar angle axis. Anchors text correctly per
+ * angle so labels never overflow the SVG box on narrow viewports. Uses high-
+ * contrast foreground color (the prior muted-foreground was unreadable on
+ * the card background). Renders short labels on mobile and full names on
+ * desktop — neither clips because anchoring is angle-aware.
+ */
+function PolarTick({
+  x,
+  y,
+  cx,
+  cy,
+  payload,
+  isMobile,
+}: any) {
+  const raw: string = payload?.value ?? "";
+  const label = isMobile
+    ? (AXIS_SHORT_LABEL[raw] ?? raw)
+    : (AXIS_FULL_LABEL[raw] ?? raw);
+  // Angle-aware text anchoring so end-anchored labels don't push off the
+  // SVG box. (cx, cy) is the polygon center; we infer side from x vs cx.
+  const dx = x - cx;
+  const textAnchor: "start" | "middle" | "end" =
+    Math.abs(dx) < 6 ? "middle" : dx > 0 ? "start" : "end";
+  // Small radial outward nudge so the label sits a few px off the polygon
+  // rather than touching the outer ring.
+  const dy = y - cy;
+  const norm = Math.hypot(dx, dy) || 1;
+  const nudge = isMobile ? 2 : 3;
+  const nx = x + (dx / norm) * nudge;
+  const ny = y + (dy / norm) * nudge;
+  return (
+    <text
+      x={nx}
+      y={ny}
+      textAnchor={textAnchor}
+      dominantBaseline="middle"
+      fill="hsl(var(--foreground))"
+      fillOpacity={0.88}
+      fontSize={isMobile ? 10 : 11}
+      fontWeight={600}
+      style={{ pointerEvents: "none" }}
+    >
+      {label}
+    </text>
+  );
+}
+
+function useIsMobile(breakpointPx = 640): boolean {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== "undefined" && window.matchMedia(`(max-width: ${breakpointPx - 1}px)`).matches,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mql = window.matchMedia(`(max-width: ${breakpointPx - 1}px)`);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    setIsMobile(mql.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, [breakpointPx]);
+  return isMobile;
+}
 
 function RadarPanel({ surface }: { surface: CanonicalRiskSurfaceData }) {
+  const isMobile = useIsMobile();
   const data = useMemo(
     () =>
       surface.radar.current.map((p, i) => ({
@@ -76,19 +165,35 @@ function RadarPanel({ surface }: { surface: CanonicalRiskSurfaceData }) {
           </p>
         </div>
       </header>
-      <div className="px-3 pt-2 pb-1">
-        <ResponsiveContainer width="100%" height={300} minHeight={260}>
-          <RadarChart data={data} margin={{ top: 12, right: 28, bottom: 12, left: 28 }}>
+      {/* Mobile: tighter horizontal padding + larger SVG margin so the
+          right-side "Tax" label has room to anchor. Desktop: full axis
+          names render comfortably with generous outer margin. */}
+      <div className="px-1 sm:px-3 pt-2 pb-1" data-testid="risk-radar-svg-wrap">
+        <ResponsiveContainer
+          width="100%"
+          height={isMobile ? 320 : 340}
+          minHeight={280}
+        >
+          <RadarChart
+            data={data}
+            margin={isMobile
+              ? { top: 16, right: 44, bottom: 16, left: 44 }
+              : { top: 18, right: 72, bottom: 18, left: 72 }
+            }
+            outerRadius={isMobile ? "72%" : "78%"}
+          >
             <PolarGrid stroke="hsl(var(--border) / 0.5)" />
             <PolarAngleAxis
               dataKey="axis"
-              tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 9, fontWeight: 600 }}
+              tick={(props: any) => <PolarTick {...props} isMobile={isMobile} />}
+              tickLine={false}
             />
             <PolarRadiusAxis
               angle={90}
               domain={[0, 100]}
-              tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 8 }}
+              tick={{ fill: "hsl(var(--foreground))", fillOpacity: 0.55, fontSize: 9 }}
               tickCount={5}
+              stroke="hsl(var(--border) / 0.4)"
             />
             {/* Safe zone — soft green fill at the safe threshold. */}
             <Radar
@@ -145,7 +250,9 @@ function RadarPanel({ surface }: { surface: CanonicalRiskSurfaceData }) {
               }}
             />
             <span>
-              <span className="font-semibold text-foreground/90">{p.axis}</span>
+              <span className="font-semibold text-foreground/90">
+                {AXIS_FULL_LABEL[p.axis] ?? p.axis}
+              </span>
               {" · "}
               <span className="tabular-nums">{Math.round(p.score)}/100</span>
               <span className="block opacity-80">{p.detail}</span>
