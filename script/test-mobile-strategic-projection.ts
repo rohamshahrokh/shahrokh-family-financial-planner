@@ -3,23 +3,25 @@
  *
  * Run: npx tsx script/test-mobile-strategic-projection.ts
  *
- * Pins the mobile-responsive fix for the Strategic Wealth Projection table:
- *   1. Desktop dense table is preserved (`hidden md:block` wrapper + every
- *      original column header still present).
- *   2. Mobile renders expandable yearly cards (`md:hidden` container with the
- *      `MobileProjectionCard` component).
+ * Pins the responsive fix for the Strategic Wealth Projection table:
+ *   1. Desktop dense table is only rendered at lg+ (`hidden lg:block`) so it
+ *      cannot clip at tablet widths (768–1023px).
+ *   2. Mobile + tablet (<lg) render expandable yearly cards (`lg:hidden`
+ *      container with the `MobileProjectionCard` component).
  *   3. Card collapsed header surfaces: year, total NW, accessible NW, CAGR,
  *      annual growth.
  *   4. Card expanded body surfaces: cash, debt, property equity, stocks,
  *      crypto, super, FIRE Capital, Liquidatable Wealth.
- *   5. No `overflow-x` is used on the mobile container (no sideways scroll).
- *   6. Wealth layers strip renders as a clean 2×2 metric grid on mobile and
- *      1×4 on md+.
+ *   5. No `overflow-x` is used on the mobile/tablet container (no sideways
+ *      scroll, no clipped Property Equity / Stocks columns).
+ *   6. Wealth layers strip renders as a clean 2×2 metric grid on mobile +
+ *      tablet (<lg) and 1×4 on lg+.
  *   7. Smooth expand/collapse animation is wired (grid-rows transition + a
  *      transition on the chevron).
  *   8. Canonical data is reused (no parallel projection engine): the mobile
  *      cards consume `projectionRows` + `wealthLayers` — the same props the
  *      desktop table reads.
+ *   9. The card container never renders a `<table>` element.
  */
 
 import fs from "node:fs";
@@ -41,13 +43,19 @@ const SRC = fs.readFileSync(
   "utf8",
 );
 
-// 1. Desktop dense table preserved ------------------------------------------
+// 1. Desktop dense table preserved AND only renders at lg+ -------------------
 
-test("desktop dense table is preserved verbatim", () => {
-  // Wrapper still gated `hidden md:block` so it only renders on md+.
+test("desktop dense table is preserved verbatim and gated to lg+", () => {
+  // Wrapper now `hidden lg:block` so it only renders at desktop (>=1024px).
+  // Tablet (768–1023px) must NOT render the dense table.
   assert(
-    /<div className="hidden md:block overflow-x-auto">[\s\S]*?<table[\s\S]*?data-testid="wealth-projection-table"/.test(SRC),
-    "desktop table wrapper + table testid intact",
+    /<div className="hidden lg:block overflow-x-auto">[\s\S]*?<table[\s\S]*?data-testid="wealth-projection-table"/.test(SRC),
+    "desktop table wrapper is `hidden lg:block` and table testid intact",
+  );
+  // Guard: no `hidden md:block` wrapper left behind for the projection table.
+  assert(
+    !/<div className="hidden md:block overflow-x-auto">\s*<table[\s\S]*?wealth-projection-table/.test(SRC),
+    "projection table is NOT gated at md — must be lg",
   );
   // Every original column header is still present.
   for (const col of [
@@ -66,17 +74,17 @@ test("desktop dense table is preserved verbatim", () => {
   }
 });
 
-// 2. Mobile expandable card component exists --------------------------------
+// 2. Mobile + tablet expandable card component exists ------------------------
 
-test("mobile uses an expandable card component (no wide table)", () => {
+test("mobile + tablet uses an expandable card component (no wide table)", () => {
   assert(SRC.includes("function MobileProjectionCard("), "MobileProjectionCard component defined");
   assert(
-    /<div\s+className="md:hidden divide-y[^"]*"\s+data-testid="wealth-projection-mobile"/.test(SRC),
-    "mobile container is md:hidden and uses divide-y (no horizontal table)",
+    /<div\s+className="lg:hidden divide-y[^"]*"\s+data-testid="wealth-projection-mobile"/.test(SRC),
+    "card container is lg:hidden (covers mobile + tablet) and uses divide-y",
   );
   assert(
     SRC.includes("<MobileProjectionCard"),
-    "mobile container renders MobileProjectionCard per row",
+    "card container renders MobileProjectionCard per row",
   );
 });
 
@@ -97,7 +105,6 @@ test("collapsed card header surfaces year, total NW, accessible NW, CAGR, growth
 // 4. Expanded body content --------------------------------------------------
 
 test("expanded card body shows every required field", () => {
-  // Lift the MobileProjectionCard body just to be defensive against test-fragility.
   const start = SRC.indexOf("function MobileProjectionCard(");
   const end = SRC.indexOf("function WealthProjectionTable(");
   const body = SRC.slice(start, end);
@@ -115,32 +122,40 @@ test("expanded card body shows every required field", () => {
   }
 });
 
-// 5. No overflow-x on the mobile path ---------------------------------------
+// 5. No overflow-x on the mobile/tablet card path ---------------------------
 
-test("mobile container does NOT use any horizontal overflow scroll", () => {
-  // Pull out the mobile container's region: from the data-testid up to its
-  // closing </div>. The desktop wrapper (overflow-x-auto) lives in a separate
-  // sibling div with `hidden md:block` and must NOT bleed into the mobile path.
+test("card container does NOT use any horizontal overflow scroll", () => {
   const mobileIdx = SRC.indexOf('data-testid="wealth-projection-mobile"');
-  assert(mobileIdx > 0, "mobile container located");
-  // Find the matching `<div ...md:hidden...>` start, then its sibling boundary
-  // (the next `<div className="hidden md:block`).
-  const desktopIdx = SRC.indexOf('hidden md:block overflow-x-auto', mobileIdx);
-  const mobileRegion = SRC.slice(mobileIdx, desktopIdx > 0 ? desktopIdx : mobileIdx + 4000);
+  assert(mobileIdx > 0, "card container located");
+  // The desktop wrapper lives in the next sibling div with `hidden lg:block`.
+  const desktopIdx = SRC.indexOf('hidden lg:block overflow-x-auto', mobileIdx);
+  assert(desktopIdx > mobileIdx, "desktop wrapper sibling located");
+  const cardRegion = SRC.slice(mobileIdx, desktopIdx);
   assert(
-    !/overflow-x/.test(mobileRegion),
-    "mobile region must not include any overflow-x utility",
+    !/overflow-x/.test(cardRegion),
+    "card region must not include any overflow-x utility (no clipped columns)",
   );
 });
 
-// 6. 2×2 wealth layers grid on mobile ---------------------------------------
+// 6. 2×2 wealth layers grid on mobile + tablet -------------------------------
 
-test("wealth layers strip renders 2×2 on mobile and 1×4 on desktop", () => {
+test("wealth layers strip renders 2×2 on mobile + tablet and 1×4 on lg+", () => {
   assert(
-    /grid grid-cols-2 md:grid-cols-4/.test(SRC),
-    "layers strip declared `grid-cols-2 md:grid-cols-4`",
+    /grid grid-cols-2 lg:grid-cols-4/.test(SRC),
+    "layers strip declared `grid-cols-2 lg:grid-cols-4` (2×2 through tablet)",
   );
-  // All four canonical layers are still individual cells.
+  // The row-level dividers only kick in at lg+.
+  assert(
+    /lg:divide-x lg:divide-border\/25/.test(SRC),
+    "row-level dividers gated to lg+",
+  );
+  // Mobile/tablet per-cell borders must be `lg:border-r-0` / `lg:border-b-0`.
+  assert(
+    /border-r border-border\/25 lg:border-r-0/.test(SRC) &&
+      /border-b border-border\/25 lg:border-b-0/.test(SRC),
+    "per-cell borders only fire below lg",
+  );
+  // All four canonical layers still emitted as cells.
   for (const id of ["gross", "accessible", "liquidatable", "fire"]) {
     assert(
       SRC.includes(`data-testid={\`wealth-layer-\${layer.id}\`}`) ||
@@ -165,9 +180,7 @@ test("expand/collapse uses a smooth animation (grid-rows transition + chevron ro
 
 // 8. Canonical data reused (no parallel engine) -----------------------------
 
-test("mobile cards consume the SAME canonical projection rows + layers as desktop", () => {
-  // Both the desktop table and the mobile container map over the same `rows`
-  // collection (which is `p.projectionRows`).
+test("card cells consume the SAME canonical projection rows + layers as desktop", () => {
   assert(
     /const rows = p\.projectionRows;/.test(SRC),
     "projection rows sourced from props (canonical engine)",
@@ -193,15 +206,15 @@ test("mobile cards consume the SAME canonical projection rows + layers as deskto
   }
 });
 
-// 9. The mobile container must not contain a <table> element -----------------
+// 9. Card region must not contain a <table> element --------------------------
 
-test("mobile container does NOT render a <table> (no clipped columns possible)", () => {
+test("card region does NOT render a <table> (no clipped columns possible)", () => {
   const mobileIdx = SRC.indexOf('data-testid="wealth-projection-mobile"');
-  const desktopIdx = SRC.indexOf('hidden md:block overflow-x-auto', mobileIdx);
-  const mobileRegion = SRC.slice(mobileIdx, desktopIdx);
+  const desktopIdx = SRC.indexOf('hidden lg:block overflow-x-auto', mobileIdx);
+  const cardRegion = SRC.slice(mobileIdx, desktopIdx);
   assert(
-    !/<table/.test(mobileRegion),
-    "mobile region must not contain a <table>",
+    !/<table/.test(cardRegion),
+    "card region must not contain a <table>",
   );
 });
 

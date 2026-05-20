@@ -983,10 +983,10 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
       </header>
 
       {/* Four canonical wealth layers — single source of truth used by every
-          surface on this page. Mobile: clean 2×2 metric grid. Desktop: 1×4. */}
+          surface on this page. Mobile + tablet: 2×2 metric grid. Desktop (lg+): 1×4. */}
       {layers && (
         <div
-          className="grid grid-cols-2 md:grid-cols-4 md:divide-x md:divide-border/25 border-b border-border/30"
+          className="grid grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-border/25 border-b border-border/30"
           data-testid="wealth-layers-strip"
         >
           {[
@@ -998,11 +998,11 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
             <div
               key={layer.id}
               className={
-                // Mobile: 2×2 grid with cell borders so rows/cols separate cleanly.
-                // Desktop: dividers come from the row-level `md:divide-x`.
+                // Mobile + tablet: 2×2 grid with cell borders so rows/cols separate cleanly.
+                // Desktop (lg+): dividers come from the row-level `lg:divide-x`.
                 `px-4 py-3 ` +
-                `${i % 2 === 0 ? 'border-r border-border/25 md:border-r-0' : ''} ` +
-                `${i < 2 ? 'border-b border-border/25 md:border-b-0' : ''}`
+                `${i % 2 === 0 ? 'border-r border-border/25 lg:border-r-0' : ''} ` +
+                `${i < 2 ? 'border-b border-border/25 lg:border-b-0' : ''}`
               }
               data-testid={`wealth-layer-${layer.id}`}
             >
@@ -1016,10 +1016,12 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
         </div>
       )}
 
-      {/* Mobile: expandable yearly projection cards. Same canonical projection
-          rows the desktop table consumes — no parallel data path. */}
+      {/* Mobile + tablet (<lg): expandable yearly projection cards. Same
+          canonical projection rows the desktop table consumes — no parallel
+          data path. Cards run through tablet so the dense desktop table never
+          renders at widths that would clip Property Equity / Stocks columns. */}
       <div
-        className="md:hidden divide-y divide-border/30"
+        className="lg:hidden divide-y divide-border/30"
         data-testid="wealth-projection-mobile"
       >
         {rows.map((row, idx) => (
@@ -1033,7 +1035,7 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
           />
         ))}
       </div>
-      <div className="hidden md:block overflow-x-auto">
+      <div className="hidden lg:block overflow-x-auto">
         <table className="w-full text-xs" data-testid="wealth-projection-table">
           <thead>
             <tr className="border-b border-border/40 bg-muted/10">

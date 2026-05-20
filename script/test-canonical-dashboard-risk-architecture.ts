@@ -273,19 +273,20 @@ test("WealthDecisionCenter RISK tab no longer renders duplicated risk cards", ()
 
 // ─── 7. Mobile-friendly projection + stress matrix ──────────────────────────
 
-test("Projection table is mobile-friendly (stacked rows on small screens)", () => {
+test("Projection table is mobile-friendly (stacked rows on small + tablet screens)", () => {
   const src = fs.readFileSync(
     path.resolve("client/src/components/ExecutiveDashboard.tsx"),
     "utf8",
   );
-  // Mobile container is gated md:hidden, desktop is hidden md:block.
+  // Cards container is gated lg:hidden (covers mobile + tablet through <1024px),
+  // desktop dense table is hidden lg:block so tablet never clips columns.
   assert(
     /data-testid="wealth-projection-mobile"/.test(src),
-    "mobile projection container present",
+    "mobile/tablet projection container present",
   );
   assert(
-    /hidden md:block/.test(src),
-    "desktop projection table is hidden on mobile",
+    /<div className="hidden lg:block overflow-x-auto">\s*<table[\s\S]*?wealth-projection-table/.test(src),
+    "desktop projection table is gated to lg+ so tablet width is not clipped",
   );
 });
 
