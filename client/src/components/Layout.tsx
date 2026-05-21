@@ -670,9 +670,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        {/* Page content — reserves bottom padding when the PWA banner is shown
-            (audit fix P1-5) so scrolling content does not hide behind it. */}
-        <main className={`pwa-main-scroll flex-1 overflow-y-auto overflow-x-hidden p-4 md:px-6 lg:p-6 ${pwaVisible ? "pb-32" : ""}`}>
+        {/* Page content — reserves bottom padding when the PWA banner is
+            shown so financial data (projection cards, dashboard rows) is
+            never hidden behind the banner. The banner itself anchors to
+            `env(safe-area-inset-bottom)`; here we add an equivalent
+            extra-tall spacer that wins against iOS Safari's home-indicator
+            inset. The reserved space is gated on `usePwaBannerVisible()`
+            which now subscribes to a `fwl-pwa-banner-visibility` event so
+            it flips in lockstep with the banner's actual DOM presence
+            (covers the prior race where the banner showed but the spacer
+            stayed collapsed). */}
+        <main
+          className={`pwa-main-scroll flex-1 overflow-y-auto overflow-x-hidden p-4 md:px-6 lg:p-6 ${pwaVisible ? "pb-[calc(8rem+env(safe-area-inset-bottom,0px))]" : ""}`}
+          data-pwa-banner-active={pwaVisible ? "true" : "false"}
+          data-testid="pwa-main-scroll"
+        >
           {children}
         </main>
       </div>

@@ -72,20 +72,49 @@ function isInStandaloneMode(): boolean {
 }
 
 /**
+ * Custom event the banner dispatches whenever its actual visibility flips.
+ * Layout listens for this so the reserved bottom-spacer stays in sync with
+ * the banner — eliminating the race where the banner showed (e.g. on the
+ * 3rd visit, via `beforeinstallprompt`, or on iOS Safari) but Layout's
+ * cached gating still read "hidden", letting the banner overlay financial
+ * data.
+ */
+const VISIBILITY_EVENT = "fwl-pwa-banner-visibility";
+
+/**
  * Hook other components (e.g. Layout / <main>) can use to reserve bottom
- * padding when the banner is visible. Mirrors the same gates as the
- * component so the layout always agrees with the banner state.
+ * padding when the banner is visible. Re-evaluates on:
+ *   • route change (location)
+ *   • a `fwl-pwa-banner-visibility` custom event dispatched by the banner
+ *     whenever it shows or hides (covers beforeinstallprompt, iOS Safari
+ *     detection, dismiss, and the 3rd-visit bump race).
+ * Returns `false` until the banner is *actually* in the DOM, but `true`
+ * the moment it appears — guaranteeing the layout reserves space before
+ * the user can scroll the projection cards underneath it.
  */
 export function usePwaBannerVisible(): boolean {
   const [location] = useLocation();
   const [active, setActive] = useState(false);
 
   useEffect(() => {
-    if (isInStandaloneMode()) return;
-    if (dismissedRecently()) return;
-    if (SUPPRESSED_PATHS.includes(location)) return;
-    if (readVisitCount() < MIN_VISITS) return;
-    setActive(true);
+    function evaluate() {
+      if (isInStandaloneMode()) { setActive(false); return; }
+      if (dismissedRecently()) { setActive(false); return; }
+      if (SUPPRESSED_PATHS.includes(location)) { setActive(false); return; }
+      if (readVisitCount() < MIN_VISITS) { setActive(false); return; }
+      setActive(true);
+    }
+    evaluate();
+    function onVisibility(e: Event) {
+      const detail = (e as CustomEvent<{ visible: boolean }>).detail;
+      if (detail && typeof detail.visible === "boolean") {
+        setActive(detail.visible);
+      } else {
+        evaluate();
+      }
+    }
+    window.addEventListener(VISIBILITY_EVENT, onVisibility);
+    return () => window.removeEventListener(VISIBILITY_EVENT, onVisibility);
   }, [location]);
 
   return active;
@@ -104,6 +133,14 @@ export default function PwaInstallBanner() {
     if (isInStandaloneMode()) return;
     bumpVisitCount();
   }, []);
+
+  // Whenever our visibility flips, broadcast it so `usePwaBannerVisible`
+  // listeners (Layout) can reserve / release the bottom-spacer in lockstep.
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("fwl-pwa-banner-visibility", { detail: { visible } }),
+    );
+  }, [visible]);
 
   useEffect(() => {
     if (isInStandaloneMode()) { setVisible(false); return; }
@@ -138,8 +175,11 @@ export default function PwaInstallBanner() {
     setDeferredPrompt(null);
   }
 
+  // Anchor to the bottom-left corner so the banner cannot overlap the
+  // primary content column on narrow iPhone widths. The `max()` honours
+  // the iOS Safari home-indicator safe area without floating too high.
   const bottomStyle = useMemo<React.CSSProperties>(() => ({
-    bottom: "max(1rem, env(safe-area-inset-bottom, 1rem))",
+    bottom: "max(0.75rem, env(safe-area-inset-bottom, 0.75rem))",
   }), []);
 
   if (!visible) return null;

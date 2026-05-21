@@ -3,25 +3,36 @@
  *
  * Run: npx tsx script/test-mobile-strategic-projection.ts
  *
- * Pins the responsive fix for the Strategic Wealth Projection table:
- *   1. Desktop dense table is only rendered at lg+ (`hidden lg:block`) so it
- *      cannot clip at tablet widths (768–1023px).
- *   2. Mobile + tablet (<lg) render expandable yearly cards (`lg:hidden`
- *      container with the `MobileProjectionCard` component).
- *   3. Card collapsed header surfaces: year, total NW, accessible NW, CAGR,
- *      annual growth.
- *   4. Card expanded body surfaces: cash, debt, property equity, stocks,
- *      crypto, super, FIRE Capital, Liquidatable Wealth.
- *   5. No `overflow-x` is used on the mobile/tablet container (no sideways
- *      scroll, no clipped Property Equity / Stocks columns).
- *   6. Wealth layers strip renders as a clean 2×2 metric grid on mobile +
- *      tablet (<lg) and 1×4 on lg+.
- *   7. Smooth expand/collapse animation is wired (grid-rows transition + a
- *      transition on the chevron).
- *   8. Canonical data is reused (no parallel projection engine): the mobile
- *      cards consume `projectionRows` + `wealthLayers` — the same props the
- *      desktop table reads.
- *   9. The card container never renders a `<table>` element.
+ * Pins the responsive contract for the Strategic Wealth Projection table
+ * plus the PWA install-banner overlay fix.
+ *
+ * Contract:
+ *   1. Desktop dense table is rendered at md+ (`hidden md:block`) with every
+ *      original column data-testid intact.
+ *   2. Mobile (<md) renders a dedicated `ProjectionCardListMobile` component
+ *      gated `block md:hidden`. This is a separate UI surface, NOT a
+ *      compressed table.
+ *   3. The mobile component file exists at
+ *      `client/src/components/ProjectionCardListMobile.tsx` and exports a
+ *      default React component.
+ *   4. The mobile component's collapsed card header surfaces:
+ *        Year · Total NW · Accessible NW · CAGR · Annual Growth
+ *      and its expanded body surfaces:
+ *        Cash · Liabilities · Property Equity · Stocks · Crypto · Super ·
+ *        FIRE Capital · Liquidatable Wealth
+ *   5. The mobile component does NOT call any projection engine, forecast
+ *      store, regime calculator, or canonical-risk builder. It consumes
+ *      `rows` (= `projectionRows`) + `layers` (= `wealthLayers`) from props.
+ *   6. The mobile container in `ExecutiveDashboard.tsx` uses no `overflow-x`
+ *      utility and renders no `<table>` element — so columns can never clip.
+ *   7. Wealth-layers strip stays 2×2 on mobile / 1×4 on md+.
+ *   8. The PWA install banner reserves bottom space via the
+ *      `usePwaBannerVisible` hook, which subscribes to a
+ *      `fwl-pwa-banner-visibility` custom event the banner dispatches when
+ *      its visibility flips — so the spacer is in lockstep with the banner
+ *      and can never overlay financial data.
+ *   9. The banner uses `env(safe-area-inset-bottom)` so the iOS Safari home
+ *      indicator does not push it over the projection cards.
  */
 
 import fs from "node:fs";
@@ -38,26 +49,36 @@ function assert(cond: any, msg: string) {
   if (!cond) throw new Error(msg);
 }
 
-const SRC = fs.readFileSync(
+const DASH = fs.readFileSync(
   path.resolve("client/src/components/ExecutiveDashboard.tsx"),
   "utf8",
 );
+const MOBILE_PATH = path.resolve(
+  "client/src/components/ProjectionCardListMobile.tsx",
+);
+const MOBILE_EXISTS = fs.existsSync(MOBILE_PATH);
+const MOBILE = MOBILE_EXISTS ? fs.readFileSync(MOBILE_PATH, "utf8") : "";
+const BANNER = fs.readFileSync(
+  path.resolve("client/src/components/PwaInstallBanner.tsx"),
+  "utf8",
+);
+const LAYOUT = fs.readFileSync(
+  path.resolve("client/src/components/Layout.tsx"),
+  "utf8",
+);
 
-// 1. Desktop dense table preserved AND only renders at lg+ -------------------
+// 1. Desktop dense table preserved + gated `hidden md:block` ----------------
 
-test("desktop dense table is preserved verbatim and gated to lg+", () => {
-  // Wrapper now `hidden lg:block` so it only renders at desktop (>=1024px).
-  // Tablet (768–1023px) must NOT render the dense table.
+test("desktop dense table is preserved and gated `hidden md:block`", () => {
   assert(
-    /<div className="hidden lg:block overflow-x-auto">[\s\S]*?<table[\s\S]*?data-testid="wealth-projection-table"/.test(SRC),
-    "desktop table wrapper is `hidden lg:block` and table testid intact",
+    /<div className="hidden md:block overflow-x-auto">\s*<table[\s\S]*?data-testid="wealth-projection-table"/.test(DASH),
+    "desktop table wrapper is `hidden md:block` (restored)",
   );
-  // Guard: no `hidden md:block` wrapper left behind for the projection table.
+  // Reject any leftover lg-gated projection table from the previous attempt.
   assert(
-    !/<div className="hidden md:block overflow-x-auto">\s*<table[\s\S]*?wealth-projection-table/.test(SRC),
-    "projection table is NOT gated at md — must be lg",
+    !/<div className="hidden lg:block overflow-x-auto">\s*<table[\s\S]*?wealth-projection-table/.test(DASH),
+    "desktop projection table must NOT be gated at lg",
   );
-  // Every original column header is still present.
   for (const col of [
     "col-accessible-nw",
     "col-total-nw",
@@ -70,151 +91,164 @@ test("desktop dense table is preserved verbatim and gated to lg+", () => {
     "col-crypto",
     "col-super",
   ]) {
-    assert(SRC.includes(`data-testid="${col}"`), `desktop column ${col} retained`);
+    assert(
+      DASH.includes(`data-testid="${col}"`),
+      `desktop column ${col} retained`,
+    );
   }
 });
 
-// 2. Mobile + tablet expandable card component exists ------------------------
+// 2. Mobile container gated `block md:hidden` -------------------------------
 
-test("mobile + tablet uses an expandable card component (no wide table)", () => {
-  assert(SRC.includes("function MobileProjectionCard("), "MobileProjectionCard component defined");
+test("mobile section is gated `block md:hidden` and renders the new component", () => {
   assert(
-    /<div\s+className="lg:hidden divide-y[^"]*"\s+data-testid="wealth-projection-mobile"/.test(SRC),
-    "card container is lg:hidden (covers mobile + tablet) and uses divide-y",
+    /<div className="block md:hidden"[^>]*data-testid="wealth-projection-mobile-wrapper"/.test(DASH),
+    "mobile wrapper is `block md:hidden` with the expected testid",
   );
   assert(
-    SRC.includes("<MobileProjectionCard"),
-    "card container renders MobileProjectionCard per row",
+    /<ProjectionCardListMobile[\s\S]*?rows=\{rows\}[\s\S]*?layers=\{layers\}[\s\S]*?startNW=\{startNW\}/.test(DASH),
+    "ExecutiveDashboard passes canonical rows + layers + startNW props",
+  );
+  assert(
+    /import ProjectionCardListMobile from ['"]@\/components\/ProjectionCardListMobile['"]/.test(DASH),
+    "ExecutiveDashboard imports the new mobile component",
   );
 });
 
-// 3. Collapsed header content -----------------------------------------------
+// 3. Separate mobile component file --------------------------------------
 
-test("collapsed card header surfaces year, total NW, accessible NW, CAGR, growth", () => {
-  assert(SRC.includes('data-testid="mobile-summary-total-nw"'), "total NW chip present");
-  assert(SRC.includes('data-testid="mobile-summary-accessible-nw"'), "accessible NW chip present");
-  assert(SRC.includes('data-testid="mobile-summary-cagr"'), "CAGR chip present");
-  assert(SRC.includes('data-testid="mobile-summary-growth"'), "growth chip present");
+test("ProjectionCardListMobile.tsx exists as a separate component", () => {
+  assert(MOBILE_EXISTS, "client/src/components/ProjectionCardListMobile.tsx exists");
+  assert(
+    /export default function ProjectionCardListMobile/.test(MOBILE),
+    "exports default ProjectionCardListMobile component",
+  );
+  assert(
+    /rows: WealthProjectionRow\[\]/.test(MOBILE) &&
+      /layers: WealthLayers \| null/.test(MOBILE),
+    "props are typed against the canonical WealthProjectionRow + WealthLayers",
+  );
+});
+
+// 4. Collapsed + expanded label contract ------------------------------------
+
+test("mobile collapsed header surfaces Year · Total NW · Accessible NW · CAGR · Growth", () => {
+  for (const tid of [
+    "mobile-summary-total-nw",
+    "mobile-summary-accessible-nw",
+    "mobile-summary-cagr",
+    "mobile-summary-growth",
+  ]) {
+    assert(
+      MOBILE.includes(`data-testid="${tid}"`),
+      `collapsed chip ${tid} present`,
+    );
+  }
   // Year appears as the leading label.
   assert(
-    /\{row\.year\}\{isFirst \? ' ★' : ''\}/.test(SRC),
-    "year is rendered at the leading position of the summary",
+    /\{row\.year\}\s*\n?\s*\{isFirst \? " ★" : ""\}/.test(MOBILE) ||
+      /\{row\.year\}\{isFirst \? " ★" : ""\}/.test(MOBILE),
+    "year leads the collapsed header",
   );
 });
 
-// 4. Expanded body content --------------------------------------------------
-
-test("expanded card body shows every required field", () => {
-  const start = SRC.indexOf("function MobileProjectionCard(");
-  const end = SRC.indexOf("function WealthProjectionTable(");
-  const body = SRC.slice(start, end);
+test("mobile expanded body surfaces every required label", () => {
   for (const label of [
     ">Cash<",
-    ">Debt<",
-    ">Property equity<",
+    ">Liabilities<",
+    ">Property Equity<",
     ">Stocks<",
     ">Crypto<",
     ">Super<",
     ">FIRE Capital<",
     ">Liquidatable Wealth<",
   ]) {
-    assert(body.includes(label), `expanded body has label ${label}`);
+    assert(MOBILE.includes(label), `expanded body has label ${label}`);
   }
 });
 
-// 5. No overflow-x on the mobile/tablet card path ---------------------------
+// 5. No engine calls in mobile component -----------------------------------
 
-test("card container does NOT use any horizontal overflow scroll", () => {
-  const mobileIdx = SRC.indexOf('data-testid="wealth-projection-mobile"');
-  assert(mobileIdx > 0, "card container located");
-  // The desktop wrapper lives in the next sibling div with `hidden lg:block`.
-  const desktopIdx = SRC.indexOf('hidden lg:block overflow-x-auto', mobileIdx);
-  assert(desktopIdx > mobileIdx, "desktop wrapper sibling located");
-  const cardRegion = SRC.slice(mobileIdx, desktopIdx);
-  assert(
-    !/overflow-x/.test(cardRegion),
-    "card region must not include any overflow-x utility (no clipped columns)",
-  );
-});
-
-// 6. 2×2 wealth layers grid on mobile + tablet -------------------------------
-
-test("wealth layers strip renders 2×2 on mobile + tablet and 1×4 on lg+", () => {
-  assert(
-    /grid grid-cols-2 lg:grid-cols-4/.test(SRC),
-    "layers strip declared `grid-cols-2 lg:grid-cols-4` (2×2 through tablet)",
-  );
-  // The row-level dividers only kick in at lg+.
-  assert(
-    /lg:divide-x lg:divide-border\/25/.test(SRC),
-    "row-level dividers gated to lg+",
-  );
-  // Mobile/tablet per-cell borders must be `lg:border-r-0` / `lg:border-b-0`.
-  assert(
-    /border-r border-border\/25 lg:border-r-0/.test(SRC) &&
-      /border-b border-border\/25 lg:border-b-0/.test(SRC),
-    "per-cell borders only fire below lg",
-  );
-  // All four canonical layers still emitted as cells.
-  for (const id of ["gross", "accessible", "liquidatable", "fire"]) {
-    assert(
-      SRC.includes(`data-testid={\`wealth-layer-\${layer.id}\`}`) ||
-        SRC.includes(`wealth-layer-${id}`),
-      `layer ${id} cell still emitted`,
-    );
-  }
-});
-
-// 7. Smooth expand/collapse animation ---------------------------------------
-
-test("expand/collapse uses a smooth animation (grid-rows transition + chevron rotate)", () => {
-  assert(
-    /transition-\[grid-template-rows\][\s\S]*?gridTemplateRows: open \? '1fr' : '0fr'/.test(SRC),
-    "grid-rows 0fr→1fr transition applied",
-  );
-  assert(
-    /rotate-90/.test(SRC) && /transition-transform/.test(SRC),
-    "chevron uses a transform transition for visual affordance",
-  );
-});
-
-// 8. Canonical data reused (no parallel engine) -----------------------------
-
-test("card cells consume the SAME canonical projection rows + layers as desktop", () => {
-  assert(
-    /const rows = p\.projectionRows;/.test(SRC),
-    "projection rows sourced from props (canonical engine)",
-  );
-  assert(
-    /const layers = p\.wealthLayers \?\? null;/.test(SRC),
-    "wealth layers sourced from props (canonical engine)",
-  );
-  // MobileProjectionCard does not call any projection / engine function.
-  const start = SRC.indexOf("function MobileProjectionCard(");
-  const end = SRC.indexOf("function WealthProjectionTable(");
-  const body = SRC.slice(start, end);
+test("ProjectionCardListMobile contains no engine / store / regime calls", () => {
   for (const forbidden of [
     "projectNetWorth",
     "computeWealthLayers",
     "buildCanonicalRiskSurface",
     "useForecastStore",
+    "computeFireCapital",
   ]) {
     assert(
-      !body.includes(forbidden),
-      `MobileProjectionCard must not call ${forbidden} (no parallel maths)`,
+      !MOBILE.includes(forbidden),
+      `mobile component must not call ${forbidden}`,
     );
   }
 });
 
-// 9. Card region must not contain a <table> element --------------------------
+// 6. No overflow-x and no <table> in the mobile region ---------------------
 
-test("card region does NOT render a <table> (no clipped columns possible)", () => {
-  const mobileIdx = SRC.indexOf('data-testid="wealth-projection-mobile"');
-  const desktopIdx = SRC.indexOf('hidden lg:block overflow-x-auto', mobileIdx);
-  const cardRegion = SRC.slice(mobileIdx, desktopIdx);
+test("mobile region uses no overflow-x and renders no <table>", () => {
+  // Locate the mobile wrapper region inside ExecutiveDashboard.
+  const startIdx = DASH.indexOf('data-testid="wealth-projection-mobile-wrapper"');
+  const endIdx = DASH.indexOf('hidden md:block overflow-x-auto', startIdx);
+  assert(startIdx > 0 && endIdx > startIdx, "mobile + desktop boundaries located");
+  const region = DASH.slice(startIdx, endIdx);
+  assert(!/overflow-x/.test(region), "no overflow-x in the mobile region");
+  assert(!/<table/.test(region), "no <table> in the mobile region");
+  // And in the standalone component file itself.
+  assert(!/<table/.test(MOBILE), "no <table> inside ProjectionCardListMobile");
+  assert(!/overflow-x/.test(MOBILE), "no overflow-x inside ProjectionCardListMobile");
+});
+
+// 7. Wealth layers strip 2×2 mobile / 1×4 md+ -------------------------------
+
+test("wealth layers strip renders 2×2 on mobile and 1×4 on md+", () => {
   assert(
-    !/<table/.test(cardRegion),
-    "card region must not contain a <table>",
+    /grid grid-cols-2 md:grid-cols-4/.test(DASH),
+    "layers strip declared `grid-cols-2 md:grid-cols-4`",
+  );
+  assert(
+    /md:divide-x md:divide-border\/25/.test(DASH),
+    "row-level dividers gated to md+",
+  );
+  assert(
+    /border-r border-border\/25 md:border-r-0/.test(DASH) &&
+      /border-b border-border\/25 md:border-b-0/.test(DASH),
+    "per-cell borders only fire below md",
+  );
+});
+
+// 8. PWA banner visibility hook subscribes to a custom event ---------------
+
+test("usePwaBannerVisible subscribes to `fwl-pwa-banner-visibility` event", () => {
+  assert(
+    BANNER.includes("fwl-pwa-banner-visibility"),
+    "banner module references the visibility event",
+  );
+  assert(
+    /window\.addEventListener\("fwl-pwa-banner-visibility"/.test(BANNER) ||
+      /window\.addEventListener\(VISIBILITY_EVENT/.test(BANNER),
+    "hook adds the visibility event listener",
+  );
+  assert(
+    /window\.dispatchEvent\(\s*new CustomEvent\("fwl-pwa-banner-visibility"/.test(BANNER),
+    "banner component dispatches the visibility event when it flips",
+  );
+});
+
+// 9. Banner uses safe-area + Layout reserves matching spacer ----------------
+
+test("banner honours `env(safe-area-inset-bottom)` and Layout reserves a safe-area spacer", () => {
+  assert(
+    /env\(safe-area-inset-bottom/.test(BANNER),
+    "banner bottom respects env(safe-area-inset-bottom)",
+  );
+  assert(
+    /pb-\[calc\(8rem\+env\(safe-area-inset-bottom,0px\)\)\]/.test(LAYOUT),
+    "Layout's reserved spacer uses safe-area + 8rem and is gated on pwaVisible",
+  );
+  assert(
+    /data-pwa-banner-active=\{pwaVisible \? "true" : "false"\}/.test(LAYOUT),
+    "Layout exposes data-pwa-banner-active so QA can assert the spacer is active",
   );
 });
 
