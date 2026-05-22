@@ -606,6 +606,39 @@ for (const yr of __cfReconYears) {
   }));
 }
 
+// Plan Feasibility audit trace — mirrors the live dashboard registration.
+// #FWL_Plan_Feasibility_Layer
+const {
+  buildPlanFeasibilityTrace: __buildPlanFeas,
+  buildFundingResolutionTrace: __buildFundRes,
+} = await import('../client/src/lib/auditMode/engineTraces');
+const { computePlanFeasibility: __computePlanFeas } =
+  await import('../client/src/lib/planFeasibility');
+const { computeFundingResolution: __computeFundRes } =
+  await import('../client/src/lib/fundingResolutionAdvisor');
+registerTrace(__buildPlanFeas({
+  result: __computePlanFeas({
+    cash: 220_000, offsetBalance: 0, fundedProperties: [],
+    cashflowAnnual: [{ year: new Date().getFullYear(), plannedStockBuy: 30_000 }],
+    horizon: 'current-year',
+  }),
+}));
+// Funding Gap Resolution audit trace — mirrors the live dashboard registration.
+// #FWL_Funding_Gap_Resolution_Advisor
+registerTrace(__buildFundRes({
+  result: __computeFundRes({
+    fundingGap: -25_000,
+    plannedStockBuy: 30_000, plannedCryptoBuy: 0,
+    stockDcaAnnual: 0, cryptoDcaAnnual: 0,
+    acquisitionCashUsed: 0, acquisitionBuyingCosts: 0,
+    availableEquityRelease: 0,
+    stocksBalance: 0, cryptoBalance: 0,
+    monthlySavings: 0,
+  }),
+  availableLiquidity: 220_000,
+  requiredLiquidity:  245_000,
+}));
+
 const missing = REQUIRED_TRACE_IDS.filter(id => !hasTrace(id));
 assert(`All required trace ids are registerable (missing: ${missing.join(', ') || 'none'})`, missing.length === 0);
 for (const id of REQUIRED_TRACE_IDS) {

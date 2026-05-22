@@ -136,3 +136,15 @@ export {
   CASHFLOW_RECONCILIATION_YEAR_RANGE,
   type CashflowReconciliationTraceArgs,
 } from './cashflowReconciliationTraces';
+
+export {
+  buildPlanFeasibilityTrace,
+  PLAN_FEASIBILITY_TRACE_ID,
+  type PlanFeasibilityTraceArgs,
+} from './planFeasibilityTraces';
+
+export {
+  buildFundingResolutionTrace,
+  FUNDING_RESOLUTION_TRACE_ID,
+  type FundingResolutionTraceArgs,
+} from './fundingResolutionTraces';

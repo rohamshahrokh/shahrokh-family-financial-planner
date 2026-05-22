@@ -492,48 +492,70 @@ if (y2027 && y2028) {
     typeof reconTrace.finalValue === 'string' && /\$/.test(reconTrace.finalValue));
   assert('Reconciliation sourceEngine references finance.ts canonical engine',
     /finance\.ts/.test(reconTrace.sourceEngine));
-  // Section headers (new schema separates bridge from info).
-  for (const header of ['─ INCOME (cash bridge) ─', '─ EXPENSES (cash bridge) ─',
+  // ── Bridge sections — Opening / Operating / Investment Allocations /
+  //    Property Acquisition Cash Used / Financing / Closing Cash. ──
+  for (const header of ['─ 1. Opening Cash ─',
+                         '─ 2. Operating Cashflow ─',
+                         '─ 3. Investment Allocations ─',
+                         '─ 4. Property Acquisition Cash Used ─',
+                         '─ 5. Financing / Equity Release ─',
                          '─ INFO (excluded from cash bridge) ─',
-                         '─ CALCULATION (engine bridge) ─']) {
-    assert(`Reconciliation has section "${header}"`,
+                         '─ 6. Closing Cash ─']) {
+    assert(`Reconciliation has bridge section "${header}"`,
       reconTrace.inputs.some(i => i.label === header));
   }
-  // Income line items (bridge).
-  for (const lbl of ['Salary income', 'Other income', 'Rental income — all properties',
-                      'Investment income (dividends)', 'Tax refunds (NG)',
-                      'Planned stock sells', 'Planned crypto sells', 'Total Income']) {
-    assert(`Reconciliation INCOME contains "${lbl}"`,
+  // Operating Cashflow line items.
+  for (const lbl of ['+ Salary income', '+ Other income', '+ Rental income — all properties',
+                      '+ Investment income (dividends)', '+ Tax refunds (NG)',
+                      '- Living expenses', '- Childcare', '- PPOR mortgage repayment',
+                      '- Investment loan repayments',
+                      '- Recurring bills / debt repayments',
+                      '= Operating Cashflow']) {
+    assert(`Operating Cashflow contains "${lbl}"`,
       reconTrace.inputs.some(i => i.label === lbl));
   }
-  // Expense line items (bridge).
-  for (const lbl of ['Living expenses', 'Childcare', 'PPOR mortgage repayment',
-                      'Investment loan repayments',
-                      'Planned stock buys', 'Planned crypto buys',
-                      'Stock DCA outflow', 'Crypto DCA outflow',
-                      'Recurring bills',
-                      'Acquisition — cash + offset used',
-                      'Acquisition — asset sales used',
-                      'Acquisition — buying costs',
-                      'Total Expenses']) {
-    assert(`Reconciliation EXPENSES contains "${lbl}"`,
+  // Investment Allocations line items.
+  for (const lbl of ['- Stock DCA', '- Crypto DCA',
+                      '- Planned stock buys', '- Planned crypto buys',
+                      '+ Planned stock sells', '+ Planned crypto sells',
+                      '= Net Investment Allocations']) {
+    assert(`Investment Allocations contains "${lbl}"`,
+      reconTrace.inputs.some(i => i.label === lbl));
+  }
+  // Property Acquisition Cash Used line items.
+  for (const lbl of ['- Deposit cash / offset used',
+                      '- Asset sales used (stocks/crypto liquidated for deposit)',
+                      '- Stamp duty + legal + building / loan setup / other buying costs',
+                      '= Property Acquisition Cash Used']) {
+    assert(`Property Acquisition Cash Used contains "${lbl}"`,
+      reconTrace.inputs.some(i => i.label === lbl));
+  }
+  // Financing / Equity Release line items.
+  for (const lbl of ['+ Equity released (debt-funded deposit)',
+                      '= Financing / Equity Release (cash impact)']) {
+    assert(`Financing / Equity Release contains "${lbl}"`,
       reconTrace.inputs.some(i => i.label === lbl));
   }
   // INFO (excluded) section.
   for (const lbl of ['Investment property holding cost',
                       'Tax payable (already withheld)',
-                      'Equity released (acquisition)']) {
+                      'Total Income (legacy combined view)',
+                      'Total Expenses (legacy combined view)']) {
     assert(`Reconciliation INFO contains "${lbl}"`,
       reconTrace.inputs.some(i => i.label === lbl));
   }
-  // Closing cash bridge.
-  for (const lbl of ['Opening Cash', '+ Total Income', '- Total Expenses',
+  // Closing-cash bridge section.
+  for (const lbl of ['Opening Cash',
+                      '+ Operating Cashflow',
+                      '+ Investment Allocations',
+                      '+ Property Acquisition Cash Used',
+                      '+ Financing / Equity Release',
                       '+ Rounding (monthly accumulation)',
-                      '= Net Cashflow (line-item sum)',
-                      '= Net Cashflow (engine)',
+                      '= Engine Net Cashflow (line-item sum)',
+                      '= Engine Net Cashflow (canonical)',
                       'Drift (line sum vs engine)',
                       '= Closing Cash']) {
-    assert(`Reconciliation CALCULATION contains "${lbl}"`,
+    assert(`Closing Cash bridge contains "${lbl}"`,
       reconTrace.inputs.some(i => i.label === lbl));
   }
 
@@ -541,13 +563,13 @@ if (y2027 && y2028) {
   const findVal = (label: string) =>
     String(reconTrace.inputs.find(i => i.label === label)?.value ?? '');
   assert('Salary income line shows engine value (>$0)',
-    /\$[1-9]/.test(findVal('Salary income')));
-  // Equity Release for the 2028 IP2 settlement = $164k — now in INFO section.
-  assert('INFO: Equity released = IP2 deposit ($164k)',
-    findVal('Equity released (acquisition)').includes('164,000'));
-  // Acquisition cash used = $0 under equity release (bridge expense).
-  assert('Acquisition — cash + offset used = $0 (equity release)',
-    /\$0\b/.test(findVal('Acquisition — cash + offset used')));
+    /\$[1-9]/.test(findVal('+ Salary income')));
+  // Equity Release for the 2028 IP2 settlement = $164k — now in section 5.
+  assert('Financing section: Equity released = IP2 deposit ($164k)',
+    findVal('+ Equity released (debt-funded deposit)').includes('164,000'));
+  // Acquisition cash used = $0 under equity release (section 4).
+  assert('Deposit cash / offset used = $0 (equity release)',
+    /\$0\b/.test(findVal('- Deposit cash / offset used')));
   // Closing cash matches engine.
   const closingCashLine = findVal('= Closing Cash');
   const expectedClosing = y2028.endingBalance >= 0
@@ -557,33 +579,34 @@ if (y2027 && y2028) {
     closingCashLine === expectedClosing,
     `got "${closingCashLine}" expected "${expectedClosing}"`);
 
-  // ── STRICT BALANCE CHECK ──────────────────────────────────────────────
-  // Parse the displayed numbers and assert that Total Income - Total
-  // Expenses == engine netCashflow within $1. This is the QA-reported bug.
+  // ── STRICT BALANCE CHECK — bridge subtotals balance to engine net ──────
   const parse$ = (s: string): number => {
     const neg = s.trim().startsWith('-');
     const raw = s.replace(/[^\d.]/g, '');
     const n = parseFloat(raw || '0');
     return neg ? -n : n;
   };
-  const incomeVal   = parse$(findVal('Total Income'));
-  const expensesVal = parse$(findVal('Total Expenses'));
+  const opVal      = parse$(findVal('= Operating Cashflow'));
+  const invVal     = parse$(findVal('= Net Investment Allocations'));
+  const acqVal     = parse$(findVal('= Property Acquisition Cash Used'));
+  const finVal     = parse$(findVal('= Financing / Equity Release (cash impact)'));
   const roundingVal = parse$(findVal('+ Rounding (monthly accumulation)'));
-  const netLineVal  = parse$(findVal('= Net Cashflow (line-item sum)'));
-  const netEngVal   = parse$(findVal('= Net Cashflow (engine)'));
+  const netLineVal  = parse$(findVal('= Engine Net Cashflow (line-item sum)'));
+  const netEngVal   = parse$(findVal('= Engine Net Cashflow (canonical)'));
   const driftVal    = parse$(findVal('Drift (line sum vs engine)'));
-  // The displayed equation MUST balance:
-  //   Total Income - Total Expenses + Rounding == line-item Net Cashflow
-  //                                            == engine Net Cashflow
-  const computedNet = incomeVal - expensesVal + roundingVal;
-  assert(`Total Income - Total Expenses + Rounding == line-item Net Cashflow (got ${computedNet} vs ${netLineVal})`,
+  // The displayed bridge MUST balance:
+  //   Operating + Investments + Acquisition + Financing + Rounding == engine netCashflow
+  const computedNet = opVal + invVal + acqVal + finVal + roundingVal;
+  assert(`Operating + Investments + Acquisition + Financing + Rounding == line-item Net Cashflow (got ${computedNet} vs ${netLineVal})`,
     Math.abs(computedNet - netLineVal) <= 1);
   assert(`Line-item Net Cashflow matches engine Net Cashflow exactly (drift ${Math.abs(netLineVal - netEngVal)})`,
     Math.abs(netLineVal - netEngVal) <= 1);
   assert(`Engine and line-item agree exactly for 2028 (drift = ${driftVal})`,
     driftVal <= 1);
-  // The rounding adjustment itself should be tiny (≤ $50). If it grows
-  // large, that means a real engine line is missing from the trace inputs.
+  // Financing/Equity Release contributes $0 to the cash bridge by design.
+  assert(`Financing / Equity Release contributes $0 to cash bridge (got ${finVal})`,
+    Math.abs(finVal) <= 1);
+  // Rounding adjustment is tiny.
   assert(`Rounding adjustment is small for 2028 (|${roundingVal}| ≤ $50)`,
     Math.abs(roundingVal) <= 50);
   // Closing cash = opening + netCashflow.
@@ -611,6 +634,271 @@ if (y2027 && y2028) {
     reconTrace.excluded.some(e => /equity[- ]release/i.test(e.label)));
   assert('Reconciliation excluded list mentions property holding cost',
     reconTrace.excluded.some(e => /holding cost/i.test(e.label)));
+}
+
+// ─── 11.b.ii — Year-End Wealth Position section present even when caller
+//              omits all wealth values (section is always rendered; missing
+//              fields read "n/a (not in current forecast row)"). ──
+if (y2027 && y2028) {
+  // Re-build the 2028 trace with NO wealth values to assert the n/a path.
+  const reconNoWealth = buildCashflowReconciliationTrace({
+    year: 2028,
+    openingCash: y2027.endingBalance,
+    closingCash: y2028.endingBalance,
+    netCashflow: y2028.netCashFlow,
+    salaryIncome: (y2028 as any).income ?? 0,
+    rentalIncomeTotal: (y2028 as any).rentalIncome ?? 0,
+    taxRefund: 0,
+    livingExpenses: (y2028 as any).totalExpenses ?? 0,
+    pporMortgage: 0,
+    investmentLoanRepayment: (y2028 as any).investmentLoanRepayment ?? 0,
+    plannedStockBuy: 0,
+    plannedCryptoBuy: 0,
+    stockDCAOutflow: 0,
+    cryptoDCAOutflow: 0,
+    billsOutflow: (y2028 as any).billsOutflow ?? 0,
+    acquisitionCashUsed: (y2028 as any).propertyPurchaseCashUsed ?? 0,
+    assetSalesUsed: (y2028 as any).propertyAssetSalesUsed ?? 0,
+    acquisitionBuyingCosts: (y2028 as any).propertyBuyingCosts ?? 0,
+    propertyHoldingCost: (y2028 as any).propertyHoldingCost ?? 0,
+    equityReleased: (y2028 as any).propertyEquityReleased ?? 0,
+    isAcquisitionYear: true,
+    // NO wealth* fields passed — every wealth row should fall back to "n/a".
+  });
+  assert('Year-End Wealth Position section header present even with no wealth args',
+    reconNoWealth.inputs.some(i => i.label === '─ 7. Year-End Wealth Position ─'));
+  const naOk = (lbl: string) => {
+    const v = String(reconNoWealth.inputs.find(i => i.label === lbl)?.value ?? '');
+    return /n\/a/i.test(v);
+  };
+  assert('Cash Position row shows n/a when forecast row not passed',
+    naOk('Cash Position (forecast row)'));
+  assert('Invested Capital row shows n/a when stocks+crypto not passed',
+    naOk('Invested Capital (Stocks + Crypto)'));
+  assert('Property Equity row shows n/a when not passed',
+    naOk('Property Equity'));
+  assert('Accessible Wealth row shows n/a when not passed',
+    naOk('Accessible Wealth (excl. super)'));
+  assert('Net Worth row shows n/a when not passed',
+    naOk('Net Worth (incl. super)'));
+  // Liquidity-vs-Wealth context row is only emitted when the section has
+  // enough information to make a comparison; with NO wealth values + a
+  // healthy closing cash for 2028, the warning must NOT fire as the
+  // "deterioration" path. (It may emit the "healthy cash" variant.)
+  const ctxRow = reconNoWealth.inputs.find(i => i.label === 'Liquidity vs Wealth context');
+  const ctxText = String(ctxRow?.value ?? '');
+  assert('Wealth context row never falsely warns of deterioration',
+    !/deterioration/i.test(ctxText) || /does not indicate/i.test(ctxText));
+}
+
+// ─── 11.c — Active 2026 scenario: bridge renders BTC lump, planned-stock
+//          lump, property deposit + buying costs as their own sections. ──
+//
+// Uses the active-household engine values surfaced by the FWL 2026 audit:
+//   property deposit (cash leg) ≈ $150,000, buying costs ≈ $31,075
+//   planned BTC buy = $80,000 (lump-sum), planned-stock buys = $40,400
+//   stock DCA (Dec only) ≈ $991, crypto DCA (Nov+Dec) = $2,600
+//   recurring bills ≈ $43,074, living expenses ≈ $117,329
+//   salary ≈ $177,295, rental ≈ $14,043
+// Engine net cashflow ≈ −$296,889; opening cash $262,000; closing −$34,889.
+section('11.c Cashflow Reconciliation — active 2026 bridge format');
+{
+  const recon2026 = buildCashflowReconciliationTrace({
+    year: 2026,
+    openingCash: 262_000,
+    closingCash: -34_889,
+    netCashflow: -296_889,
+    salaryIncome:            177_295,
+    rentalIncomeTotal:        14_043,
+    rentalIncomeByProperty:  { '3': 14_043 },
+    taxRefund:                     0,
+    plannedStockSell:              0,
+    plannedCryptoSell:             0,
+    livingExpenses:          117_329,
+    pporMortgage:                  0,
+    investmentLoanRepayment:  22_752,
+    plannedStockBuy:          40_400,
+    plannedCryptoBuy:         80_000,
+    stockDCAOutflow:             991,
+    cryptoDCAOutflow:          2_600,
+    billsOutflow:             43_074,
+    acquisitionCashUsed:     150_000,
+    assetSalesUsed:                0,
+    acquisitionBuyingCosts:   31_075,
+    propertyHoldingCost:       3_450,
+    taxPayableInformational:  56_408,
+    equityReleased:                0,
+    isAcquisitionYear:          true,
+    fundingSourceLabel:        'offset+savings',
+    // ── Year-End Wealth Position (pass-through from YearlyProjection) ──
+    // Plausible 2026 wealth row: cash drained but capital deployed into
+    // stocks/crypto + new IP equity. Numbers below come straight from a
+    // forecast row — the trace MUST surface them without re-deriving net
+    // worth.
+    wealthCash:                  -34_889, // matches closing cash
+    wealthStocks:                121_391, // ~40.4k lump + small DCA
+    wealthCrypto:                 82_600, // ~80k BTC lump + 2.6k DCA
+    wealthPropertyEquity:        336_000, // PPOR equity + IP1 equity (150k deposit + cap growth)
+    wealthAccessibleNetWorth:    505_102,
+    wealthTotalSuper:             96_000,
+    wealthTotalNetWorth:         601_102,
+    priorYearAccessibleNetWorth: 480_000,
+  });
+
+  const parse$2026 = (s: string): number => {
+    const neg = s.trim().startsWith('-');
+    const raw = s.replace(/[^\d.]/g, '');
+    const n = parseFloat(raw || '0');
+    return neg ? -n : n;
+  };
+  const find2026 = (label: string) =>
+    String(recon2026.inputs.find(i => i.label === label)?.value ?? '');
+
+  // Section presence — every required bridge section.
+  for (const header of ['─ 1. Opening Cash ─',
+                         '─ 2. Operating Cashflow ─',
+                         '─ 3. Investment Allocations ─',
+                         '─ 4. Property Acquisition Cash Used ─',
+                         '─ 5. Financing / Equity Release ─',
+                         '─ 6. Closing Cash ─']) {
+    assert(`2026 bridge has section "${header}"`,
+      recon2026.inputs.some(i => i.label === header));
+  }
+
+  // Line values match the active-scenario data.
+  assert('2026: BTC lump-sum shows -$80,000 in Investment Allocations',
+    /80,000/.test(find2026('- Planned crypto buys')));
+  assert('2026: Planned stock buys show -$40,400 in Investment Allocations',
+    /40,400/.test(find2026('- Planned stock buys')));
+  assert('2026: Stock DCA shows engine value (~$991) in Investment Allocations',
+    /991\b/.test(find2026('- Stock DCA')));
+  assert('2026: Crypto DCA shows engine value (~$2,600) in Investment Allocations',
+    /2,600/.test(find2026('- Crypto DCA')));
+  assert('2026: Property deposit cash leg shows $150,000 in Acquisition section',
+    /150,000/.test(find2026('- Deposit cash / offset used')));
+  assert('2026: Buying costs show $31,075 in Acquisition section',
+    /31,075/.test(find2026('- Stamp duty + legal + building / loan setup / other buying costs')));
+  assert('2026: Recurring bills show $43,074 in Operating Cashflow',
+    /43,074/.test(find2026('- Recurring bills / debt repayments')));
+  assert('2026: Living expenses show $117,329 in Operating Cashflow',
+    /117,329/.test(find2026('- Living expenses')));
+  assert('2026: Salary shows $177,295 in Operating Cashflow',
+    /177,295/.test(find2026('+ Salary income')));
+  assert('2026: Rental shows $14,043 in Operating Cashflow',
+    /14,043/.test(find2026('+ Rental income — all properties')));
+  // Financing/Equity Release section must read $0 because default funding is
+  // offset+savings — the cash leg pays the full deposit, no equity drawn.
+  assert('2026: Financing/Equity Release line is $0 (offset+savings funding)',
+    /\$0\b/.test(find2026('= Financing / Equity Release (cash impact)')));
+
+  // Bridge arithmetic balances exactly to engine netCashflow.
+  const op2026  = parse$2026(find2026('= Operating Cashflow'));
+  const inv2026 = parse$2026(find2026('= Net Investment Allocations'));
+  const acq2026 = parse$2026(find2026('= Property Acquisition Cash Used'));
+  const fin2026 = parse$2026(find2026('= Financing / Equity Release (cash impact)'));
+  const rnd2026 = parse$2026(find2026('+ Rounding (monthly accumulation)'));
+  const netLine2026 = parse$2026(find2026('= Engine Net Cashflow (line-item sum)'));
+  const netEng2026  = parse$2026(find2026('= Engine Net Cashflow (canonical)'));
+  const summed = op2026 + inv2026 + acq2026 + fin2026 + rnd2026;
+  assert(`2026 bridge subtotals sum to engine netCashflow (got ${summed} vs ${netLine2026})`,
+    Math.abs(summed - netLine2026) <= 1);
+  assert(`2026 line-item Net Cashflow == engine Net Cashflow (drift ${Math.abs(netLine2026 - netEng2026)})`,
+    Math.abs(netLine2026 - netEng2026) <= 1);
+  // Property Acquisition Cash Used must be negative (signed) — this is the
+  // whole point of the new bridge.
+  assert(`2026 Property Acquisition Cash Used is negative (got ${acq2026})`, acq2026 < 0);
+  // Investment Allocations must also be negative for this household (no sells).
+  assert(`2026 Investment Allocations is negative (got ${inv2026})`,  inv2026 < 0);
+  // Closing cash matches engine.
+  const closing2026 = parse$2026(find2026('= Closing Cash'));
+  assert(`2026 Closing Cash = -$34,889 (got ${closing2026})`,
+    Math.abs(closing2026 - (-34_889)) <= 1);
+
+  // Plain-English / formula text reference the bridge terminology so a future
+  // refactor can't silently revert to the legacy "Total Income - Total Expenses".
+  assert('2026: formula text names every bridge subtotal',
+    /Operating Cashflow/.test(recon2026.formula)
+      && /Investment Allocations/.test(recon2026.formula)
+      && /Property Acquisition Cash Used/.test(recon2026.formula)
+      && /Financing.*Equity Release/.test(recon2026.formula));
+  assert('2026: plainEnglish names the bridge sections',
+    /Operating Cashflow/.test(recon2026.plainEnglish)
+      && /Investment Allocations/.test(recon2026.plainEnglish)
+      && /Property Acquisition Cash Used/.test(recon2026.plainEnglish));
+  assert('2026: assumptions clarify Operating Cashflow is a derived subtotal',
+    recon2026.assumptions.some(x =>
+      /Operating Cashflow.*derived subtotal/i.test(x.label)));
+
+  // ── Year-End Wealth Position rows ────────────────────────────────────────
+  assert('2026: Wealth Position section header present',
+    recon2026.inputs.some(i => i.label === '─ 7. Year-End Wealth Position ─'));
+  for (const lbl of ['Liquidity Position — Closing Cash',
+                      'Cash Position (forecast row)',
+                      'Invested Capital (Stocks + Crypto)',
+                      '  · Stocks',
+                      '  · Crypto',
+                      'Property Equity',
+                      'Accessible Wealth (excl. super)',
+                      'Total Super (display only)',
+                      'Net Worth (incl. super)']) {
+    assert(`2026 Wealth Position contains "${lbl}"`,
+      recon2026.inputs.some(i => i.label === lbl));
+  }
+  assert('2026: Invested Capital shows Stocks + Crypto ($203,991)',
+    /203,991/.test(String(recon2026.inputs.find(i => i.label === 'Invested Capital (Stocks + Crypto)')?.value ?? '')));
+  assert('2026: Property Equity row shows $336,000',
+    /336,000/.test(String(recon2026.inputs.find(i => i.label === 'Property Equity')?.value ?? '')));
+  assert('2026: Accessible Wealth row shows $505,102',
+    /505,102/.test(String(recon2026.inputs.find(i => i.label === 'Accessible Wealth (excl. super)')?.value ?? '')));
+  assert('2026: Net Worth row shows $601,102',
+    /601,102/.test(String(recon2026.inputs.find(i => i.label === 'Net Worth (incl. super)')?.value ?? '')));
+  assert('2026: Δ Accessible Wealth row shows positive delta vs prior year',
+    /Δ Accessible Wealth/i.test(
+      recon2026.inputs.find(i => /Δ Accessible Wealth/i.test(i.label))?.label ?? ''));
+  // Reassurance row — low cash + material deployment → exact wording required.
+  const ctxValue = String(recon2026.inputs.find(i => i.label === 'Liquidity vs Wealth context')?.value ?? '');
+  assert('2026: Liquidity vs Wealth context row present',
+    ctxValue.length > 0);
+  assert('2026: Wealth context message reads "Cash has been converted into assets and equity. Low cash does not indicate financial deterioration."',
+    /Cash has been converted into assets and equity\. Low cash does not indicate financial deterioration\./.test(ctxValue));
+  assert('2026 notes include the Liquidity-vs-Wealth reassurance message',
+    (recon2026.notes ?? []).some(n =>
+      /converted into assets and equity/i.test(n)
+        && /does not indicate financial deterioration/i.test(n)));
+  // plainEnglish must reference Wealth Position so the audit panel summary
+  // surfaces the liquidity-vs-wealth framing, not just the cash bridge.
+  assert('2026: plainEnglish mentions Year-End Wealth Position',
+    /Year-End Wealth Position/i.test(recon2026.plainEnglish));
+  assert('2026: plainEnglish mentions Liquidity vs Wealth framing',
+    /Liquidity Position/i.test(recon2026.plainEnglish)
+      && /Wealth Position/i.test(recon2026.plainEnglish));
+  // assumptions clarify the wealth values are pass-through (no recompute).
+  assert('2026: assumptions clarify wealth pass-through from YearlyProjection',
+    recon2026.assumptions.some(x =>
+      /Year-End Wealth Position.*pass through/i.test(x.label)
+        && /does NOT recompute/i.test(x.label)));
+
+  // ── Engine-untouched guard. The reconciliation trace must not mutate
+  //    CashFlowYear / YearlyProjection. We re-derive the bridge from the
+  //    same args and assert byte-identical line-item Net Cashflow.
+  const recon2026Bis = buildCashflowReconciliationTrace({
+    year: 2026, openingCash: 262_000, closingCash: -34_889, netCashflow: -296_889,
+    salaryIncome: 177_295, rentalIncomeTotal: 14_043,
+    rentalIncomeByProperty: { '3': 14_043 },
+    taxRefund: 0, livingExpenses: 117_329, pporMortgage: 0,
+    investmentLoanRepayment: 22_752,
+    plannedStockBuy: 40_400, plannedCryptoBuy: 80_000,
+    stockDCAOutflow: 991, cryptoDCAOutflow: 2_600, billsOutflow: 43_074,
+    acquisitionCashUsed: 150_000, assetSalesUsed: 0, acquisitionBuyingCosts: 31_075,
+    propertyHoldingCost: 3_450, taxPayableInformational: 56_408,
+    equityReleased: 0, isAcquisitionYear: true,
+  });
+  const findVal2 = (label: string) =>
+    String(recon2026Bis.inputs.find(i => i.label === label)?.value ?? '');
+  assert('Engine-untouched: Net Cashflow identical without wealth args',
+    findVal2('= Engine Net Cashflow (canonical)') === '-$296,889');
+  assert('Engine-untouched: Closing Cash identical without wealth args',
+    findVal2('= Closing Cash') === '-$34,889');
 }
 
 // ─── 12. Coverage manifest includes reconciliation ids ──────────────────────
@@ -682,6 +970,37 @@ assert('Dashboard forwards plannedStockBuy/plannedStockSell to reconciliation tr
 assert('Dashboard forwards stockDCAOutflow/cryptoDCAOutflow to reconciliation trace',
   /stockDCAOutflow:\s*\(a as any\)\.stockDCAOutflow/.test(dashPageSrc)
     && /cryptoDCAOutflow:\s*\(a as any\)\.cryptoDCAOutflow/.test(dashPageSrc));
+// Year-End Wealth Position pass-through from YearlyProjection.
+assert('Dashboard builds a per-year projection lookup for the reconciliation trace',
+  /projByYear|projRow\?\.cash/.test(dashPageSrc));
+assert('Dashboard forwards wealthCash / wealthStocks / wealthCrypto to reconciliation trace',
+  /wealthCash:\s*projRow\?\.cash/.test(dashPageSrc)
+    && /wealthStocks:\s*projRow\?\.stockValue/.test(dashPageSrc)
+    && /wealthCrypto:\s*projRow\?\.cryptoValue/.test(dashPageSrc));
+assert('Dashboard forwards wealthPropertyEquity / wealthAccessibleNetWorth / wealthTotalNetWorth',
+  /wealthPropertyEquity:\s*projRow\?\.propertyEquity/.test(dashPageSrc)
+    && /wealthAccessibleNetWorth:\s*projRow\?\.accessibleNetWorth/.test(dashPageSrc)
+    && /wealthTotalNetWorth:\s*projRow\?\.endNetWorth/.test(dashPageSrc));
+assert('Dashboard forwards priorYearAccessibleNetWorth for Δ comparison',
+  /priorYearAccessibleNetWorth:\s*priorProjRow\?\.accessibleNetWorth/.test(dashPageSrc));
+// Engine guard — the trace file lives in /auditMode/ and only consumes
+// pre-computed rows. It must NOT import any canonical engine module; the
+// references to `buildCashFlowSeries` / `projectNetWorth` in JSDoc and
+// `source:` strings are documentation-only.
+const reconTraceSrc = await (await import('node:fs')).promises.readFile(
+  'client/src/lib/auditMode/engineTraces/cashflowReconciliationTraces.ts', 'utf8');
+const reconImportLines = reconTraceSrc.split('\n').filter(l => /^\s*import\b/.test(l)).join('\n');
+assert('Trace file does not import finance / forecastEngine / monteCarlo modules',
+  !/from\s+['"][^'"]*\/(finance|forecastEngine|monteCarloEngine|forecastEngineRegimeAware)['"]/.test(reconImportLines));
+// Stripping JSDoc + double-quoted strings leaves only executable code; the
+// trace must not call any engine entry-point there.
+const codeOnly = reconTraceSrc
+  .replace(/\/\*\*[\s\S]*?\*\//g, '')   // JSDoc blocks
+  .replace(/\/\/[^\n]*/g, '')           // single-line comments
+  .replace(/"(?:[^"\\]|\\.)*"/g, '""')  // double-quoted strings
+  .replace(/'(?:[^'\\]|\\.)*'/g, "''"); // single-quoted strings
+assert('Trace executable code does not invoke buildCashFlowSeries() or projectNetWorth()',
+  !/\bbuildCashFlowSeries\s*\(/.test(codeOnly) && !/\bprojectNetWorth\s*\(/.test(codeOnly));
 
 // ─── 16. ExecutiveDashboard renders the native reconciliation chip row ──────
 
