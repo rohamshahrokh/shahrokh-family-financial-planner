@@ -127,6 +127,10 @@ const PLACEHOLDER_FORMULAS: Record<string, string> = {
   'assumptions:mc:expected-return:stocks':   'Stocks mean annual return — feeds MCInput.yearlyAssumptions[*].stocks_return',
   'assumptions:mc:expected-return:crypto':   'Crypto mean annual return — feeds MCInput.yearlyAssumptions[*].crypto_return',
   'assumptions:mc:expected-return:super':    'Super mean annual return — feeds MCInput.yearlyAssumptions[*].super_return',
+  // Plan Feasibility (planning-validation layer)
+  // #FWL_Plan_Feasibility_Layer
+  'dashboard:plan-feasibility':
+    'Funding Gap = Available Liquidity − Required Liquidity. Status = Fully Funded (>$50k) | Tight Liquidity (0–$50k) | Funding Gap (<$0). Inform only — no hard stop.',
 };
 
 // Per-year Plan Execution Capacity cashflow placeholders — same formula for

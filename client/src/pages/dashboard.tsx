@@ -15,7 +15,13 @@ import { registerTrace as registerAuditTrace } from "@/lib/auditMode/auditRegist
 import {
   buildCashflowYearTrace,
   buildCashflowReconciliationTrace,
+  buildPlanFeasibilityTrace,
 } from "@/lib/auditMode/engineTraces";
+import {
+  computePlanFeasibility,
+  type PlanFeasibilityResult,
+} from "@/lib/planFeasibility";
+import { applyFundingToProperties, buildAdapterContext } from "@/lib/propertyFundingAdapter";
 import { useActiveRegime } from "@/hooks/useActiveRegime";
 // Map the active regime selector → calcNegativeGearing scenario value.
 // The 4-value selector enum from taxPolicyEngine collapses to the 3-value
@@ -1393,6 +1399,35 @@ export default function DashboardPage() {
   }, [snapshot, snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
   const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
 
+  // ─── Plan Feasibility (planning-validation layer) ───────────────────────
+  // Pure derivation from already-resolved state. NO engine calculation lives
+  // here; this only routes existing values into computePlanFeasibility().
+  // #FWL_Plan_Feasibility_Layer
+  const planFeasibility: PlanFeasibilityResult = useMemo(() => {
+    const fundedProperties = applyFundingToProperties(
+      (properties ?? []) as any[],
+      buildAdapterContext({
+        snapshot: { cash: snap.cash, offset_balance: snap.offset_balance },
+        stocks:   stocks  ?? [],
+        cryptos:  cryptos ?? [],
+      }),
+    );
+    return computePlanFeasibility({
+      cash:           snap.cash,
+      offsetBalance:  snap.offset_balance,
+      savingsCash:    snap.savings_cash,
+      emergencyCash:  snap.emergency_cash,
+      otherCash:      (snap as any).other_cash,
+      fundedProperties: fundedProperties as any[],
+      cashflowAnnual: cashFlowAnnual as any[],
+      horizon:        "current-year",
+    });
+  }, [properties, stocks, cryptos, snap.cash, snap.offset_balance, snap.savings_cash, snap.emergency_cash, cashFlowAnnual]);
+
+  useEffect(() => {
+    registerAuditTrace(buildPlanFeasibilityTrace({ result: planFeasibility }));
+  }, [planFeasibility]);
+
   // ─── Master CF data with event markers ───────────────────────────────────
   const eventsByMonthKey = useMemo<Record<string, string[]>>(() => {
     const events: CashEvent[] = cashEngineResult?.events ?? [];
@@ -2169,6 +2204,12 @@ export default function DashboardPage() {
     totalLiab,
     monthlyExpenses: monthlyExpensesSOT,
     passiveIncome,
+    // ── Plan Feasibility (planning-validation layer) ──
+    // Compact card surfaced next to the Plan Execution Capacity audit area.
+    // Inform-only: a negative gap renders a warning banner but no engine,
+    // save, forecast, Monte Carlo, or FIRE action is blocked.
+    // #FWL_Plan_Feasibility_Layer
+    planFeasibility,
     year10NW,
     trajectoryP50,
     trajectoryYear,
