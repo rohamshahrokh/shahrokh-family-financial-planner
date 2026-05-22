@@ -13,6 +13,7 @@ import { usePwaBannerVisible } from "@/components/PwaInstallBanner";
 import { applyTheme } from "@/lib/store";
 import type { Permission } from "@/lib/store";
 import { Button } from "@/components/ui/button";
+import { AuditModeToggle } from "@/components/auditMode/AuditModeToggle";
 // FWL P1b: Global tax-regime selector strip (route-scoped, additive).
 import {
   // Step 1 — Snapshot
@@ -566,6 +567,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="ml-auto flex items-center gap-2">
             <span className="live-clock-display"><LiveClock /></span>
             <span className="chart-view-toggle-header"><ChartViewToggle /></span>
+
+            {/* Audit Mode toggle — global header chip */}
+            <AuditModeToggle />
 
             {/* Privacy toggle */}
             <Button

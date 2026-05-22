@@ -20,6 +20,8 @@ import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { useAppStore } from "./lib/store";
 import { PrivacyProvider } from "@/contexts/PrivacyContext";
+import { AuditModeProvider } from "@/lib/auditMode/AuditModeContext";
+import { CalculationTracePanel } from "@/components/auditMode/CalculationTracePanel";
 import { useEffect, useRef } from "react";
 import { trackPageView } from "./lib/analytics";
 
@@ -328,9 +330,12 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <PrivacyProvider>
-        <AppRouter />
-        <Toaster />
-        <PwaInstallBanner />
+        <AuditModeProvider>
+          <AppRouter />
+          <CalculationTracePanel />
+          <Toaster />
+          <PwaInstallBanner />
+        </AuditModeProvider>
       </PrivacyProvider>
     </QueryClientProvider>
   );

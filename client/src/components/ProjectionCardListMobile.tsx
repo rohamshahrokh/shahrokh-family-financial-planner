@@ -43,6 +43,7 @@ import type { WealthLayers } from "@/lib/canonicalWealth";
 import { formatCurrency } from "@/lib/finance";
 import { useAppStore } from "@/lib/store";
 import { maskValue } from "@/components/PrivacyMask";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
 
 export interface ProjectionCardListMobileProps {
   /** Canonical projection rows produced upstream (passed through props). */
@@ -143,7 +144,9 @@ function ProjectionCardMobile({
             data-testid="mobile-summary-total-nw"
             title="Total NW"
           >
-            {mv(formatCurrency(row.totalNetWorth, true))}
+            <AuditableMetric traceId={`projection:total-nw:${row.year}`}>
+              {mv(formatCurrency(row.totalNetWorth, true))}
+            </AuditableMetric>
           </span>
           <span
             className="tabular-nums font-mono"
@@ -161,7 +164,9 @@ function ProjectionCardMobile({
             data-testid="mobile-summary-cagr"
             title="CAGR"
           >
-            {cagrPct.toFixed(1)}%
+            <AuditableMetric traceId={`projection:cagr:${row.year}`}>
+              {cagrPct.toFixed(1)}%
+            </AuditableMetric>
           </span>
           <span
             className="tabular-nums font-mono"
@@ -171,8 +176,10 @@ function ProjectionCardMobile({
             data-testid="mobile-summary-growth"
             title="Annual Growth"
           >
-            {row.growth >= 0 ? "+" : ""}
-            {mv(formatCurrency(row.growth, true))}
+            <AuditableMetric traceId={`projection:growth:${row.year}`}>
+              {row.growth >= 0 ? "+" : ""}
+              {mv(formatCurrency(row.growth, true))}
+            </AuditableMetric>
           </span>
           <span
             className={`text-muted-foreground transition-transform duration-200 ${
