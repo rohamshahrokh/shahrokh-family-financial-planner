@@ -32,6 +32,9 @@ import {
   Wallet, AlertCircle, Calendar, ShieldCheck, Target, Info, CheckCircle2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
+import { registerTrace } from "@/lib/auditMode/auditRegistry";
+import { buildAllPropertyPortfolioTraces } from "@/lib/auditMode/engineTraces";
 
 // ─── QLD Stamp Duty — delegates to australianTax.ts central function ────────
 const estimateStampDuty = estimateQldStampDuty;
@@ -1169,6 +1172,22 @@ export default function PropertyPage() {
     return s + c.monthlyCashFlow;
   }, 0);
 
+  // ─── Audit Mode — register portfolio aggregate traces.
+  //   These do not modify engine math; they emit explanation metadata for the
+  //   numbers that are already computed above. The CalculationTracePanel reads
+  //   them via the global audit registry when the user clicks a wrapped KPI.
+  useEffect(() => {
+    const traces = buildAllPropertyPortfolioTraces({
+      portfolioValue,
+      portfolioLoans,
+      portfolioEquity,
+      portfolioLVR,
+      monthlyPortfolioCF,
+      propertyCount: properties.length,
+    });
+    traces.forEach(registerTrace);
+  }, [portfolioValue, portfolioLoans, portfolioEquity, portfolioLVR, monthlyPortfolioCF, properties.length]);
+
   const toggleSelect = (id: number) => {
     setSelected(prev => {
       const next = new Set(prev);
@@ -1310,15 +1329,17 @@ export default function PropertyPage() {
       {/* Portfolio Summary KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
-          { label: "Portfolio Value", value: mv(formatCurrency(portfolioValue, true)), color: "" },
-          { label: "Total Loans", value: mv(formatCurrency(portfolioLoans, true)), color: "text-red-400" },
-          { label: "Total Equity", value: mv(formatCurrency(portfolioEquity, true)), color: "text-emerald-400" },
-          { label: "Portfolio LVR", value: mv(`${portfolioLVR.toFixed(1)}%`), color: portfolioLVR > 80 ? "text-red-400" : "text-primary" },
-          { label: "Monthly CF (Inv.)", value: mv(formatCurrency(monthlyPortfolioCF, true)), color: monthlyPortfolioCF >= 0 ? "text-emerald-400" : "text-red-400" },
+          { label: "Portfolio Value", value: mv(formatCurrency(portfolioValue, true)), color: "", traceId: "property:portfolio:value" },
+          { label: "Total Loans", value: mv(formatCurrency(portfolioLoans, true)), color: "text-red-400", traceId: "property:portfolio:loans" },
+          { label: "Total Equity", value: mv(formatCurrency(portfolioEquity, true)), color: "text-emerald-400", traceId: "property:portfolio:equity" },
+          { label: "Portfolio LVR", value: mv(`${portfolioLVR.toFixed(1)}%`), color: portfolioLVR > 80 ? "text-red-400" : "text-primary", traceId: "property:portfolio:lvr" },
+          { label: "Monthly CF (Inv.)", value: mv(formatCurrency(monthlyPortfolioCF, true)), color: monthlyPortfolioCF >= 0 ? "text-emerald-400" : "text-red-400", traceId: "property:portfolio:cashflow" },
         ].map(s => (
           <div key={s.label} className="bg-card border border-border rounded-xl p-4">
             <p className="text-xs text-muted-foreground">{s.label}</p>
-            <p className={`text-lg font-bold num-display mt-1 ${s.color}`}>{s.value}</p>
+            <p className={`text-lg font-bold num-display mt-1 ${s.color}`}>
+              <AuditableMetric traceId={s.traceId}>{s.value}</AuditableMetric>
+            </p>
           </div>
         ))}
       </div>

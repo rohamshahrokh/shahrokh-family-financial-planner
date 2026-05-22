@@ -14,6 +14,7 @@ import { applyTheme } from "@/lib/store";
 import type { Permission } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { AuditModeToggle } from "@/components/auditMode/AuditModeToggle";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 // FWL P1b: Global tax-regime selector strip (route-scoped, additive).
 import {
   // Step 1 — Snapshot
@@ -26,7 +27,7 @@ import {
   // Step 4 — Action
   Lightbulb, Bell, Calendar, BrainCircuit,
   // Support / System
-  HelpCircle, Settings,
+  HelpCircle, Settings, Microscope,
   // UI chrome
   LogOut, Sun, Moon, SunMoon, Menu, X, Clock, Eye, EyeOff,
   ChevronDown, ChevronRight, Database, Newspaper,
@@ -205,6 +206,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [location, navigate] = useLocation();
   const { theme, toggleTheme, setTheme, logout, lastSaved, currentUser, privacyMode, togglePrivacy, role, isDemo, householdRole, permissions, hasPermission } =
     useAppStore();
+  // Audit Mode — drives visibility of the developer "Audit Coverage" nav entry.
+  const { auditMode } = useAuditMode();
   // Reserve bottom padding when the PWA install banner is showing (audit P1-5).
   const pwaVisible = usePwaBannerVisible();
 
@@ -470,6 +473,51 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             );
           })}
         </div>
+
+        {/* ─── ADMIN / DEVELOPER TOOLS ───────────────────────────────────────
+            Audit Coverage report is the entry-point for the global Audit Mode
+            inventory. We intentionally hide the whole section when Audit Mode
+            is OFF — the report only makes sense in the context of the audit
+            workflow, and the rest of the platform should stay calm. */}
+        {auditMode && (
+          <div
+            className="mt-3 pt-3"
+            style={{ borderTop: "1px solid hsl(var(--gold-dim) / 0.35)" }}
+            data-testid="nav-section-admin-tools"
+          >
+            <p
+              className="px-3 mb-1 text-[9px] font-bold uppercase tracking-widest select-none"
+              style={{ color: "hsl(var(--gold) / 0.85)" }}
+            >
+              Admin · Developer Tools
+            </p>
+            {(() => {
+              const href = "/audit-coverage";
+              const label = "Audit Coverage";
+              const active = isPathActive(href, location);
+              return (
+                <Link
+                  href={href}
+                  onClick={() => setMobileOpen(false)}
+                  data-testid="nav-audit-coverage"
+                  className={`nav-item${active ? " active" : ""}`}
+                >
+                  <Microscope
+                    className="nav-item-icon"
+                    style={{ color: active ? "hsl(var(--gold))" : "hsl(var(--gold) / 0.75)" }}
+                  />
+                  <span className="text-[13px]">{label}</span>
+                  {active && (
+                    <ChevronRight
+                      className="w-3 h-3 ml-auto shrink-0"
+                      style={{ color: "hsl(var(--gold))" }}
+                    />
+                  )}
+                </Link>
+              );
+            })()}
+          </div>
+        )}
       </nav>
 
       {/* Bottom bar */}

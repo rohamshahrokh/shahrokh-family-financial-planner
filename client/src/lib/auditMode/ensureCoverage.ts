@@ -106,6 +106,12 @@ const PLACEHOLDER_FORMULAS: Record<string, string> = {
   'wealth-strategy:savings-rate': 'Savings Rate = (monthly_surplus / monthly_income) × 100',
   'wealth-strategy:debt-to-assets': 'Debt-to-Assets = (total_debt / total_assets) × 100',
   'wealth-strategy:freedom-progress': 'Freedom Progress = (current_investable_capital / FIRE_target) × 100',
+  // Property Engine — portfolio aggregates
+  'property:portfolio:value': 'Portfolio Value = Σ property.current_value (settled only)',
+  'property:portfolio:loans': 'Total Loans = Σ property.loan_balance (settled only)',
+  'property:portfolio:equity': 'Equity = Portfolio Value − Total Loans',
+  'property:portfolio:lvr': 'LVR = Total Loans ÷ Portfolio Value × 100',
+  'property:portfolio:cashflow': 'Monthly CF = Σ ((rent × (1 − vacancy)) − interest − principal − running_costs) ÷ 12',
 };
 
 function buildPlaceholderTrace(entry: CoverageEntry): CalculationTrace {

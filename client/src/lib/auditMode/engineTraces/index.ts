@@ -83,3 +83,14 @@ export {
   WEALTH_STRATEGY_TRACE_IDS,
   type WealthStrategyTraceArgs,
 } from './wealthStrategyTraces';
+
+export {
+  buildAllPropertyPortfolioTraces,
+  buildPropertyValueTrace,
+  buildPropertyLoansTrace,
+  buildPropertyPortfolioEquityTrace,
+  buildPropertyLvrTrace,
+  buildPropertyCashflowTrace,
+  PROPERTY_TRACE_IDS,
+  type PropertyPortfolioTraceArgs,
+} from './propertyTraces';

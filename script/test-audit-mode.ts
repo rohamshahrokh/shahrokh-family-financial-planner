@@ -50,6 +50,10 @@ import {
   buildWealthStrategyTraces,
   WEALTH_STRATEGY_TRACE_IDS,
 } from '../client/src/lib/auditMode/engineTraces/wealthStrategyTraces';
+import {
+  buildAllPropertyPortfolioTraces,
+  PROPERTY_TRACE_IDS,
+} from '../client/src/lib/auditMode/engineTraces/propertyTraces';
 import { ensureCoverageRegistered } from '../client/src/lib/auditMode/ensureCoverage';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -500,6 +504,10 @@ for (const id of [
 ]) {
   registerTrace(stub(id, id));
 }
+buildAllPropertyPortfolioTraces({
+  portfolioValue: 1_000_000, portfolioLoans: 600_000, portfolioEquity: 400_000,
+  portfolioLVR: 60, monthlyPortfolioCF: 100, propertyCount: 2,
+}).forEach(registerTrace);
 
 const missing = REQUIRED_TRACE_IDS.filter(id => !hasTrace(id));
 assert(`All required trace ids are registerable (missing: ${missing.join(', ') || 'none'})`, missing.length === 0);
@@ -672,6 +680,115 @@ assert(`Coverage report Connected count = manifest length (got ${connectedCount}
 // but the engine files it consumes (riskEngine, finance) still must not.
 assert('client/src/lib/riskEngine.ts still does not import auditMode', !/auditMode/.test(read('client/src/lib/riskEngine.ts')));
 assert('client/src/lib/finance.ts does not import auditMode', !/auditMode/.test(read('client/src/lib/finance.ts')));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 16 — Audit Coverage navigation: hidden when OFF, visible only when ON
+// ─────────────────────────────────────────────────────────────────────────────
+section('Audit Coverage nav — gated behind Audit Mode ON');
+const layoutSrcNav = read('client/src/components/Layout.tsx');
+assert('Layout imports useAuditMode', /useAuditMode/.test(layoutSrcNav));
+assert('Layout reads auditMode flag', /const \{ auditMode \} = useAuditMode\(\)/.test(layoutSrcNav));
+assert('Layout has Admin · Developer Tools section', /Admin · Developer Tools/.test(layoutSrcNav));
+assert('Layout gates Admin Tools section on auditMode flag', /\{auditMode && \(/.test(layoutSrcNav));
+assert('Layout exposes nav-audit-coverage test id', /data-testid="nav-audit-coverage"/.test(layoutSrcNav));
+assert('Layout link target is /audit-coverage', /["\/]audit-coverage["]/.test(layoutSrcNav));
+assert('Layout uses Microscope icon for Audit Coverage', /Microscope/.test(layoutSrcNav));
+// The Audit Coverage nav appears ONLY inside the auditMode-gated branch — make
+// sure no unconditional /audit-coverage Link is rendered in the sidebar.
+const navAuditMatches = (layoutSrcNav.match(/data-testid="nav-audit-coverage"/g) ?? []).length;
+assert('Layout renders exactly one Audit Coverage nav entry', navAuditMatches === 1);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 17 — Discoverability: representative non-/audit-coverage surfaces wire
+//      AuditableMetric so users can open traces from where they appear.
+// ─────────────────────────────────────────────────────────────────────────────
+section('Discoverability — non-/audit-coverage surfaces wire AuditableMetric');
+const exDashSrc = read('client/src/components/ExecutiveDashboard.tsx');
+assert('ExecutiveDashboard wraps Best Move recommendation', /traceId="decision:bestmove:recommendation-logic"/.test(exDashSrc));
+assert('ExecutiveDashboard wraps Best Move impact', /traceId="decision:bestmove:component-scores"/.test(exDashSrc));
+
+const fcEngineSrc = read('client/src/pages/ai-forecast-engine.tsx');
+assert('Forecast Engine page imports AuditableMetric', /AuditableMetric/.test(fcEngineSrc));
+assert('Forecast Engine page wires P10', /traceId="mc:p10-nw-at-target"/.test(fcEngineSrc));
+assert('Forecast Engine page wires P50', /traceId="mc:p50-nw-at-target"/.test(fcEngineSrc));
+assert('Forecast Engine page wires P90', /traceId="mc:p90-nw-at-target"/.test(fcEngineSrc));
+assert('Forecast Engine page wires reach-goal probabilities', /traceId="mc:reach-goal-probabilities"/.test(fcEngineSrc));
+assert('Forecast Engine page wires Financial Freedom Prob', /traceId="mc:financial-freedom-prob"/.test(fcEngineSrc));
+assert('Forecast Engine page wires Negative Cashflow Risk', /traceId="mc:neg-cashflow-risk"/.test(fcEngineSrc));
+assert('Forecast Engine page wires Cash Shortfall Risk', /traceId="mc:cash-shortfall-risk"/.test(fcEngineSrc));
+
+const propertySrc = read('client/src/pages/property.tsx');
+assert('Property page imports AuditableMetric', /from "@\/components\/auditMode\/AuditableMetric"/.test(propertySrc));
+assert('Property page imports buildAllPropertyPortfolioTraces', /buildAllPropertyPortfolioTraces/.test(propertySrc));
+assert('Property page wraps Portfolio Value', /property:portfolio:value/.test(propertySrc));
+assert('Property page wraps Portfolio Loans', /property:portfolio:loans/.test(propertySrc));
+assert('Property page wraps Portfolio Equity', /property:portfolio:equity/.test(propertySrc));
+assert('Property page wraps Portfolio LVR', /property:portfolio:lvr/.test(propertySrc));
+assert('Property page wraps Portfolio Cashflow', /property:portfolio:cashflow/.test(propertySrc));
+// Confirm the property tile actually renders the value inside AuditableMetric.
+assert('Property page renders AuditableMetric in KPI tile loop', /<AuditableMetric traceId=\{s\.traceId\}/.test(propertySrc));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 18 — Property portfolio trace factories produce complete records
+// ─────────────────────────────────────────────────────────────────────────────
+section('Property portfolio trace factories');
+const propTraces = buildAllPropertyPortfolioTraces({
+  portfolioValue: 2_400_000,
+  portfolioLoans: 1_400_000,
+  portfolioEquity: 1_000_000,
+  portfolioLVR: 58.3,
+  monthlyPortfolioCF: -250,
+  propertyCount: 3,
+});
+assert('Property portfolio traces = 5', propTraces.length === 5);
+for (const id of PROPERTY_TRACE_IDS) {
+  const t = propTraces.find(x => x.id === id);
+  assert(`Property trace ${id} present`, !!t);
+  if (t) {
+    assert(`Property trace ${id} has finalValue`, t.finalValue !== null && t.finalValue !== undefined);
+    assert(`Property trace ${id} has formula`, t.formula.length > 0);
+    assert(`Property trace ${id} has sourceEngine`, t.sourceEngine.length > 0);
+    assert(`Property trace ${id} included in manifest`, REQUIRED_TRACE_IDS.includes(id));
+  }
+}
+assert('Equity trace expanded uses actual values',
+  /\$2,400,000 − \$1,400,000 = \$1,000,000/.test(
+    propTraces.find(t => t.id === 'property:portfolio:equity')!.expanded));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 19 — Audit indicator — hover/focus class wired on AuditableMetric
+// ─────────────────────────────────────────────────────────────────────────────
+section('Audit indicator — hover/focus class wired');
+const auditableSrc = read('client/src/components/auditMode/AuditableMetric.tsx');
+assert('AuditableMetric uses fwl-audit-metric class', /fwl-audit-metric/.test(auditableSrc));
+const cssSrc = read('client/src/index.css');
+assert('index.css defines .fwl-audit-metric', /\.fwl-audit-metric\s*\{/.test(cssSrc));
+assert('index.css defines :hover state', /\.fwl-audit-metric:hover/.test(cssSrc));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 20 — Canonical engines remain untouched (extended)
+// ─────────────────────────────────────────────────────────────────────────────
+section('Canonical engines remain untouched (extended)');
+const engineFilesToCheck = [
+  'client/src/lib/equityEngine.ts',
+  'client/src/lib/canonicalWealth.ts',
+  'client/src/lib/canonicalRiskSurface.ts',
+  'client/src/lib/recommendationEngine.ts',
+  'client/src/lib/monteCarloEngine.ts',
+  'client/src/lib/monteCarloCanonical.ts',
+  'client/src/lib/monteCarloV4.ts',
+  'client/src/lib/monteCarloV5.ts',
+  'client/src/lib/taxPolicyEngine.ts',
+  'client/src/lib/taxRulesEngine.ts',
+];
+for (const f of engineFilesToCheck) {
+  try {
+    const src = read(f);
+    assert(`${f} does not import auditMode`, !/from\s+["'][^"']*auditMode["']/.test(src));
+  } catch {
+    // file optional — skip
+  }
+}
 
 console.log(`\n${failures === 0 ? 'OK' : 'FAIL'} Audit Mode tests: ${failures} failure${failures === 1 ? '' : 's'}`);
 process.exit(failures === 0 ? 0 : 1);

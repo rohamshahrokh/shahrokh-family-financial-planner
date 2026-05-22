@@ -484,11 +484,11 @@ function ExecutiveHeroSnapshot(p: HeroProps) {
             {best ? (
               <>
                 <p className="text-sm md:text-base font-semibold text-foreground leading-snug" data-testid="hero-best-move-title">
-                  {best.title}
+                  <AuditableMetric traceId="decision:bestmove:recommendation-logic">{best.title}</AuditableMetric>
                 </p>
                 {best.benefitLabel && (
                   <p className="text-xs text-emerald-400 font-mono mt-1.5" data-testid="hero-best-move-benefit">
-                    {mv(best.benefitLabel)}
+                    <AuditableMetric traceId="decision:bestmove:component-scores">{mv(best.benefitLabel)}</AuditableMetric>
                   </p>
                 )}
               </>

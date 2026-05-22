@@ -58,6 +58,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { maskValue } from "@/components/PrivacyMask";
 import AIInsightsCard from "@/components/AIInsightsCard";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
 import { useToast } from "@/hooks/use-toast";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -96,9 +97,11 @@ const FanTooltip = ({ active, payload }: any) => {
 
 // ─── Probability card ─────────────────────────────────────────────────────────
 
-function ProbCard({ label, value, sub, icon, colorClass, bgClass }: {
+function ProbCard({ label, value, sub, icon, colorClass, bgClass, traceId }: {
   label: string; value: string; sub?: string;
   icon: React.ReactNode; colorClass: string; bgClass: string;
+  /** Optional audit-mode trace id — when present, the value becomes clickable in Audit Mode. */
+  traceId?: string;
 }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-2">
@@ -108,7 +111,11 @@ function ProbCard({ label, value, sub, icon, colorClass, bgClass }: {
           <div className={`w-4 h-4 ${colorClass}`}>{icon}</div>
         </div>
       </div>
-      <p className={`text-xl font-bold num-display ${colorClass}`}>{value}</p>
+      <p className={`text-xl font-bold num-display ${colorClass}`}>
+        {traceId
+          ? <AuditableMetric traceId={traceId}>{value}</AuditableMetric>
+          : value}
+      </p>
       {sub && <p className="text-xs text-muted-foreground leading-snug">{sub}</p>}
     </div>
   );
@@ -863,35 +870,44 @@ export default function AIForecastEnginePage() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <ProbCard label="Median Net Worth 2035" value={maskValue(fmtM(mc.median), privacyMode)}
               sub="50th percentile outcome" icon={<DollarSign className="w-full h-full" />}
-              colorClass="text-emerald-400" bgClass="bg-emerald-500/15" />
+              colorClass="text-emerald-400" bgClass="bg-emerald-500/15"
+              traceId="mc:p50-nw-at-target" />
             <ProbCard label="P10 — Bad Case" value={maskValue(fmtM(mc.p10), privacyMode)}
               sub="Worst 10% of outcomes" icon={<TrendingDown className="w-full h-full" />}
-              colorClass="text-red-400" bgClass="bg-red-500/15" />
+              colorClass="text-red-400" bgClass="bg-red-500/15"
+              traceId="mc:p10-nw-at-target" />
             <ProbCard label="P90 — Best Case" value={maskValue(fmtM(mc.p90), privacyMode)}
               sub="Best 10% of outcomes" icon={<TrendingUp className="w-full h-full" />}
-              colorClass="text-emerald-400" bgClass="bg-emerald-500/15" />
+              colorClass="text-emerald-400" bgClass="bg-emerald-500/15"
+              traceId="mc:p90-nw-at-target" />
             <ProbCard label="Financial Freedom" value={pct(mc.prob_ff)}
               sub="Passive income ≥ $120k/yr by 2035" icon={<Sparkles className="w-full h-full" />}
-              colorClass="text-primary" bgClass="bg-primary/15" />
+              colorClass="text-primary" bgClass="bg-primary/15"
+              traceId="mc:financial-freedom-prob" />
             <ProbCard label="Reach $3M Net Worth" value={pct(mc.prob_3m)}
               sub="Probability of $3M+ by 2035" icon={<Target className="w-full h-full" />}
-              colorClass="text-teal-400" bgClass="bg-teal-500/15" />
+              colorClass="text-teal-400" bgClass="bg-teal-500/15"
+              traceId="mc:reach-goal-probabilities" />
             <ProbCard label="Reach $5M Net Worth" value={pct(mc.prob_5m)}
               sub="Probability of $5M+ by 2035" icon={<Target className="w-full h-full" />}
-              colorClass="text-blue-400" bgClass="bg-blue-500/15" />
+              colorClass="text-blue-400" bgClass="bg-blue-500/15"
+              traceId="mc:reach-goal-probabilities" />
             <ProbCard label="Reach $10M Net Worth" value={pct(mc.prob_10m)}
               sub="Probability of $10M+ by 2035" icon={<Target className="w-full h-full" />}
-              colorClass="text-purple-400" bgClass="bg-purple-500/15" />
+              colorClass="text-purple-400" bgClass="bg-purple-500/15"
+              traceId="mc:reach-goal-probabilities" />
             <ProbCard label="Negative Cashflow Risk" value={pct(mc.prob_neg_cf)}
               sub="Sims with ≥1 negative cashflow year"
               icon={<ShieldAlert className="w-full h-full" />}
               colorClass={mc.prob_neg_cf > 30 ? 'text-red-400' : 'text-orange-400'}
-              bgClass={mc.prob_neg_cf > 30 ? 'bg-red-500/15' : 'bg-orange-500/15'} />
+              bgClass={mc.prob_neg_cf > 30 ? 'bg-red-500/15' : 'bg-orange-500/15'}
+              traceId="mc:neg-cashflow-risk" />
             <ProbCard label="Cash Shortfall Risk" value={pct(mc.prob_cash_shortfall)}
               sub={`Cash ever below $${(mcVolatility.emergency_buffer / 1000).toFixed(0)}k emergency buffer`}
               icon={<Wallet className="w-full h-full" />}
               colorClass={mc.prob_cash_shortfall > 30 ? 'text-red-400' : 'text-amber-400'}
-              bgClass={mc.prob_cash_shortfall > 30 ? 'bg-red-500/15' : 'bg-amber-500/15'} />
+              bgClass={mc.prob_cash_shortfall > 30 ? 'bg-red-500/15' : 'bg-amber-500/15'}
+              traceId="mc:cash-shortfall-risk" />
             <ProbCard label="Median Lowest Cash" value={maskValue(fmtM(mc.lowest_cash_median), privacyMode)}
               sub="Median of minimum cash across all paths" icon={<Wallet className="w-full h-full" />}
               colorClass={mc.lowest_cash_median < mcVolatility.emergency_buffer ? 'text-red-400' : 'text-emerald-400'}
