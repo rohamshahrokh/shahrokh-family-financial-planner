@@ -1871,12 +1871,25 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!Array.isArray(cashFlowAnnual) || cashFlowAnnual.length === 0) return;
     let openingCash = totalLiquidCash;
+    // Index projection rows by year so the per-year Cashflow Reconciliation
+    // trace can surface the live Year-End Wealth Position alongside the
+    // cash bridge. `projection` comes from `projectNetWorth` (canonical
+    // forecast engine in finance.ts) and uses the same year indexing as
+    // `cashFlowAnnual` (currentYear .. currentYear + 9 / 10).
+    // #FWL_Cashflow_Reconciliation_WealthPosition
+    const projByYear = new Map<number, any>();
+    for (const p of (projection ?? [])) {
+      const y = (p as any)?.year;
+      if (typeof y === 'number') projByYear.set(y, p);
+    }
     for (const a of cashFlowAnnual) {
       const cashUsed   = (a as any).propertyPurchaseCashUsed ?? 0;
       const equityRel  = (a as any).propertyEquityReleased   ?? 0;
       const assetSales = (a as any).propertyAssetSalesUsed   ?? 0;
       const buyingCosts = (a as any).propertyBuyingCosts ?? 0;
       const isAcquisitionYear = (cashUsed + equityRel + assetSales + buyingCosts) > 0;
+      const projRow = projByYear.get(a.year);
+      const priorProjRow = projByYear.get(a.year - 1);
       registerAuditTrace(
         buildCashflowYearTrace({
           year: a.year,
@@ -1936,12 +1949,25 @@ export default function DashboardPage() {
           equityReleased: equityRel,
           isAcquisitionYear,
           fundingSourceLabel,
+          // ── YEAR-END WEALTH POSITION (pass-through from projectNetWorth) ──
+          // Liquidity (cash bridge above) vs Wealth (this section). Every
+          // value is read live from the canonical forecast row — the trace
+          // never recomputes net worth.
+          // #FWL_Cashflow_Reconciliation_WealthPosition
+          wealthCash:               projRow?.cash,
+          wealthStocks:             projRow?.stockValue,
+          wealthCrypto:             projRow?.cryptoValue,
+          wealthPropertyEquity:     projRow?.propertyEquity,
+          wealthAccessibleNetWorth: projRow?.accessibleNetWorth,
+          wealthTotalSuper:         projRow?.totalSuper,
+          wealthTotalNetWorth:      projRow?.endNetWorth,
+          priorYearAccessibleNetWorth: priorProjRow?.accessibleNetWorth,
         }),
       );
 
       openingCash = a.endingBalance ?? openingCash;
     }
-  }, [cashFlowAnnual, totalLiquidCash]);
+  }, [cashFlowAnnual, totalLiquidCash, projection]);
 
   // ─── Best Move V2 useMemo — MUST be before loading guard (Rules of Hooks) ──────────
   const inlineBestMove_hook = useMemo(() => {

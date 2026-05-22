@@ -154,6 +154,29 @@ export interface CashflowReconciliationTraceArgs {
 
   /** Which funding source dominated for the acquisition (display label only). */
   fundingSourceLabel?: string;
+
+  // ── YEAR-END WEALTH POSITION (display only — sourced from projectNetWorth) ──
+  // Optional. Lets the trace surface a compact "Liquidity vs Wealth" summary so
+  // a low/negative Closing Cash year doesn't read as financial deterioration
+  // when cash was intentionally deployed into property / stocks / crypto.
+  // Every field passes through from `YearlyProjection` (see finance.ts) — the
+  // trace does NOT recompute net worth.
+  /** Year-end cash position from the forecast row (`YearlyProjection.cash`). */
+  wealthCash?: number;
+  /** Stock holdings value at year end (`YearlyProjection.stockValue`). */
+  wealthStocks?: number;
+  /** Crypto holdings value at year end (`YearlyProjection.cryptoValue`). */
+  wealthCrypto?: number;
+  /** Total property equity at year end (`YearlyProjection.propertyEquity`). */
+  wealthPropertyEquity?: number;
+  /** Accessible net worth (excl. super) — `YearlyProjection.accessibleNetWorth`. */
+  wealthAccessibleNetWorth?: number;
+  /** Total net worth incl. super — `YearlyProjection.endNetWorth`. */
+  wealthTotalNetWorth?: number;
+  /** Total super (display only) — `YearlyProjection.totalSuper`. */
+  wealthTotalSuper?: number;
+  /** Prior-year accessible net worth (optional). Used to decide whether to surface the "low cash but wealth intact" reassurance message. */
+  priorYearAccessibleNetWorth?: number;
 }
 
 interface BalanceBuckets {
@@ -363,7 +386,149 @@ function diagnoseDoubleCounting(
     );
   }
 
+  // 6. Liquidity-vs-Wealth reassurance — surfaces when a low / negative Closing
+  //    Cash year coexists with deployed capital (property acquisition or
+  //    investment allocations) AND a wealth row is available to show the
+  //    deployment hasn't destroyed value. The exact wording is required by the
+  //    "Year-End Wealth Position" UX rule so a user does not interpret low cash
+  //    as financial deterioration.
+  const cashDeployedSignificantly =
+    Math.abs(b.investmentAllocations) + Math.abs(b.propertyAcquisitionCashUsed) >= 10_000;
+  const closingCashLow = a.closingCash < 50_000;
+  const hasWealthRow =
+    a.wealthAccessibleNetWorth !== undefined
+    || a.wealthTotalNetWorth !== undefined
+    || a.wealthPropertyEquity !== undefined;
+  if (closingCashLow && cashDeployedSignificantly && hasWealthRow) {
+    flags.push(
+      `ℹ Cash has been converted into assets and equity. Low cash does not indicate financial deterioration.`,
+    );
+  }
+
   return flags;
+}
+
+/**
+ * Build the Year-End Wealth Position rows. Returns trace input rows that
+ * distinguish Liquidity Position (Closing Cash, already shown above) from
+ * Wealth Position (cash + invested capital + property equity + accessible /
+ * total net worth). Every value passes through from `YearlyProjection` — the
+ * trace does NOT recompute net worth.
+ *
+ * Fields that the caller did not provide are rendered as "n/a (not in current
+ * forecast row)" so the user can see why a line is missing instead of the
+ * row being silently dropped. This is the explicit UX rule from the screenshot:
+ * "only show fields that can be derived live; clearly label unavailable
+ * fields; do not fake/hardcode."
+ */
+function buildWealthPositionRows(
+  a: CashflowReconciliationTraceArgs,
+): Array<{ label: string; value: string; source?: string; note?: string }> {
+  const investedCapital =
+    a.wealthStocks !== undefined || a.wealthCrypto !== undefined
+      ? safeSum(a.wealthStocks) + safeSum(a.wealthCrypto)
+      : undefined;
+  const accessibleDelta =
+    a.wealthAccessibleNetWorth !== undefined && a.priorYearAccessibleNetWorth !== undefined
+      ? a.wealthAccessibleNetWorth - a.priorYearAccessibleNetWorth
+      : undefined;
+
+  const NA = "n/a (not in current forecast row)";
+  const fmtOrNA = (v: number | undefined) => (v === undefined ? NA : fmt$(v));
+
+  const rows: Array<{ label: string; value: string; source?: string; note?: string }> = [
+    { label: "─ 7. Year-End Wealth Position ─", value: "" },
+    {
+      label: "Liquidity Position — Closing Cash",
+      value: fmt$(a.closingCash),
+      source: "CashFlowYear.endingBalance (re-stated from section 6 for the liquidity-vs-wealth comparison)",
+    },
+    {
+      label: "Cash Position (forecast row)",
+      value: fmtOrNA(a.wealthCash),
+      source: "YearlyProjection.cash",
+      note: a.wealthCash === undefined
+        ? "Caller did not pass a forecast cash row — section is informational only when this is omitted."
+        : undefined,
+    },
+    {
+      label: "Invested Capital (Stocks + Crypto)",
+      value: fmtOrNA(investedCapital),
+      source: "YearlyProjection.stockValue + YearlyProjection.cryptoValue",
+      note: investedCapital === undefined
+        ? "Caller did not pass stocks/crypto values — pass at least one of wealthStocks / wealthCrypto to surface this row."
+        : undefined,
+    },
+    {
+      label: "  · Stocks",
+      value: fmtOrNA(a.wealthStocks),
+      source: "YearlyProjection.stockValue",
+    },
+    {
+      label: "  · Crypto",
+      value: fmtOrNA(a.wealthCrypto),
+      source: "YearlyProjection.cryptoValue",
+    },
+    {
+      label: "Property Equity",
+      value: fmtOrNA(a.wealthPropertyEquity),
+      source: "YearlyProjection.propertyEquity (PPOR + IP value − all loans)",
+    },
+    {
+      label: "Accessible Wealth (excl. super)",
+      value: fmtOrNA(a.wealthAccessibleNetWorth),
+      source: "YearlyProjection.accessibleNetWorth (canonical accessible net worth)",
+    },
+    {
+      label: "Total Super (display only)",
+      value: fmtOrNA(a.wealthTotalSuper),
+      source: "YearlyProjection.totalSuper",
+      note: "Super is locked until preservation age — kept separate from Accessible Wealth.",
+    },
+    {
+      label: "Net Worth (incl. super)",
+      value: fmtOrNA(a.wealthTotalNetWorth),
+      source: "YearlyProjection.endNetWorth",
+    },
+  ];
+
+  if (accessibleDelta !== undefined) {
+    rows.push({
+      label: "Δ Accessible Wealth vs prior year",
+      value: fmt$(accessibleDelta),
+      source: "Accessible Wealth (this year) − Accessible Wealth (prior year)",
+      note: accessibleDelta >= 0
+        ? "Accessible wealth held or grew despite the cash movement — liquidity dipped, wealth did not."
+        : "Accessible wealth declined this year — review whether the deployment matches the strategic plan.",
+    });
+  }
+
+  // Reassurance row — always rendered as a trace input so a UI can pick it
+  // up without having to parse `notes`. Mirrors the diagnostic message in
+  // `notes` so it's visible in both surfaces.
+  const cashDeployed =
+    Math.abs(safeSum(a.acquisitionCashUsed) + safeSum(a.acquisitionBuyingCosts) + safeSum(a.assetSalesUsed))
+    + Math.abs(safeSum(a.plannedStockBuy) + safeSum(a.plannedCryptoBuy) + safeSum(a.stockDCAOutflow) + safeSum(a.cryptoDCAOutflow));
+  const lowCash = a.closingCash < 50_000;
+  if (lowCash && cashDeployed >= 10_000) {
+    rows.push({
+      label: "Liquidity vs Wealth context",
+      value: "Cash has been converted into assets and equity. Low cash does not indicate financial deterioration.",
+      source: "Year-End Wealth Position guard (triggered when Closing Cash < $50k and capital deployed ≥ $10k)",
+    });
+  } else if (a.closingCash >= 50_000 && cashDeployed >= 10_000) {
+    rows.push({
+      label: "Liquidity vs Wealth context",
+      value: "Cash position remains healthy and capital was actively deployed into assets / equity.",
+      source: "Year-End Wealth Position guard (Closing Cash ≥ $50k with material deployment)",
+    });
+  }
+
+  return rows;
+}
+
+function safeSum(n: number | undefined): number {
+  return typeof n === "number" && Number.isFinite(n) ? n : 0;
 }
 
 /**
@@ -404,8 +569,8 @@ export function buildCashflowReconciliationTrace(
     label: `Cashflow Reconciliation — ${a.year}`,
     finalValue: fmt$(a.netCashflow),
     plainEnglish: a.isAcquisitionYear
-      ? `Year ${a.year} is an acquisition year. The closing-cash bridge has four parts: Opening Cash + Operating Cashflow − Investment Allocations − Property Acquisition Cash Used + Financing/Equity Release = Closing Cash. Operating Cashflow shows the recurring household movement (salary, rental, tax refund vs living, IP loan, bills). Investment Allocations isolates Stock/Crypto DCA + planned lump-sum buys/sells. Property Acquisition Cash Used isolates the IP settlement cash leg (deposit cash + offset + asset sales + buying costs). Financing/Equity Release reports the debt-funded portion of the deposit — display only; never reduces cash.`
-      : `Year ${a.year} has no property settlement. The closing-cash bridge has three live parts: Opening Cash + Operating Cashflow − Investment Allocations = Closing Cash. Property Acquisition Cash Used and Financing/Equity Release are $0 in this year.`,
+      ? `Year ${a.year} is an acquisition year. The closing-cash bridge has four parts: Opening Cash + Operating Cashflow − Investment Allocations − Property Acquisition Cash Used + Financing/Equity Release = Closing Cash. Operating Cashflow shows the recurring household movement (salary, rental, tax refund vs living, IP loan, bills). Investment Allocations isolates Stock/Crypto DCA + planned lump-sum buys/sells. Property Acquisition Cash Used isolates the IP settlement cash leg (deposit cash + offset + asset sales + buying costs). Financing/Equity Release reports the debt-funded portion of the deposit — display only; never reduces cash. The Year-End Wealth Position section below contrasts Liquidity Position (Closing Cash) with Wealth Position (Cash + Invested Capital + Property Equity + Accessible Wealth + Net Worth) so a year where cash was deployed into assets does not read as financial deterioration.`
+      : `Year ${a.year} has no property settlement. The closing-cash bridge has three live parts: Opening Cash + Operating Cashflow − Investment Allocations = Closing Cash. Property Acquisition Cash Used and Financing/Equity Release are $0 in this year. The Year-End Wealth Position section below contrasts Liquidity (Closing Cash) with Wealth (Cash + Invested Capital + Property Equity + Accessible Wealth + Net Worth).`,
     formula:
       "Closing Cash = Opening Cash\n" +
       "             + Operating Cashflow\n" +
@@ -482,11 +647,21 @@ export function buildCashflowReconciliationTrace(
       { label: "= Engine Net Cashflow (canonical)", value: fmt$(a.netCashflow),     source: "CashFlowYear.netCashFlow (canonical)" },
       { label: "Drift (line sum vs engine)",       value: fmt$(b.driftFromEngineNet), source: "should be 0 once rounding adjustment is applied — flagged in notes otherwise" },
       { label: "= Closing Cash",                   value: fmt$(a.closingCash),     source: "CashFlowYear.endingBalance = Opening Cash + Engine Net Cashflow" },
+
+      // ── 7. YEAR-END WEALTH POSITION ──────────────────────────────────────
+      // Liquidity (Closing Cash above) vs Wealth (this section). Every value
+      // here is read live from `YearlyProjection` — no recomputation. Fields
+      // are listed individually so unavailable ones can show "n/a" without
+      // hiding the others. The "Cash has been converted into assets and
+      // equity" note appears in `notes` when Closing Cash is low / negative
+      // and capital was materially deployed in the year.
+      ...buildWealthPositionRows(a),
     ],
     assumptions: [
       { label: "Engine values come from buildCashFlowSeries → aggregateCashFlowToAnnual (canonical)", source: "client/src/lib/finance.ts" },
       { label: "Operating Cashflow is a derived subtotal for audit clarity — the engine's CashFlowYear.netCashFlow already includes acquisition cash and investment allocations", source: "buildCashflowReconciliationTrace (this trace)" },
       { label: "Engine Net Cashflow = Operating Cashflow + Investment Allocations + Property Acquisition Cash Used + Financing/Equity Release + Rounding", source: "buildCashflowReconciliationTrace bridge" },
+      { label: "Year-End Wealth Position values pass through from YearlyProjection (projectNetWorth) — this trace does NOT recompute net worth. Unavailable fields are labelled 'n/a (not in current forecast row)' rather than zeroed.", source: "client/src/lib/finance.ts (projectNetWorth)" },
       { label: "Equity Release adds to debt, NOT to cash outflow — included in section 5 as a $0 cash-impact line for transparency", source: "propertyFundingAdapter" },
       { label: "PPOR mortgage is inside snapshot.monthly_expenses — engine zeroes the separate PPOR line in forecast months", source: "buildCashFlowSeries" },
       { label: "Property holding cost is NG display only — engine never subtracts it from netCashflow", source: "buildCashFlowSeries (propDeductibleExpenses for NG calc)" },
@@ -500,6 +675,7 @@ export function buildCashflowReconciliationTrace(
       { label: "Investment Allocations: stock + crypto DCA, planned stock + crypto buys/sells" },
       { label: "Property Acquisition Cash Used: deposit cash/offset, asset sales used, stamp duty + legal + building + loan setup + other buying costs" },
       { label: "Financing / Equity Release: equity-released portion of the deposit (debt-funded; $0 cash impact)" },
+      { label: "Year-End Wealth Position: Cash, Invested Capital (Stocks + Crypto), Property Equity, Accessible Wealth, Total Super, Net Worth — pass-through from YearlyProjection (projectNetWorth)" },
       { label: "Rounding adjustment for per-month Math.round() residual" },
     ],
     excluded: [

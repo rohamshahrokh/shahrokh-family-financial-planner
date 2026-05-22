@@ -636,6 +636,61 @@ if (y2027 && y2028) {
     reconTrace.excluded.some(e => /holding cost/i.test(e.label)));
 }
 
+// ─── 11.b.ii — Year-End Wealth Position section present even when caller
+//              omits all wealth values (section is always rendered; missing
+//              fields read "n/a (not in current forecast row)"). ──
+if (y2027 && y2028) {
+  // Re-build the 2028 trace with NO wealth values to assert the n/a path.
+  const reconNoWealth = buildCashflowReconciliationTrace({
+    year: 2028,
+    openingCash: y2027.endingBalance,
+    closingCash: y2028.endingBalance,
+    netCashflow: y2028.netCashFlow,
+    salaryIncome: (y2028 as any).income ?? 0,
+    rentalIncomeTotal: (y2028 as any).rentalIncome ?? 0,
+    taxRefund: 0,
+    livingExpenses: (y2028 as any).totalExpenses ?? 0,
+    pporMortgage: 0,
+    investmentLoanRepayment: (y2028 as any).investmentLoanRepayment ?? 0,
+    plannedStockBuy: 0,
+    plannedCryptoBuy: 0,
+    stockDCAOutflow: 0,
+    cryptoDCAOutflow: 0,
+    billsOutflow: (y2028 as any).billsOutflow ?? 0,
+    acquisitionCashUsed: (y2028 as any).propertyPurchaseCashUsed ?? 0,
+    assetSalesUsed: (y2028 as any).propertyAssetSalesUsed ?? 0,
+    acquisitionBuyingCosts: (y2028 as any).propertyBuyingCosts ?? 0,
+    propertyHoldingCost: (y2028 as any).propertyHoldingCost ?? 0,
+    equityReleased: (y2028 as any).propertyEquityReleased ?? 0,
+    isAcquisitionYear: true,
+    // NO wealth* fields passed — every wealth row should fall back to "n/a".
+  });
+  assert('Year-End Wealth Position section header present even with no wealth args',
+    reconNoWealth.inputs.some(i => i.label === '─ 7. Year-End Wealth Position ─'));
+  const naOk = (lbl: string) => {
+    const v = String(reconNoWealth.inputs.find(i => i.label === lbl)?.value ?? '');
+    return /n\/a/i.test(v);
+  };
+  assert('Cash Position row shows n/a when forecast row not passed',
+    naOk('Cash Position (forecast row)'));
+  assert('Invested Capital row shows n/a when stocks+crypto not passed',
+    naOk('Invested Capital (Stocks + Crypto)'));
+  assert('Property Equity row shows n/a when not passed',
+    naOk('Property Equity'));
+  assert('Accessible Wealth row shows n/a when not passed',
+    naOk('Accessible Wealth (excl. super)'));
+  assert('Net Worth row shows n/a when not passed',
+    naOk('Net Worth (incl. super)'));
+  // Liquidity-vs-Wealth context row is only emitted when the section has
+  // enough information to make a comparison; with NO wealth values + a
+  // healthy closing cash for 2028, the warning must NOT fire as the
+  // "deterioration" path. (It may emit the "healthy cash" variant.)
+  const ctxRow = reconNoWealth.inputs.find(i => i.label === 'Liquidity vs Wealth context');
+  const ctxText = String(ctxRow?.value ?? '');
+  assert('Wealth context row never falsely warns of deterioration',
+    !/deterioration/i.test(ctxText) || /does not indicate/i.test(ctxText));
+}
+
 // ─── 11.c — Active 2026 scenario: bridge renders BTC lump, planned-stock
 //          lump, property deposit + buying costs as their own sections. ──
 //
@@ -675,6 +730,19 @@ section('11.c Cashflow Reconciliation — active 2026 bridge format');
     equityReleased:                0,
     isAcquisitionYear:          true,
     fundingSourceLabel:        'offset+savings',
+    // ── Year-End Wealth Position (pass-through from YearlyProjection) ──
+    // Plausible 2026 wealth row: cash drained but capital deployed into
+    // stocks/crypto + new IP equity. Numbers below come straight from a
+    // forecast row — the trace MUST surface them without re-deriving net
+    // worth.
+    wealthCash:                  -34_889, // matches closing cash
+    wealthStocks:                121_391, // ~40.4k lump + small DCA
+    wealthCrypto:                 82_600, // ~80k BTC lump + 2.6k DCA
+    wealthPropertyEquity:        336_000, // PPOR equity + IP1 equity (150k deposit + cap growth)
+    wealthAccessibleNetWorth:    505_102,
+    wealthTotalSuper:             96_000,
+    wealthTotalNetWorth:         601_102,
+    priorYearAccessibleNetWorth: 480_000,
   });
 
   const parse$2026 = (s: string): number => {
@@ -760,6 +828,77 @@ section('11.c Cashflow Reconciliation — active 2026 bridge format');
   assert('2026: assumptions clarify Operating Cashflow is a derived subtotal',
     recon2026.assumptions.some(x =>
       /Operating Cashflow.*derived subtotal/i.test(x.label)));
+
+  // ── Year-End Wealth Position rows ────────────────────────────────────────
+  assert('2026: Wealth Position section header present',
+    recon2026.inputs.some(i => i.label === '─ 7. Year-End Wealth Position ─'));
+  for (const lbl of ['Liquidity Position — Closing Cash',
+                      'Cash Position (forecast row)',
+                      'Invested Capital (Stocks + Crypto)',
+                      '  · Stocks',
+                      '  · Crypto',
+                      'Property Equity',
+                      'Accessible Wealth (excl. super)',
+                      'Total Super (display only)',
+                      'Net Worth (incl. super)']) {
+    assert(`2026 Wealth Position contains "${lbl}"`,
+      recon2026.inputs.some(i => i.label === lbl));
+  }
+  assert('2026: Invested Capital shows Stocks + Crypto ($203,991)',
+    /203,991/.test(String(recon2026.inputs.find(i => i.label === 'Invested Capital (Stocks + Crypto)')?.value ?? '')));
+  assert('2026: Property Equity row shows $336,000',
+    /336,000/.test(String(recon2026.inputs.find(i => i.label === 'Property Equity')?.value ?? '')));
+  assert('2026: Accessible Wealth row shows $505,102',
+    /505,102/.test(String(recon2026.inputs.find(i => i.label === 'Accessible Wealth (excl. super)')?.value ?? '')));
+  assert('2026: Net Worth row shows $601,102',
+    /601,102/.test(String(recon2026.inputs.find(i => i.label === 'Net Worth (incl. super)')?.value ?? '')));
+  assert('2026: Δ Accessible Wealth row shows positive delta vs prior year',
+    /Δ Accessible Wealth/i.test(
+      recon2026.inputs.find(i => /Δ Accessible Wealth/i.test(i.label))?.label ?? ''));
+  // Reassurance row — low cash + material deployment → exact wording required.
+  const ctxValue = String(recon2026.inputs.find(i => i.label === 'Liquidity vs Wealth context')?.value ?? '');
+  assert('2026: Liquidity vs Wealth context row present',
+    ctxValue.length > 0);
+  assert('2026: Wealth context message reads "Cash has been converted into assets and equity. Low cash does not indicate financial deterioration."',
+    /Cash has been converted into assets and equity\. Low cash does not indicate financial deterioration\./.test(ctxValue));
+  assert('2026 notes include the Liquidity-vs-Wealth reassurance message',
+    (recon2026.notes ?? []).some(n =>
+      /converted into assets and equity/i.test(n)
+        && /does not indicate financial deterioration/i.test(n)));
+  // plainEnglish must reference Wealth Position so the audit panel summary
+  // surfaces the liquidity-vs-wealth framing, not just the cash bridge.
+  assert('2026: plainEnglish mentions Year-End Wealth Position',
+    /Year-End Wealth Position/i.test(recon2026.plainEnglish));
+  assert('2026: plainEnglish mentions Liquidity vs Wealth framing',
+    /Liquidity Position/i.test(recon2026.plainEnglish)
+      && /Wealth Position/i.test(recon2026.plainEnglish));
+  // assumptions clarify the wealth values are pass-through (no recompute).
+  assert('2026: assumptions clarify wealth pass-through from YearlyProjection',
+    recon2026.assumptions.some(x =>
+      /Year-End Wealth Position.*pass through/i.test(x.label)
+        && /does NOT recompute/i.test(x.label)));
+
+  // ── Engine-untouched guard. The reconciliation trace must not mutate
+  //    CashFlowYear / YearlyProjection. We re-derive the bridge from the
+  //    same args and assert byte-identical line-item Net Cashflow.
+  const recon2026Bis = buildCashflowReconciliationTrace({
+    year: 2026, openingCash: 262_000, closingCash: -34_889, netCashflow: -296_889,
+    salaryIncome: 177_295, rentalIncomeTotal: 14_043,
+    rentalIncomeByProperty: { '3': 14_043 },
+    taxRefund: 0, livingExpenses: 117_329, pporMortgage: 0,
+    investmentLoanRepayment: 22_752,
+    plannedStockBuy: 40_400, plannedCryptoBuy: 80_000,
+    stockDCAOutflow: 991, cryptoDCAOutflow: 2_600, billsOutflow: 43_074,
+    acquisitionCashUsed: 150_000, assetSalesUsed: 0, acquisitionBuyingCosts: 31_075,
+    propertyHoldingCost: 3_450, taxPayableInformational: 56_408,
+    equityReleased: 0, isAcquisitionYear: true,
+  });
+  const findVal2 = (label: string) =>
+    String(recon2026Bis.inputs.find(i => i.label === label)?.value ?? '');
+  assert('Engine-untouched: Net Cashflow identical without wealth args',
+    findVal2('= Engine Net Cashflow (canonical)') === '-$296,889');
+  assert('Engine-untouched: Closing Cash identical without wealth args',
+    findVal2('= Closing Cash') === '-$34,889');
 }
 
 // ─── 12. Coverage manifest includes reconciliation ids ──────────────────────
@@ -831,6 +970,37 @@ assert('Dashboard forwards plannedStockBuy/plannedStockSell to reconciliation tr
 assert('Dashboard forwards stockDCAOutflow/cryptoDCAOutflow to reconciliation trace',
   /stockDCAOutflow:\s*\(a as any\)\.stockDCAOutflow/.test(dashPageSrc)
     && /cryptoDCAOutflow:\s*\(a as any\)\.cryptoDCAOutflow/.test(dashPageSrc));
+// Year-End Wealth Position pass-through from YearlyProjection.
+assert('Dashboard builds a per-year projection lookup for the reconciliation trace',
+  /projByYear|projRow\?\.cash/.test(dashPageSrc));
+assert('Dashboard forwards wealthCash / wealthStocks / wealthCrypto to reconciliation trace',
+  /wealthCash:\s*projRow\?\.cash/.test(dashPageSrc)
+    && /wealthStocks:\s*projRow\?\.stockValue/.test(dashPageSrc)
+    && /wealthCrypto:\s*projRow\?\.cryptoValue/.test(dashPageSrc));
+assert('Dashboard forwards wealthPropertyEquity / wealthAccessibleNetWorth / wealthTotalNetWorth',
+  /wealthPropertyEquity:\s*projRow\?\.propertyEquity/.test(dashPageSrc)
+    && /wealthAccessibleNetWorth:\s*projRow\?\.accessibleNetWorth/.test(dashPageSrc)
+    && /wealthTotalNetWorth:\s*projRow\?\.endNetWorth/.test(dashPageSrc));
+assert('Dashboard forwards priorYearAccessibleNetWorth for Δ comparison',
+  /priorYearAccessibleNetWorth:\s*priorProjRow\?\.accessibleNetWorth/.test(dashPageSrc));
+// Engine guard — the trace file lives in /auditMode/ and only consumes
+// pre-computed rows. It must NOT import any canonical engine module; the
+// references to `buildCashFlowSeries` / `projectNetWorth` in JSDoc and
+// `source:` strings are documentation-only.
+const reconTraceSrc = await (await import('node:fs')).promises.readFile(
+  'client/src/lib/auditMode/engineTraces/cashflowReconciliationTraces.ts', 'utf8');
+const reconImportLines = reconTraceSrc.split('\n').filter(l => /^\s*import\b/.test(l)).join('\n');
+assert('Trace file does not import finance / forecastEngine / monteCarlo modules',
+  !/from\s+['"][^'"]*\/(finance|forecastEngine|monteCarloEngine|forecastEngineRegimeAware)['"]/.test(reconImportLines));
+// Stripping JSDoc + double-quoted strings leaves only executable code; the
+// trace must not call any engine entry-point there.
+const codeOnly = reconTraceSrc
+  .replace(/\/\*\*[\s\S]*?\*\//g, '')   // JSDoc blocks
+  .replace(/\/\/[^\n]*/g, '')           // single-line comments
+  .replace(/"(?:[^"\\]|\\.)*"/g, '""')  // double-quoted strings
+  .replace(/'(?:[^'\\]|\\.)*'/g, "''"); // single-quoted strings
+assert('Trace executable code does not invoke buildCashFlowSeries() or projectNetWorth()',
+  !/\bbuildCashFlowSeries\s*\(/.test(codeOnly) && !/\bprojectNetWorth\s*\(/.test(codeOnly));
 
 // ─── 16. ExecutiveDashboard renders the native reconciliation chip row ──────
 
