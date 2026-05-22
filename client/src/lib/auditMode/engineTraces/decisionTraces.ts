@@ -574,3 +574,346 @@ export const BESTMOVE_TRACE_IDS = [
   'decision:bestmove:why-not-ranked-higher',
   'decision:bestmove:recommendation-logic',
 ] as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Decision Engine — per-candidate (rank N) traces + ranking-logic + lens-scores
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface DecisionCandidateTraceArgs {
+  rank: number;
+  candidate: {
+    id: string;
+    label: string;
+    headline: string;
+    score: {
+      score: number;
+      baseScore: number;
+      breakdown: Array<{
+        axis: string;
+        rawValue: number;
+        normalisedValue: number;
+        weight: number;
+        contribution: number;
+      }>;
+      penalties: Array<{ id: string; magnitude: number; reason: string; band?: string }>;
+    };
+    rationale: string[];
+  };
+  investorProfile: string;
+  generatedAt: string;
+}
+
+/** Per-candidate Total Score trace — keyed by candidate id so each rank row
+ *  can be opened independently of the winner trace. */
+export function buildDecisionCandidateScoreTrace(args: DecisionCandidateTraceArgs): CalculationTrace {
+  const { rank, candidate } = args;
+  const totalContribution = candidate.score.breakdown.reduce((s, b) => s + b.contribution, 0);
+  const totalPenalty = candidate.score.penalties.reduce((s, p) => s + p.magnitude, 0);
+  const inputs: TraceInput[] = [
+    { label: 'Rank', value: `#${rank}`, source: 'QuickDecisionOutput.ranked' },
+    { label: 'Candidate label', value: candidate.label, source: 'RankedCandidate.label' },
+    { label: 'Investor profile', value: args.investorProfile },
+    { label: 'Base score (Σ contributions)', value: candidate.score.baseScore.toFixed(2) },
+    { label: 'Penalties applied', value: totalPenalty.toFixed(2) },
+    { label: 'Final score (0–100)', value: candidate.score.score.toFixed(2) },
+  ];
+  return {
+    id: `decision:candidate:${candidate.id}:total-score`,
+    label: `Decision Engine — Candidate #${rank} Score`,
+    finalValue: candidate.score.score.toFixed(0),
+    plainEnglish:
+      `Composite score (0–100) for "${candidate.label}" (rank #${rank}). Same scoring math as the winner trace — ` +
+      `weighted sum of normalised axes minus penalties, evaluated under the active investor profile.`,
+    formula: 'Score = Σ (axis_contribution) − Σ (penalty_magnitudes)',
+    expanded: `Score = ${totalContribution.toFixed(2)} − ${totalPenalty.toFixed(2)} = ${candidate.score.score.toFixed(2)}`,
+    inputs,
+    assumptions: [
+      { label: 'Profile', value: args.investorProfile },
+      { label: 'Normalised axes ∈ [0,1]', value: 'Yes', source: 'registry.scoring.normalise*' },
+    ],
+    dataSource: `QuickDecisionOutput.ranked[#${rank}]`,
+    sourceEngine: SOURCE_ENGINE_DECISION,
+    included: candidate.score.breakdown.map(b => ({ label: b.axis, value: b.contribution.toFixed(2) })),
+    excluded: [{ label: 'Soft warnings', reason: 'Surfaced separately as chips; not in score.' }],
+    calculatedAt: args.generatedAt || nowIso(),
+    inputHash: hashTraceInputs(inputs),
+    relatedIds: [
+      `decision:candidate:${candidate.id}:component-scores`,
+      `decision:candidate:${candidate.id}:penalties`,
+      `decision:candidate:${candidate.id}:rationale`,
+      'decision:ranking-logic',
+    ],
+  };
+}
+
+/** Per-candidate Component Scores trace — score breakdown by axis with values. */
+export function buildDecisionCandidateComponentTrace(args: DecisionCandidateTraceArgs): CalculationTrace {
+  const { rank, candidate } = args;
+  const inputs: TraceInput[] = candidate.score.breakdown.map(b => ({
+    label: b.axis,
+    value: `${(b.normalisedValue * 100).toFixed(0)} / 100 · contrib ${b.contribution.toFixed(2)}`,
+    source: 'CompositeScore.breakdown[]',
+  }));
+  return {
+    id: `decision:candidate:${candidate.id}:component-scores`,
+    label: `Decision Engine — Candidate #${rank} Component Scores`,
+    finalValue: `${candidate.score.breakdown.length} axes scored`,
+    plainEnglish:
+      `Per-axis breakdown for "${candidate.label}". Each axis is normalised to [0,1] then multiplied by its profile weight.`,
+    formula: 'contribution_axis = normalised_axis × weight_axis × 100',
+    expanded: candidate.score.breakdown
+      .map(b => `${b.axis}: ${(b.normalisedValue * 100).toFixed(0)} × ${(b.weight * 100).toFixed(0)}% = ${b.contribution.toFixed(2)}`)
+      .join('\n'),
+    inputs,
+    assumptions: [{ label: 'Profile', value: args.investorProfile }],
+    dataSource: `RankedCandidate(${candidate.id}).score.breakdown`,
+    sourceEngine: SOURCE_ENGINE_DECISION,
+    included: candidate.score.breakdown.map(b => ({ label: b.axis, value: b.contribution.toFixed(2) })),
+    excluded: [],
+    calculatedAt: args.generatedAt || nowIso(),
+    inputHash: hashTraceInputs(inputs),
+    relatedIds: [`decision:candidate:${candidate.id}:total-score`],
+  };
+}
+
+/** Per-candidate Penalties trace. */
+export function buildDecisionCandidatePenaltiesTrace(args: DecisionCandidateTraceArgs): CalculationTrace {
+  const { rank, candidate } = args;
+  const totalPenalty = candidate.score.penalties.reduce((s, p) => s + p.magnitude, 0);
+  const inputs: TraceInput[] = candidate.score.penalties.map(p => ({
+    label: p.id,
+    value: `−${p.magnitude.toFixed(2)} pts`,
+    note: p.reason,
+  }));
+  return {
+    id: `decision:candidate:${candidate.id}:penalties`,
+    label: `Decision Engine — Candidate #${rank} Penalties`,
+    finalValue: candidate.score.penalties.length === 0 ? 'None' : `−${totalPenalty.toFixed(2)} pts (${candidate.score.penalties.length})`,
+    plainEnglish:
+      `Deterministic penalty deductions for "${candidate.label}" — typically refinance pressure or excessive leverage.`,
+    formula: 'penalty_id = breach_steps × penalty_weight × 100\ntotal_penalty = Σ penalty_id',
+    expanded: candidate.score.penalties.length === 0
+      ? 'No penalties triggered for this candidate.'
+      : candidate.score.penalties.map(p => `${p.id}: ${p.reason} → −${p.magnitude.toFixed(2)} pts`).join('\n'),
+    inputs,
+    assumptions: [
+      { label: 'Refinance band steps', value: 'none=0, mild=0, elevated=1, severe=2', source: 'scoring.REFI_BAND_STEPS' },
+    ],
+    dataSource: `RankedCandidate(${candidate.id}).score.penalties`,
+    sourceEngine: SOURCE_ENGINE_DECISION,
+    included: candidate.score.penalties.map(p => ({ label: p.id, value: p.magnitude.toFixed(2) })),
+    excluded: [],
+    calculatedAt: args.generatedAt || nowIso(),
+    inputHash: hashTraceInputs(inputs),
+    relatedIds: [`decision:candidate:${candidate.id}:total-score`],
+  };
+}
+
+/** Per-candidate Rationale trace — the strengths/weaknesses narrative. */
+export function buildDecisionCandidateRationaleTrace(args: DecisionCandidateTraceArgs): CalculationTrace {
+  const { rank, candidate } = args;
+  const inputs: TraceInput[] = candidate.rationale.length > 0
+    ? candidate.rationale.map((r, i) => ({ label: `Reason #${i + 1}`, value: r }))
+    : [{ label: 'Headline', value: candidate.headline }];
+  return {
+    id: `decision:candidate:${candidate.id}:rationale`,
+    label: `Decision Engine — Candidate #${rank} Rationale`,
+    finalValue: `${inputs.length} reason${inputs.length === 1 ? '' : 's'}`,
+    plainEnglish:
+      `Engine-generated per-axis rationale for why "${candidate.label}" ranks where it does. Same strings the StrategyCard "Why this ranks" + deep-dive PDF use.`,
+    formula: 'rationale[] = scoring.buildAxisRationale(breakdown[], profile)',
+    expanded: candidate.rationale.length > 0 ? candidate.rationale.join('\n') : candidate.headline,
+    inputs,
+    assumptions: [{ label: 'Profile', value: args.investorProfile }],
+    dataSource: `RankedCandidate(${candidate.id}).rationale`,
+    sourceEngine: SOURCE_ENGINE_DECISION,
+    included: inputs.map(i => ({ label: i.label, value: String(i.value) })),
+    excluded: [],
+    calculatedAt: args.generatedAt || nowIso(),
+    inputHash: hashTraceInputs(inputs),
+    relatedIds: [`decision:candidate:${candidate.id}:total-score`],
+  };
+}
+
+/** Bundle for one candidate row. */
+export function buildAllDecisionCandidateTraces(args: DecisionCandidateTraceArgs): CalculationTrace[] {
+  return [
+    buildDecisionCandidateScoreTrace(args),
+    buildDecisionCandidateComponentTrace(args),
+    buildDecisionCandidatePenaltiesTrace(args),
+    buildDecisionCandidateRationaleTrace(args),
+  ];
+}
+
+// ─── Ranking logic (cross-candidate) ─────────────────────────────────────────
+
+export interface DecisionRankingLogicTraceArgs {
+  candidates: Array<{ id: string; label: string; score: number; rank: number }>;
+  investorProfile: string;
+  riskMode: string;
+  weights: Record<string, number>;
+  totalGenerated: number;
+  totalDiscarded: number;
+  generatedAt: string;
+}
+
+/** Page-level ranking-logic trace — explains how the engine sorted the full
+ *  list of candidates under the active profile + risk mode. */
+export function buildDecisionRankingLogicTrace(args: DecisionRankingLogicTraceArgs): CalculationTrace {
+  const inputs: TraceInput[] = args.candidates.slice(0, 10).map(c => ({
+    label: `#${c.rank} ${c.label}`,
+    value: c.score.toFixed(2),
+    source: 'QuickDecisionOutput.ranked',
+  }));
+  const weightLines = Object.entries(args.weights)
+    .map(([k, v]) => `${k} = ${(v * 100).toFixed(1)}%`)
+    .join('\n');
+  return {
+    id: 'decision:ranking-logic',
+    label: 'Decision Engine — Ranking Logic',
+    finalValue: `${args.candidates.length} ranked · ${args.totalDiscarded} filtered out`,
+    plainEnglish:
+      'How candidates were sorted into the final ranking. For each remaining candidate the engine ran a 300-path Monte Carlo, scored every axis under the active investor profile weights, applied refinance/leverage penalties, and sorted by composite score.',
+    formula:
+      'rank(c) = sort_desc( Σ (normalise(axis, profile) × weight(axis)) − Σ penalty(c) )',
+    expanded: [
+      `Total generated: ${args.totalGenerated}`,
+      `Filtered out (behavioural / safety): ${args.totalDiscarded}`,
+      `Risk mode: ${args.riskMode}`,
+      `Profile: ${args.investorProfile}`,
+      ``,
+      `Weights:`,
+      weightLines,
+      ``,
+      `Top of ranking:`,
+      ...args.candidates.slice(0, 10).map(c => `  #${c.rank} ${c.label} → ${c.score.toFixed(1)}`),
+    ].join('\n'),
+    inputs,
+    assumptions: [
+      { label: 'Risk mode', value: args.riskMode, source: 'QuickDecisionOutput.riskControlsApplied.mode' },
+      { label: 'Profile', value: args.investorProfile, source: 'QuickDecisionOutput.investorProfile' },
+      { label: 'MC paths per candidate', value: 300, source: 'generateQuickDecisionCandidates.simulationCount' },
+    ],
+    dataSource: 'QuickDecisionOutput.ranked + discarded + riskControlsApplied',
+    sourceEngine: SOURCE_ENGINE_DECISION,
+    included: args.candidates.map(c => ({ label: `#${c.rank} ${c.label}`, value: c.score.toFixed(2) })),
+    excluded: [],
+    calculatedAt: args.generatedAt || nowIso(),
+    inputHash: hashTraceInputs(inputs),
+    relatedIds: [
+      'decision:winner:total-score',
+      'decision:winner:weightings',
+      'decision:winner:why-this-ranks',
+      'decision:trade-off-analysis',
+    ],
+  };
+}
+
+// ─── Trade-off analysis (winner) ─────────────────────────────────────────────
+
+export interface DecisionTradeoffsTraceArgs {
+  candidateLabel: string;
+  candidateId: string;
+  rank: number;
+  tradeOffs: {
+    returnPotential: number;
+    riskExposure: number;
+    liquidity: number;
+    cashflowSafety: number;
+    taxEfficiency: number;
+    volatilityTolerance: number;
+  };
+  investorProfile: string;
+  generatedAt: string;
+}
+
+export function buildDecisionTradeoffsTrace(args: DecisionTradeoffsTraceArgs): CalculationTrace {
+  const t = args.tradeOffs;
+  const inputs: TraceInput[] = [
+    { label: 'Return potential',     value: `${(t.returnPotential * 100).toFixed(0)} / 100` },
+    { label: 'Risk exposure',        value: `${(t.riskExposure * 100).toFixed(0)} / 100`, note: 'higher = more risk' },
+    { label: 'Liquidity',            value: `${(t.liquidity * 100).toFixed(0)} / 100` },
+    { label: 'Cashflow safety',      value: `${(t.cashflowSafety * 100).toFixed(0)} / 100` },
+    { label: 'Tax efficiency',       value: `${(t.taxEfficiency * 100).toFixed(0)} / 100` },
+    { label: 'Volatility tolerance', value: `${(t.volatilityTolerance * 100).toFixed(0)} / 100`, note: 'higher = needs more tolerance' },
+  ];
+  return {
+    id: `decision:trade-off-analysis`,
+    label: 'Decision Engine — Trade-off Analysis',
+    finalValue: `${args.candidateLabel} (rank #${args.rank})`,
+    plainEnglish:
+      'Trade-off radar for the currently surfaced candidate. Each axis is a [0,1] index derived deterministically from MC outputs (return potential from terminal NW spread, risk from VaR/CVaR + default-probability, liquidity from low-cash exposure, cashflow safety from negative-month frequency, tax efficiency from effective tax rate, volatility tolerance from monthly NW σ).',
+    formula: 'tradeOffs = buildStrategyIntelligence(candidate, baseline).tradeOffs',
+    expanded: inputs.map(i => `${i.label} = ${i.value}`).join('\n'),
+    inputs,
+    assumptions: [
+      { label: 'Index scale', value: '[0, 1] then × 100 for display' },
+      { label: 'Profile', value: args.investorProfile },
+    ],
+    dataSource: 'scenarioV2.decisionEngine.strategyIntelligence.tradeOffs',
+    sourceEngine: SOURCE_ENGINE_DECISION,
+    included: inputs.map(i => ({ label: i.label, value: String(i.value) })),
+    excluded: [
+      { label: 'Composite Score', reason: 'Shown separately under total-score trace.' },
+    ],
+    calculatedAt: args.generatedAt || nowIso(),
+    inputHash: hashTraceInputs(inputs),
+    relatedIds: [
+      `decision:candidate:${args.candidateId}:total-score`,
+      'decision:winner:total-score',
+      'decision:ranking-logic',
+    ],
+  };
+}
+
+// ─── Multi-winner lens score traces ──────────────────────────────────────────
+
+export interface DecisionLensTraceArgs {
+  lensKey: 'balanced' | 'wealthMax' | 'cashflowSafe' | 'highRisk';
+  lensLabel: string;
+  winnerLabel: string;
+  winnerId: string;
+  score: number;
+  whyThisWins: string;
+  investorProfile: string;
+  generatedAt: string;
+}
+
+export function buildDecisionLensTrace(args: DecisionLensTraceArgs): CalculationTrace {
+  const inputs: TraceInput[] = [
+    { label: 'Lens', value: args.lensLabel },
+    { label: 'Winning candidate', value: args.winnerLabel },
+    { label: 'Lens score', value: args.score.toFixed(2) },
+    { label: 'Active profile', value: args.investorProfile },
+  ];
+  return {
+    id: `decision:lens:${args.lensKey}`,
+    label: `Decision Engine — Lens "${args.lensLabel}"`,
+    finalValue: `${args.winnerLabel} · ${args.score.toFixed(0)}`,
+    plainEnglish:
+      `Re-scoring of the same candidate set under the "${args.lensLabel}" lens. ${args.whyThisWins}. ` +
+      `The composite math is unchanged — only the axis weights flip, which is why "best" can differ from the active profile's winner.`,
+    formula: 'lens_score = Σ (normalised_axis × lens_weight) − Σ penalties',
+    expanded: `Lens: ${args.lensLabel}\nWinner under this lens: ${args.winnerLabel}\nScore: ${args.score.toFixed(2)} / 100`,
+    inputs,
+    assumptions: [
+      { label: 'Lens weighting source', value: 'engine multiWinner re-score', source: 'scenarioV2.decisionEngine.multiWinner' },
+    ],
+    dataSource: 'QuickDecisionOutput.multiWinner',
+    sourceEngine: SOURCE_ENGINE_DECISION,
+    included: inputs.map(i => ({ label: i.label, value: String(i.value) })),
+    excluded: [],
+    calculatedAt: args.generatedAt || nowIso(),
+    inputHash: hashTraceInputs(inputs),
+    relatedIds: ['decision:ranking-logic', 'decision:winner:total-score'],
+  };
+}
+
+export const DECISION_EXTENDED_TRACE_IDS = [
+  'decision:ranking-logic',
+  'decision:trade-off-analysis',
+  'decision:lens:balanced',
+  'decision:lens:wealthMax',
+  'decision:lens:cashflowSafe',
+  'decision:lens:highRisk',
+] as const;

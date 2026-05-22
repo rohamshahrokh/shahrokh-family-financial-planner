@@ -285,3 +285,194 @@ export const LEGACY_RISK_RADAR_TRACE_IDS = [
   'risk-radar:category:investment',
   'risk-radar:category:income',
 ] as const;
+
+// ─── Live canonical 8-axis traces backed by riskEngine output ───────────────
+//
+// The /risk-radar page is the only native UI that displays a Financial Health
+// breakdown. The Audit Mode QA matrix requires that Liquidity, Leverage,
+// Cashflow, FIRE Progress and the Overall Risk/Health Score open a *live*
+// trace from /risk-radar — not the architecture-ready placeholder.
+//
+// These factories adapt the legacy 4-category RiskRadarResult into the
+// canonical financial-health:* trace ids so the clickable surface on
+// /risk-radar can resolve to live values. Engine math is untouched — we just
+// re-pin factor scores from the existing result onto trace records under
+// canonical ids.
+
+function findFactorScore(result: RiskRadarResult, factorId: string): { score: number; value: string; label: string; benchmark: string } | null {
+  for (const cat of result.categories) {
+    const f = cat.factors.find(ff => ff.id === factorId);
+    if (f) return { score: f.score, value: String(f.value), label: f.label, benchmark: String(f.benchmark) };
+  }
+  return null;
+}
+
+function findCategoryScore(result: RiskRadarResult, catId: string): number | null {
+  const c = result.categories.find(cc => cc.id === catId);
+  return c ? c.score : null;
+}
+
+export function buildLiveFinancialHealthTracesFromRiskRadar(result: RiskRadarResult): CalculationTrace[] {
+  const generatedAt = nowIso();
+  const surface = 'pages/risk-radar.tsx';
+
+  // Liquidity — driven by cash_buffer (months of expenses) under the legacy
+  // cashflow category. Score = factor.score (0–100).
+  const cashBuffer = findFactorScore(result, 'cash_buffer');
+  const liquidity: CalculationTrace = {
+    id: 'financial-health:liquidity',
+    label: 'Financial Health — Liquidity',
+    finalValue: cashBuffer ? `${cashBuffer.score} / 100` : '—',
+    plainEnglish:
+      'Liquidity axis — how many months of expenses you can fund from cash + offset without selling assets or borrowing. ' +
+      'Above 6 months is robust; below 3 months is fragile.',
+    formula: 'liquidity_score = clamp01((cash + offset) / monthly_expenses / 6_months_target) × 100',
+    expanded: cashBuffer
+      ? `cash_buffer = ${cashBuffer.value}\nscore = ${cashBuffer.score} / 100\ntarget = ${cashBuffer.benchmark}`
+      : 'cash_buffer factor not available',
+    inputs: cashBuffer
+      ? [{ label: cashBuffer.label, value: cashBuffer.value, note: cashBuffer.benchmark, source: 'riskEngine.cashflow.factors[cash_buffer]' }]
+      : [],
+    assumptions: [
+      { label: 'Target buffer', value: '≥ 3 months · 6 months robust', source: 'riskEngine.cash_buffer thresholds' },
+      { label: 'Surface', value: surface },
+    ],
+    dataSource: 'riskEngine.computeRiskRadar.categories[cashflow].factors[cash_buffer]',
+    sourceEngine: 'riskEngine.computeRiskRadar',
+    included: cashBuffer ? [{ label: cashBuffer.label, value: cashBuffer.value }] : [],
+    excluded: [
+      { label: 'Super', reason: 'Not accessible until preservation age — excluded from liquidity.' },
+    ],
+    calculatedAt: generatedAt,
+    inputHash: hashTraceInputs(cashBuffer ? [{ label: cashBuffer.label, value: cashBuffer.value }] : []),
+    relatedIds: ['financial-health:overall', 'risk-radar:category:cashflow', 'wealth-strategy:cash-buffer'],
+  };
+
+  // Leverage — driven by debt_ratio under the legacy debt category.
+  const debtRatio = findFactorScore(result, 'debt_ratio');
+  const leverage: CalculationTrace = {
+    id: 'financial-health:leverage',
+    label: 'Financial Health — Leverage',
+    finalValue: debtRatio ? `${debtRatio.score} / 100` : '—',
+    plainEnglish:
+      'Leverage axis — share of total assets funded by debt. Lower is safer; > 60% raises refinance + serviceability risk.',
+    formula: 'leverage_score = clamp01(1 − total_debt / total_assets) × 100',
+    expanded: debtRatio
+      ? `debt_ratio = ${debtRatio.value}\nscore = ${debtRatio.score} / 100\ntarget = ${debtRatio.benchmark}`
+      : 'debt_ratio factor not available',
+    inputs: debtRatio
+      ? [{ label: debtRatio.label, value: debtRatio.value, note: debtRatio.benchmark, source: 'riskEngine.debt.factors[debt_ratio]' }]
+      : [],
+    assumptions: [
+      { label: 'Threshold', value: '< 40% healthy · > 60% elevated', source: 'riskEngine.debt_ratio thresholds' },
+      { label: 'Surface', value: surface },
+    ],
+    dataSource: 'riskEngine.computeRiskRadar.categories[debt].factors[debt_ratio]',
+    sourceEngine: 'riskEngine.computeRiskRadar',
+    included: debtRatio ? [{ label: debtRatio.label, value: debtRatio.value }] : [],
+    excluded: [],
+    calculatedAt: generatedAt,
+    inputHash: hashTraceInputs(debtRatio ? [{ label: debtRatio.label, value: debtRatio.value }] : []),
+    relatedIds: ['financial-health:overall', 'risk-radar:category:debt', 'wealth-strategy:debt-to-assets'],
+  };
+
+  // Cashflow — driven by surplus_ratio under the legacy cashflow category.
+  const surplusRatio = findFactorScore(result, 'surplus_ratio');
+  const cashflowCatScore = findCategoryScore(result, 'cashflow');
+  const cashflow: CalculationTrace = {
+    id: 'financial-health:cashflow',
+    label: 'Financial Health — Cashflow',
+    finalValue: cashflowCatScore != null ? `${cashflowCatScore} / 100` : '—',
+    plainEnglish:
+      'Cashflow axis — combined view of monthly surplus, income coverage and bill concentration. Higher = healthier monthly margin between income and outgoings.',
+    formula: 'cashflow_score = weighted_avg(surplus_ratio, income_coverage, cash_buffer, bill_concentration)',
+    expanded: surplusRatio
+      ? `surplus_ratio = ${surplusRatio.value} (score ${surplusRatio.score})\ncategory score = ${cashflowCatScore ?? '—'} / 100`
+      : `category score = ${cashflowCatScore ?? '—'} / 100`,
+    inputs: surplusRatio
+      ? [{ label: surplusRatio.label, value: surplusRatio.value, note: surplusRatio.benchmark, source: 'riskEngine.cashflow.factors[surplus_ratio]' }]
+      : [],
+    assumptions: [
+      { label: 'Healthy surplus', value: '≥ 20% of income', source: 'riskEngine.surplus_ratio thresholds' },
+      { label: 'Surface', value: surface },
+    ],
+    dataSource: 'riskEngine.computeRiskRadar.categories[cashflow]',
+    sourceEngine: 'riskEngine.computeRiskRadar',
+    included: surplusRatio ? [{ label: surplusRatio.label, value: surplusRatio.value }] : [],
+    excluded: [],
+    calculatedAt: generatedAt,
+    inputHash: hashTraceInputs(surplusRatio ? [{ label: surplusRatio.label, value: surplusRatio.value }] : []),
+    relatedIds: ['financial-health:overall', 'risk-radar:category:cashflow', 'wealth-strategy:savings-rate'],
+  };
+
+  // FIRE Progress — derived from snapshot.fire_progress_pct (passed via input).
+  // The legacy engine doesn't surface this as a category directly, but the
+  // riskEngine input carries it. Expose it via a derived progress trace that
+  // points users to the FIRE Path page for full breakdown.
+  const fireProgressPct = (result as any).fire_progress_pct ?? null;
+  const fireProgress: CalculationTrace = {
+    id: 'financial-health:fire-progress',
+    label: 'Financial Health — FIRE Progress',
+    finalValue: fireProgressPct != null ? `${Number(fireProgressPct).toFixed(0)} / 100` : 'see FIRE Path',
+    plainEnglish:
+      'FIRE Progress axis — current accessible capital divided by the FIRE capital target. Driven by the FIRE Path Engine; this axis surfaces the same canonical progress percentage.',
+    formula: 'fire_progress = (accessible_capital_now / fire_capital_target) × 100',
+    expanded: fireProgressPct != null
+      ? `fire_progress = ${Number(fireProgressPct).toFixed(1)}%`
+      : 'fire_progress_pct not present on snapshot — open the FIRE Path page for live calculation',
+    inputs: fireProgressPct != null
+      ? [{ label: 'FIRE progress %', value: `${Number(fireProgressPct).toFixed(1)}%`, source: 'snapshot.fire_progress_pct' }]
+      : [],
+    assumptions: [
+      { label: 'Engine', value: 'firePathEngine.computeFirePath', source: 'firePathEngine.ts' },
+      { label: 'Surface', value: surface },
+    ],
+    dataSource: 'snapshot.fire_progress_pct (FIRE engine canonical)',
+    sourceEngine: 'firePathEngine.computeFirePath',
+    included: fireProgressPct != null
+      ? [{ label: 'FIRE progress %', value: `${Number(fireProgressPct).toFixed(1)}%` }]
+      : [],
+    excluded: [
+      { label: 'Volatility', reason: 'Deterministic FIRE path — see Monte Carlo for stochastic FIRE probability.' },
+    ],
+    calculatedAt: generatedAt,
+    inputHash: hashTraceInputs([{ label: 'fire_progress', value: fireProgressPct ?? '—' }]),
+    relatedIds: ['financial-health:overall', 'fire:date', 'fire:capital-target', 'wealth-strategy:freedom-progress'],
+  };
+
+  // Overall — mirror the legacy overall score under the canonical id so the
+  // Dashboard / Risk Radar overall click resolves under either id.
+  const overallInputs: TraceInput[] = result.categories.map(c => ({
+    label: c.label,
+    value: `${c.score}/100 (${c.level})`,
+  }));
+  const overall: CalculationTrace = {
+    id: 'financial-health:overall',
+    label: 'Financial Health — Overall Score',
+    finalValue: `${result.overall_score} / 100 · ${result.overall_label}`,
+    plainEnglish:
+      'Overall Financial Health Score — the canonical Risk/Health composite. Computed as the weighted average of the four risk-radar categories on the legacy engine; surfaced here under the canonical 8-axis id.',
+    formula: 'overall_health = Σ (category.score × CAT_WEIGHTS[category])',
+    expanded: `Overall = ${result.overall_score} (label: ${result.overall_label}); fragility index = ${result.fragility_index}`,
+    inputs: overallInputs,
+    assumptions: [
+      { label: 'Weights', value: 'Debt 0.30, Cashflow 0.25, Investment 0.25, Income 0.20', source: 'riskEngine.CAT_WEIGHTS' },
+      { label: 'Surface', value: surface },
+    ],
+    dataSource: 'riskEngine.computeRiskRadar',
+    sourceEngine: 'riskEngine.computeRiskRadar',
+    included: result.categories.map(c => ({ label: c.label, value: c.score })),
+    excluded: [],
+    calculatedAt: generatedAt,
+    inputHash: hashTraceInputs(overallInputs),
+    relatedIds: [
+      'financial-health:liquidity',
+      'financial-health:leverage',
+      'financial-health:cashflow',
+      'financial-health:fire-progress',
+      'risk-radar:overall',
+    ],
+  };
+
+  return [liquidity, leverage, cashflow, fireProgress, overall];
+}

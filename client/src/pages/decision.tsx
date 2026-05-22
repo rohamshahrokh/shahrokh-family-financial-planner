@@ -112,7 +112,14 @@ import ScenarioCompareV2Page from "./scenario-compare-v2";
 import AssumptionsPanel from "@/components/AssumptionsPanel";
 import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
 import { registerTrace } from "@/lib/auditMode/auditRegistry";
-import { buildAllDecisionWinnerTraces } from "@/lib/auditMode/engineTraces";
+import {
+  buildAllDecisionWinnerTraces,
+  buildAllDecisionCandidateTraces,
+  buildDecisionRankingLogicTrace,
+  buildDecisionTradeoffsTrace,
+  buildDecisionLensTrace,
+} from "@/lib/auditMode/engineTraces";
+import { buildStrategyIntelligence } from "@/lib/scenarioV2/decisionEngine/strategyIntelligence";
 
 // ─── Formatting helpers (mask-aware) ─────────────────────────────────────────
 
@@ -395,6 +402,10 @@ function QuickDecisionTab() {
     if (!output || !winner) return;
     const weights: Record<string, number> = {};
     winner.score.breakdown.forEach(b => { weights[b.axis as string] = b.weight; });
+    const generatedAt = output.generatedAt;
+    const investorProfile = String(output.investorProfile);
+
+    // Winner-scoped (existing)
     buildAllDecisionWinnerTraces({
       winnerId: winner.id,
       winnerLabel: winner.label,
@@ -419,9 +430,92 @@ function QuickDecisionTab() {
       whyWon: output.comparativeNarrative.whyWon,
       whatCouldInvalidate: output.comparativeNarrative.whatCouldInvalidate,
       runnerUpReason: output.comparativeNarrative.secondPlaceAndWhy,
-      investorProfile: String(output.investorProfile),
-      generatedAt: output.generatedAt,
+      investorProfile,
+      generatedAt,
     }).forEach(registerTrace);
+
+    // Per-candidate (all ranked rows + high-risk paths, so every clickable
+    // candidate label/score has its own trace).
+    const allClickable = [...output.ranked, ...output.highRiskPaths];
+    allClickable.forEach((c, idx) => {
+      buildAllDecisionCandidateTraces({
+        rank: idx + 1,
+        candidate: {
+          id: c.id,
+          label: c.label,
+          headline: c.headline,
+          score: {
+            score: c.score.score,
+            baseScore: c.score.baseScore,
+            breakdown: c.score.breakdown.map(b => ({
+              axis: String(b.axis),
+              rawValue: b.rawValue,
+              normalisedValue: b.normalisedValue,
+              weight: b.weight,
+              contribution: b.contribution,
+            })),
+            penalties: c.score.penalties.map(p => ({
+              id: p.id,
+              magnitude: p.magnitude,
+              reason: p.reason,
+              band: p.band,
+            })),
+          },
+          rationale: c.rationale,
+        },
+        investorProfile,
+        generatedAt,
+      }).forEach(registerTrace);
+    });
+
+    // Page-level ranking logic.
+    registerTrace(buildDecisionRankingLogicTrace({
+      candidates: output.ranked.map((c, i) => ({ id: c.id, label: c.label, score: c.score.score, rank: i + 1 })),
+      investorProfile,
+      riskMode: output.riskControlsApplied?.mode ?? 'balanced',
+      weights,
+      totalGenerated: output.ranked.length + output.discarded.length,
+      totalDiscarded: output.discarded.length,
+      generatedAt,
+    }));
+
+    // Trade-off analysis (winner). Use the same StrategyIntelligence the
+    // StrategyCard renders so the trace mirrors the on-screen radar.
+    try {
+      const intel = buildStrategyIntelligence(winner, output.baseScenarioResult);
+      registerTrace(buildDecisionTradeoffsTrace({
+        candidateLabel: winner.label,
+        candidateId: winner.id,
+        rank: 1,
+        tradeOffs: intel.tradeOffs,
+        investorProfile,
+        generatedAt,
+      }));
+    } catch { /* intentionally swallow — trade-offs are presentational only */ }
+
+    // Multi-winner lens scores.
+    const mw = output.multiWinner;
+    const lensMeta: Array<{ key: 'balanced' | 'wealthMax' | 'cashflowSafe' | 'highRisk'; label: string; why: string }> = [
+      { key: 'balanced',     label: 'Balanced',        why: 'Equal weight across all axes' },
+      { key: 'wealthMax',    label: 'Wealth Max',      why: 'Emphasises terminal NW + risk-adjusted return' },
+      { key: 'cashflowSafe', label: 'Cashflow Safe',   why: 'Emphasises survival, liquidity, low cashflow stress' },
+      { key: 'highRisk',     label: 'High-risk Upside', why: 'Tolerates volatility for tail upside' },
+    ];
+    for (const lens of lensMeta) {
+      const w = mw[lens.key];
+      if (!w) continue;
+      const candidate = allClickable.find(c => c.id === w.id);
+      registerTrace(buildDecisionLensTrace({
+        lensKey: lens.key,
+        lensLabel: lens.label,
+        winnerLabel: candidate?.label ?? w.id,
+        winnerId: w.id,
+        score: w.score,
+        whyThisWins: lens.why,
+        investorProfile,
+        generatedAt,
+      }));
+    }
   }, [output, winner]);
 
   return (
@@ -926,11 +1020,12 @@ function QuickDecisionTab() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <ListChecks className="h-5 w-5" />
-              All ranked paths ({ranked.length})
+              <AuditableMetric traceId="decision:ranking-logic">All ranked paths ({ranked.length})</AuditableMetric>
               <HelpLink topic={HELP_TOPICS.rankingWeights} variant="icon" ariaLabel="How paths are ranked" />
             </CardTitle>
             <CardDescription>
               Each path is an investment-committee–style explanation with trade-offs, baseline delta, stress, and a deep-dive sheet.
+              {' '}<AuditableMetric traceId="decision:trade-off-analysis">Trade-off analysis</AuditableMetric>.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -1248,7 +1343,9 @@ function MultiWinnerPanel({ output }: { output: QuickDecisionOutput }) {
                 <div className="text-sm font-semibold mt-0.5 truncate text-foreground">{findLabel(v?.id)}</div>
                 <div className="flex items-baseline gap-1.5">
                   <span className="text-base font-bold tabular-nums">
-                    {v ? v.score.toFixed(0) : "—"}
+                    {v
+                      ? <AuditableMetric traceId={`decision:lens:${lens.key}`}>{v.score.toFixed(0)}</AuditableMetric>
+                      : "—"}
                   </span>
                   <span className="text-[10px] opacity-70">{v ? "/100" : "no candidate"}</span>
                 </div>

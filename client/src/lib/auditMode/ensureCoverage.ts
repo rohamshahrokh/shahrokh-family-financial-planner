@@ -106,6 +106,7 @@ const PLACEHOLDER_FORMULAS: Record<string, string> = {
   'wealth-strategy:savings-rate': 'Savings Rate = (monthly_surplus / monthly_income) × 100',
   'wealth-strategy:debt-to-assets': 'Debt-to-Assets = (total_debt / total_assets) × 100',
   'wealth-strategy:freedom-progress': 'Freedom Progress = (current_investable_capital / FIRE_target) × 100',
+  'wealth-strategy:net-position': 'Net Position = Σ(asset values) − Σ(liabilities)',
   // Property Engine — portfolio aggregates
   'property:portfolio:value': 'Portfolio Value = Σ property.current_value (settled only)',
   'property:portfolio:loans': 'Total Loans = Σ property.loan_balance (settled only)',

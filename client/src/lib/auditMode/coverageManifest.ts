@@ -131,6 +131,7 @@ const wealthStrategyDescriptions: Record<string, string> = {
   'wealth-strategy:savings-rate': 'Wealth Strategy Hub — Savings Rate (%)',
   'wealth-strategy:debt-to-assets': 'Wealth Strategy Hub — Debt-to-Assets ratio (%)',
   'wealth-strategy:freedom-progress': 'Wealth Strategy Hub — Freedom Progress toward FIRE (%)',
+  'wealth-strategy:net-position': 'Wealth Strategy Hub — Household Net Position',
 };
 
 const propertyDescriptions: Record<string, string> = {
