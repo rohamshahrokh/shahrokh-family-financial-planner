@@ -23,6 +23,8 @@ import { PrivacyProvider } from "@/contexts/PrivacyContext";
 import { AuditModeProvider } from "@/lib/auditMode/AuditModeContext";
 import { CalculationTracePanel } from "@/components/auditMode/CalculationTracePanel";
 import { ensureCoverageRegistered } from "@/lib/auditMode/ensureCoverage";
+import { hydrateUserDefaultsFromServer } from "@/lib/userDefaultsApi";
+import { registerUserDefaultsTraces } from "@/lib/auditMode/engineTraces";
 import { useEffect, useRef } from "react";
 import { trackPageView } from "./lib/analytics";
 
@@ -30,6 +32,19 @@ import { trackPageView } from "./lib/analytics";
 // Audit Coverage report can resolve traces immediately. Live host components
 // overwrite these with real engine output when they mount.
 ensureCoverageRegistered();
+
+// Live user-default trace factories registered at boot so the Audit
+// Coverage page (and any other surface that opens the trace panel BEFORE
+// Settings has mounted) resolves them with real source / tier / savedAt
+// metadata rather than the manifest placeholder.
+// #FWL_Persistent_UserDefaults_ScenarioOverride — audit discoverability
+registerUserDefaultsTraces();
+
+// Fire-and-forget: hydrate persistent user defaults from the durable backend
+// BEFORE any page mounts. The first paint may briefly read system defaults
+// (or stale localStorage values); the server payload then overrides them.
+// #FWL_Persistent_UserDefaults_ScenarioOverride — server tier
+hydrateUserDefaultsFromServer().catch(() => { /* surfaced via getServerSyncState */ });
 
 import LoginPage          from "./pages/login";
 import DashboardPage      from "./pages/dashboard";

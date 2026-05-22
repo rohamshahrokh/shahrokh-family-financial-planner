@@ -17,6 +17,7 @@ import {
 import { sbHouseholdPermissions, type HouseholdPermissionSettings } from "@/lib/supabaseClient";
 import * as XLSX from "xlsx";
 import { sendTestMessage, sendBrowserPush, invalidateSettingsCache } from "@/lib/notifications";
+import { UserDefaultsSection } from "@/components/UserDefaultsSection";
 
 // ─── Toggle Row helper ────────────────────────────────────────────────────────
 
@@ -1212,6 +1213,12 @@ export default function SettingsPage() {
       */}
 
       {/* ── Planning Assumptions ─────────────────────────────────────────── */}
+      {/* ── User Defaults — Modelling Preferences ──────────────────────────
+           Persistent across reload/redeploy. Source-of-truth for projection
+           mode, tax regime, property growth, risk profile, etc. Resolved
+           via scenarioSettingsResolver (scenario > user > system). */}
+      <UserDefaultsSection />
+
       <SectionCard title="Planning Assumptions" icon={SettingsIcon} adminOnly isAdmin={isAdmin}>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {[

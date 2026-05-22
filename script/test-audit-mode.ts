@@ -639,6 +639,13 @@ registerTrace(__buildFundRes({
   requiredLiquidity:  245_000,
 }));
 
+// Persistent User Defaults audit traces — mirror the App.tsx boot-time
+// registration so the coverage guard sees every `user-default:<key>` id.
+// #FWL_Persistent_UserDefaults_ScenarioOverride
+const { registerUserDefaultsTraces: __registerUserDefaults } =
+  await import('../client/src/lib/auditMode/engineTraces');
+__registerUserDefaults();
+
 const missing = REQUIRED_TRACE_IDS.filter(id => !hasTrace(id));
 assert(`All required trace ids are registerable (missing: ${missing.join(', ') || 'none'})`, missing.length === 0);
 for (const id of REQUIRED_TRACE_IDS) {

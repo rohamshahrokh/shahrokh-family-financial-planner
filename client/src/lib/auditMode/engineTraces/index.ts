@@ -148,3 +148,8 @@ export {
   FUNDING_RESOLUTION_TRACE_ID,
   type FundingResolutionTraceArgs,
 } from './fundingResolutionTraces';
+
+export {
+  buildUserDefaultTrace,
+  registerUserDefaultsTraces,
+} from './userDefaultsTraces';
