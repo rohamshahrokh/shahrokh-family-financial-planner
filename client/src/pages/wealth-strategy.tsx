@@ -124,7 +124,8 @@ function KpiCard({
   icon,
 }: {
   label: string;
-  value: string;
+  /** Accept ReactNode so callers can wrap the value in an AuditableMetric. */
+  value: string | React.ReactNode;
   sub?: string;
   color?: string;
   icon?: React.ReactNode;
