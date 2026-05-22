@@ -21,6 +21,7 @@ import {
   FINANCIAL_HEALTH_TRACE_IDS,
   LEGACY_RISK_RADAR_TRACE_IDS,
   PROPERTY_TRACE_IDS,
+  FUNDING_SOURCE_TRACE_IDS,
 } from './engineTraces';
 
 export type EngineSourceKey =
@@ -152,6 +153,14 @@ const propertyDescriptions: Record<string, string> = {
   'property:portfolio:cashflow': 'Property page — Monthly Investment Cashflow',
 };
 
+const fundingSourceDescriptions: Record<string, string> = {
+  'property:funding-source:used':              'Property page — Funding Source Used (cash + equity + sales = deposit)',
+  'property:funding-source:cash-impact':       'Property page — Closing Cash after funding (excludes equity-release deposits)',
+  'property:funding-source:equity-release':    'Property page — New loan balance after Equity Release',
+  'property:funding-source:emergency-buffer':  'Property page — Months of emergency buffer after funding',
+  'property:funding-source:negative-gearing':  'Property page — Negative gearing applied under active regime (current-law vs reform, loss bank)',
+};
+
 const projectionRequiredDescriptions: Record<string, string> = {
   'dashboard:net-worth': 'Dashboard hero — Net Worth',
   'dashboard:monthly-surplus': 'Dashboard hero — Monthly Surplus',
@@ -245,6 +254,14 @@ export const COVERAGE_MANIFEST: CoverageEntry[] = [
     engine: 'property_engine',
     surface: 'pages/property.tsx (Portfolio tab)',
     description: propertyDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Property funding source + emergency buffer + negative gearing ──
+  ...FUNDING_SOURCE_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'property_engine',
+    surface: 'pages/property.tsx (Funding Source rows)',
+    description: fundingSourceDescriptions[id] ?? id,
     required: true,
   })),
   // ── Monte Carlo Expected Returns (canonical assumptions) ──

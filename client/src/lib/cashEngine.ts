@@ -48,6 +48,7 @@ import {
 } from './liquidityRules';
 
 import { safeNum } from './mathUtils';
+import { applyFundingToProperties, buildAdapterContext } from './propertyFundingAdapter';
 
 // ─── Public input type ────────────────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ export interface CashEngineOutput {
 export function runCashEngine(input: CashEngineInput): CashEngineOutput {
   const {
     snapshot,
-    properties = [],
+    properties: rawProperties = [],
     stockTransactions = [],
     cryptoTransactions = [],
     stockDCASchedules = [],
@@ -115,6 +116,18 @@ export function runCashEngine(input: CashEngineInput): CashEngineOutput {
     annualSalaryIncome,
     reservedCash,
   } = input;
+
+  // Apply per-property funding source so Equity Release deposits do not draw
+  // cash and asset-sale funding reduces the cash deposit accordingly.
+  // #FWL_Critical_StatePersistence_FundingSource_TaxRegime_Fix
+  const properties = applyFundingToProperties(
+    rawProperties as any[],
+    buildAdapterContext({
+      snapshot,
+      stocks: input.stocks as any,
+      cryptos: input.cryptos as any,
+    }),
+  );
 
   // Build actual month keys set (for isActual tracking)
   const actualMonthKeys = new Set<string>();

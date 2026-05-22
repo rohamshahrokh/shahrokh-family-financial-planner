@@ -23,6 +23,7 @@ import {
 } from './finance';
 import { runCashEngine, type CashEngineOutput } from './cashEngine';
 import type { YearAssumptions } from './forecastStore';
+import { applyFundingToProperties, buildAdapterContext } from './propertyFundingAdapter';
 
 export interface ForecastInput {
   snapshot: any;
@@ -88,12 +89,21 @@ function resolveYearAssumptions(
 
 export function buildForecast(input: ForecastInput): ForecastOutput {
   const {
-    snapshot, properties, stocks, cryptos,
+    snapshot, properties: rawProperties, stocks, cryptos,
     stockTransactions, cryptoTransactions, bills, assumptions,
     expenses, stockDCASchedules, cryptoDCASchedules,
     plannedStockOrders, plannedCryptoOrders,
     yearlyAssumptions,
   } = input;
+
+  // Apply per-property funding source (Equity Release does NOT consume cash;
+  // it increases loan balance instead). Engines downstream receive effective
+  // property records where `deposit` and `loan_amount` already reflect the
+  // user's persisted funding choice. #FWL_Critical_StatePersistence_FundingSource_TaxRegime_Fix
+  const properties = applyFundingToProperties(
+    rawProperties,
+    buildAdapterContext({ snapshot, stocks, cryptos }),
+  );
 
   // Only planned transactions (don't double-count actuals which are in expenses)
   const plannedStockTx  = (stockTransactions  ?? []).filter((t: any) => t.status === 'planned');
