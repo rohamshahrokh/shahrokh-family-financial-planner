@@ -530,7 +530,8 @@ export default function AIForecastEnginePage() {
       ['mc:reach-goal-probabilities', 'mc:fire-probability'],
     ));
 
-    // Reach probabilities — store an aggregate trace covering all 3 goal levels
+    // Reach probabilities — aggregate trace + one per-goal trace (so each
+    // visible $X tile opens its own live value, never a placeholder).
     registerTrace({
       id: 'mc:reach-goal-probabilities',
       label: 'Monte Carlo — Reach NW Goal Probabilities',
@@ -556,8 +557,40 @@ export default function AIForecastEnginePage() {
       excluded: [{ label: 'Year-by-year crossings', reason: 'Use FIRE-by-age curve trace instead.' }],
       calculatedAt: generatedAt,
       inputHash: hashTraceInputs([{ label: 'p3m', value: mc.prob_3m }, { label: 'p5m', value: mc.prob_5m }, { label: 'p10m', value: mc.prob_10m }]),
-      relatedIds: ['mc:financial-freedom-prob'],
+      relatedIds: ['mc:financial-freedom-prob', 'mc:reach-3m', 'mc:reach-5m', 'mc:reach-10m'],
     });
+
+    // Per-goal traces — each card opens with its specific live probability.
+    function reachTrace(id: string, threshold: number, label: string, prob: number): CalculationTrace {
+      const inputs: TraceInput[] = [
+        { label: 'Simulations', value: sims.toLocaleString() },
+        { label: 'Threshold', value: `$${(threshold / 1_000_000).toFixed(0)}M` },
+        { label: 'Horizon', value: `${horizonStartYear}–${horizonEndYear}` },
+        { label: 'P(reach)', value: fmtPct(prob) },
+      ];
+      return {
+        id,
+        label,
+        finalValue: fmtPct(prob),
+        plainEnglish:
+          `Probability that simulated net worth reaches at least $${(threshold / 1_000_000).toFixed(0)}M at any point in the ${horizonStartYear}–${horizonEndYear} horizon. ` +
+          `${prob.toFixed(1)}% of the ${sims.toLocaleString()} paths crossed this threshold at least once.`,
+        formula: `P(reach $${(threshold / 1_000_000).toFixed(0)}M) = count(scenarios where max(NW(t)) ≥ ${threshold.toLocaleString()}) / N`,
+        expanded: `${prob.toFixed(2)}% = ${Math.round((prob / 100) * sims)} / ${sims}`,
+        inputs,
+        assumptions: commonAssumptions,
+        dataSource: 'MonteCarloResult (live)',
+        sourceEngine: SOURCE,
+        included: [{ label: 'NW peak across full horizon (any year)' }],
+        excluded: [{ label: 'Year-by-year crossings', reason: 'Use FIRE-by-age curve trace instead.' }],
+        calculatedAt: generatedAt,
+        inputHash: hashTraceInputs(inputs),
+        relatedIds: ['mc:reach-goal-probabilities', 'mc:financial-freedom-prob'],
+      };
+    }
+    registerTrace(reachTrace('mc:reach-3m',  3_000_000,  'Monte Carlo — P(NW ≥ $3M)',  mc.prob_3m));
+    registerTrace(reachTrace('mc:reach-5m',  5_000_000,  'Monte Carlo — P(NW ≥ $5M)',  mc.prob_5m));
+    registerTrace(reachTrace('mc:reach-10m', 10_000_000, 'Monte Carlo — P(NW ≥ $10M)', mc.prob_10m));
 
     // Negative cashflow risk
     registerTrace(probTrace(
@@ -1136,15 +1169,15 @@ export default function AIForecastEnginePage() {
             <ProbCard label="Reach $3M Net Worth" value={pct(mc.prob_3m)}
               sub="Probability of $3M+ by 2035" icon={<Target className="w-full h-full" />}
               colorClass="text-teal-400" bgClass="bg-teal-500/15"
-              traceId="mc:reach-goal-probabilities" />
+              traceId="mc:reach-3m" />
             <ProbCard label="Reach $5M Net Worth" value={pct(mc.prob_5m)}
               sub="Probability of $5M+ by 2035" icon={<Target className="w-full h-full" />}
               colorClass="text-blue-400" bgClass="bg-blue-500/15"
-              traceId="mc:reach-goal-probabilities" />
+              traceId="mc:reach-5m" />
             <ProbCard label="Reach $10M Net Worth" value={pct(mc.prob_10m)}
               sub="Probability of $10M+ by 2035" icon={<Target className="w-full h-full" />}
               colorClass="text-purple-400" bgClass="bg-purple-500/15"
-              traceId="mc:reach-goal-probabilities" />
+              traceId="mc:reach-10m" />
             <ProbCard label="Negative Cashflow Risk" value={pct(mc.prob_neg_cf)}
               sub="Sims with ≥1 negative cashflow year"
               icon={<ShieldAlert className="w-full h-full" />}

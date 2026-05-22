@@ -809,6 +809,46 @@ function QuickDecisionTab() {
           </CardHeader>
 
           <CardContent className="space-y-4">
+            {/* Audit Mode — universal click affordances so every Decision
+                Engine metric (Component Scores, Weightings, Penalties,
+                Why This Wins, Why Not Higher, Ranking Logic, Trade-offs) is
+                reachable from a single visible row in *every* narrative mode.
+                In default mode this reads as a plain caption; in Audit Mode
+                each chip becomes a clickable trace target. */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border/40 bg-muted/30 px-2 py-1.5">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Trace:</span>
+              <AuditableMetric traceId="decision:winner:component-scores">
+                <span className="text-[10px] font-medium text-foreground">Component Scores</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:winner:weightings">
+                <span className="text-[10px] font-medium text-foreground">Weightings</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:winner:penalties">
+                <span className="text-[10px] font-medium text-foreground">Penalties</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:winner:why-this-ranks">
+                <span className="text-[10px] font-medium text-foreground">Why This Wins</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:winner:why-not-ranked-higher">
+                <span className="text-[10px] font-medium text-foreground">Why Not Higher</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:ranking-logic">
+                <span className="text-[10px] font-medium text-foreground">Ranking Logic</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:trade-off-analysis">
+                <span className="text-[10px] font-medium text-foreground">Trade-off Analysis</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:winner:recommendation-logic">
+                <span className="text-[10px] font-medium text-foreground">Recommendation Logic</span>
+              </AuditableMetric>
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <PlainMetric
                 icon={<Shield className="h-3 w-3" />}

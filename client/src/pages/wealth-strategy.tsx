@@ -3097,6 +3097,34 @@ export default function WealthStrategyPage() {
     };
   }, [snap, properties, stocks, crypto]);
 
+  // ── Audit Mode: register the Wealth Strategy Hub *hub-level* live traces.
+  //    The QA matrix calls out that the visible hero metrics (Household Net
+  //    Position, Cash Buffer, Savings Rate, Debt/Assets, Freedom Progress) and
+  //    the Data Summary Net Worth tile must show LIVE values when clicked
+  //    under Audit Mode — not the boot-time architecture-ready placeholder.
+  //
+  //    These traces are built from `derived` (already computed above for
+  //    rendering) so no engine math is duplicated. `registerTrace` overwrites
+  //    any existing entry under the same id, which is exactly what we want:
+  //    placeholder factories registered at boot are replaced with live values
+  //    as soon as this page mounts. Re-runs when any source signal changes.
+  useEffect(() => {
+    buildWealthStrategyTraces({
+      cash: derived.liquidity,
+      monthlyExpenses: derived.monthlyExpenses,
+      monthlyIncome: derived.monthlyIncome,
+      monthlySurplus: derived.monthlySurplus,
+      totalAssets: derived.totalAssets,
+      totalDebt: derived.totalDebt,
+      investableAssets: derived.investable,
+      fireTarget: derived.requiredFIRE,
+    }).forEach(registerTrace);
+  }, [
+    derived.liquidity, derived.monthlyExpenses, derived.monthlyIncome,
+    derived.monthlySurplus, derived.totalAssets, derived.totalDebt,
+    derived.investable, derived.requiredFIRE,
+  ]);
+
   // ─── Status classifications (calm advisor tone) ────────────────────────────
   const emergencyStatus: StabilityStatus =
     derived.monthsBuffer >= derived.bufferTargetMo ? "good"

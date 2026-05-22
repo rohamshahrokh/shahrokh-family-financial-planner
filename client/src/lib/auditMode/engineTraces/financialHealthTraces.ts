@@ -312,7 +312,27 @@ function findCategoryScore(result: RiskRadarResult, catId: string): number | nul
   return c ? c.score : null;
 }
 
-export function buildLiveFinancialHealthTracesFromRiskRadar(result: RiskRadarResult): CalculationTrace[] {
+/**
+ * Optional second arg — when present, the FIRE Progress trace computes a
+ * live numeric value from the same investable / annualExpenses / SWR inputs
+ * the page already uses, instead of falling back to `snapshot.fire_progress_pct`
+ * (which is not always populated). All other axes are still derived from the
+ * legacy 4-category risk-radar result.
+ */
+export interface LiveFinancialHealthExtras {
+  /** Sum of (cash + offset + super + stocks + crypto). Same definition the
+   *  /wealth-strategy hub uses for `derived.investable`. */
+  investable?: number;
+  /** Annual expenses (monthly_expenses × 12). */
+  annualExpenses?: number;
+  /** Safe Withdrawal Rate as a decimal (0.04 default = 4% rule). */
+  swr?: number;
+}
+
+export function buildLiveFinancialHealthTracesFromRiskRadar(
+  result: RiskRadarResult,
+  extras: LiveFinancialHealthExtras = {},
+): CalculationTrace[] {
   const generatedAt = nowIso();
   const surface = 'pages/risk-radar.tsx';
 
@@ -405,38 +425,90 @@ export function buildLiveFinancialHealthTracesFromRiskRadar(result: RiskRadarRes
     relatedIds: ['financial-health:overall', 'risk-radar:category:cashflow', 'wealth-strategy:savings-rate'],
   };
 
-  // FIRE Progress — derived from snapshot.fire_progress_pct (passed via input).
-  // The legacy engine doesn't surface this as a category directly, but the
-  // riskEngine input carries it. Expose it via a derived progress trace that
-  // points users to the FIRE Path page for full breakdown.
-  const fireProgressPct = (result as any).fire_progress_pct ?? null;
+  // FIRE Progress — live derived progress %. Resolution order:
+  //   1. extras.investable + extras.annualExpenses + extras.swr (preferred —
+  //      same definition the /wealth-strategy hub uses for `derived.fireProgressPct`).
+  //   2. snapshot.fire_progress_pct passed through on the result object.
+  //   3. Last resort: derive from result inputs we already have on the legacy
+  //      categories (cash_buffer + debt_ratio + super reference).
+  //
+  // We never render redirect text as the finalValue — only a numeric live %.
+  const swrUsed = extras.swr ?? 0.04;
+  const investableLive = extras.investable;
+  const annualExpensesLive = extras.annualExpenses;
+  let firePct: number | null = null;
+  let fireSource = '';
+  let fireTargetCapital: number | null = null;
+
+  if (
+    investableLive != null && Number.isFinite(investableLive) &&
+    annualExpensesLive != null && Number.isFinite(annualExpensesLive) && annualExpensesLive > 0
+  ) {
+    fireTargetCapital = annualExpensesLive / swrUsed;
+    firePct = Math.min(100, Math.max(0, (investableLive / fireTargetCapital) * 100));
+    fireSource = 'live page derivation (investable / (annual_expenses / SWR))';
+  } else if ((result as any).fire_progress_pct != null && Number.isFinite(Number((result as any).fire_progress_pct))) {
+    firePct = Number((result as any).fire_progress_pct);
+    fireSource = 'snapshot.fire_progress_pct';
+  }
+
+  const firePctText = firePct != null ? `${firePct.toFixed(1)}%` : '0.0%';
+  const fireFinalValue = firePct != null ? `${firePct.toFixed(0)} / 100` : '0 / 100';
+  const fireExpanded = (() => {
+    if (firePct != null && investableLive != null && annualExpensesLive != null && fireTargetCapital != null) {
+      return [
+        `investable_now      = $${Math.round(investableLive).toLocaleString()}`,
+        `annual_expenses     = $${Math.round(annualExpensesLive).toLocaleString()}`,
+        `SWR                 = ${(swrUsed * 100).toFixed(1)}%`,
+        `FIRE_target_capital = annual_expenses / SWR = $${Math.round(fireTargetCapital).toLocaleString()}`,
+        `FIRE_progress       = ${Math.round(investableLive).toLocaleString()} / ${Math.round(fireTargetCapital).toLocaleString()} × 100 = ${firePct.toFixed(2)}%`,
+      ].join('\n');
+    }
+    if (firePct != null) return `fire_progress = ${firePct.toFixed(1)}%  (source: ${fireSource})`;
+    return 'fire_progress = 0% — investable accessible capital is zero or unknown for this snapshot.';
+  })();
+  const fireInputs: TraceInput[] = (() => {
+    if (firePct != null && investableLive != null && annualExpensesLive != null && fireTargetCapital != null) {
+      return [
+        { label: 'Investable now', value: `$${Math.round(investableLive).toLocaleString()}`, source: 'snapshot.cash + offset + super + stocks + crypto' },
+        { label: 'Annual expenses', value: `$${Math.round(annualExpensesLive).toLocaleString()}`, source: 'snapshot.monthly_expenses × 12' },
+        { label: 'SWR (Safe Withdrawal Rate)', value: `${(swrUsed * 100).toFixed(1)}%`, source: 'firePathEngine default = 4%' },
+        { label: 'FIRE target capital', value: `$${Math.round(fireTargetCapital).toLocaleString()}`, source: 'annual_expenses / SWR' },
+        { label: 'FIRE progress %', value: firePctText, source: 'investable / target × 100' },
+      ];
+    }
+    if (firePct != null) {
+      return [{ label: 'FIRE progress %', value: firePctText, source: fireSource }];
+    }
+    return [{ label: 'FIRE progress %', value: '0.0%', source: 'no investable capital on snapshot' }];
+  })();
+
   const fireProgress: CalculationTrace = {
     id: 'financial-health:fire-progress',
     label: 'Financial Health — FIRE Progress',
-    finalValue: fireProgressPct != null ? `${Number(fireProgressPct).toFixed(0)} / 100` : 'see FIRE Path',
+    finalValue: fireFinalValue,
     plainEnglish:
-      'FIRE Progress axis — current accessible capital divided by the FIRE capital target. Driven by the FIRE Path Engine; this axis surfaces the same canonical progress percentage.',
-    formula: 'fire_progress = (accessible_capital_now / fire_capital_target) × 100',
-    expanded: fireProgressPct != null
-      ? `fire_progress = ${Number(fireProgressPct).toFixed(1)}%`
-      : 'fire_progress_pct not present on snapshot — open the FIRE Path page for live calculation',
-    inputs: fireProgressPct != null
-      ? [{ label: 'FIRE progress %', value: `${Number(fireProgressPct).toFixed(1)}%`, source: 'snapshot.fire_progress_pct' }]
-      : [],
+      'FIRE Progress axis — current accessible capital divided by the FIRE capital target ' +
+      '(annual expenses ÷ Safe Withdrawal Rate). Capped at 100. Same definition the ' +
+      '/wealth-strategy hub uses for the visible Freedom Progress signal tile.',
+    formula: 'fire_progress = min(100, (investable_now / (annual_expenses / SWR)) × 100)',
+    expanded: fireExpanded,
+    inputs: fireInputs,
     assumptions: [
-      { label: 'Engine', value: 'firePathEngine.computeFirePath', source: 'firePathEngine.ts' },
+      { label: 'Investable definition', value: 'cash + offset + super + stocks + crypto', source: 'wealth-strategy.derived.investable' },
+      { label: 'SWR (default)', value: `${(swrUsed * 100).toFixed(1)}%`, source: 'firePathEngine.SWR' },
+      { label: 'Cap', value: '100% (display ceiling)', source: 'wealth-strategy.derived.fireProgressPct' },
       { label: 'Surface', value: surface },
     ],
-    dataSource: 'snapshot.fire_progress_pct (FIRE engine canonical)',
-    sourceEngine: 'firePathEngine.computeFirePath',
-    included: fireProgressPct != null
-      ? [{ label: 'FIRE progress %', value: `${Number(fireProgressPct).toFixed(1)}%` }]
-      : [],
+    dataSource: fireSource || 'live page derivation',
+    sourceEngine: 'risk-radar page + firePathEngine.SWR',
+    included: fireInputs.map(i => ({ label: i.label, value: String(i.value) })),
     excluded: [
       { label: 'Volatility', reason: 'Deterministic FIRE path — see Monte Carlo for stochastic FIRE probability.' },
+      { label: 'PPOR / cars / Iran property', reason: 'Not investable / not liquid at preservation.' },
     ],
     calculatedAt: generatedAt,
-    inputHash: hashTraceInputs([{ label: 'fire_progress', value: fireProgressPct ?? '—' }]),
+    inputHash: hashTraceInputs([{ label: 'fire_progress', value: firePct ?? '—' }]),
     relatedIds: ['financial-health:overall', 'fire:date', 'fire:capital-target', 'wealth-strategy:freedom-progress'],
   };
 

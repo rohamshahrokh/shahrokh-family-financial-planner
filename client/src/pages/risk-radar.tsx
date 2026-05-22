@@ -176,11 +176,27 @@ export default function RiskRadarPage() {
     if (!result) return;
     registerTrace(buildLegacyRiskOverallTrace(result));
     buildLegacyRiskCategoryTraces(result).forEach(registerTrace);
+    // Live extras for the FIRE Progress canonical trace — same investable +
+    // annual_expenses definition the /wealth-strategy hub uses for
+    // `derived.fireProgressPct`, so the FIRE Progress trace always shows a
+    // numeric live value (never redirect text).
+    const s: any = snap ?? {};
+    const investable =
+      Number(s.cash ?? 0) +
+      Number(s.offset_balance ?? 0) +
+      Number(s.super_balance ?? 0) +
+      Number(s.stocks ?? 0) +
+      Number(s.crypto ?? 0);
+    const annualExpenses = Number(s.monthly_expenses ?? 0) * 12;
     const resultWithFireProgress = {
       ...result,
       fire_progress_pct: (snap as any)?.fire_progress_pct ?? null,
     };
-    buildLiveFinancialHealthTracesFromRiskRadar(resultWithFireProgress as any).forEach(registerTrace);
+    buildLiveFinancialHealthTracesFromRiskRadar(resultWithFireProgress as any, {
+      investable,
+      annualExpenses,
+      swr: 0.04,
+    }).forEach(registerTrace);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, overallScoreKey, categoryScoreKey]);
 

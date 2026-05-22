@@ -717,7 +717,11 @@ assert('Forecast Engine page imports AuditableMetric', /AuditableMetric/.test(fc
 assert('Forecast Engine page wires P10', /traceId="mc:p10-nw-at-target"/.test(fcEngineSrc));
 assert('Forecast Engine page wires P50', /traceId="mc:p50-nw-at-target"/.test(fcEngineSrc));
 assert('Forecast Engine page wires P90', /traceId="mc:p90-nw-at-target"/.test(fcEngineSrc));
-assert('Forecast Engine page wires reach-goal probabilities', /traceId="mc:reach-goal-probabilities"/.test(fcEngineSrc));
+// Per-goal trace ids replaced the shared aggregate on the visible cards
+// (the aggregate trace is still registered for cross-page consumers).
+assert('Forecast Engine page wires reach-3m', /traceId="mc:reach-3m"/.test(fcEngineSrc));
+assert('Forecast Engine page wires reach-5m', /traceId="mc:reach-5m"/.test(fcEngineSrc));
+assert('Forecast Engine page wires reach-10m', /traceId="mc:reach-10m"/.test(fcEngineSrc));
 assert('Forecast Engine page wires Financial Freedom Prob', /traceId="mc:financial-freedom-prob"/.test(fcEngineSrc));
 assert('Forecast Engine page wires Negative Cashflow Risk', /traceId="mc:neg-cashflow-risk"/.test(fcEngineSrc));
 assert('Forecast Engine page wires Cash Shortfall Risk', /traceId="mc:cash-shortfall-risk"/.test(fcEngineSrc));
@@ -805,6 +809,16 @@ assert('wealth-strategy wires Cash Buffer signal tile', /traceId="wealth-strateg
 assert('wealth-strategy wires Savings Rate signal tile', /traceId="wealth-strategy:savings-rate"[\s\S]{0,250}derived\.savingsRate/.test(wealthStratSrc));
 assert('wealth-strategy wires Debt/Assets signal tile', /traceId="wealth-strategy:debt-to-assets"[\s\S]{0,250}derived\.debtToAsset/.test(wealthStratSrc));
 assert('wealth-strategy wires Freedom Progress signal tile', /traceId="wealth-strategy:freedom-progress"[\s\S]{0,250}derived\.fireProgressPct/.test(wealthStratSrc));
+// Hub-level live registration (NOT only in AICoach sub-component). The hub
+// useEffect must build traces from `derived.*` and pass them to registerTrace
+// so the live values overwrite the boot-time placeholders the moment the
+// /wealth-strategy hub page mounts.
+assert('wealth-strategy hub registers live traces from derived',
+  /buildWealthStrategyTraces\(\{[\s\S]{0,400}cash: derived\.liquidity,[\s\S]{0,400}totalAssets: derived\.totalAssets,[\s\S]{0,400}fireTarget: derived\.requiredFIRE,[\s\S]{0,80}\}\)\.forEach\(registerTrace\)/.test(wealthStratSrc));
+// Two distinct registration sites (hub + AICoach inner) so coverage is
+// guaranteed regardless of which tab is active.
+const wealthRegMatches = wealthStratSrc.match(/buildWealthStrategyTraces\(\{/g) ?? [];
+assert('wealth-strategy buildWealthStrategyTraces called at hub AND AICoach', wealthRegMatches.length >= 2);
 
 section('Native-page discoverability — Monte Carlo / AI Forecast Engine');
 assert('ai-forecast-engine imports registerTrace', /import \{ registerTrace \} from "@\/lib\/auditMode\/auditRegistry"/.test(fcEngineSrc));
@@ -812,6 +826,80 @@ assert('ai-forecast-engine registers live mc traces in useEffect', /registerTrac
 assert('ai-forecast-engine registers live fire-probability id', /registerTrace\(\{[\s\S]{0,1200}id: 'mc:fire-probability'/.test(fcEngineSrc));
 assert('ai-forecast-engine registers live confidence-bands id', /id: 'mc:confidence-bands'/.test(fcEngineSrc));
 assert('ai-forecast-engine registers live median-fire-year id', /id: 'mc:median-fire-year'/.test(fcEngineSrc));
+// Per-goal trace ids — each visible $X tile must open its own live trace,
+// not the aggregate. The browser QA flagged that a single shared id is
+// ambiguous in the trace panel.
+assert('ai-forecast-engine $3M card uses mc:reach-3m', /traceId="mc:reach-3m"/.test(fcEngineSrc));
+assert('ai-forecast-engine $5M card uses mc:reach-5m', /traceId="mc:reach-5m"/.test(fcEngineSrc));
+assert('ai-forecast-engine $10M card uses mc:reach-10m', /traceId="mc:reach-10m"/.test(fcEngineSrc));
+assert('ai-forecast-engine registers per-goal reach-3m trace', /registerTrace\(reachTrace\('mc:reach-3m'/.test(fcEngineSrc));
+assert('ai-forecast-engine registers per-goal reach-5m trace', /registerTrace\(reachTrace\('mc:reach-5m'/.test(fcEngineSrc));
+assert('ai-forecast-engine registers per-goal reach-10m trace', /registerTrace\(reachTrace\('mc:reach-10m'/.test(fcEngineSrc));
+
+section('Native-page discoverability — Decision Engine universal affordance row');
+const decisionSrc2 = read('client/src/pages/decision.tsx');
+for (const id of [
+  'decision:winner:component-scores',
+  'decision:winner:weightings',
+  'decision:winner:penalties',
+  'decision:winner:why-this-ranks',
+  'decision:winner:why-not-ranked-higher',
+  'decision:ranking-logic',
+  'decision:trade-off-analysis',
+  'decision:winner:recommendation-logic',
+]) {
+  assert(`decision.tsx universal affordance row wires ${id}`,
+    new RegExp(`<AuditableMetric traceId="${id.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}"`).test(decisionSrc2));
+}
+
+section('Trace factories — FIRE Progress numeric live (no redirect text)');
+// Case 1: extras provided → numeric, formula uses actual values.
+const fhWithExtras = buildLiveFinancialHealthTracesFromRiskRadar({
+  overall_score: 67, overall_level: 'amber', overall_label: 'Moderate', fragility_index: 12,
+  categories: [
+    { id: 'debt',       label: 'Debt Risk',       icon: '🏦', score: 72, level: 'green', factors: [{ id: 'debt_ratio', label: 'Debt/Assets', value: '38%', benchmark: '<40%', score: 80, weight: 1, level: 'green', finding: 'OK', action: 'ok' }], summary: '' },
+    { id: 'cashflow',   label: 'Cashflow Risk',   icon: '💸', score: 60, level: 'amber', factors: [{ id: 'cash_buffer', label: 'Cash Buffer', value: '4.2 months', benchmark: '≥3', score: 78, weight: 1, level: 'green', finding: '', action: '' }, { id: 'surplus_ratio', label: 'Surplus Ratio', value: '22%', benchmark: '≥20%', score: 70, weight: 1, level: 'green', finding: '', action: '' }], summary: '' },
+    { id: 'investment', label: 'Investment Risk', icon: '📈', score: 55, level: 'amber', factors: [], summary: '' },
+    { id: 'income',     label: 'Income Risk',     icon: '💼', score: 65, level: 'amber', factors: [], summary: '' },
+  ],
+  top_risks: [], alerts: [], radar_data: [], data_coverage: 'full' as any,
+} as any, { investable: 600_000, annualExpenses: 264_000, swr: 0.04 });
+const fhFireLive = fhWithExtras.find(x => x.id === 'financial-health:fire-progress')!;
+assert('FIRE Progress finalValue is "N / 100" numeric',
+  /^\d+\s*\/\s*100$/.test(String(fhFireLive.finalValue)));
+assert('FIRE Progress finalValue is NOT "see FIRE Path"', !/see FIRE Path/i.test(String(fhFireLive.finalValue)));
+assert('FIRE Progress expanded shows annual_expenses arithmetic',
+  /annual_expenses\s*=\s*\$264,000/.test(fhFireLive.expanded));
+assert('FIRE Progress expanded shows SWR',
+  /SWR\s*=\s*4\.0%/.test(fhFireLive.expanded));
+assert('FIRE Progress expanded shows FIRE_target_capital arithmetic',
+  /FIRE_target_capital = annual_expenses \/ SWR = \$6,600,000/.test(fhFireLive.expanded));
+assert('FIRE Progress source attributes "live page derivation"',
+  /live page derivation/.test(fhFireLive.dataSource));
+// Case 2: no extras + no fire_progress_pct → still a numeric 0 / 100, never redirect text.
+const fhNoExtras = buildLiveFinancialHealthTracesFromRiskRadar({
+  overall_score: 67, overall_level: 'amber', overall_label: 'Moderate', fragility_index: 12,
+  categories: [
+    { id: 'debt', label: 'Debt Risk', icon: '🏦', score: 72, level: 'green', factors: [], summary: '' },
+    { id: 'cashflow', label: 'Cashflow Risk', icon: '💸', score: 60, level: 'amber', factors: [], summary: '' },
+    { id: 'investment', label: 'Investment Risk', icon: '📈', score: 55, level: 'amber', factors: [], summary: '' },
+    { id: 'income', label: 'Income Risk', icon: '💼', score: 65, level: 'amber', factors: [], summary: '' },
+  ],
+  top_risks: [], alerts: [], radar_data: [], data_coverage: 'full' as any,
+} as any);
+const fhFireNoExtras = fhNoExtras.find(x => x.id === 'financial-health:fire-progress')!;
+assert('FIRE Progress fallback finalValue is "0 / 100" (numeric, never redirect)',
+  String(fhFireNoExtras.finalValue) === '0 / 100');
+assert('FIRE Progress fallback expanded never contains "see FIRE Path"',
+  !/see FIRE Path/i.test(fhFireNoExtras.expanded));
+
+// risk-radar.tsx wires the live extras (investable, annualExpenses, swr).
+const riskRadarSrc2 = read('client/src/pages/risk-radar.tsx');
+assert('risk-radar passes investable to buildLiveFinancialHealthTracesFromRiskRadar',
+  /buildLiveFinancialHealthTracesFromRiskRadar\(resultWithFireProgress as any, \{[\s\S]{0,200}investable,/.test(riskRadarSrc2));
+assert('risk-radar passes annualExpenses to live FH builder',
+  /annualExpenses,/.test(riskRadarSrc2));
+assert('risk-radar passes SWR to live FH builder', /swr:\s*0\.04/.test(riskRadarSrc2));
 
 section('Trace factories — Decision Engine extended');
 const candidateTraces = buildAllDecisionCandidateTraces({
