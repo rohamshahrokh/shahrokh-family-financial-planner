@@ -28,6 +28,24 @@ import {
   buildNetWorthTrace, buildMonthlySurplusTrace, buildFireNumberTrace,
   buildPropertyEquityTrace, buildCgtGrossGainTrace, buildProjectionRowTraces,
 } from '../client/src/lib/auditMode/traceFactories';
+import {
+  buildAllMonteCarloTraces,
+  MONTE_CARLO_TRACE_IDS,
+  buildAllDecisionWinnerTraces,
+  DECISION_WINNER_TRACE_IDS,
+  buildAllBestMoveTraces,
+  BESTMOVE_TRACE_IDS,
+  buildAllFireTraces,
+  FIRE_TRACE_IDS,
+  buildAllForecastHeadlineTraces,
+  FORECAST_TRACE_IDS,
+  buildAllFinancialHealthTraces,
+  FINANCIAL_HEALTH_TRACE_IDS,
+  buildLegacyRiskCategoryTraces,
+  buildLegacyRiskOverallTrace,
+  LEGACY_RISK_RADAR_TRACE_IDS,
+} from '../client/src/lib/auditMode/engineTraces';
+import { COVERAGE_MANIFEST, REQUIRED_TRACE_IDS, ENGINE_LABELS } from '../client/src/lib/auditMode/coverageManifest';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -210,6 +228,361 @@ for (const f of ['client/src/lib/canonicalNetWorth.ts','client/src/lib/canonical
                  'client/src/lib/australianTax.ts']) {
   assert(`${f} does not import auditMode`, !/auditMode/.test(read(f)));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8 — Engine trace factories (Monte Carlo, Decision, FIRE, Forecast, FH)
+// ─────────────────────────────────────────────────────────────────────────────
+section('Engine trace factories — Monte Carlo');
+
+const fakeMcResult: any = {
+  probFireByTarget: 72.3,
+  medianFireYear: 2042,
+  p10FireYear: 2050,
+  p90FireYear: 2038,
+  neverFirePct: 8.2,
+  fanData: [],
+  fireYearHistogram: [],
+  fireProbByAge: [{ age: 50, probability: 25 }, { age: 60, probability: 80 }],
+  nwP10AtTarget: 2_300_000,
+  nwP50AtTarget: 3_800_000,
+  nwP90AtTarget: 5_400_000,
+  offsetVsEtf: null,
+  propAcquisitionProb: 0,
+  probCashShortfall: 11.4,
+  probNegCashflow: 13.7,
+  highestRiskYear: 2029,
+  biggestRiskDriver: 'mortgage rate jump',
+  keyRisks: [],
+  recommendedActions: [],
+  ranAt: '2026-05-22T08:00:00.000Z',
+  simulationCount: 5000,
+  runtimeMs: 1234,
+};
+const fakeMcSettings: any = {
+  currentAge: 36, targetFireAge: 55, targetPassiveMonthly: 20_000, swrPct: 4,
+  simulationCount: 5000, meanStockReturn: 8.5, meanPropertyReturn: 5.5,
+  meanCryptoReturn: 15, meanSuperReturn: 8, meanInflation: 3, meanIncomeGrowth: 3,
+  meanExpenseGrowth: 3, meanMortgageRate: 6.5,
+  volStocks: 18, volProperty: 6, volCrypto: 80, volSuper: 12, volInflation: 1.5,
+  rhoStocksCrypto: 0.3, rhoInflationRates: 0.6, rhoRatesProperty: -0.3, rhoStocksProperty: 0.2,
+};
+const mcTraces = buildAllMonteCarloTraces(fakeMcResult, fakeMcSettings);
+assert('MC traces produced for every required id',
+  MONTE_CARLO_TRACE_IDS.every(id => mcTraces.some(t => t.id === id)),
+  `expected ${MONTE_CARLO_TRACE_IDS.length}, got ${mcTraces.length}`);
+const mcFireProb = mcTraces.find(t => t.id === 'mc:fire-probability')!;
+assert('MC FIRE probability finalValue is %', /72\.3%/.test(String(mcFireProb.finalValue)));
+const mcP50 = mcTraces.find(t => t.id === 'mc:p50-nw-at-target')!;
+assert('MC P50 NW finalValue contains $', /\$/.test(String(mcP50.finalValue)));
+assert('MC confidence band uses P90 − P10', /P90 NW − P10 NW/i.test(mcTraces.find(t => t.id === 'mc:confidence-bands')!.formula));
+assert('MC neg-cashflow risk pins biggestRiskDriver', /mortgage rate jump/.test(String(mcTraces.find(t => t.id === 'mc:neg-cashflow-risk')!.expanded)));
+assert('MC traces include calculatedAt timestamp', mcTraces.every(t => !!t.calculatedAt));
+assert('MC traces have sourceEngine = fireMonteCarlo', mcTraces.every(t => /fireMonteCarlo/i.test(t.sourceEngine)));
+
+section('Engine trace factories — Decision Engine winner');
+const decisionTraces = buildAllDecisionWinnerTraces({
+  winnerId: 'cand_001', winnerLabel: 'Property + ETF mix',
+  totalScore: 78.4, baseScore: 84.2,
+  weights: { survivalProbability: 0.30, liquidityFactor: 0.20, riskAdjustedReturn: 0.25, terminalNetWorth: 0.25 },
+  breakdown: [
+    { axis: 'survivalProbability', rawValue: 0.85, normalisedValue: 0.85, weight: 0.30, contribution: 25.5 },
+    { axis: 'liquidityFactor',     rawValue: 0.72, normalisedValue: 0.72, weight: 0.20, contribution: 14.4 },
+    { axis: 'riskAdjustedReturn',  rawValue: 0.07, normalisedValue: 0.70, weight: 0.25, contribution: 17.5 },
+    { axis: 'terminalNetWorth',    rawValue: 3_500_000, normalisedValue: 0.70, weight: 0.25, contribution: 17.5 },
+  ],
+  penalties: [
+    { id: 'refinancePressure', magnitude: 5.8, reason: 'elevated band', band: 'elevated' },
+  ],
+  rationale: ['Strong survival', 'Healthy liquidity', 'Top RAR'],
+  headline: 'Property + ETF balances safety and growth.',
+  whyWon: ['Beats runner-up on RAR by 2pp', 'Lower refinance pressure'],
+  whatCouldInvalidate: ['Rates jump >75bps', 'Income falls >10%'],
+  runnerUpReason: 'ETF-only ranked #2 for tighter liquidity but lower RAR.',
+  investorProfile: 'balanced',
+  generatedAt: '2026-05-22T08:00:00.000Z',
+});
+assert('Decision winner traces produced for every id',
+  DECISION_WINNER_TRACE_IDS.every(id => decisionTraces.some(t => t.id === id)));
+assert('Decision total score = 78', /78/.test(String(decisionTraces.find(t => t.id === 'decision:winner:total-score')!.finalValue)));
+assert('Decision component scores expanded uses axis × weight × 100', /×/.test(decisionTraces.find(t => t.id === 'decision:winner:component-scores')!.expanded));
+assert('Decision penalties trace lists refinancePressure', /refinancePressure/.test(decisionTraces.find(t => t.id === 'decision:winner:penalties')!.expanded));
+assert('Decision why-this-ranks contains "Beats runner-up"', /Beats runner-up/.test(decisionTraces.find(t => t.id === 'decision:winner:why-this-ranks')!.expanded));
+assert('Decision why-not-ranked-higher lists rate jump', /Rates jump/.test(decisionTraces.find(t => t.id === 'decision:winner:why-not-ranked-higher')!.expanded));
+assert('Decision recommendation logic includes profile', /balanced/.test(decisionTraces.find(t => t.id === 'decision:winner:recommendation-logic')!.expanded));
+
+section('Engine trace factories — Best Move (Recommendation engine)');
+const bestMoveTraces = buildAllBestMoveTraces({
+  id: 'rec_001', title: 'Build 3-month emergency buffer',
+  actionType: 'build_emergency_buffer', pillar: 'protect_liquidity',
+  priorityRank: 1, confidenceScore: 0.86, urgency: 'this_quarter', riskLevel: 'Low',
+  expectedFinancialImpact: { annualDollar: 0, expectedReturnPct: 5.5, afterTaxReturnPct: 4.2, label: 'safety buffer' },
+  liquidityImpact: { deltaDeployableCash: 10_000, deltaRunwayMonths: 1 },
+  fireImpact: { yearsDelta: -0.2, probabilityDelta: 0.04 },
+  netWorthImpact: { horizonYears: 10, delta: 5000 },
+  riskReductionImpact: { points: 8, categoriesAffected: ['liquidity'] },
+  opportunityCost: { description: 'cash held vs ETF', annualDollar: 800 },
+  implementationSteps: [{ step: 'Open HISA' }],
+  whatCouldChangeRecommendation: ['Income drop >15%', 'New large debt taken on'],
+  alternativeOptions: [{ title: 'Skip', whyAlternative: 'high MC stress', tradeoff: 'fragility' }],
+  reviewTrigger: { condition: 'buffer hits 3mo', reviewByISO: '2026-08-22T00:00:00.000Z', watchSignals: ['cash_offset'] },
+  sourceSignalsUsed: ['snapshot', 'ledger_income_expense', 'cash_offset'],
+  surfaces: ['best_move', 'risk', 'action_centre'],
+  reasoning: 'Liquidity scoring shows <2 months runway; safety pillar overrides growth.',
+  benefitLabel: '+ 1 month runway',
+} as any);
+assert('Best Move traces produced for every id',
+  BESTMOVE_TRACE_IDS.every(id => bestMoveTraces.some(t => t.id === id)));
+const bmTotal = bestMoveTraces.find(t => t.id === 'decision:bestmove:total-score')!;
+assert('Best Move total score formula uses priorityRank', /priorityRank/.test(bmTotal.formula));
+assert('Best Move why-this-ranks pins reasoning', /Liquidity scoring/.test(bestMoveTraces.find(t => t.id === 'decision:bestmove:why-this-ranks')!.expanded));
+
+section('Engine trace factories — FIRE Engine');
+const fireResult: any = {
+  scenarios: [{ id: 'etf', label: 'ETF', fire_year: 2042 }, { id: 'property', label: 'Property', fire_year: 2045 }],
+  best_scenario: 'etf', best_label: 'ETF', best_fire_year: 2042, fastest_vs_slowest_years: 3,
+  target_capital: 6_000_000, target_passive_income: 20_000, current_progress_pct: 48,
+  investable_now: 1_200_000, super_now: 300_000, total_nw_now: 2_500_000, fire_gap: 4_500_000,
+  recommendation: '', semi_fire_year: 2038, data_coverage: 'full', missing_fields: [],
+  sensitivity: {},
+};
+const fireSettings: any = {
+  safe_withdrawal_rate: 4.0, desired_monthly_passive: 20_000,
+  property_cagr: 5.0, etf_return_pct: 8.5, general_inflation_pct: 2.8, include_super_in_fire: true,
+};
+const fireTraces = buildAllFireTraces(fireResult, fireSettings);
+assert('FIRE traces produced for every required id',
+  FIRE_TRACE_IDS.every(id => fireTraces.some(t => t.id === id)));
+assert('FIRE date finalValue = 2042', /2042/.test(String(fireTraces.find(t => t.id === 'fire:date')!.finalValue)));
+assert('FIRE capital target uses Trinity formula', /Annual passive[^]*SWR|Passive[^]*SWR/i.test(fireTraces.find(t => t.id === 'fire:capital-target')!.formula));
+assert('FIRE swr-used = 4.0%', /4\.0%/.test(String(fireTraces.find(t => t.id === 'fire:swr-used')!.finalValue)));
+assert('FIRE passive-gap pins gap dollar', String(fireTraces.find(t => t.id === 'fire:passive-gap')!.finalValue).includes('M'));
+assert('FIRE time-saved-lost = ±3yr', /±?3\s?yr/.test(String(fireTraces.find(t => t.id === 'fire:time-saved-lost')!.finalValue)));
+
+section('Engine trace factories — Forecast headlines');
+const forecastFinalRow: any = {
+  year: 2036, accessibleNetWorth: 4_200_000, totalNetWorth: 5_500_000, cagrPct: 8.2,
+  growth: 320_000, cash: 300_000, liabilities: 800_000, propertyEquity: 3_500_000,
+  stocks: 800_000, crypto: 200_000, superTotal: 1_300_000,
+};
+const forecastLayers: any = {
+  grossNetWorth: 2_500_000, accessibleNetWorth: 1_800_000,
+  liquidatableWealth: 1_700_000, fireCapital: 1_500_000,
+  drivers: {
+    raw: { assets: {}, liabilities: {} },
+    lockedEquity: 0, sellingCost: 70_000, cgtOnIp: 100_000, reformDrag: 50_000,
+  },
+};
+const forecastTraces = buildAllForecastHeadlineTraces({
+  startNetWorth: 2_500_000,
+  finalRow: forecastFinalRow,
+  layers: forecastLayers,
+  annualCashflow: 60_000,
+  scenarioId: 'current_law',
+});
+assert('Forecast headline traces produced for every required id',
+  FORECAST_TRACE_IDS.every(id => forecastTraces.some(t => t.id === id)));
+assert('Forecast NW final value contains $', /\$/.test(String(forecastTraces.find(t => t.id === 'forecast:net-worth')!.finalValue)));
+assert('Forecast CAGR formula uses Final / Starting', /Final NW \/ Starting NW/.test(forecastTraces.find(t => t.id === 'forecast:cagr')!.formula));
+assert('Forecast cashflow uses surplus × 12', /Monthly Surplus × 12/i.test(forecastTraces.find(t => t.id === 'forecast:cashflow')!.formula));
+assert('Forecast property equity = 2036 row value', String(forecastTraces.find(t => t.id === 'forecast:property-equity')!.finalValue).includes('M'));
+
+section('Engine trace factories — Financial Health (8-axis + Risk Radar legacy)');
+const surface: any = {
+  radar: {
+    current: [
+      { axis: 'Liquidity', score: 72, detail: '3.2 mo cover' },
+      { axis: 'Leverage', score: 60, detail: '52% LVR' },
+      { axis: 'Cashflow', score: 85, detail: '30% surplus' },
+      { axis: 'Concentration', score: 75, detail: 'spread' },
+      { axis: 'Property Exposure', score: 60, detail: '65% NW' },
+      { axis: 'Interest Rate', score: 70, detail: '6.5% rate' },
+      { axis: 'Tax Reform', score: 90, detail: 'current law' },
+      { axis: 'FIRE Delay', score: 65, detail: 'on track' },
+    ],
+    safeZone: [75, 75, 75, 75, 75, 75, 75, 75],
+    warningZone: [50, 50, 50, 50, 50, 50, 50, 50],
+  },
+  fragility: { level: 'stable', score: 75, summary: '', drivers: { leveragePct: 52, liquidityMonths: 3.2, appreciationReliancePct: 35, postTaxLiquidationValue: 1_500_000 } },
+};
+const fhTraces = buildAllFinancialHealthTraces(surface, { score: 72, label: 'Stable' }, 'current_law');
+assert('FH traces produced for every required id',
+  FINANCIAL_HEALTH_TRACE_IDS.every(id => fhTraces.some(t => t.id === id)));
+assert('FH Liquidity finalValue = 72/100', /72\s*\/\s*100/.test(String(fhTraces.find(t => t.id === 'financial-health:liquidity')!.finalValue)));
+assert('FH Overall expanded uses mean of axes', /mean\(/i.test(fhTraces.find(t => t.id === 'financial-health:overall')!.expanded));
+
+const legacyResult: any = {
+  overall_score: 68, overall_level: 'amber', overall_label: 'Moderate Risk',
+  categories: [
+    { id: 'debt', label: 'Debt Risk', icon: '🏦', score: 60, level: 'amber', factors: [{ id: 'debt_ratio', label: 'Debt-to-Assets', value: '55%', benchmark: '<40%', score: 55, level: 'amber', finding: '...', action: '...', weight: 35 }], summary: 'Moderate' },
+    { id: 'cashflow', label: 'Cashflow Risk', icon: '💸', score: 80, level: 'green', factors: [], summary: 'Healthy' },
+    { id: 'investment', label: 'Investment Risk', icon: '📈', score: 70, level: 'green', factors: [], summary: 'Spread' },
+    { id: 'income', label: 'Income Risk', icon: '💼', score: 60, level: 'amber', factors: [], summary: 'Single' },
+  ],
+  top_risks: [], top_mitigations: [], alerts: [], radar_data: [], fragility_index: 32, data_coverage: 'full',
+};
+const legacyOverall = buildLegacyRiskOverallTrace(legacyResult);
+const legacyCats = buildLegacyRiskCategoryTraces(legacyResult);
+assert('Legacy overall finalValue contains 68/100', /68\s*\/\s*100/.test(String(legacyOverall.finalValue)));
+assert('Legacy category traces = 4', legacyCats.length === 4);
+assert('Legacy cat ids match required', LEGACY_RISK_RADAR_TRACE_IDS.slice(1).every(id => legacyCats.some(t => t.id === id)));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9 — Coverage manifest
+// ─────────────────────────────────────────────────────────────────────────────
+section('Audit Coverage manifest');
+assert('Manifest is non-empty', COVERAGE_MANIFEST.length > 0);
+assert('Required ids array is non-empty', REQUIRED_TRACE_IDS.length > 0);
+const requiredIdSet = new Set(REQUIRED_TRACE_IDS);
+assert('Manifest covers all Monte Carlo ids', MONTE_CARLO_TRACE_IDS.every(id => requiredIdSet.has(id)));
+assert('Manifest covers all Decision Winner ids', DECISION_WINNER_TRACE_IDS.every(id => requiredIdSet.has(id)));
+assert('Manifest covers all Best Move ids', BESTMOVE_TRACE_IDS.every(id => requiredIdSet.has(id)));
+assert('Manifest covers all FIRE ids', FIRE_TRACE_IDS.every(id => requiredIdSet.has(id)));
+assert('Manifest covers all Forecast ids', FORECAST_TRACE_IDS.every(id => requiredIdSet.has(id)));
+assert('Manifest covers all Financial Health ids', FINANCIAL_HEALTH_TRACE_IDS.every(id => requiredIdSet.has(id)));
+assert('Manifest covers legacy risk-radar ids', LEGACY_RISK_RADAR_TRACE_IDS.every(id => requiredIdSet.has(id)));
+const allEngines = new Set(COVERAGE_MANIFEST.map(e => e.engine));
+for (const k of allEngines) assert(`Engine label exists for ${k}`, !!ENGINE_LABELS[k]);
+assert('No duplicate ids in manifest',
+  new Set(COVERAGE_MANIFEST.map(e => e.id)).size === COVERAGE_MANIFEST.length);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10 — Coverage guard: every required id must be registerable
+// ─────────────────────────────────────────────────────────────────────────────
+section('Coverage guard — every required trace can be registered + resolved');
+__resetTraceRegistry();
+// Register every engine-trace bundle at once so the coverage check has no
+// false negatives caused by host components not being mounted in the test.
+mcTraces.forEach(registerTrace);
+decisionTraces.forEach(registerTrace);
+bestMoveTraces.forEach(registerTrace);
+fireTraces.forEach(registerTrace);
+forecastTraces.forEach(registerTrace);
+fhTraces.forEach(registerTrace);
+registerTrace(legacyOverall);
+legacyCats.forEach(registerTrace);
+// Also register the pre-existing dashboard / wealth-layer / risk-fragility ids
+// from PR #43 so the full manifest resolves green.
+const nw2 = buildNetWorthTrace({
+  netWorth: 1_000_000,
+  components: {
+    cashTotal: 250_000, superTotal: 200_000, ppor: 800_000, ips: 700_000,
+    stocks: 100_000, crypto: 50_000, cars: 30_000, iranProperty: 20_000,
+    otherAssets: 10_000, mortgage: 600_000, ipsLoans: 500_000, otherDebts: 60_000,
+  },
+  lastCalculatedAt: '2026-01-01T00:00:00.000Z',
+});
+registerTrace(nw2);
+const surplus2 = buildMonthlySurplusTrace({
+  monthlyIncome: 18_000, monthlyExpenses: 11_000, monthlyDebtService: 4_000,
+  passiveIncome: 1_200, surplus: 5_000,
+});
+registerTrace(surplus2);
+// Stub out dashboard:risk-state, dashboard:fire-timeline, wealth-layers, risk-fragility.
+const stub = (id: string, label: string): CalculationTrace => ({
+  id, label, finalValue: '—', plainEnglish: 'stub', formula: 'stub', expanded: 'stub',
+  inputs: [], assumptions: [], dataSource: 'test-stub', sourceEngine: 'test-stub',
+  included: [], excluded: [], calculatedAt: '2026-01-01T00:00:00.000Z',
+});
+for (const id of [
+  'dashboard:risk-state', 'dashboard:fire-timeline',
+  'dashboard:wealth-layers:gross', 'dashboard:wealth-layers:accessible',
+  'dashboard:wealth-layers:liquidatable', 'dashboard:wealth-layers:fire',
+  'risk:fire-fragility',
+]) {
+  registerTrace(stub(id, id));
+}
+
+const missing = REQUIRED_TRACE_IDS.filter(id => !hasTrace(id));
+assert(`All required trace ids are registerable (missing: ${missing.join(', ') || 'none'})`, missing.length === 0);
+for (const id of REQUIRED_TRACE_IDS) {
+  const t = resolveTrace(id);
+  assert(`Trace ${id} resolves with a non-null record`, t !== null);
+  if (t) {
+    assert(`Trace ${id} has formula`, typeof t.formula === 'string' && t.formula.length > 0);
+    assert(`Trace ${id} has expanded`, typeof t.expanded === 'string' && t.expanded.length > 0);
+    assert(`Trace ${id} has calculatedAt`, typeof t.calculatedAt === 'string' && t.calculatedAt.length > 0);
+    assert(`Trace ${id} has sourceEngine`, typeof t.sourceEngine === 'string' && t.sourceEngine.length > 0);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 11 — Coverage host-component wiring (static grep)
+// ─────────────────────────────────────────────────────────────────────────────
+section('Coverage host-component wiring (static grep)');
+const mcSrc = read('client/src/components/MonteCarloDashboard.tsx');
+assert('MonteCarloDashboard imports AuditableMetric', /AuditableMetric/.test(mcSrc));
+assert('MonteCarloDashboard imports buildAllMonteCarloTraces', /buildAllMonteCarloTraces/.test(mcSrc));
+assert('MonteCarloDashboard registers MC traces', /buildAllMonteCarloTraces\(/.test(mcSrc));
+for (const id of ['mc:fire-probability', 'mc:p10-nw-at-target', 'mc:p50-nw-at-target', 'mc:p90-nw-at-target', 'mc:confidence-bands', 'mc:neg-cashflow-risk', 'mc:reach-goal-probabilities']) {
+  assert(`MonteCarloDashboard wraps ${id}`, mcSrc.includes(`traceId="${id}"`) || mcSrc.includes(`traceId=\`${id}\``));
+}
+
+const decSrc = read('client/src/pages/decision.tsx');
+assert('decision.tsx imports buildAllDecisionWinnerTraces', /buildAllDecisionWinnerTraces/.test(decSrc));
+for (const id of ['decision:winner:total-score', 'decision:winner:recommendation-logic', 'decision:winner:weightings', 'decision:winner:why-this-ranks', 'decision:winner:why-not-ranked-higher', 'decision:winner:component-scores', 'decision:winner:penalties']) {
+  assert(`decision.tsx wraps ${id}`, decSrc.includes(`traceId="${id}"`));
+}
+
+const bmSrc = read('client/src/components/BestMoveCard.tsx');
+assert('BestMoveCard imports buildAllBestMoveTraces', /buildAllBestMoveTraces/.test(bmSrc));
+for (const id of ['decision:bestmove:recommendation-logic', 'decision:bestmove:total-score', 'decision:bestmove:why-this-ranks', 'decision:bestmove:weightings', 'decision:bestmove:component-scores', 'decision:bestmove:penalties', 'decision:bestmove:why-not-ranked-higher']) {
+  assert(`BestMoveCard wraps ${id}`, bmSrc.includes(`traceId="${id}"`));
+}
+
+const fpSrc = read('client/src/pages/fire-path.tsx');
+assert('fire-path.tsx imports buildAllFireTraces', /buildAllFireTraces/.test(fpSrc));
+// fire-path uses both literal traceId="…" (best year, swr) and dynamic
+// traceId={traceId} bound from a per-KPI object literal — both render to the
+// same set of ids at runtime, so we accept either form in the static grep.
+for (const id of ['fire:date', 'fire:capital-target', 'fire:swr-used', 'fire:passive-gap', 'fire:time-saved-lost']) {
+  const wrapped =
+    fpSrc.includes(`traceId="${id}"`) ||
+    fpSrc.includes(`traceId='${id}'`) ||
+    fpSrc.includes(`traceId: '${id}'`);
+  assert(`fire-path.tsx wraps ${id}`, wrapped);
+}
+
+const rrSrc = read('client/src/pages/risk-radar.tsx');
+assert('risk-radar.tsx imports legacy trace builders', /buildLegacyRiskOverallTrace/.test(rrSrc));
+assert('risk-radar.tsx wraps overall score', /traceId="risk-radar:overall"/.test(rrSrc));
+assert('risk-radar.tsx wraps each category', /traceId=\{`risk-radar:category:\$\{c\.id\}`\}/.test(rrSrc));
+
+const dashSrc2 = read('client/src/components/ExecutiveDashboard.tsx');
+assert('ExecutiveDashboard registers FH traces', /buildAllFinancialHealthTraces/.test(dashSrc2));
+assert('ExecutiveDashboard registers Forecast headline traces', /buildAllForecastHeadlineTraces/.test(dashSrc2));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 12 — Engines untouched (extended)
+// ─────────────────────────────────────────────────────────────────────────────
+section('Engines untouched (Monte Carlo / FIRE / risk / decision / recommendation)');
+for (const f of [
+  'client/src/lib/fireMonteCarlo.ts',
+  'client/src/lib/firePathEngine.ts',
+  'client/src/lib/firePathEngineRegimeAware.ts',
+  'client/src/lib/riskEngine.ts',
+  'client/src/lib/forecastEngine.ts',
+  'client/src/lib/scenarioV2/decisionEngine/candidateGenerator.ts',
+  'client/src/lib/scenarioV2/registry/scoring.ts',
+  'client/src/lib/recommendationEngine/engine.ts',
+]) {
+  assert(`${f} does not import auditMode`, !/auditMode/.test(read(f)));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 13 — Coverage Report panel + dev route mounted
+// ─────────────────────────────────────────────────────────────────────────────
+section('Coverage Report panel + dev route');
+const reportSrc = read('client/src/components/auditMode/AuditCoverageReport.tsx');
+assert('AuditCoverageReport exports component', /export\s+(function|const)\s+AuditCoverageReport|export\s+default\s+AuditCoverageReport/.test(reportSrc));
+assert('AuditCoverageReport reads COVERAGE_MANIFEST', /COVERAGE_MANIFEST/.test(reportSrc));
+assert('AuditCoverageReport subscribes to registry', /subscribeRegistry/.test(reportSrc));
+assert('AuditCoverageReport has Total / Connected / Unconnected stats', /Total auditable metrics/.test(reportSrc) && /Connected/.test(reportSrc) && /Unconnected/.test(reportSrc));
+
+const auditPageSrc = read('client/src/pages/audit-coverage.tsx');
+assert('audit-coverage page mounts AuditCoverageReport', /<AuditCoverageReport/.test(auditPageSrc));
+
+const appSrc2 = read('client/src/App.tsx');
+assert('App.tsx mounts /audit-coverage route', /path="\/audit-coverage"/.test(appSrc2));
 
 console.log(`\n${failures === 0 ? 'OK' : 'FAIL'} Audit Mode tests: ${failures} failure${failures === 1 ? '' : 's'}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -21,11 +21,17 @@ import {
   Shield, AlertTriangle, CheckCircle2, AlertCircle,
   ChevronDown, ChevronUp, Info, TrendingDown, Zap,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip, Legend,
 } from 'recharts';
+import { AuditableMetric } from '@/components/auditMode/AuditableMetric';
+import { registerTrace } from '@/lib/auditMode/auditRegistry';
+import {
+  buildLegacyRiskCategoryTraces,
+  buildLegacyRiskOverallTrace,
+} from '@/lib/auditMode/engineTraces';
 
 // ─── Level config ─────────────────────────────────────────────────────────────
 
@@ -161,6 +167,16 @@ export default function RiskRadarPage() {
   const result = computeRiskRadar(input);
   const { overall_score, overall_level, overall_label, categories, top_risks, alerts, radar_data, fragility_index, data_coverage } = result;
 
+  // ── Audit Mode: register legacy /risk-radar traces whenever the engine
+  //    re-runs. No math is duplicated — we pin the canonical RiskRadarResult
+  //    onto trace records.
+  useEffect(() => {
+    registerTrace(buildLegacyRiskOverallTrace(result));
+    buildLegacyRiskCategoryTraces(result).forEach(registerTrace);
+    // Re-run when overall score / category scores change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overall_score, categories.map(c => c.score).join('|')]);
+
   const levelCfg = LEVEL_CFG[overall_level];
   const LevelIcon = levelCfg.Icon;
   const criticalAlerts = alerts.filter(a => a.severity === 'critical' || a.severity === 'high');
@@ -192,12 +208,16 @@ export default function RiskRadarPage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className={`rounded-xl p-3 border ${levelCfg.bg} ${levelCfg.border}`}>
           <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Overall Safety Score</div>
-          <div className={`text-3xl font-black ${levelCfg.text}`}>{overall_score}</div>
+          <AuditableMetric traceId="risk-radar:overall">
+            <div className={`text-3xl font-black ${levelCfg.text}`}>{overall_score}</div>
+          </AuditableMetric>
           <div className="text-[9px] text-muted-foreground mt-0.5">/ 100</div>
         </div>
         <div className="bg-card border border-border rounded-xl p-3">
           <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Risk Level</div>
-          <div className={`text-base font-black ${levelCfg.text}`}>{overall_label}</div>
+          <AuditableMetric traceId="risk-radar:overall">
+            <div className={`text-base font-black ${levelCfg.text}`}>{overall_label}</div>
+          </AuditableMetric>
           <div className="text-[9px] text-muted-foreground mt-0.5">Fragility index: {fragility_index}</div>
         </div>
         <div className="bg-card border border-border rounded-xl p-3">
@@ -240,7 +260,9 @@ export default function RiskRadarPage() {
             const ccfg = LEVEL_CFG[c.level];
             return (
               <div key={c.id} className={`rounded-xl p-2 border text-center ${ccfg.bg} ${ccfg.border}`}>
-                <div className={`text-lg font-black ${ccfg.text}`}>{c.score}</div>
+                <AuditableMetric traceId={`risk-radar:category:${c.id}`}>
+                  <div className={`text-lg font-black ${ccfg.text}`}>{c.score}</div>
+                </AuditableMetric>
                 <div className="text-[9px] text-muted-foreground leading-tight">{c.label.replace(' Risk', '')}</div>
                 <div className={`text-[9px] font-semibold ${ccfg.text}`}>{ccfg.label}</div>
               </div>

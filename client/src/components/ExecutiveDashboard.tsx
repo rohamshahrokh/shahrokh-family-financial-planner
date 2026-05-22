@@ -70,6 +70,10 @@ import {
   buildRiskAxisTraces,
   buildFireFragilityTrace,
 } from '@/lib/auditMode/traceFactories';
+import {
+  buildAllFinancialHealthTraces,
+  buildAllForecastHeadlineTraces,
+} from '@/lib/auditMode/engineTraces';
 
 // ─── Public props ────────────────────────────────────────────────────────────
 
@@ -2102,6 +2106,30 @@ export default function ExecutiveDashboard(props: ExecutiveDashboardProps) {
         resolved.wealthLayers ?? null,
       );
       traces.forEach(registerTrace);
+    }
+
+    // Financial Health (8-axis canonical) — Liquidity / Leverage / Cashflow /
+    // FIRE Progress / Overall headlines. Mirrors the per-axis traces emitted
+    // by buildRiskAxisTraces but pins them under canonical financial-health:*
+    // ids so the Audit Coverage report sees them by their user-facing names.
+    buildAllFinancialHealthTraces(
+      resolved.riskSurface ?? null,
+      { score: resolved.riskScore, label: resolved.riskLabel },
+      scenarioId,
+    ).forEach(registerTrace);
+
+    // Forecast Engine headline traces — single-value cards for Net Worth /
+    // Accessible NW / FIRE Capital / Liquidatable / Property Equity / Cashflow /
+    // CAGR using the canonical projection row + wealth layers.
+    if (resolved.projectionRows && resolved.projectionRows.length > 0) {
+      const finalRow = resolved.projectionRows[resolved.projectionRows.length - 1];
+      buildAllForecastHeadlineTraces({
+        startNetWorth: resolved.netWorth,
+        finalRow,
+        layers: resolved.wealthLayers ?? null,
+        annualCashflow: resolved.surplus * 12,
+        scenarioId,
+      }).forEach(registerTrace);
     }
   }, [
     resolved.netWorth,

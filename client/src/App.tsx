@@ -54,6 +54,7 @@ import WhatIfScenariosPage     from "./pages/what-if-scenarios";
 import DecisionPage            from "./pages/decision";
 import RiskRadarPage           from "./pages/risk-radar";
 import TaxAlphaPage            from "./pages/tax-alpha";
+import AuditCoveragePage       from "./pages/audit-coverage";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -248,6 +249,10 @@ function AppRouter() {
         </Route>
         <Route path="/tax-strategy">
           <ProtectedRoute component={TaxAlphaPage} title="Tax Strategy" />
+        </Route>
+        {/* Audit Coverage — developer transparency surface for Audit Mode */}
+        <Route path="/audit-coverage">
+          <ProtectedRoute component={AuditCoveragePage} title="Audit Coverage" />
         </Route>
         {/* 404 */}
         <Route component={NotFound} />
