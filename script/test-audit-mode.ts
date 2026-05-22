@@ -724,6 +724,89 @@ assert('client/src/lib/riskEngine.ts still does not import auditMode', !/auditMo
 assert('client/src/lib/finance.ts does not import auditMode', !/auditMode/.test(read('client/src/lib/finance.ts')));
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 15a — Funding source / equity release / emergency buffer / NG live traces
+//        (#FWL_Critical_StatePersistence_FundingSource_TaxRegime_Fix)
+// ─────────────────────────────────────────────────────────────────────────────
+section('Funding source live traces overwrite placeholders + property.tsx wraps the 5 ids');
+__resetTraceRegistry();
+ensureCoverageRegistered();
+// Placeholders register first.
+for (const id of FUNDING_SOURCE_TRACE_IDS) {
+  const placeholder = resolveTrace(id);
+  assert(`Placeholder for ${id} exists at boot`, placeholder !== null);
+  if (placeholder) {
+    assert(`Placeholder ${id} finalValue = "ready"`, placeholder.finalValue === 'ready');
+    assert(`Placeholder ${id} formula non-empty`, placeholder.formula.length > 0);
+  }
+}
+// Live traces — registered when /property mounts.
+const liveFundingTraces = buildAllFundingTraces({
+  plans: [{
+    propertyId: 1, propertyName: 'IP1 — Demo',
+    plan: {
+      source: 'equity-release', deposit: 150_000,
+      cashUsed: 0, offsetUsed: 0, equityReleased: 150_000,
+      stocksSold: 0, cryptoSold: 0, debtIncreaseFromEquityRelease: 150_000,
+    },
+  }],
+  openingCash: 220_000,
+  netCashflowOverHorizon: 0,
+  closingCashAfterFunding: 220_000,
+  monthlyExpenses: 14_540,
+  existingLoanBalance: 1_200_000,
+  activeRegimeKind: 'PROPOSED_2027_REFORM',
+  activeRegimeLabel: 'Proposed 2027 reform',
+  negativeGearing: [{
+    propertyName: 'IP1 — Demo',
+    currentLawRefund: 11_433,
+    reformRefund: 0,
+    lossQuarantined: 23_573,
+    carriedForwardLoss: 23_573,
+    refundAppliedToCashflow: 0,
+    appliedRefundScenario: 'proposed_reform',
+  }],
+});
+liveFundingTraces.forEach(registerTrace);
+for (const id of FUNDING_SOURCE_TRACE_IDS) {
+  const live = resolveTrace(id);
+  assert(`Live trace ${id} resolves`, live !== null);
+  if (live) {
+    // Final value must NOT be the placeholder string.
+    assert(`Live ${id} finalValue ≠ "ready"`, live.finalValue !== 'ready');
+    assert(`Live ${id} finalValue is non-empty`,
+      typeof live.finalValue === 'string' && (live.finalValue as string).length > 0);
+    assert(`Live ${id} formula is populated`, live.formula.length > 0);
+    assert(`Live ${id} expanded uses actual values (not "live values populate")`,
+      !/live values populate when/.test(live.expanded));
+    assert(`Live ${id} sourceEngine populated`, live.sourceEngine.length > 0);
+    assert(`Live ${id} has calculatedAt timestamp`, live.calculatedAt.length > 0);
+  }
+}
+// Specific values: equity-release trace must echo $150,000 in the expanded form,
+// and the NG trace must show applied refund = $0 under reform.
+const eqTrace = resolveTrace('property:funding-source:equity-release')!;
+assert('Equity-release trace expanded mentions $150,000',
+  /\$150,000/.test(eqTrace.expanded), eqTrace.expanded);
+const ngTrace = resolveTrace('property:funding-source:negative-gearing')!;
+assert('NG trace expanded mentions "Applied: $0"',
+  /Applied: \$0/.test(ngTrace.expanded), ngTrace.expanded);
+assert('NG trace finalValue mentions $0',
+  String(ngTrace.finalValue).includes('$0'), String(ngTrace.finalValue));
+
+// Static grep: property.tsx wraps each funding-source trace id in AuditableMetric.
+const fundingPropertySrc = read('client/src/pages/property.tsx');
+assert('property.tsx imports useAuditMode', /useAuditMode/.test(fundingPropertySrc));
+assert('property.tsx imports buildAllFundingTraces', /buildAllFundingTraces/.test(fundingPropertySrc));
+assert('property.tsx registers funding traces (forEach registerTrace)',
+  /fundingTraces\.forEach\(registerTrace\)/.test(fundingPropertySrc));
+for (const id of FUNDING_SOURCE_TRACE_IDS) {
+  assert(`property.tsx wraps ${id} in AuditableMetric`,
+    fundingPropertySrc.includes(`traceId="${id}"`));
+}
+assert('property.tsx renders audit-only strip per IP (data-testid="funding-audit-strip-...")',
+  /funding-audit-strip-/.test(fundingPropertySrc));
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 16 — Audit Coverage navigation: hidden when OFF, visible only when ON
 // ─────────────────────────────────────────────────────────────────────────────
 section('Audit Coverage nav — gated behind Audit Mode ON');

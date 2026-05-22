@@ -298,6 +298,83 @@ assert('Cash remaining after funding > $50k', cashRemaining > 50_000,
 assert('Months of buffer ≥ 3 (still healthy bucket)', months >= 3,
   `months = ${months.toFixed(1)}`);
 
+// ─── 7. Audit traces — live records carry real values, not placeholders ─────
+
+section('7. Audit traces: live records carry real values, not "ready" placeholders');
+const { buildAllFundingTraces } = await import(
+  '../client/src/lib/auditMode/engineTraces/fundingSourceTraces'
+);
+const liveTraces = buildAllFundingTraces({
+  plans: [
+    {
+      propertyId: 1, propertyName: 'IP1',
+      plan: (ip1Effective as any)[FUNDING_PLAN_FIELD],
+    },
+    {
+      propertyId: 2, propertyName: 'IP2',
+      plan: (ip2Effective as any)[FUNDING_PLAN_FIELD],
+    },
+  ],
+  openingCash: SNAPSHOT.cash + (SNAPSHOT.offset_balance ?? 0),
+  netCashflowOverHorizon: 0,
+  closingCashAfterFunding: cashRemaining,
+  monthlyExpenses: SNAPSHOT.monthly_expenses,
+  existingLoanBalance: IP1.loan_amount + IP2.loan_amount,
+  activeRegimeKind: 'PROPOSED_2027_REFORM',
+  activeRegimeLabel: 'Proposed 2027 reform',
+  negativeGearing: [{
+    propertyName: 'IP2',
+    currentLawRefund: ip2NgCurrent.annualTaxBenefit,
+    reformRefund: ip2Ng.annualTaxBenefit,
+    lossQuarantined: ip2Ng.lossAccumulatedThisYear,
+    carriedForwardLoss: ip2Ng.lossBankBalance,
+    refundAppliedToCashflow: ip2Ng.annualTaxBenefit,
+    appliedRefundScenario: 'proposed_reform',
+  }],
+});
+const traceById: Record<string, any> = {};
+for (const t of liveTraces) traceById[t.id] = t;
+
+const expectedIds = [
+  'property:funding-source:used',
+  'property:funding-source:cash-impact',
+  'property:funding-source:equity-release',
+  'property:funding-source:emergency-buffer',
+  'property:funding-source:negative-gearing',
+];
+for (const id of expectedIds) {
+  const t = traceById[id];
+  assert(`Trace ${id} exists`, !!t);
+  if (t) {
+    assert(`${id}: finalValue is not the "ready" placeholder`,
+      t.finalValue !== 'ready',
+      `got "${t.finalValue}"`);
+    assert(`${id}: formula populated`, typeof t.formula === 'string' && t.formula.length > 0);
+    assert(`${id}: expanded uses real numbers (no "live values populate" wording)`,
+      !/live values populate when/.test(t.expanded), t.expanded);
+    assert(`${id}: sourceEngine populated`, typeof t.sourceEngine === 'string' && t.sourceEngine.length > 0);
+    assert(`${id}: calculatedAt timestamp populated`, typeof t.calculatedAt === 'string' && t.calculatedAt.length > 0);
+    assert(`${id}: includes metric id in trace record`, t.id === id);
+  }
+}
+// Specific live values reflect the regression scenario.
+assert(
+  'equity-release trace: expanded mentions the actual IP2 deposit $164,000',
+  /\$164,000/.test(traceById['property:funding-source:equity-release'].expanded),
+  traceById['property:funding-source:equity-release'].expanded,
+);
+assert(
+  'negative-gearing trace: finalValue shows applied refund = $0 under reform',
+  String(traceById['property:funding-source:negative-gearing'].finalValue).includes('$0'),
+  String(traceById['property:funding-source:negative-gearing'].finalValue),
+);
+assert(
+  'funding-source-used trace: expanded mentions equity dollars',
+  traceById['property:funding-source:used'].expanded.includes('$164,000') ||
+  traceById['property:funding-source:used'].expanded.includes('164,000'),
+  traceById['property:funding-source:used'].expanded,
+);
+
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 if (failures > 0) {

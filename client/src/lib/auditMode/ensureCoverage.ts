@@ -116,6 +116,12 @@ const PLACEHOLDER_FORMULAS: Record<string, string> = {
   'property:portfolio:equity': 'Equity = Portfolio Value − Total Loans',
   'property:portfolio:lvr': 'LVR = Total Loans ÷ Portfolio Value × 100',
   'property:portfolio:cashflow': 'Monthly CF = Σ ((rent × (1 − vacancy)) − interest − principal − running_costs) ÷ 12',
+  // Property Engine — funding source / equity release / emergency buffer / negative gearing
+  'property:funding-source:used':              'Cash Used + Equity Released + Asset Sales = Total Deposit Required',
+  'property:funding-source:cash-impact':       'Closing Cash = Opening Cash − Cash Used + Net Cashflow',
+  'property:funding-source:equity-release':    'New Loan Balance = Existing Loan Balance + Equity Released',
+  'property:funding-source:emergency-buffer':  'Months of Buffer = Cash Remaining ÷ Monthly Expenses',
+  'property:funding-source:negative-gearing':  'Applied Refund = (active regime = reform & post-cutoff established IP) ? $0 : current-law refund',
   // Monte Carlo Expected Returns (canonical assumptions)
   'assumptions:mc:expected-return:property': 'Property mean annual growth — feeds MCInput.yearlyAssumptions[*].property_growth',
   'assumptions:mc:expected-return:stocks':   'Stocks mean annual return — feeds MCInput.yearlyAssumptions[*].stocks_return',

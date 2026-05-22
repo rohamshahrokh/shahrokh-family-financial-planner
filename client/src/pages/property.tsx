@@ -35,6 +35,7 @@ import * as XLSX from "xlsx";
 import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
 import { registerTrace } from "@/lib/auditMode/auditRegistry";
 import { buildAllPropertyPortfolioTraces } from "@/lib/auditMode/engineTraces";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import {
   usePropertyFundingStore,
   resolveFundingPlan,
@@ -1060,6 +1061,7 @@ export default function PropertyPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const { privacyMode } = useAppStore();
+  const { auditMode } = useAuditMode();
   const fa = useForecastAssumptions();
   // Seed new-property form defaults from global forecast assumptions
   const emptyWithDefaults = {
@@ -1198,12 +1200,12 @@ export default function PropertyPage() {
     traces.forEach(registerTrace);
   }, [portfolioValue, portfolioLoans, portfolioEquity, portfolioLVR, monthlyPortfolioCF, properties.length]);
 
-  // ─── Audit Mode — register funding source / equity release / emergency
-  //   buffer / negative gearing traces. These are emitted at the page
-  //   boundary (engines stay free of audit imports) and reflect the user's
-  //   persisted funding choice + the active tax regime.
-  useEffect(() => {
-    // Build per-property resolved plans from the persistent funding store.
+  // ─── Funding source / regime — derive ONE memoised view of the per-property
+  //   resolved plans + portfolio-level summary used by BOTH the audit trace
+  //   factories AND the inline Audit Mode strip on each IP card. Keeping this
+  //   in one place guarantees the numbers shown in the UI match the trace
+  //   panel values exactly.
+  const fundingAudit = useMemo(() => {
     const stocksTotalValue = (stocks ?? []).reduce(
       (s: number, x: any) => s + safeNum(x.current_holding) * safeNum(x.current_price), 0,
     );
@@ -1233,14 +1235,23 @@ export default function PropertyPage() {
       };
     });
 
-    // Cash impact aggregation — only cash-like draws hit liquid balances.
     const totalCashLike = plans.reduce(
       (s: number, x: any) => s + x.plan.cashUsed + x.plan.offsetUsed, 0,
     );
-    // Use cashEngine end-of-horizon delta as proxy for net cashflow.
+    const totalEquityReleased = plans.reduce(
+      (s: number, x: any) => s + x.plan.equityReleased, 0,
+    );
+    const totalAssetSales = plans.reduce(
+      (s: number, x: any) => s + x.plan.stocksSold + x.plan.cryptoSold, 0,
+    );
+    const totalDeposit = plans.reduce(
+      (s: number, x: any) => s + x.plan.deposit, 0,
+    );
     const closingCashAfterFunding = Math.max(0, openingCash - totalCashLike);
+    const bufferMonths = monthlyExpenses > 0
+      ? closingCashAfterFunding / monthlyExpenses
+      : 0;
 
-    // Negative gearing under active regime (Smart Choice = current_law / per-property auto via classify).
     const ngScenarioRaw = (typeof window !== 'undefined'
       ? window.localStorage.getItem('fwl.activeRegime')
       : null) ?? 'AUTO_DETECT';
@@ -1273,6 +1284,7 @@ export default function PropertyPage() {
         ? reformRefund
         : currentLawRefund;
       return {
+        propertyId: p.id,
         propertyName: p.name || p.address || `IP #${p.id}`,
         currentLawRefund,
         reformRefund,
@@ -1284,32 +1296,56 @@ export default function PropertyPage() {
           : 'current_law' as const,
       };
     });
+    const totalAppliedRefund = ngByProp.reduce((s, n) => s + n.refundAppliedToCashflow, 0);
 
     const regimeLabel = ngScenarioRaw === 'PROPOSED_2027_REFORM' ? 'Proposed 2027 reform'
       : ngScenarioRaw === 'CURRENT_RULES' ? "Today's rules"
       : ngScenarioRaw === 'CUSTOM_STRESS_TEST' ? 'Custom what-if'
       : 'Smart auto-detect';
 
-    const fundingTraces = buildAllFundingTraces({
+    return {
       plans,
+      ngByProp,
       openingCash,
-      netCashflowOverHorizon: 0, // page-level traces show point-in-time impact
-      closingCashAfterFunding,
       monthlyExpenses,
+      annualSalaryIncome,
+      totalCashLike,
+      totalEquityReleased,
+      totalAssetSales,
+      totalDeposit,
+      closingCashAfterFunding,
+      bufferMonths,
+      totalAppliedRefund,
+      newLoanBalanceAfterEquityRelease: portfolioLoans + totalEquityReleased,
+      ngScenarioRaw,
+      regimeLabel,
+    };
+  }, [fundingChoices, snapshot, properties, stocks, cryptos, portfolioLoans]);
+
+  // ─── Audit Mode — register funding source / equity release / emergency
+  //   buffer / negative gearing traces from the live page values.
+  useEffect(() => {
+    const fundingTraces = buildAllFundingTraces({
+      plans: fundingAudit.plans,
+      openingCash: fundingAudit.openingCash,
+      netCashflowOverHorizon: 0, // page-level traces show point-in-time impact
+      closingCashAfterFunding: fundingAudit.closingCashAfterFunding,
+      monthlyExpenses: fundingAudit.monthlyExpenses,
       existingLoanBalance: portfolioLoans,
-      activeRegimeKind: ngScenarioRaw,
-      activeRegimeLabel: regimeLabel,
-      negativeGearing: ngByProp,
+      activeRegimeKind: fundingAudit.ngScenarioRaw,
+      activeRegimeLabel: fundingAudit.regimeLabel,
+      negativeGearing: fundingAudit.ngByProp.map(n => ({
+        propertyName: n.propertyName,
+        currentLawRefund: n.currentLawRefund,
+        reformRefund: n.reformRefund,
+        lossQuarantined: n.lossQuarantined,
+        carriedForwardLoss: n.carriedForwardLoss,
+        refundAppliedToCashflow: n.refundAppliedToCashflow,
+        appliedRefundScenario: n.appliedRefundScenario,
+      })),
     });
     fundingTraces.forEach(registerTrace);
-  }, [
-    fundingChoices,
-    snapshot,
-    properties,
-    stocks,
-    cryptos,
-    portfolioLoans,
-  ]);
+  }, [fundingAudit, portfolioLoans]);
 
   const toggleSelect = (id: number) => {
     setSelected(prev => {
@@ -1719,6 +1755,18 @@ export default function PropertyPage() {
               {(p.type === 'investment' || p.property_type === 'IP') && (() => {
                 const choice = fundingChoices[String(p.id)];
                 const activeKey: FundingSourceKey = (choice?.source ?? 'offset+savings') as FundingSourceKey;
+                // Per-IP resolved plan + negative-gearing line, sourced from
+                // the same memoised value the audit trace factories see.
+                const planRow  = fundingAudit.plans.find(x => x.propertyId === p.id);
+                const ngRow    = fundingAudit.ngByProp.find(n => n.propertyId === p.id);
+                const plan     = planRow?.plan;
+                const cashImpactForIp = plan ? (plan.cashUsed + plan.offsetUsed) : 0;
+                const equityForIp     = plan?.equityReleased ?? 0;
+                const newLoanForIp    = safeNum(p.loan_amount) + equityForIp;
+                const bufferMonthsForIp = fundingAudit.monthlyExpenses > 0
+                  ? Math.max(0, fundingAudit.openingCash - cashImpactForIp) / fundingAudit.monthlyExpenses
+                  : 0;
+                const appliedRefundForIp = ngRow?.refundAppliedToCashflow ?? 0;
                 return (
                 <div className="rounded-b-xl border border-t-0 border-primary/20 bg-card/60 px-4 py-3" data-testid={`funding-source-row-${p.id}`}>
                   <div className="flex flex-wrap items-center gap-3">
@@ -1747,10 +1795,78 @@ export default function PropertyPage() {
                     ))}
                     <span className="text-[10px] text-muted-foreground ml-auto">
                       Selected: <span className="text-primary font-medium" data-testid={`funding-source-selected-${p.id}`}>
-                        {FUNDING_SOURCE_LABEL[activeKey]}
+                        <AuditableMetric traceId="property:funding-source:used" testId={`audit-fs-used-${p.id}`}>
+                          {FUNDING_SOURCE_LABEL[activeKey]}
+                        </AuditableMetric>
                       </span>
                     </span>
                   </div>
+
+                  {/* Audit Mode strip — native click affordances for the five
+                      required funding-source traces, scoped to this IP.
+                      Hidden when audit mode is OFF so the layout doesn't shift. */}
+                  {auditMode && (
+                    <div
+                      className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2 border-t border-border/40"
+                      data-testid={`funding-audit-strip-${p.id}`}
+                    >
+                      <div className="text-[10px]">
+                        <p className="text-muted-foreground uppercase tracking-wider">Cash Impact</p>
+                        <p className="num-display font-medium mt-0.5">
+                          <AuditableMetric
+                            traceId="property:funding-source:cash-impact"
+                            testId={`audit-fs-cash-${p.id}`}
+                          >
+                            {formatCurrency(cashImpactForIp, true)}
+                          </AuditableMetric>
+                        </p>
+                      </div>
+                      <div className="text-[10px]">
+                        <p className="text-muted-foreground uppercase tracking-wider">Equity Release</p>
+                        <p className="num-display font-medium mt-0.5">
+                          <AuditableMetric
+                            traceId="property:funding-source:equity-release"
+                            testId={`audit-fs-equity-${p.id}`}
+                          >
+                            {formatCurrency(equityForIp, true)}
+                          </AuditableMetric>
+                        </p>
+                      </div>
+                      <div className="text-[10px]">
+                        <p className="text-muted-foreground uppercase tracking-wider">New Loan</p>
+                        <p className="num-display font-medium mt-0.5">
+                          <AuditableMetric
+                            traceId="property:funding-source:equity-release"
+                            testId={`audit-fs-newloan-${p.id}`}
+                          >
+                            {formatCurrency(newLoanForIp, true)}
+                          </AuditableMetric>
+                        </p>
+                      </div>
+                      <div className="text-[10px]">
+                        <p className="text-muted-foreground uppercase tracking-wider">Buffer (mo)</p>
+                        <p className="num-display font-medium mt-0.5">
+                          <AuditableMetric
+                            traceId="property:funding-source:emergency-buffer"
+                            testId={`audit-fs-buffer-${p.id}`}
+                          >
+                            {bufferMonthsForIp.toFixed(1)}
+                          </AuditableMetric>
+                        </p>
+                      </div>
+                      <div className="text-[10px]">
+                        <p className="text-muted-foreground uppercase tracking-wider">NG Refund</p>
+                        <p className="num-display font-medium mt-0.5">
+                          <AuditableMetric
+                            traceId="property:funding-source:negative-gearing"
+                            testId={`audit-fs-ng-${p.id}`}
+                          >
+                            {formatCurrency(appliedRefundForIp, true)}
+                          </AuditableMetric>
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 );
               })()}
