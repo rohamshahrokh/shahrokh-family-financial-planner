@@ -31,8 +31,23 @@ const localStorageShim = {
   key: (i: number) => Object.keys(memoryStore)[i] ?? null,
   get length() { return Object.keys(memoryStore).length; },
 };
-(globalThis as any).window = { localStorage: localStorageShim };
+(globalThis as any).window = {
+  localStorage: localStorageShim,
+  location: { hostname: "localhost", search: "" },
+};
 (globalThis as any).localStorage = localStorageShim;
+// document is touched by some imports (not by our code path); provide a stub
+(globalThis as any).document = (globalThis as any).document ?? { hidden: false };
+
+// Fetch stub — the resolver fires off pushUserDefaultsToServer() in the
+// background after each saveUserDefault(). In these unit tests we don't
+// need that to actually succeed; we just need it to NOT crash. Backend
+// round-trip is exercised separately by test-persistent-user-defaults-backend.ts.
+const _fetchLog: Array<{ url: string; init?: RequestInit }> = [];
+(globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+  _fetchLog.push({ url: String(url), init });
+  return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+};
 
 const {
   useUserDefaultsStore,
@@ -281,8 +296,8 @@ fullReset();
     taxTrace.inputs.some(i => i.label === 'Source') &&
     taxTrace.inputs.some(i => i.label === 'Saved at') &&
     taxTrace.inputs.some(i => i.label === 'Applied to'));
-  assert('Tax-regime trace Source is "User Default"',
-    taxTrace.inputs.find(i => i.label === 'Source')?.value === 'User Default');
+  assert('Tax-regime trace Source starts with "User Default"',
+    String(taxTrace.inputs.find(i => i.label === 'Source')?.value ?? '').startsWith('User Default'));
   assert('Tax-regime trace Applied to lists Tax Alpha Engine',
     String(taxTrace.inputs.find(i => i.label === 'Applied to')?.value).includes('Tax Alpha Engine'));
 
@@ -297,8 +312,8 @@ fullReset();
     String(propTrace.finalValue) === '10');
 
   const fundingTrace = resolveTrace('user-default:fundingSourceByProperty')!;
-  assert('Funding trace Source is User Default',
-    fundingTrace.inputs.find(i => i.label === 'Source')?.value === 'User Default');
+  assert('Funding trace Source starts with "User Default"',
+    String(fundingTrace.inputs.find(i => i.label === 'Source')?.value ?? '').startsWith('User Default'));
   assert('Funding trace finalValue contains equity-release',
     String(fundingTrace.finalValue).includes('equity-release'));
 }

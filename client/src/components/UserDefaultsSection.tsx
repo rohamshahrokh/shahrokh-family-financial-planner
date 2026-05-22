@@ -39,10 +39,12 @@ import {
   resetAllUserDefaults as resetAllDefaults,
   saveUserDefault,
   sourceLabel,
+  fullSourceLabel,
   type ResolvedSetting,
   type ScenarioOverrides,
 } from "@/lib/scenarioSettingsResolver";
 import { registerUserDefaultsTraces } from "@/lib/auditMode/engineTraces";
+import { getServerSyncState, subscribeServerSync } from "@/lib/userDefaultsApi";
 import type { TaxPolicyRegimeKind } from "@/lib/taxPolicyEngine";
 import type { ProjectionMode } from "@/lib/monteCarloV5/projectionModes";
 
@@ -52,18 +54,20 @@ const SOURCE_COLOURS: Record<string, string> = {
   "Scenario Override": "hsl(188,65%,52%)",
 };
 
-function SourceChip({ source }: { source: ResolvedSetting["source"] }) {
-  const label = sourceLabel(source);
+function SourceChip({ resolved }: { resolved: ResolvedSetting }) {
+  const baseLabel = sourceLabel(resolved.source);
+  const fullLabel = fullSourceLabel(resolved);
   return (
     <span
       className="inline-flex items-center text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5"
       style={{
-        background: `${SOURCE_COLOURS[label]}1f`,
-        color: SOURCE_COLOURS[label],
-        border: `1px solid ${SOURCE_COLOURS[label]}44`,
+        background: `${SOURCE_COLOURS[baseLabel]}1f`,
+        color: SOURCE_COLOURS[baseLabel],
+        border: `1px solid ${SOURCE_COLOURS[baseLabel]}44`,
       }}
+      title={fullLabel}
     >
-      {label}
+      {fullLabel}
     </span>
   );
 }
@@ -95,7 +99,7 @@ function DefaultRow({ title, description, resolved, onSave, onClear, children }:
         <div>
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium">{title}</p>
-            <SourceChip source={resolved.source} />
+            <SourceChip resolved={resolved} />
           </div>
           {description && (
             <p className="text-[11px] text-muted-foreground mt-0.5">{description}</p>
@@ -130,6 +134,12 @@ export function UserDefaultsSection({ scenarioOverrides }: UserDefaultsSectionPr
   // Force a re-render whenever the underlying defaults store changes.
   const _storeVersion = useUserDefaultsStore(s => s.savedAt);
   void _storeVersion;
+
+  // Re-render whenever server sync state changes (push lands, hydration
+  // completes, error transitions) so the persistence tier chip updates.
+  const [_syncTick, setSyncTick] = useState(0);
+  useEffect(() => subscribeServerSync(() => setSyncTick(t => t + 1)), []);
+  void _syncTick;
 
   // Register audit traces for every resolved setting on mount.
   useEffect(() => {
@@ -366,6 +376,19 @@ export function UserDefaultsSection({ scenarioOverrides }: UserDefaultsSectionPr
         System defaults · Projection: {SYSTEM_DEFAULTS.projectionMode} · Tax: {SYSTEM_DEFAULTS.taxPolicyRegime}
         {" · "}Property growth: {SYSTEM_DEFAULTS.propertyGrowthAssumption}% · Risk: {SYSTEM_DEFAULTS.riskProfile}
       </div>
+      {(() => {
+        const sync = getServerSyncState();
+        if (!sync.hydrated) {
+          return <div className="mt-1 text-[10px] text-muted-foreground">Backend sync: hydrating…</div>;
+        }
+        if (sync.lastWriteOk && sync.lastWriteAt) {
+          return <div className="mt-1 text-[10px] text-muted-foreground">Backend sync: OK · last write {new Date(sync.lastWriteAt).toLocaleString()}</div>;
+        }
+        if (sync.lastError) {
+          return <div className="mt-1 text-[10px]" style={{ color: "hsl(0,70%,60%)" }}>Backend sync: {sync.lastError} — using localStorage fallback.</div>;
+        }
+        return <div className="mt-1 text-[10px] text-muted-foreground">Backend sync: ready · no writes yet this session</div>;
+      })()}
     </div>
   );
 }

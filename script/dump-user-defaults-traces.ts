@@ -19,19 +19,47 @@ const localStorageShim = {
   key: (i: number) => Object.keys(memoryStore)[i] ?? null,
   get length() { return Object.keys(memoryStore).length; },
 };
-(globalThis as any).window = { localStorage: localStorageShim };
+(globalThis as any).window = {
+  localStorage: localStorageShim,
+  location: { hostname: "localhost", search: "" },
+};
 (globalThis as any).localStorage = localStorageShim;
+(globalThis as any).document = { hidden: false };
+
+// Simulated backend that accepts the /api/settings/:key contract.
+const backend: Record<string, string> = {};
+(globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+  const u = String(url);
+  const m = u.match(/\/api\/settings\/(.+)$/);
+  if (!m) return new Response("{}", { status: 200 });
+  const key = decodeURIComponent(m[1]);
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (method === "GET") {
+    return new Response(JSON.stringify({ key, value: backend[key] ?? null }), { status: 200 });
+  }
+  if (method === "PUT") {
+    const body = init?.body ? JSON.parse(init.body as string) : {};
+    backend[key] = String(body.value ?? "");
+    return new Response(JSON.stringify({ success: true }), { status: 200 });
+  }
+  return new Response("{}", { status: 200 });
+};
 
 const { saveUserDefault } = await import('../client/src/lib/scenarioSettingsResolver');
 const { usePropertyFundingStore } = await import('../client/src/lib/propertyFundingStore');
 const { resolveTrace } = await import('../client/src/lib/auditMode/auditRegistry');
 const { registerUserDefaultsTraces } = await import('../client/src/lib/auditMode/engineTraces/userDefaultsTraces');
+const { pushUserDefaultsToServer } = await import('../client/src/lib/userDefaultsApi');
 
 saveUserDefault('taxPolicyRegime', 'PROPOSED_2027_REFORM');
 saveUserDefault('projectionMode', 'optimistic');
 saveUserDefault('propertyGrowthAssumption', 10);
 saveUserDefault('monteCarloEnabled', true);
 usePropertyFundingStore.getState().setChoice('2', { source: 'equity-release' });
+saveUserDefault('fundingSourceByProperty', usePropertyFundingStore.getState().choices as any);
+
+// Flush the debounced server push so the trace renders as "server-backed".
+await pushUserDefaultsToServer({ immediate: true });
 
 registerUserDefaultsTraces();
 

@@ -35,6 +35,7 @@
     "test:plan-feasibility": "tsx script/test-plan-feasibility.ts",
     "test:funding-resolution": "tsx script/test-funding-resolution.ts",
     "test:persistent-user-defaults": "tsx script/test-persistent-user-defaults.ts",
+    "test:persistent-user-defaults-backend": "tsx script/test-persistent-user-defaults-backend.ts",
     "test:decision-engine": "tsx script/test-decision-engine.ts",
     "test:narrative-layer": "tsx script/test-narrative-layer.ts",
     "test:behavioural-priorities": "tsx script/test-behavioural-priorities.ts",

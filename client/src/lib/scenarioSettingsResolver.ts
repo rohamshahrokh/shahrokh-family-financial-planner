@@ -46,11 +46,25 @@ import {
   usePropertyFundingStore,
   type FundingChoice,
 } from "./propertyFundingStore";
+import {
+  isKeyServerBacked,
+  markKeyPending,
+  pushUserDefaultsToServer,
+  getServerSyncState,
+} from "./userDefaultsApi";
 
 // ─── Resolved record ─────────────────────────────────────────────────────────
 
 /** Source of a resolved value. */
 export type SettingSource = "system" | "user" | "scenario";
+
+/**
+ * Persistence tier that produced a "user"-source value. Helps the audit
+ * trace distinguish a value that's confirmed on the durable backend
+ * (Supabase / SQLite settings table) from one that only lives in
+ * localStorage. System and scenario sources don't carry a tier.
+ */
+export type UserPersistenceTier = "server-backed" | "local-pending" | "local-fallback";
 
 export interface ResolvedSetting<K extends UserDefaultsKey = UserDefaultsKey> {
   /** The key being resolved. */
@@ -59,6 +73,13 @@ export interface ResolvedSetting<K extends UserDefaultsKey = UserDefaultsKey> {
   value: UserDefaultsState[K] | (typeof SYSTEM_DEFAULTS)[K extends keyof typeof SYSTEM_DEFAULTS ? K : never];
   /** Which layer produced the value. */
   source: SettingSource;
+  /**
+   * For "user"-source values, the persistence tier:
+   *   • server-backed : last successful PUT contained this key
+   *   • local-pending : edited since the last successful PUT
+   *   • local-fallback: server hydration never succeeded (offline / 5xx)
+   */
+  userTier?: UserPersistenceTier;
   /** ISO timestamp the value was saved, if any. */
   savedAt?: string;
   /** Module/engine the value is being applied to (caller-supplied). */
@@ -85,8 +106,41 @@ const SOURCE_LABELS: Record<SettingSource, string> = {
   scenario: "Scenario Override",
 };
 
+const USER_TIER_LABELS: Record<UserPersistenceTier, string> = {
+  "server-backed":   "server-backed",
+  "local-pending":   "local pending sync",
+  "local-fallback":  "local fallback",
+};
+
 export function sourceLabel(source: SettingSource): string {
   return SOURCE_LABELS[source];
+}
+
+/**
+ * Build the full audit-friendly label, e.g.
+ *   "User Default (server-backed)"
+ *   "User Default (local pending sync)"
+ *   "User Default (local fallback)"
+ *   "System Default"
+ *   "Scenario Override"
+ */
+export function fullSourceLabel(resolved: Pick<ResolvedSetting, "source" | "userTier">): string {
+  if (resolved.source === "user" && resolved.userTier) {
+    return `${SOURCE_LABELS.user} (${USER_TIER_LABELS[resolved.userTier]})`;
+  }
+  return SOURCE_LABELS[resolved.source];
+}
+
+/**
+ * Compute the persistence tier for a user-sourced key. Reads in-memory
+ * sync state populated by `userDefaultsApi.ts`.
+ */
+function getUserTier(key: UserDefaultsKey): UserPersistenceTier {
+  const sync = getServerSyncState();
+  if (sync.pendingKeys.has(key)) return "local-pending";
+  if (isKeyServerBacked(key)) return "server-backed";
+  // Hydration may not have happened yet, or the server is unreachable.
+  return "local-fallback";
 }
 
 // ─── Resolver ────────────────────────────────────────────────────────────────
@@ -130,6 +184,7 @@ export function resolveSetting<K extends UserDefaultsKey>(
         key,
         value: selector as any,
         source: "user",
+        userTier: getUserTier(key),
         savedAt: userSaved,
         appliedTo,
       };
@@ -145,6 +200,7 @@ export function resolveSetting<K extends UserDefaultsKey>(
         key,
         value: choices as any,
         source: "user",
+        userTier: getUserTier(key),
         savedAt: savedTs,
         appliedTo,
       };
@@ -156,6 +212,7 @@ export function resolveSetting<K extends UserDefaultsKey>(
         key,
         value: v as any,
         source: "user",
+        userTier: getUserTier(key),
         savedAt: getUserDefaultSavedAt(key),
         appliedTo,
       };
@@ -258,7 +315,9 @@ export function applyScenarioOverride(
 /**
  * Save a user default and also propagate to legacy single-purpose stores
  * (activeRegimeStore for tax regime; propertyFundingStore for funding) so
- * existing engines that already read those stores continue to work.
+ * existing engines that already read those stores continue to work. The
+ * value is written immediately to localStorage and asynchronously pushed
+ * to the durable server (debounced).
  */
 export function saveUserDefault<K extends UserDefaultsKey>(
   key: K,
@@ -271,15 +330,22 @@ export function saveUserDefault<K extends UserDefaultsKey>(
   if (key === "fundingSourceByProperty" && value && typeof value === "object") {
     usePropertyFundingStore.getState().hydrate(value as any);
   }
+  // Mark pending then push (debounced). Tests that need the synchronous
+  // round-trip call `pushUserDefaultsToServer({ immediate: true })`
+  // directly afterwards.
+  markKeyPending(key);
+  void pushUserDefaultsToServer().catch(() => { /* surfaced via getServerSyncState */ });
 }
 
 /**
  * Reset every user default to system defaults. Also resets the legacy
  * activeRegimeStore selector to AUTO_DETECT and clears per-property funding
- * so the user sees a true clean slate.
+ * so the user sees a true clean slate. The cleared state is also pushed
+ * to the server so the reset propagates across browsers.
  */
 export function resetAllUserDefaults(): void {
   useUserDefaultsStore.getState().resetAllUserDefaults();
   setActiveRegimeRaw({ selector: SYSTEM_DEFAULTS.taxPolicyRegime });
   usePropertyFundingStore.getState().hydrate({});
+  void pushUserDefaultsToServer().catch(() => { /* silent */ });
 }

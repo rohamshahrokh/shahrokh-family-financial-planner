@@ -20,9 +20,11 @@ import { registerTraceFactory } from "../auditRegistry";
 import {
   resolveSetting,
   sourceLabel,
+  fullSourceLabel,
   type ScenarioOverrides,
   type ResolvedSetting,
 } from "../../scenarioSettingsResolver";
+import { getServerSyncState } from "../../userDefaultsApi";
 import type { UserDefaultsKey } from "../../persistentUserDefaults";
 import type {
   CalculationTrace,
@@ -74,6 +76,20 @@ export function buildUserDefaultTrace(
   const label = KEY_LABELS[key] ?? key;
   const applied = APPLIED_MODULES[key] ?? [];
 
+  const sync = getServerSyncState();
+  const fullLabel = fullSourceLabel(resolved);
+  const persistenceSource =
+    resolved.source === "scenario"
+      ? "scenarios.data.userSettingsOverrides JSON column"
+      : resolved.source === "user"
+        ? (resolved.userTier === "server-backed"
+            ? `durable backend (settings k-v table key: fwl.userDefaults.v1)` +
+              (sync.lastWriteAt ? `  · last server write: ${sync.lastWriteAt}` : "")
+            : resolved.userTier === "local-pending"
+              ? `localStorage (fwl.userDefaults.v1) — push to backend pending`
+              : `localStorage (fwl.userDefaults.v1) — backend unreachable, local fallback`)
+        : "SYSTEM_DEFAULTS";
+
   const inputs: TraceInput[] = [
     {
       label: "Current value",
@@ -82,12 +98,8 @@ export function buildUserDefaultTrace(
     },
     {
       label: "Source",
-      value: sourceLabel(resolved.source),
-      source: resolved.source === "scenario"
-        ? "scenarios.data.userSettingsOverrides"
-        : resolved.source === "user"
-          ? "persistentUserDefaults (localStorage fwl.userDefaults.v1)"
-          : "SYSTEM_DEFAULTS",
+      value: fullLabel,
+      source: persistenceSource,
     },
     {
       label: "Saved at",
@@ -103,15 +115,35 @@ export function buildUserDefaultTrace(
     },
   ];
 
+  // Add a server-sync diagnostic row for user-sourced values.
+  if (resolved.source === "user") {
+    inputs.push({
+      label: "Backend sync",
+      value: sync.hydrated
+        ? (sync.lastWriteOk
+            ? `OK — last write ${sync.lastWriteAt ?? "—"}`
+            : (sync.lastError ? `pending / failed: ${sync.lastError}` : "pending"))
+        : "not yet hydrated (boot-time fetch in flight)",
+      source: "userDefaultsApi.getServerSyncState()",
+    });
+  }
+
   return {
     id: `user-default:${key}`,
     label,
     finalValue: formatValue(resolved.value),
     plainEnglish: `${label} is currently set to "${formatValue(resolved.value)}". ` +
-      `This value comes from the ${sourceLabel(resolved.source)} layer of the resolver ` +
+      `This value comes from the ${fullLabel} layer of the resolver ` +
       `(scenario override > user default > system default). It is read by the ` +
       `${applied.length > 0 ? applied.join(" / ") : "downstream"} engine(s) ` +
-      `every time a projection or recommendation is computed.`,
+      `every time a projection or recommendation is computed. ` +
+      (resolved.source === "user"
+        ? (resolved.userTier === "server-backed"
+            ? "It is durably persisted to the backend and will survive reload, redeploy, and a fresh browser."
+            : resolved.userTier === "local-pending"
+              ? "The value is saved locally; a backend write is in flight."
+              : "The backend was not reachable; this value is held in localStorage and will sync on next successful write.")
+        : ""),
     formula: "resolved = scenarioOverride ?? userDefault ?? systemDefault",
     expanded: `resolved = ${resolved.source === "scenario" ? "(scenario override)" : "—"} ?? ` +
       `${resolved.source === "user" ? `(user default: ${formatValue(resolved.value)})` : "—"} ?? ` +
@@ -125,16 +157,24 @@ export function buildUserDefaultTrace(
       },
       {
         label: "Persistence layer",
-        value: resolved.source === "system" ? "—" : (resolved.source === "user"
-          ? "localStorage + Supabase mirror"
-          : "scenarios.data JSON column"),
-        source: "persistentUserDefaults / scenarios table",
+        value: resolved.source === "system"
+          ? "—"
+          : resolved.source === "user"
+            ? (resolved.userTier === "server-backed"
+                ? "Durable backend (settings k-v) + localStorage cache"
+                : resolved.userTier === "local-pending"
+                  ? "localStorage now, backend push in flight"
+                  : "localStorage fallback (backend unreachable)")
+            : "scenarios.data JSON column",
+        source: "persistentUserDefaults + userDefaultsApi / scenarios table",
       },
     ],
     dataSource: resolved.source === "system"
       ? "SYSTEM_DEFAULTS constant in persistentUserDefaults.ts"
       : resolved.source === "user"
-        ? "useUserDefaultsStore (Zustand, persisted to localStorage)"
+        ? (resolved.userTier === "server-backed"
+            ? "Backend settings row (fwl.userDefaults.v1) via /api/settings/:key"
+            : "useUserDefaultsStore (Zustand, persisted to localStorage)")
         : "scenarios.data.userSettingsOverrides JSON",
     sourceEngine: "scenarioSettingsResolver",
     included: applied.map(mod => ({
