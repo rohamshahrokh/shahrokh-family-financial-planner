@@ -24,6 +24,8 @@ import {
   FUNDING_SOURCE_TRACE_IDS,
   CASHFLOW_PLAN_EXECUTION_TRACE_IDS,
   CASHFLOW_PLAN_EXECUTION_YEAR_RANGE,
+  CASHFLOW_RECONCILIATION_TRACE_IDS,
+  CASHFLOW_RECONCILIATION_YEAR_RANGE,
 } from './engineTraces';
 
 export type EngineSourceKey =
@@ -170,6 +172,18 @@ const cashflowYearDescriptions: Record<string, string> = Object.fromEntries(
   ]),
 );
 
+/**
+ * Per-year Cashflow Reconciliation trace descriptions. Itemises every income
+ * and outgoing line that feeds netCashflow and proves no double-counting.
+ * #FWL_Cashflow_Reconciliation_Trace
+ */
+const cashflowReconciliationDescriptions: Record<string, string> = Object.fromEntries(
+  CASHFLOW_RECONCILIATION_YEAR_RANGE.map((y) => [
+    `cashflow:plan-execution:reconciliation:${y}`,
+    `Plan Execution Capacity — Cashflow Reconciliation, ${y} net cashflow breakdown (income lines + outgoings + acquisition decomposition)`,
+  ]),
+);
+
 const fundingSourceDescriptions: Record<string, string> = {
   'property:funding-source:used':              'Property page — Funding Source Used (cash + equity + sales = deposit)',
   'property:funding-source:cash-impact':       'Property page — Closing Cash after funding (excludes equity-release deposits)',
@@ -296,6 +310,15 @@ export const COVERAGE_MANIFEST: CoverageEntry[] = [
     engine: 'cashflow_engine',
     surface: 'ExecutiveDashboard → Plan Execution Capacity (acquisition year audit row + final-year tile)',
     description: cashflowYearDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Cashflow Reconciliation per-year traces ──
+  // #FWL_Cashflow_Reconciliation_Trace
+  ...CASHFLOW_RECONCILIATION_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'cashflow_engine',
+    surface: 'ExecutiveDashboard → Plan Execution Capacity (AUDIT · CASHFLOW RECONCILIATION row)',
+    description: cashflowReconciliationDescriptions[id] ?? id,
     required: true,
   })),
 ];

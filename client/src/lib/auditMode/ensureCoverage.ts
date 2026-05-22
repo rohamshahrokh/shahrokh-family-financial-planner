@@ -139,9 +139,20 @@ function isCashflowPlanExecutionId(id: string): boolean {
 const CASHFLOW_PLAN_EXECUTION_FORMULA =
   'Closing Cash = Opening Cash + Net Cashflow (deposits already net of funding source; equity-release adds debt, not cash)';
 
+// Cashflow Reconciliation placeholders. Same formula for every year — replaced
+// at runtime when the dashboard mounts and produces a live trace with all
+// engine-side income / outgoing line items. #FWL_Cashflow_Reconciliation_Trace
+function isCashflowReconciliationId(id: string): boolean {
+  return id.startsWith('cashflow:plan-execution:reconciliation:');
+}
+const CASHFLOW_RECONCILIATION_FORMULA =
+  'Net Cashflow = (Salary + Rental + Tax Refund) - (Living + PPOR Mortgage + IP Loan + Holding + Contributions + Bills) - Acquisition Cash Used';
+
 function buildPlaceholderTrace(entry: CoverageEntry): CalculationTrace {
   const formula = PLACEHOLDER_FORMULAS[entry.id]
-    ?? (isCashflowPlanExecutionId(entry.id) ? CASHFLOW_PLAN_EXECUTION_FORMULA : entry.description);
+    ?? (isCashflowPlanExecutionId(entry.id) ? CASHFLOW_PLAN_EXECUTION_FORMULA
+        : isCashflowReconciliationId(entry.id) ? CASHFLOW_RECONCILIATION_FORMULA
+        : entry.description);
   return {
     id: entry.id,
     label: entry.description,

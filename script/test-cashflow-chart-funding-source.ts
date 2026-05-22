@@ -436,6 +436,234 @@ assert('Audit-mode chip exposes audit-metric-cashflow-{yr} testid',
   }
 }
 
+// ─── 11. Cashflow Reconciliation trace exposes every line item ──────────────
+
+section('11. Cashflow Reconciliation trace — full per-year breakdown');
+const {
+  buildCashflowReconciliationTrace,
+  cashflowReconciliationTraceId,
+  CASHFLOW_RECONCILIATION_TRACE_IDS,
+  CASHFLOW_RECONCILIATION_YEAR_RANGE,
+} = await import('../client/src/lib/auditMode/engineTraces');
+
+// 11.a — Trace id convention.
+assert('Reconciliation trace id matches canonical convention',
+  cashflowReconciliationTraceId(2028) === 'cashflow:plan-execution:reconciliation:2028');
+assert('Reconciliation year range is 11 entries starting at currentYear',
+  CASHFLOW_RECONCILIATION_TRACE_IDS.length === 11
+    && CASHFLOW_RECONCILIATION_YEAR_RANGE[0] === new Date().getFullYear());
+
+// 11.b — Reconciliation trace uses LIVE engine values for the 2028 acquisition
+// year and itemises every income + outgoing line + acquisition decomposition.
+if (y2027 && y2028) {
+  const investmentContributions =
+    ((y2028 as any).stockDCAOutflow  ?? 0)
+    + ((y2028 as any).cryptoDCAOutflow ?? 0)
+    + ((y2028 as any).plannedStockBuy  ?? 0)
+    + ((y2028 as any).plannedCryptoBuy ?? 0);
+  const reconTrace = buildCashflowReconciliationTrace({
+    year: 2028,
+    openingCash: y2027.endingBalance,
+    closingCash: y2028.endingBalance,
+    netCashflow: y2028.netCashFlow,
+    salaryIncome: (y2028 as any).income ?? 0,
+    rentalIncomeByProperty: (y2028 as any).rentalIncomeByProperty ?? {},
+    rentalIncomeTotal: (y2028 as any).rentalIncome ?? 0,
+    taxRefund: (y2028 as any).ngTaxBenefit ?? 0,
+    livingExpenses: (y2028 as any).totalExpenses ?? 0,
+    pporMortgage: (y2028 as any).mortgageRepayment ?? 0,
+    propertyHoldingCost: (y2028 as any).propertyHoldingCost ?? 0,
+    investmentLoanRepayment: (y2028 as any).investmentLoanRepayment ?? 0,
+    investmentContributions,
+    billsOutflow: (y2028 as any).billsOutflow ?? 0,
+    taxPayableInformational: (y2028 as any).taxPayable ?? 0,
+    acquisitionCashUsed: (y2028 as any).propertyPurchaseCashUsed ?? 0,
+    equityReleased: (y2028 as any).propertyEquityReleased ?? 0,
+    assetSalesUsed: (y2028 as any).propertyAssetSalesUsed ?? 0,
+    acquisitionBuyingCosts: (y2028 as any).propertyBuyingCosts ?? 0,
+    isAcquisitionYear: true,
+    fundingSourceLabel: 'equity-release',
+  });
+
+  // ── Structural assertions ──
+  assert('Reconciliation trace id is canonical',
+    reconTrace.id === 'cashflow:plan-execution:reconciliation:2028');
+  assert('Reconciliation finalValue formats as $ amount',
+    typeof reconTrace.finalValue === 'string' && /\$/.test(reconTrace.finalValue));
+  assert('Reconciliation sourceEngine references finance.ts canonical engine',
+    /finance\.ts/.test(reconTrace.sourceEngine));
+  // Section headers.
+  for (const header of ['─ INCOME ─', '─ OUTGOINGS ─', '─ PROPERTY ACQUISITION ─', '─ CALCULATION ─']) {
+    assert(`Reconciliation has section "${header}"`,
+      reconTrace.inputs.some(i => i.label === header));
+  }
+  // Income line items.
+  for (const lbl of ['Salary income', 'Other income', 'Rental income — all properties', 'Investment income (dividends)', 'Tax refunds (NG)', 'Total Income']) {
+    assert(`Reconciliation INCOME contains "${lbl}"`,
+      reconTrace.inputs.some(i => i.label === lbl));
+  }
+  // Outgoings line items.
+  for (const lbl of ['Living expenses', 'Childcare', 'PPOR mortgage repayment',
+                      'Investment property holding cost', 'Investment loan repayments',
+                      'Investment contributions (DCA + planned buys)', 'Recurring bills',
+                      'Total Outgoings']) {
+    assert(`Reconciliation OUTGOINGS contains "${lbl}"`,
+      reconTrace.inputs.some(i => i.label === lbl));
+  }
+  // Property acquisition decomposition.
+  for (const lbl of ['Acquisition — cash used', 'Acquisition — equity released',
+                      'Acquisition — asset sales', 'Acquisition — buying costs']) {
+    assert(`Reconciliation ACQUISITION contains "${lbl}"`,
+      reconTrace.inputs.some(i => i.label === lbl));
+  }
+  // Closing cash bridge.
+  for (const lbl of ['Opening Cash', '+ Total Income', '- Total Expenses', '= Net Cashflow',
+                      '+ Equity Released (debt — not cash)',
+                      '- Acquisition Cash Used (already in netCashflow)',
+                      '= Closing Cash']) {
+    assert(`Reconciliation CALCULATION contains "${lbl}"`,
+      reconTrace.inputs.some(i => i.label === lbl));
+  }
+
+  // ── Live-value assertions ──
+  const findVal = (label: string) =>
+    String(reconTrace.inputs.find(i => i.label === label)?.value ?? '');
+  assert('Salary income line shows engine value (>$0)',
+    /\$[1-9]/.test(findVal('Salary income')));
+  // Equity Release for the 2028 IP2 settlement = $164k.
+  assert('Acquisition — equity released = IP2 deposit ($164k)',
+    findVal('Acquisition — equity released').includes('164,000'));
+  // Acquisition cash used = $0 under equity release.
+  assert('Acquisition — cash used = $0 (equity release)',
+    /\$0\b/.test(findVal('Acquisition — cash used')));
+  // Closing cash matches engine.
+  const closingCashLine = findVal('= Closing Cash');
+  const expectedClosing = y2028.endingBalance >= 0
+    ? `$${Math.round(y2028.endingBalance).toLocaleString()}`
+    : `-$${Math.abs(Math.round(y2028.endingBalance)).toLocaleString()}`;
+  assert(`Reconciliation closing cash matches engine endingBalance (${expectedClosing})`,
+    closingCashLine === expectedClosing,
+    `got "${closingCashLine}" expected "${expectedClosing}"`);
+
+  // ── Double-counting diagnostics ──
+  assert('Reconciliation has notes (double-counting diagnostics)',
+    Array.isArray(reconTrace.notes) && reconTrace.notes.length > 0);
+  assert('Notes flag that equity-release adds to debt (no double-count)',
+    (reconTrace.notes ?? []).some(n => /equity release/i.test(n) && /debt/i.test(n)));
+  assert('Notes confirm PPOR mortgage not double-counted in forecast months',
+    (reconTrace.notes ?? []).some(n => /PPOR mortgage/i.test(n) && /\$0|deduplicate|double-count/i.test(n)));
+  assert('Notes confirm closing-cash bridge balances',
+    (reconTrace.notes ?? []).some(n => /bridge/i.test(n) && /balanc/i.test(n)));
+
+  // ── Excluded list explicitly excludes equity-release deposits. ──
+  assert('Reconciliation excluded list mentions equity-release deposits',
+    reconTrace.excluded.some(e => /equity[- ]release/i.test(e.label)));
+}
+
+// ─── 12. Coverage manifest includes reconciliation ids ──────────────────────
+
+section('12. Coverage manifest enumerates per-year reconciliation trace ids');
+assert('CASHFLOW_RECONCILIATION_TRACE_IDS exposes 11 ids',
+  CASHFLOW_RECONCILIATION_TRACE_IDS.length === 11);
+
+const reconIds2028 = 'cashflow:plan-execution:reconciliation:2028';
+if (CASHFLOW_RECONCILIATION_TRACE_IDS.includes(reconIds2028)) {
+  const _coverage = await import('../client/src/lib/auditMode/coverageManifest');
+  assert(`Manifest contains ${reconIds2028}`,
+    _coverage.REQUIRED_TRACE_IDS.includes(reconIds2028));
+  const entry = _coverage.COVERAGE_MANIFEST.find(e => e.id === reconIds2028);
+  assert(`${reconIds2028}: engine = cashflow_engine`,
+    entry?.engine === 'cashflow_engine');
+  assert(`${reconIds2028}: surface mentions Plan Execution Capacity`,
+    !!entry?.surface && /Plan Execution Capacity/i.test(entry.surface));
+  assert(`${reconIds2028}: description mentions reconciliation / breakdown`,
+    !!entry?.description && /reconcil|breakdown/i.test(entry.description));
+}
+
+// ─── 13. ensureCoverageRegistered seeds reconciliation placeholders ─────────
+
+section('13. ensureCoverageRegistered seeds reconciliation placeholders');
+const probeReconYear = new Date().getFullYear() + 4;
+const probeReconId = cashflowReconciliationTraceId(probeReconYear);
+auditRegistry.unregisterTrace(probeReconId);
+assert('Reconciliation probe id starts unregistered',
+  !auditRegistry.hasTrace(probeReconId));
+ensureCoverageRegistered();
+assert('Reconciliation probe id registered after ensureCoverageRegistered',
+  auditRegistry.hasTrace(probeReconId));
+const reconPlaceholder = auditRegistry.resolveTrace(probeReconId);
+assert('Reconciliation placeholder resolves',
+  !!reconPlaceholder);
+assert('Reconciliation placeholder formula mentions net cashflow',
+  /Net Cashflow/i.test(reconPlaceholder?.formula ?? ''),
+  reconPlaceholder?.formula);
+
+// ─── 14. Audit Coverage stays 100% with the new reconciliation ids ──────────
+
+section('14. Audit Coverage still reports 100% with reconciliation ids included');
+const { COVERAGE_MANIFEST: _MF2 } = await import('../client/src/lib/auditMode/coverageManifest');
+const connected = _MF2.filter(e => auditRegistry.hasTrace(e.id)).length;
+assert(`Coverage connected = manifest length (got ${connected}/${_MF2.length})`,
+  connected === _MF2.length);
+// Spot-check a reconciliation id is in the manifest.
+assert('Reconciliation 2028 is in coverage manifest',
+  _MF2.some(e => e.id === 'cashflow:plan-execution:reconciliation:2028'));
+
+// ─── 15. Dashboard wires reconciliation alongside the cash-balance trace ────
+
+section('15. Dashboard.tsx registers reconciliation traces');
+const dashPageSrc = await (await import('node:fs')).promises.readFile(
+  'client/src/pages/dashboard.tsx', 'utf8');
+assert('Dashboard imports buildCashflowReconciliationTrace',
+  /buildCashflowReconciliationTrace/.test(dashPageSrc));
+assert('Dashboard calls buildCashflowReconciliationTrace inside useEffect',
+  /registerAuditTrace\(\s*\n?\s*buildCashflowReconciliationTrace\(/.test(dashPageSrc));
+assert('Dashboard passes acquisitionCashUsed / equityReleased to reconciliation trace',
+  /acquisitionCashUsed:\s*cashUsed/.test(dashPageSrc)
+    && /equityReleased:\s*equityRel/.test(dashPageSrc));
+
+// ─── 16. ExecutiveDashboard renders the native reconciliation chip row ──────
+
+section('16. ExecutiveDashboard renders Cashflow Reconciliation chip row');
+const dashSrc2 = await (await import('node:fs')).promises.readFile(
+  'client/src/components/ExecutiveDashboard.tsx', 'utf8');
+assert('Imports cashflowReconciliationTraceId',
+  /cashflowReconciliationTraceId/.test(dashSrc2));
+assert('Renders a dedicated reconciliation audit row',
+  /plan-execution-reconciliation-row/.test(dashSrc2));
+assert('Reconciliation chip uses cashflowReconciliationTraceId(yr)',
+  /cashflowReconciliationTraceId\(yr\)/.test(dashSrc2));
+assert('Reconciliation chip is a real <button> in Audit Mode',
+  /audit-metric-cashflow-reconciliation-\$\{yr\}|audit-metric-cashflow-reconciliation-/.test(dashSrc2));
+assert('Reconciliation chip click calls auditCtx.openTrace(traceId)',
+  /Open Cashflow Reconciliation trace for/.test(dashSrc2)
+    && /onClick=\{[\s\S]{0,100}handleOpen\(\)/.test(dashSrc2));
+assert('Reconciliation chip stops propagation',
+  /onClick=\{\s*\(e\)\s*=>\s*\{[^}]*e\.stopPropagation\(\);[^}]*handleOpen\(\)/.test(dashSrc2));
+assert('Reconciliation chip overrides touch-action / tap-highlight for iOS Safari',
+  /touchAction:\s*'manipulation'[\s\S]*WebkitTapHighlightColor:\s*'transparent'/.test(dashSrc2));
+assert('Reconciliation row supports every year (not just acquisition years)',
+  /Reconciliation supports every year/i.test(dashSrc2));
+
+// ─── 17. Engine surfaces line items needed by the reconciliation trace ──────
+
+section('17. Engine surfaces rentalIncomeByProperty + propertyHoldingCost on annual roll-up');
+if (y2028) {
+  const ribp = (y2028 as any).rentalIncomeByProperty;
+  assert('CashFlowYear exposes rentalIncomeByProperty',
+    ribp && typeof ribp === 'object');
+  // 2028 has IP1 active full year and IP2 from July → both have non-zero rental.
+  if (ribp) {
+    const keys = Object.keys(ribp);
+    assert(`rentalIncomeByProperty includes entries for both IPs (got keys: ${keys.join(',')})`,
+      keys.length >= 2);
+    assert('IP1 rental in 2028 > $0',
+      Object.values(ribp).some((v: any) => Number(v) > 0));
+  }
+  assert('CashFlowYear exposes propertyHoldingCost',
+    typeof (y2028 as any).propertyHoldingCost === 'number');
+}
+
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 if (failures > 0) {

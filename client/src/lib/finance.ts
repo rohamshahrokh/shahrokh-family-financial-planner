@@ -1108,6 +1108,13 @@ export interface CashFlowMonth {
   propertyPurchaseCashUsed?: number;  // cash actually deducted at settlement
   propertyEquityReleased?: number;    // equity drawn from existing IPs/PPOR (loan-funded)
   propertyAssetSalesUsed?: number;    // stocks/crypto sold to fund the deposit
+
+  // ── Cashflow reconciliation line items (per-IP / per-bucket) ──────────────
+  // Surfaced so the Cashflow Reconciliation audit trace can show every income
+  // and outgoing line without re-running the engine.
+  // #FWL_Cashflow_Reconciliation_Trace
+  rentalIncomeByProperty?: Record<string, number>; // keyed by property id → monthly rental income
+  propertyHoldingCost?: number;                    // council rates + insurance + maintenance + water + body corp + land tax (monthly)
 }
 
 export function buildCashFlowSeries(params: {
@@ -1262,6 +1269,9 @@ export function buildCashFlowSeries(params: {
       let rentalIncome = 0;
       let investmentLoanRepayment = 0;
       let propDeductibleExpenses = 0; // running costs for NG calc display
+      // Per-IP rental breakdown for the Cashflow Reconciliation trace.
+      // #FWL_Cashflow_Reconciliation_Trace
+      const rentalIncomeByProperty: Record<string, number> = {};
       const monthDate = new Date(year, month - 1, 1);
 
       // Track one-time cash outflows for this month
@@ -1352,7 +1362,11 @@ export function buildCashFlowSeries(params: {
             * (1 - safeNum(prop.vacancy_rate) / 100)
             * (1 - safeNum(prop.management_fee) / 100)
             * Math.pow(1 + (safeNum(prop.rental_growth) || 3) / 100, yearsSinceRental);
-          rentalIncome += annualRent / 12;
+          const monthlyRent = annualRent / 12;
+          rentalIncome += monthlyRent;
+          // Per-IP rental for reconciliation trace.
+          const propKey = String(prop.id ?? (prop as any).name ?? 'unknown');
+          rentalIncomeByProperty[propKey] = (rentalIncomeByProperty[propKey] ?? 0) + monthlyRent;
 
           // Track deductible expenses per month for this property
           propDeductibleExpenses += (
@@ -1514,6 +1528,12 @@ export function buildCashFlowSeries(params: {
         stockDCAOutflow:     Math.round(stockDCAOutflow),
         cryptoDCAOutflow:    Math.round(cryptoDCAOutflow),
         billsOutflow:        Math.round(billsOutflow),
+        // ── Reconciliation line items ──
+        // #FWL_Cashflow_Reconciliation_Trace
+        rentalIncomeByProperty: Object.fromEntries(
+          Object.entries(rentalIncomeByProperty).map(([k, v]) => [k, Math.round(v)]),
+        ),
+        propertyHoldingCost: Math.round(propDeductibleExpenses),
       });
 
       monthIndex++;
@@ -1825,6 +1845,19 @@ export interface CashFlowYear {
   propertyPurchaseCashUsed?: number;   // cash actually drawn (always equals propertyDeposit + 0)
   propertyEquityReleased?: number;     // equity drawn from existing IPs/PPOR
   propertyAssetSalesUsed?: number;     // stocks/crypto sold to fund deposit
+
+  // ── Cashflow Reconciliation rollup (annual line items) ────────────────────
+  // #FWL_Cashflow_Reconciliation_Trace
+  rentalIncomeByProperty?: Record<string, number>; // annual rental income per IP id
+  propertyHoldingCost?: number;                    // annual property running costs (rates/insurance/maint/etc.)
+  stockDCAOutflow?: number;                        // annual stock DCA contributions
+  cryptoDCAOutflow?: number;                       // annual crypto DCA contributions
+  plannedStockBuy?: number;                        // annual planned stock buys (outflow)
+  plannedCryptoBuy?: number;                       // annual planned crypto buys (outflow)
+  plannedStockSell?: number;                       // annual planned stock sells (inflow)
+  plannedCryptoSell?: number;                      // annual planned crypto sells (inflow)
+  billsOutflow?: number;                           // annual recurring bills outflow
+  taxPayable?: number;                             // annual informational tax payable (display only)
 }
 
 export function aggregateCashFlowToAnnual(monthly: CashFlowMonth[]): CashFlowYear[] {
@@ -1840,6 +1873,12 @@ export function aggregateCashFlowToAnnual(monthly: CashFlowMonth[]): CashFlowYea
         propertyDeposit: 0, propertyBuyingCosts: 0,
         propertyPurchaseCashUsed: 0, propertyEquityReleased: 0,
         propertyAssetSalesUsed: 0,
+        rentalIncomeByProperty: {},
+        propertyHoldingCost: 0,
+        stockDCAOutflow: 0, cryptoDCAOutflow: 0,
+        plannedStockBuy: 0, plannedCryptoBuy: 0,
+        plannedStockSell: 0, plannedCryptoSell: 0,
+        billsOutflow: 0, taxPayable: 0,
       });
     }
     const yr = byYear.get(m.year)!;
@@ -1859,6 +1898,23 @@ export function aggregateCashFlowToAnnual(monthly: CashFlowMonth[]): CashFlowYea
     yr.propertyPurchaseCashUsed = (yr.propertyPurchaseCashUsed ?? 0) + (m.propertyPurchaseCashUsed ?? 0);
     yr.propertyEquityReleased   = (yr.propertyEquityReleased   ?? 0) + (m.propertyEquityReleased   ?? 0);
     yr.propertyAssetSalesUsed   = (yr.propertyAssetSalesUsed   ?? 0) + (m.propertyAssetSalesUsed   ?? 0);
+    // Reconciliation line-item rollups.
+    // #FWL_Cashflow_Reconciliation_Trace
+    if (m.rentalIncomeByProperty) {
+      const acc = yr.rentalIncomeByProperty ?? (yr.rentalIncomeByProperty = {});
+      for (const [k, v] of Object.entries(m.rentalIncomeByProperty)) {
+        acc[k] = (acc[k] ?? 0) + (v ?? 0);
+      }
+    }
+    yr.propertyHoldingCost = (yr.propertyHoldingCost ?? 0) + (m.propertyHoldingCost ?? 0);
+    yr.stockDCAOutflow     = (yr.stockDCAOutflow     ?? 0) + (m.stockDCAOutflow     ?? 0);
+    yr.cryptoDCAOutflow    = (yr.cryptoDCAOutflow    ?? 0) + (m.cryptoDCAOutflow    ?? 0);
+    yr.plannedStockBuy     = (yr.plannedStockBuy     ?? 0) + (m.plannedStockBuy     ?? 0);
+    yr.plannedCryptoBuy    = (yr.plannedCryptoBuy    ?? 0) + (m.plannedCryptoBuy    ?? 0);
+    yr.plannedStockSell    = (yr.plannedStockSell    ?? 0) + (m.plannedStockSell    ?? 0);
+    yr.plannedCryptoSell   = (yr.plannedCryptoSell   ?? 0) + (m.plannedCryptoSell   ?? 0);
+    yr.billsOutflow        = (yr.billsOutflow        ?? 0) + (m.billsOutflow        ?? 0);
+    yr.taxPayable          = (yr.taxPayable          ?? 0) + (m.taxPayable          ?? 0);
   }
   return Array.from(byYear.values()).sort((a, b) => a.year - b.year);
 }

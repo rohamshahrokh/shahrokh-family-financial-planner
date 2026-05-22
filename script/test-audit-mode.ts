@@ -557,6 +557,8 @@ buildAllFundingTraces({
 const {
   buildCashflowYearTrace: __buildCfYr,
   CASHFLOW_PLAN_EXECUTION_YEAR_RANGE: __cfYears,
+  buildCashflowReconciliationTrace: __buildCfRec,
+  CASHFLOW_RECONCILIATION_YEAR_RANGE: __cfReconYears,
 } = await import('../client/src/lib/auditMode/engineTraces');
 for (const yr of __cfYears) {
   registerTrace(__buildCfYr({
@@ -568,6 +570,32 @@ for (const yr of __cfYears) {
     propertyEquityReleased: 0,
     propertyAssetSalesUsed: 0,
     propertyBuyingCosts: 0,
+    isAcquisitionYear: false,
+  }));
+}
+// Cashflow Reconciliation per-year traces — same shape as the dashboard
+// registration loop. #FWL_Cashflow_Reconciliation_Trace
+for (const yr of __cfReconYears) {
+  registerTrace(__buildCfRec({
+    year: yr,
+    openingCash: 220_000,
+    closingCash: 220_000,
+    netCashflow: 50_000,
+    salaryIncome: 264_000,
+    rentalIncomeByProperty: {},
+    rentalIncomeTotal: 0,
+    taxRefund: 0,
+    livingExpenses: 174_480,
+    pporMortgage: 0,
+    propertyHoldingCost: 0,
+    investmentLoanRepayment: 0,
+    investmentContributions: 0,
+    billsOutflow: 0,
+    taxPayableInformational: 0,
+    acquisitionCashUsed: 0,
+    equityReleased: 0,
+    assetSalesUsed: 0,
+    acquisitionBuyingCosts: 0,
     isAcquisitionYear: false,
   }));
 }

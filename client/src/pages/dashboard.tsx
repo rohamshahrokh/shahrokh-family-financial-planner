@@ -12,7 +12,10 @@ import {
 } from "@/lib/finance";
 import { runCashEngine, getCashKPICards, type CashEvent } from "@/lib/cashEngine";
 import { registerTrace as registerAuditTrace } from "@/lib/auditMode/auditRegistry";
-import { buildCashflowYearTrace } from "@/lib/auditMode/engineTraces";
+import {
+  buildCashflowYearTrace,
+  buildCashflowReconciliationTrace,
+} from "@/lib/auditMode/engineTraces";
 import { useActiveRegime } from "@/hooks/useActiveRegime";
 // Map the active regime selector → calcNegativeGearing scenario value.
 // The 4-value selector enum from taxPolicyEngine collapses to the 3-value
@@ -1887,6 +1890,50 @@ export default function DashboardPage() {
           isAcquisitionYear,
         }),
       );
+
+      // ── Cashflow Reconciliation (Net Cashflow Breakdown) trace ──
+      // Itemises every income/outgoing line behind netCashflow so the user can
+      // verify there is no double-counting and see exactly which engine line
+      // produced each number. #FWL_Cashflow_Reconciliation_Trace
+      const investmentContributions =
+        ((a as any).stockDCAOutflow  ?? 0)
+        + ((a as any).cryptoDCAOutflow ?? 0)
+        + ((a as any).plannedStockBuy  ?? 0)
+        + ((a as any).plannedCryptoBuy ?? 0);
+      const fundingSourceLabel =
+        equityRel > 0
+          ? 'equity-release'
+          : assetSales > 0
+            ? 'asset-sale'
+            : cashUsed > 0
+              ? 'cash + offset'
+              : undefined;
+      registerAuditTrace(
+        buildCashflowReconciliationTrace({
+          year: a.year,
+          openingCash,
+          closingCash: a.endingBalance ?? 0,
+          netCashflow: a.netCashFlow ?? 0,
+          salaryIncome: (a as any).income ?? 0,
+          rentalIncomeByProperty: (a as any).rentalIncomeByProperty ?? {},
+          rentalIncomeTotal: (a as any).rentalIncome ?? 0,
+          taxRefund: (a as any).ngTaxBenefit ?? 0,
+          livingExpenses: (a as any).totalExpenses ?? 0,
+          pporMortgage: (a as any).mortgageRepayment ?? 0,
+          propertyHoldingCost: (a as any).propertyHoldingCost ?? 0,
+          investmentLoanRepayment: (a as any).investmentLoanRepayment ?? 0,
+          investmentContributions,
+          billsOutflow: (a as any).billsOutflow ?? 0,
+          taxPayableInformational: (a as any).taxPayable ?? 0,
+          acquisitionCashUsed: cashUsed,
+          equityReleased: equityRel,
+          assetSalesUsed: assetSales,
+          acquisitionBuyingCosts: buyingCosts,
+          isAcquisitionYear,
+          fundingSourceLabel,
+        }),
+      );
+
       openingCash = a.endingBalance ?? openingCash;
     }
   }, [cashFlowAnnual, totalLiquidCash]);
