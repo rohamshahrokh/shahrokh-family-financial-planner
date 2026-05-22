@@ -506,6 +506,11 @@ for (const id of [
   'dashboard:wealth-layers:gross', 'dashboard:wealth-layers:accessible',
   'dashboard:wealth-layers:liquidatable', 'dashboard:wealth-layers:fire',
   'risk:fire-fragility',
+  // MC Expected Returns assumption traces (registered by AI Forecast Engine page)
+  'assumptions:mc:expected-return:property',
+  'assumptions:mc:expected-return:stocks',
+  'assumptions:mc:expected-return:crypto',
+  'assumptions:mc:expected-return:super',
 ]) {
   registerTrace(stub(id, id));
 }

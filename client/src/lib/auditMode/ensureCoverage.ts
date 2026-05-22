@@ -116,6 +116,11 @@ const PLACEHOLDER_FORMULAS: Record<string, string> = {
   'property:portfolio:equity': 'Equity = Portfolio Value − Total Loans',
   'property:portfolio:lvr': 'LVR = Total Loans ÷ Portfolio Value × 100',
   'property:portfolio:cashflow': 'Monthly CF = Σ ((rent × (1 − vacancy)) − interest − principal − running_costs) ÷ 12',
+  // Monte Carlo Expected Returns (canonical assumptions)
+  'assumptions:mc:expected-return:property': 'Property mean annual growth — feeds MCInput.yearlyAssumptions[*].property_growth',
+  'assumptions:mc:expected-return:stocks':   'Stocks mean annual return — feeds MCInput.yearlyAssumptions[*].stocks_return',
+  'assumptions:mc:expected-return:crypto':   'Crypto mean annual return — feeds MCInput.yearlyAssumptions[*].crypto_return',
+  'assumptions:mc:expected-return:super':    'Super mean annual return — feeds MCInput.yearlyAssumptions[*].super_return',
 };
 
 function buildPlaceholderTrace(entry: CoverageEntry): CalculationTrace {

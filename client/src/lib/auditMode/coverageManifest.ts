@@ -33,7 +33,8 @@ export type EngineSourceKey =
   | 'dashboard'
   | 'projection_rows'
   | 'wealth_strategy'
-  | 'property_engine';
+  | 'property_engine'
+  | 'mc_assumptions';
 
 export interface CoverageEntry {
   /** Trace id registered with the audit registry. */
@@ -133,6 +134,15 @@ const wealthStrategyDescriptions: Record<string, string> = {
   'wealth-strategy:freedom-progress': 'Wealth Strategy Hub — Freedom Progress toward FIRE (%)',
   'wealth-strategy:net-position': 'Wealth Strategy Hub — Household Net Position',
 };
+
+const mcAssumptionsDescriptions: Record<string, string> = {
+  'assumptions:mc:expected-return:property': 'Monte Carlo assumption — Property expected (mean) annual growth %',
+  'assumptions:mc:expected-return:stocks':   'Monte Carlo assumption — Stocks expected (mean) annual return %',
+  'assumptions:mc:expected-return:crypto':   'Monte Carlo assumption — Crypto expected (mean) annual return %',
+  'assumptions:mc:expected-return:super':    'Monte Carlo assumption — Super expected (mean) annual return %',
+};
+
+export const MC_EXPECTED_RETURN_TRACE_IDS = Object.keys(mcAssumptionsDescriptions);
 
 const propertyDescriptions: Record<string, string> = {
   'property:portfolio:value': 'Property page — Portfolio Value (sum of settled IPs)',
@@ -237,6 +247,14 @@ export const COVERAGE_MANIFEST: CoverageEntry[] = [
     description: propertyDescriptions[id] ?? id,
     required: true,
   })),
+  // ── Monte Carlo Expected Returns (canonical assumptions) ──
+  ...MC_EXPECTED_RETURN_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'mc_assumptions',
+    surface: 'pages/ai-forecast-engine.tsx (Expected Returns)',
+    description: mcAssumptionsDescriptions[id] ?? id,
+    required: true,
+  })),
 ];
 
 /** Map an engine key to a friendly label. */
@@ -251,6 +269,7 @@ export const ENGINE_LABELS: Record<EngineSourceKey, string> = {
   projection_rows: 'Projection Rows',
   wealth_strategy: 'Wealth Strategy Hub',
   property_engine: 'Property Engine',
+  mc_assumptions: 'Monte Carlo Assumptions',
 };
 
 /** All required trace ids in a stable order. */
