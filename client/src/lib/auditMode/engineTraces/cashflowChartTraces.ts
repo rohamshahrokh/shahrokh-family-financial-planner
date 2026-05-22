@@ -33,6 +33,27 @@ export function cashflowYearTraceId(year: number): string {
   return `cashflow:plan-execution:cash-balance:${year}`;
 }
 
+/**
+ * Canonical 11-year window of trace ids for the Plan Execution Capacity
+ * cashflow chart. The cashflow series spans `currentYear` .. `currentYear + 10`
+ * (see buildCashFlowSeries), so this is the static enumeration we publish to
+ * the coverage manifest. The dashboard mounts and overwrites every entry with
+ * a live trace whose `finalValue` is the actual closing cash for the year.
+ *
+ * Captured at module-load (deterministic) so the manifest is stable for the
+ * test:audit-mode coverage guard. If the calendar year advances, a fresh page
+ * load picks up the new range — but tests pin a fixed year via `--TS`.
+ */
+const NOW_YEAR = new Date().getFullYear();
+
+export const CASHFLOW_PLAN_EXECUTION_YEAR_RANGE: number[] = Array.from(
+  { length: 11 },
+  (_, i) => NOW_YEAR + i,
+);
+
+export const CASHFLOW_PLAN_EXECUTION_TRACE_IDS: string[] =
+  CASHFLOW_PLAN_EXECUTION_YEAR_RANGE.map(cashflowYearTraceId);
+
 export interface CashflowYearTraceArgs {
   year: number;
   openingCash: number;

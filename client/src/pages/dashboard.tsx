@@ -1827,21 +1827,38 @@ export default function DashboardPage() {
     (equityTimeline ?? []).forEach((pt: any) => {
       equityByYear.set(pt.year, (pt.ppor_usable_equity ?? 0) + (pt.ip_usable_equity ?? 0));
     });
+    let openingCash = totalLiquidCash;
     return cashFlowAnnual.slice(0, 10).map((a: any) => {
       const yr = a.year as number;
       const cash = a.endingBalance ?? 0;
       const usableEquity = equityByYear.get(yr) ?? 0;
       const dp = Math.max(0, cash + usableEquity - emergencyBuffer);
-      return {
+      // Funding-source decomposition flows through the canonical engine.
+      // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+      const cashUsed   = (a as any).propertyPurchaseCashUsed ?? 0;
+      const equityRel  = (a as any).propertyEquityReleased   ?? 0;
+      const assetSales = (a as any).propertyAssetSalesUsed   ?? 0;
+      const buyingCosts = (a as any).propertyBuyingCosts ?? 0;
+      const isAcq = (cashUsed + equityRel + assetSales + buyingCosts) > 0;
+      const point = {
         label: String(yr),
         cashBalance: cash,
         netCashflow: a.netCashFlow ?? 0,
         taxRefund: a.ngTaxBenefit ?? 0,
         usableEquity,
         totalDepositPower: dp,
+        year: yr,
+        openingCash,
+        propertyPurchaseCashUsed: cashUsed,
+        propertyEquityReleased:   equityRel,
+        propertyAssetSalesUsed:   assetSales,
+        propertyBuyingCosts:      buyingCosts,
+        isAcquisitionYear: isAcq,
       };
+      openingCash = cash;
+      return point;
     });
-  }, [cashFlowAnnual, equityTimeline, emergencyBuffer]);
+  }, [cashFlowAnnual, equityTimeline, emergencyBuffer, totalLiquidCash]);
 
   // ── Audit Mode: per-year cash-balance traces for the Plan Execution
   // Capacity / Cashflow chart. The trace decomposes the year's closing cash

@@ -289,6 +289,130 @@ assert('Raw vs funded: identical cumulative balance at year end',
   fromRaw[fromRaw.length - 1].cumulativeBalance
     === fromFunded[fromFunded.length - 1].cumulativeBalance);
 
+// ─── 7. Coverage manifest exposes per-year trace ids ────────────────────────
+
+section('7. Coverage manifest enumerates per-year cashflow trace ids');
+const {
+  COVERAGE_MANIFEST,
+  REQUIRED_TRACE_IDS,
+} = await import('../client/src/lib/auditMode/coverageManifest');
+const {
+  CASHFLOW_PLAN_EXECUTION_TRACE_IDS,
+  CASHFLOW_PLAN_EXECUTION_YEAR_RANGE,
+} = await import('../client/src/lib/auditMode/engineTraces');
+
+const currentYear = new Date().getFullYear();
+// Demo IP1 purchase year per QA report (2027) + canonical bug year (2028).
+const REQUIRED_DEMO_YEARS = [currentYear, currentYear + 1, 2027, 2028];
+
+assert('CASHFLOW_PLAN_EXECUTION_TRACE_IDS exposes 11 ids',
+  CASHFLOW_PLAN_EXECUTION_TRACE_IDS.length === 11,
+  `got ${CASHFLOW_PLAN_EXECUTION_TRACE_IDS.length}`);
+assert('Year range starts at the current calendar year',
+  CASHFLOW_PLAN_EXECUTION_YEAR_RANGE[0] === currentYear);
+
+for (const yr of REQUIRED_DEMO_YEARS) {
+  // Year may fall outside the rolling 11-year window if the calendar drifts;
+  // only assert membership when the year is in-range.
+  if (yr < currentYear || yr > currentYear + 10) continue;
+  const id = `cashflow:plan-execution:cash-balance:${yr}`;
+  assert(`Manifest contains ${id}`,
+    REQUIRED_TRACE_IDS.includes(id),
+    `not in REQUIRED_TRACE_IDS`);
+  const entry = COVERAGE_MANIFEST.find(e => e.id === id);
+  assert(`${id}: engine = cashflow_engine`, entry?.engine === 'cashflow_engine');
+  assert(`${id}: surface mentions Plan Execution Capacity`,
+    !!entry?.surface && /Plan Execution Capacity/i.test(entry.surface));
+}
+
+// Audit Coverage page must enumerate every required id — proving the per-year
+// trace ids show up in /audit-coverage rows.
+const reportSource = await (await import('node:fs')).promises.readFile(
+  'client/src/components/auditMode/AuditCoverageReport.tsx', 'utf8');
+assert('AuditCoverageReport reads COVERAGE_MANIFEST',
+  /COVERAGE_MANIFEST/.test(reportSource));
+
+// ─── 8. ensureCoverageRegistered installs placeholder factories ─────────────
+
+section('8. ensureCoverageRegistered seeds per-year placeholders');
+const auditRegistry = await import('../client/src/lib/auditMode/auditRegistry');
+const { ensureCoverageRegistered } = await import('../client/src/lib/auditMode/ensureCoverage');
+
+// Pre-seed: at least one per-year id is unregistered before ensureCoverage.
+const probeYear = currentYear + 3;
+const probeId = `cashflow:plan-execution:cash-balance:${probeYear}`;
+auditRegistry.unregisterTrace(probeId);
+assert('Probe id starts unregistered', !auditRegistry.hasTrace(probeId));
+
+ensureCoverageRegistered();
+assert('Probe id registered after ensureCoverageRegistered',
+  auditRegistry.hasTrace(probeId));
+const placeholderTrace = auditRegistry.resolveTrace(probeId);
+assert('Placeholder trace resolves to a record', !!placeholderTrace);
+assert('Placeholder formula mentions funding-source path',
+  /funding source|equity-release/i.test(placeholderTrace?.formula ?? ''),
+  placeholderTrace?.formula);
+assert('Placeholder finalValue = ready (overwritten on dashboard mount)',
+  placeholderTrace?.finalValue === 'ready');
+
+// ─── 9. Dashboard mount overwrites placeholders with live values ────────────
+
+section('9. Dashboard live trace overwrites placeholder');
+// Simulate the dashboard mount by calling buildCashflowYearTrace with the
+// IP2 settlement year and registering it. The Audit Coverage report reads
+// `finalValue` from the registry, so after the dashboard runs the entry
+// must no longer say "ready".
+const liveTrace = buildCashflowYearTrace({
+  year: 2028,
+  openingCash: 200_000,
+  closingCash: 170_000,
+  netCashflow: -30_000,
+  propertyPurchaseCashUsed: 0,
+  propertyEquityReleased: IP2.deposit,
+  propertyAssetSalesUsed: 0,
+  propertyBuyingCosts: IP2.stamp_duty,
+  isAcquisitionYear: true,
+});
+auditRegistry.registerTrace(liveTrace);
+const liveRead = auditRegistry.resolveTrace(`cashflow:plan-execution:cash-balance:2028`);
+assert('Live trace overwrites placeholder',
+  liveRead?.finalValue !== 'ready' && typeof liveRead?.finalValue === 'string');
+assert('Live trace exposes the $0 cash-used line',
+  liveRead?.inputs.some(i => /cash used/i.test(i.label) && /\$0\b/.test(String(i.value))));
+assert('Live trace exposes equity-released > $0 line',
+  liveRead?.inputs.some(i => /equity released/i.test(i.label)
+    && (String(i.value).includes('$164,000') || String(i.value).includes('164,000'))));
+
+// ─── 10. ExecutiveDashboard renders native AuditableMetric click targets ────
+
+section('10. Plan Execution Capacity panel exposes native audit click targets');
+const dashSrc = await (await import('node:fs')).promises.readFile(
+  'client/src/components/ExecutiveDashboard.tsx', 'utf8');
+assert('Imports cashflowYearTraceId from engineTraces',
+  /cashflowYearTraceId[\s,]/.test(dashSrc));
+assert('Per-year audit affordance row uses AuditableMetric',
+  /plan-execution-audit-row[\s\S]+?AuditableMetric/.test(dashSrc));
+assert('Audit chip wraps trace id from cashflowYearTraceId',
+  /AuditableMetric[\s\S]{0,400}cashflowYearTraceId\(/.test(dashSrc));
+assert('Final-year cash tile wraps AuditableMetric with cashflowYearTraceId',
+  /audit-metric-cashflow-final-year/.test(dashSrc) &&
+  /cashflowYearTraceId\(parseInt\(finalYearLabel/.test(dashSrc));
+assert('Plan Execution audit row has data-testid for QA',
+  /data-testid="plan-execution-audit-row"/.test(dashSrc));
+assert('Acquisition-year chips emit data-acquisition flag',
+  /data-acquisition=/.test(dashSrc));
+
+// Coverage manifest surface string must point at Plan Execution Capacity so
+// the /audit-coverage filter actually surfaces these rows.
+{
+  const id2028 = 'cashflow:plan-execution:cash-balance:2028';
+  if (CASHFLOW_PLAN_EXECUTION_TRACE_IDS.includes(id2028)) {
+    const e = COVERAGE_MANIFEST.find(x => x.id === id2028);
+    assert(`${id2028} surface mentions Plan Execution Capacity`,
+      !!e && /Plan Execution Capacity/i.test(e.surface));
+  }
+}
+
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 if (failures > 0) {

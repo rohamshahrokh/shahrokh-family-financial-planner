@@ -124,5 +124,7 @@ export {
 export {
   buildCashflowYearTrace,
   cashflowYearTraceId,
+  CASHFLOW_PLAN_EXECUTION_TRACE_IDS,
+  CASHFLOW_PLAN_EXECUTION_YEAR_RANGE,
   type CashflowYearTraceArgs,
 } from './cashflowChartTraces';

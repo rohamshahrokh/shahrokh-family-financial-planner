@@ -551,6 +551,27 @@ buildAllFundingTraces({
   }],
 }).forEach(registerTrace);
 
+// Plan Execution Capacity per-year cashflow traces. Mirrors the live
+// dashboard registration loop so the coverage guard sees every year's
+// cash-balance entry. #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+const {
+  buildCashflowYearTrace: __buildCfYr,
+  CASHFLOW_PLAN_EXECUTION_YEAR_RANGE: __cfYears,
+} = await import('../client/src/lib/auditMode/engineTraces');
+for (const yr of __cfYears) {
+  registerTrace(__buildCfYr({
+    year: yr,
+    openingCash: 220_000,
+    closingCash: 220_000,
+    netCashflow: 50_000,
+    propertyPurchaseCashUsed: 0,
+    propertyEquityReleased: 0,
+    propertyAssetSalesUsed: 0,
+    propertyBuyingCosts: 0,
+    isAcquisitionYear: false,
+  }));
+}
+
 const missing = REQUIRED_TRACE_IDS.filter(id => !hasTrace(id));
 assert(`All required trace ids are registerable (missing: ${missing.join(', ') || 'none'})`, missing.length === 0);
 for (const id of REQUIRED_TRACE_IDS) {

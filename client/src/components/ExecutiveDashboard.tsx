@@ -73,6 +73,7 @@ import {
 import {
   buildAllFinancialHealthTraces,
   buildAllForecastHeadlineTraces,
+  cashflowYearTraceId,
 } from '@/lib/auditMode/engineTraces';
 
 // ─── Public props ────────────────────────────────────────────────────────────
@@ -90,6 +91,19 @@ export interface CashflowTrajectoryPoint {
   usableEquity: number;
   /** Total deposit power for the year (cash + usable equity − buffer). */
   totalDepositPower: number;
+  /**
+   * Funding-source decomposition for the year. Populated for every year by
+   * the dashboard; only acquisition years carry non-zero values. Surfaced
+   * here so the chart panel can render a per-year audit click target.
+   * #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+   */
+  year?: number;
+  openingCash?: number;
+  propertyPurchaseCashUsed?: number;
+  propertyEquityReleased?: number;
+  propertyAssetSalesUsed?: number;
+  propertyBuyingCosts?: number;
+  isAcquisitionYear?: boolean;
 }
 
 /** Mini summary metrics surfaced above the Deposit Power & Cashflow chart. */
@@ -1366,6 +1380,10 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
         </div>
         <div className="rounded-lg bg-background/60 border border-border px-2.5 py-1.5">
           <div className="text-[10px] text-muted-foreground mb-0.5">{finalYearLabel} Cash</div>
+          <AuditableMetric
+            traceId={cashflowYearTraceId(parseInt(finalYearLabel, 10) || new Date().getFullYear() + 9)}
+            testId="audit-metric-cashflow-final-year"
+          >
           <div
             className="text-sm sm:text-[15px] font-extrabold tabular-nums leading-tight"
             style={{ color: (finalYearCash ?? 0) >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}
@@ -1373,6 +1391,7 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
           >
             {mv(formatCurrency(finalYearCash ?? 0, true))}
           </div>
+          </AuditableMetric>
         </div>
         <div className="rounded-lg bg-background/60 border border-border px-2.5 py-1.5">
           <div className="text-[10px] text-muted-foreground mb-0.5">{gran === 'monthly' ? 'Monthly Net CF' : 'Annual Net CF'}</div>
@@ -1640,6 +1659,70 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
                 {gran === 'monthly' ? 'Monthly granularity · responsive' : 'Annual granularity · 10-year horizon'}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ── Per-year audit affordance — native click target for the
+              Plan Execution Capacity cashflow trace. Renders a compact row
+              of chips: each acquisition year + the final year. In Audit
+              Mode each chip opens the per-year trace; off mode they
+              render as subtle text. Acquisition rows are explicitly
+              labelled because their cashflow already routes through the
+              canonical funding-aware path (Equity Release adds debt, not
+              cash). #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+        */}
+        {hasData && (
+          <div
+            className="px-3 pb-2 mt-1 flex flex-wrap items-center gap-1.5"
+            data-testid="plan-execution-audit-row"
+            aria-label="Per-year cashflow audit trace"
+          >
+            <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mr-1">
+              Audit · Cash by year
+            </span>
+            {(() => {
+              const traj = p.cashflowTrajectory ?? [];
+              const acquisitionYears = traj
+                .filter((pt: any) => pt.isAcquisitionYear && typeof pt.year === 'number')
+                .map((pt: any) => pt.year as number);
+              const fallbackYear = (() => {
+                const lastLabel = lastRow?.label;
+                if (lastLabel) {
+                  const m = String(lastLabel).match(/\d{4}/);
+                  if (m) return parseInt(m[0], 10);
+                }
+                if (traj.length > 0 && typeof (traj[traj.length - 1] as any).year === 'number') {
+                  return (traj[traj.length - 1] as any).year as number;
+                }
+                return new Date().getFullYear() + 9;
+              })();
+              const all = Array.from(new Set([...acquisitionYears, fallbackYear])).sort((a, b) => a - b);
+              return all.map((yr) => {
+                const pt = traj.find((t: any) => t.year === yr);
+                const isAcq = !!pt?.isAcquisitionYear;
+                return (
+                  <AuditableMetric
+                    key={`audit-yr-${yr}`}
+                    traceId={cashflowYearTraceId(yr)}
+                    testId={`audit-metric-cashflow-${yr}`}
+                    className="inline-flex items-center"
+                  >
+                    <span
+                      className="px-2 py-0.5 rounded-md border text-[11px] tabular-nums font-semibold"
+                      style={{
+                        borderColor: isAcq ? 'hsl(43,90%,55% / 0.55)' : 'hsl(var(--border))',
+                        color: isAcq ? 'hsl(43,90%,60%)' : 'hsl(var(--muted-foreground))',
+                        background: isAcq ? 'hsl(43,90%,12% / 0.4)' : 'transparent',
+                      }}
+                      data-testid={`plan-execution-year-${yr}`}
+                      data-acquisition={isAcq ? 'true' : 'false'}
+                    >
+                      {isAcq ? `🏠 ${yr}` : yr}
+                    </span>
+                  </AuditableMetric>
+                );
+              });
+            })()}
           </div>
         )}
       </div>
