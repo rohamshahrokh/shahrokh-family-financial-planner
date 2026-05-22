@@ -1699,10 +1699,14 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
             Audit · Cash by year
           </span>
           {(() => {
+            // QA fix: render a chip for EVERY visible cashflow year so the
+            // user can audit any year on the chart — not only acquisition
+            // years. Acquisition years keep their visual marker (🏠 + amber
+            // accent). #FWL_CashByYear_Render_Every_Year
             const traj = p.cashflowTrajectory ?? [];
-            const acquisitionYears = traj
-              .filter((pt: any) => pt.isAcquisitionYear && typeof pt.year === 'number')
-              .map((pt: any) => pt.year as number);
+            const allYears = traj
+              .map((pt: any) => (typeof pt.year === 'number' ? (pt.year as number) : NaN))
+              .filter((y: number) => Number.isFinite(y));
             const fallbackYear = (() => {
               const lastLabel = lastRow?.label;
               if (lastLabel) {
@@ -1714,7 +1718,7 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
               }
               return new Date().getFullYear() + 9;
             })();
-            const all = Array.from(new Set([...acquisitionYears, fallbackYear])).sort((a, b) => a - b);
+            const all = Array.from(new Set([...allYears, fallbackYear])).sort((a, b) => a - b);
             return all.map((yr) => {
               const pt = traj.find((t: any) => t.year === yr);
               const isAcq = !!pt?.isAcquisitionYear;

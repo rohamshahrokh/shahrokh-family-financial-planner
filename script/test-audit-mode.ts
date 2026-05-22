@@ -574,28 +574,34 @@ for (const yr of __cfYears) {
   }));
 }
 // Cashflow Reconciliation per-year traces — same shape as the dashboard
-// registration loop. #FWL_Cashflow_Reconciliation_Trace
+// registration loop. Balanced bridge: 264k income - 214k expenses = 50k.
+// #FWL_Cashflow_Reconciliation_Trace
 for (const yr of __cfReconYears) {
   registerTrace(__buildCfRec({
     year: yr,
     openingCash: 220_000,
-    closingCash: 220_000,
+    closingCash: 270_000,
     netCashflow: 50_000,
     salaryIncome: 264_000,
     rentalIncomeByProperty: {},
     rentalIncomeTotal: 0,
     taxRefund: 0,
-    livingExpenses: 174_480,
+    plannedStockSell: 0,
+    plannedCryptoSell: 0,
+    livingExpenses: 214_000,
     pporMortgage: 0,
-    propertyHoldingCost: 0,
     investmentLoanRepayment: 0,
-    investmentContributions: 0,
+    plannedStockBuy: 0,
+    plannedCryptoBuy: 0,
+    stockDCAOutflow: 0,
+    cryptoDCAOutflow: 0,
     billsOutflow: 0,
-    taxPayableInformational: 0,
     acquisitionCashUsed: 0,
-    equityReleased: 0,
     assetSalesUsed: 0,
     acquisitionBuyingCosts: 0,
+    propertyHoldingCost: 0,
+    taxPayableInformational: 0,
+    equityReleased: 0,
     isAcquisitionYear: false,
   }));
 }

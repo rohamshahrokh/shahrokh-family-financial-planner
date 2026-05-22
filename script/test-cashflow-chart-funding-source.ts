@@ -456,11 +456,6 @@ assert('Reconciliation year range is 11 entries starting at currentYear',
 // 11.b — Reconciliation trace uses LIVE engine values for the 2028 acquisition
 // year and itemises every income + outgoing line + acquisition decomposition.
 if (y2027 && y2028) {
-  const investmentContributions =
-    ((y2028 as any).stockDCAOutflow  ?? 0)
-    + ((y2028 as any).cryptoDCAOutflow ?? 0)
-    + ((y2028 as any).plannedStockBuy  ?? 0)
-    + ((y2028 as any).plannedCryptoBuy ?? 0);
   const reconTrace = buildCashflowReconciliationTrace({
     year: 2028,
     openingCash: y2027.endingBalance,
@@ -470,17 +465,22 @@ if (y2027 && y2028) {
     rentalIncomeByProperty: (y2028 as any).rentalIncomeByProperty ?? {},
     rentalIncomeTotal: (y2028 as any).rentalIncome ?? 0,
     taxRefund: (y2028 as any).ngTaxBenefit ?? 0,
+    plannedStockSell: (y2028 as any).plannedStockSell ?? 0,
+    plannedCryptoSell: (y2028 as any).plannedCryptoSell ?? 0,
     livingExpenses: (y2028 as any).totalExpenses ?? 0,
     pporMortgage: (y2028 as any).mortgageRepayment ?? 0,
-    propertyHoldingCost: (y2028 as any).propertyHoldingCost ?? 0,
     investmentLoanRepayment: (y2028 as any).investmentLoanRepayment ?? 0,
-    investmentContributions,
+    plannedStockBuy: (y2028 as any).plannedStockBuy ?? 0,
+    plannedCryptoBuy: (y2028 as any).plannedCryptoBuy ?? 0,
+    stockDCAOutflow: (y2028 as any).stockDCAOutflow ?? 0,
+    cryptoDCAOutflow: (y2028 as any).cryptoDCAOutflow ?? 0,
     billsOutflow: (y2028 as any).billsOutflow ?? 0,
-    taxPayableInformational: (y2028 as any).taxPayable ?? 0,
     acquisitionCashUsed: (y2028 as any).propertyPurchaseCashUsed ?? 0,
-    equityReleased: (y2028 as any).propertyEquityReleased ?? 0,
     assetSalesUsed: (y2028 as any).propertyAssetSalesUsed ?? 0,
     acquisitionBuyingCosts: (y2028 as any).propertyBuyingCosts ?? 0,
+    propertyHoldingCost: (y2028 as any).propertyHoldingCost ?? 0,
+    taxPayableInformational: (y2028 as any).taxPayable ?? 0,
+    equityReleased: (y2028 as any).propertyEquityReleased ?? 0,
     isAcquisitionYear: true,
     fundingSourceLabel: 'equity-release',
   });
@@ -492,34 +492,46 @@ if (y2027 && y2028) {
     typeof reconTrace.finalValue === 'string' && /\$/.test(reconTrace.finalValue));
   assert('Reconciliation sourceEngine references finance.ts canonical engine',
     /finance\.ts/.test(reconTrace.sourceEngine));
-  // Section headers.
-  for (const header of ['─ INCOME ─', '─ OUTGOINGS ─', '─ PROPERTY ACQUISITION ─', '─ CALCULATION ─']) {
+  // Section headers (new schema separates bridge from info).
+  for (const header of ['─ INCOME (cash bridge) ─', '─ EXPENSES (cash bridge) ─',
+                         '─ INFO (excluded from cash bridge) ─',
+                         '─ CALCULATION (engine bridge) ─']) {
     assert(`Reconciliation has section "${header}"`,
       reconTrace.inputs.some(i => i.label === header));
   }
-  // Income line items.
-  for (const lbl of ['Salary income', 'Other income', 'Rental income — all properties', 'Investment income (dividends)', 'Tax refunds (NG)', 'Total Income']) {
+  // Income line items (bridge).
+  for (const lbl of ['Salary income', 'Other income', 'Rental income — all properties',
+                      'Investment income (dividends)', 'Tax refunds (NG)',
+                      'Planned stock sells', 'Planned crypto sells', 'Total Income']) {
     assert(`Reconciliation INCOME contains "${lbl}"`,
       reconTrace.inputs.some(i => i.label === lbl));
   }
-  // Outgoings line items.
+  // Expense line items (bridge).
   for (const lbl of ['Living expenses', 'Childcare', 'PPOR mortgage repayment',
-                      'Investment property holding cost', 'Investment loan repayments',
-                      'Investment contributions (DCA + planned buys)', 'Recurring bills',
-                      'Total Outgoings']) {
-    assert(`Reconciliation OUTGOINGS contains "${lbl}"`,
+                      'Investment loan repayments',
+                      'Planned stock buys', 'Planned crypto buys',
+                      'Stock DCA outflow', 'Crypto DCA outflow',
+                      'Recurring bills',
+                      'Acquisition — cash + offset used',
+                      'Acquisition — asset sales used',
+                      'Acquisition — buying costs',
+                      'Total Expenses']) {
+    assert(`Reconciliation EXPENSES contains "${lbl}"`,
       reconTrace.inputs.some(i => i.label === lbl));
   }
-  // Property acquisition decomposition.
-  for (const lbl of ['Acquisition — cash used', 'Acquisition — equity released',
-                      'Acquisition — asset sales', 'Acquisition — buying costs']) {
-    assert(`Reconciliation ACQUISITION contains "${lbl}"`,
+  // INFO (excluded) section.
+  for (const lbl of ['Investment property holding cost',
+                      'Tax payable (already withheld)',
+                      'Equity released (acquisition)']) {
+    assert(`Reconciliation INFO contains "${lbl}"`,
       reconTrace.inputs.some(i => i.label === lbl));
   }
   // Closing cash bridge.
-  for (const lbl of ['Opening Cash', '+ Total Income', '- Total Expenses', '= Net Cashflow',
-                      '+ Equity Released (debt — not cash)',
-                      '- Acquisition Cash Used (already in netCashflow)',
+  for (const lbl of ['Opening Cash', '+ Total Income', '- Total Expenses',
+                      '+ Rounding (monthly accumulation)',
+                      '= Net Cashflow (line-item sum)',
+                      '= Net Cashflow (engine)',
+                      'Drift (line sum vs engine)',
                       '= Closing Cash']) {
     assert(`Reconciliation CALCULATION contains "${lbl}"`,
       reconTrace.inputs.some(i => i.label === lbl));
@@ -530,12 +542,12 @@ if (y2027 && y2028) {
     String(reconTrace.inputs.find(i => i.label === label)?.value ?? '');
   assert('Salary income line shows engine value (>$0)',
     /\$[1-9]/.test(findVal('Salary income')));
-  // Equity Release for the 2028 IP2 settlement = $164k.
-  assert('Acquisition — equity released = IP2 deposit ($164k)',
-    findVal('Acquisition — equity released').includes('164,000'));
-  // Acquisition cash used = $0 under equity release.
-  assert('Acquisition — cash used = $0 (equity release)',
-    /\$0\b/.test(findVal('Acquisition — cash used')));
+  // Equity Release for the 2028 IP2 settlement = $164k — now in INFO section.
+  assert('INFO: Equity released = IP2 deposit ($164k)',
+    findVal('Equity released (acquisition)').includes('164,000'));
+  // Acquisition cash used = $0 under equity release (bridge expense).
+  assert('Acquisition — cash + offset used = $0 (equity release)',
+    /\$0\b/.test(findVal('Acquisition — cash + offset used')));
   // Closing cash matches engine.
   const closingCashLine = findVal('= Closing Cash');
   const expectedClosing = y2028.endingBalance >= 0
@@ -544,6 +556,41 @@ if (y2027 && y2028) {
   assert(`Reconciliation closing cash matches engine endingBalance (${expectedClosing})`,
     closingCashLine === expectedClosing,
     `got "${closingCashLine}" expected "${expectedClosing}"`);
+
+  // ── STRICT BALANCE CHECK ──────────────────────────────────────────────
+  // Parse the displayed numbers and assert that Total Income - Total
+  // Expenses == engine netCashflow within $1. This is the QA-reported bug.
+  const parse$ = (s: string): number => {
+    const neg = s.trim().startsWith('-');
+    const raw = s.replace(/[^\d.]/g, '');
+    const n = parseFloat(raw || '0');
+    return neg ? -n : n;
+  };
+  const incomeVal   = parse$(findVal('Total Income'));
+  const expensesVal = parse$(findVal('Total Expenses'));
+  const roundingVal = parse$(findVal('+ Rounding (monthly accumulation)'));
+  const netLineVal  = parse$(findVal('= Net Cashflow (line-item sum)'));
+  const netEngVal   = parse$(findVal('= Net Cashflow (engine)'));
+  const driftVal    = parse$(findVal('Drift (line sum vs engine)'));
+  // The displayed equation MUST balance:
+  //   Total Income - Total Expenses + Rounding == line-item Net Cashflow
+  //                                            == engine Net Cashflow
+  const computedNet = incomeVal - expensesVal + roundingVal;
+  assert(`Total Income - Total Expenses + Rounding == line-item Net Cashflow (got ${computedNet} vs ${netLineVal})`,
+    Math.abs(computedNet - netLineVal) <= 1);
+  assert(`Line-item Net Cashflow matches engine Net Cashflow exactly (drift ${Math.abs(netLineVal - netEngVal)})`,
+    Math.abs(netLineVal - netEngVal) <= 1);
+  assert(`Engine and line-item agree exactly for 2028 (drift = ${driftVal})`,
+    driftVal <= 1);
+  // The rounding adjustment itself should be tiny (≤ $50). If it grows
+  // large, that means a real engine line is missing from the trace inputs.
+  assert(`Rounding adjustment is small for 2028 (|${roundingVal}| ≤ $50)`,
+    Math.abs(roundingVal) <= 50);
+  // Closing cash = opening + netCashflow.
+  const openingVal = parse$(findVal('Opening Cash'));
+  const closingVal = parse$(findVal('= Closing Cash'));
+  assert(`Opening Cash + engine Net Cashflow == Closing Cash within $1 (got ${openingVal + netEngVal} vs ${closingVal})`,
+    Math.abs(openingVal + netEngVal - closingVal) <= 1);
 
   // ── Double-counting diagnostics ──
   assert('Reconciliation has notes (double-counting diagnostics)',
@@ -554,10 +601,16 @@ if (y2027 && y2028) {
     (reconTrace.notes ?? []).some(n => /PPOR mortgage/i.test(n) && /\$0|deduplicate|double-count/i.test(n)));
   assert('Notes confirm closing-cash bridge balances',
     (reconTrace.notes ?? []).some(n => /bridge/i.test(n) && /balanc/i.test(n)));
+  assert('Notes confirm reconciliation arithmetic balances (✓, not ✗)',
+    (reconTrace.notes ?? []).some(n => /arithmetic balances/i.test(n) && !/does NOT balance/i.test(n)));
+  assert('No notes report arithmetic does NOT balance',
+    !(reconTrace.notes ?? []).some(n => /does NOT balance/i.test(n)));
 
-  // ── Excluded list explicitly excludes equity-release deposits. ──
+  // ── Excluded list explicitly excludes equity-release deposits + holding cost. ──
   assert('Reconciliation excluded list mentions equity-release deposits',
     reconTrace.excluded.some(e => /equity[- ]release/i.test(e.label)));
+  assert('Reconciliation excluded list mentions property holding cost',
+    reconTrace.excluded.some(e => /holding cost/i.test(e.label)));
 }
 
 // ─── 12. Coverage manifest includes reconciliation ids ──────────────────────
@@ -621,6 +674,14 @@ assert('Dashboard calls buildCashflowReconciliationTrace inside useEffect',
 assert('Dashboard passes acquisitionCashUsed / equityReleased to reconciliation trace',
   /acquisitionCashUsed:\s*cashUsed/.test(dashPageSrc)
     && /equityReleased:\s*equityRel/.test(dashPageSrc));
+// New bridge-balance schema: explicit plannedStockBuy / plannedStockSell /
+// stockDCAOutflow fields must reach the trace so the math balances.
+assert('Dashboard forwards plannedStockBuy/plannedStockSell to reconciliation trace',
+  /plannedStockBuy:\s*\(a as any\)\.plannedStockBuy/.test(dashPageSrc)
+    && /plannedStockSell:\s*\(a as any\)\.plannedStockSell/.test(dashPageSrc));
+assert('Dashboard forwards stockDCAOutflow/cryptoDCAOutflow to reconciliation trace',
+  /stockDCAOutflow:\s*\(a as any\)\.stockDCAOutflow/.test(dashPageSrc)
+    && /cryptoDCAOutflow:\s*\(a as any\)\.cryptoDCAOutflow/.test(dashPageSrc));
 
 // ─── 16. ExecutiveDashboard renders the native reconciliation chip row ──────
 
@@ -644,6 +705,21 @@ assert('Reconciliation chip overrides touch-action / tap-highlight for iOS Safar
   /touchAction:\s*'manipulation'[\s\S]*WebkitTapHighlightColor:\s*'transparent'/.test(dashSrc2));
 assert('Reconciliation row supports every year (not just acquisition years)',
   /Reconciliation supports every year/i.test(dashSrc2));
+
+// ── 16.b — CASH BY YEAR row also renders every year (QA fix) ───────────────
+// Before this fix the row only rendered acquisition years + final year, so
+// 2028 was missing for users whose trajectory had IP1 in 2026 and IP2 in 2028
+// — the chip simply did not exist to be clickable. The fix unions every
+// visible cashflow year, not only acquisition years.
+// #FWL_CashByYear_Render_Every_Year
+assert('Cash-by-year row enumerates every year in trajectory (not just acquisition)',
+  /render a chip for EVERY visible cashflow year/.test(dashSrc2)
+    && /const allYears = traj/.test(dashSrc2));
+// Defensive check — the previous bug was hard-coded as
+// `const acquisitionYears = traj.filter(...).filter(pt.isAcquisitionYear)`
+// gating the chip set. Ensure that gating pattern is gone.
+assert('Cash-by-year row no longer filters by isAcquisitionYear for membership',
+  !/const acquisitionYears = traj\s*\n\s*\.filter\(\([^)]+\) =>\s*pt\.isAcquisitionYear/.test(dashSrc2));
 
 // ─── 17. Engine surfaces line items needed by the reconciliation trace ──────
 

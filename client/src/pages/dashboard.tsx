@@ -1894,12 +1894,9 @@ export default function DashboardPage() {
       // ── Cashflow Reconciliation (Net Cashflow Breakdown) trace ──
       // Itemises every income/outgoing line behind netCashflow so the user can
       // verify there is no double-counting and see exactly which engine line
-      // produced each number. #FWL_Cashflow_Reconciliation_Trace
-      const investmentContributions =
-        ((a as any).stockDCAOutflow  ?? 0)
-        + ((a as any).cryptoDCAOutflow ?? 0)
-        + ((a as any).plannedStockBuy  ?? 0)
-        + ((a as any).plannedCryptoBuy ?? 0);
+      // produced each number. Every line passes through as a separate input
+      // so the displayed arithmetic balances exactly to engine netCashflow.
+      // #FWL_Cashflow_Reconciliation_Trace
       const fundingSourceLabel =
         equityRel > 0
           ? 'equity-release'
@@ -1914,21 +1911,29 @@ export default function DashboardPage() {
           openingCash,
           closingCash: a.endingBalance ?? 0,
           netCashflow: a.netCashFlow ?? 0,
+          // ── INCOME (cash bridge) ──
           salaryIncome: (a as any).income ?? 0,
           rentalIncomeByProperty: (a as any).rentalIncomeByProperty ?? {},
           rentalIncomeTotal: (a as any).rentalIncome ?? 0,
           taxRefund: (a as any).ngTaxBenefit ?? 0,
+          plannedStockSell: (a as any).plannedStockSell ?? 0,
+          plannedCryptoSell: (a as any).plannedCryptoSell ?? 0,
+          // ── EXPENSES (cash bridge) ──
           livingExpenses: (a as any).totalExpenses ?? 0,
           pporMortgage: (a as any).mortgageRepayment ?? 0,
-          propertyHoldingCost: (a as any).propertyHoldingCost ?? 0,
           investmentLoanRepayment: (a as any).investmentLoanRepayment ?? 0,
-          investmentContributions,
+          plannedStockBuy: (a as any).plannedStockBuy ?? 0,
+          plannedCryptoBuy: (a as any).plannedCryptoBuy ?? 0,
+          stockDCAOutflow: (a as any).stockDCAOutflow ?? 0,
+          cryptoDCAOutflow: (a as any).cryptoDCAOutflow ?? 0,
           billsOutflow: (a as any).billsOutflow ?? 0,
-          taxPayableInformational: (a as any).taxPayable ?? 0,
           acquisitionCashUsed: cashUsed,
-          equityReleased: equityRel,
           assetSalesUsed: assetSales,
           acquisitionBuyingCosts: buyingCosts,
+          // ── INFO (NOT in cash bridge) ──
+          propertyHoldingCost: (a as any).propertyHoldingCost ?? 0,
+          taxPayableInformational: (a as any).taxPayable ?? 0,
+          equityReleased: equityRel,
           isAcquisitionYear,
           fundingSourceLabel,
         }),
