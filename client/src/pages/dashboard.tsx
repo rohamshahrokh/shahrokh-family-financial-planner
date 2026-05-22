@@ -16,11 +16,16 @@ import {
   buildCashflowYearTrace,
   buildCashflowReconciliationTrace,
   buildPlanFeasibilityTrace,
+  buildFundingResolutionTrace,
 } from "@/lib/auditMode/engineTraces";
 import {
   computePlanFeasibility,
   type PlanFeasibilityResult,
 } from "@/lib/planFeasibility";
+import {
+  computeFundingResolution,
+  type FundingResolutionResult,
+} from "@/lib/fundingResolutionAdvisor";
 import { applyFundingToProperties, buildAdapterContext } from "@/lib/propertyFundingAdapter";
 import { useActiveRegime } from "@/hooks/useActiveRegime";
 // Map the active regime selector → calcNegativeGearing scenario value.
@@ -1428,6 +1433,53 @@ export default function DashboardPage() {
     registerAuditTrace(buildPlanFeasibilityTrace({ result: planFeasibility }));
   }, [planFeasibility]);
 
+  // ─── Funding Gap Resolution Advisor (advisory layer) ────────────────────
+  // Only generates candidate solutions when planFeasibility reports a gap.
+  // Every input is a pass-through from existing state — no engine call.
+  // Available equity-release headroom is approximated from the same
+  // refinance-LVR cap surfaced on the Property page; the advisor never
+  // re-runs the refinance / lending engine.
+  // #FWL_Funding_Gap_Resolution_Advisor
+  const fundingResolution: FundingResolutionResult = useMemo(() => {
+    const thisYear = new Date().getFullYear();
+    const yearRow = cashFlowAnnual.find((a: any) => a.year === thisYear);
+    const totalPropertyValue =
+      safeNum(snap.ppor) +
+      ((properties ?? []) as any[])
+        .filter((p: any) => p.type !== 'ppor')
+        .reduce((acc: number, p: any) => acc + safeNum(p.current_value ?? p.purchase_price), 0);
+    const totalMortgageDebt =
+      safeNum(snap.mortgage) +
+      ((properties ?? []) as any[])
+        .filter((p: any) => p.type !== 'ppor')
+        .reduce((acc: number, p: any) => acc + safeNum(p.loan_amount), 0);
+    const availableEquityRelease = Math.max(
+      0,
+      totalPropertyValue * maxRefinanceLVR - totalMortgageDebt,
+    );
+    return computeFundingResolution({
+      fundingGap: planFeasibility.fundingGap,
+      plannedStockBuy:        safeNum((yearRow as any)?.plannedStockBuy),
+      plannedCryptoBuy:       safeNum((yearRow as any)?.plannedCryptoBuy),
+      stockDcaAnnual:         safeNum((yearRow as any)?.stockDCAOutflow),
+      cryptoDcaAnnual:        safeNum((yearRow as any)?.cryptoDCAOutflow),
+      acquisitionCashUsed:    safeNum((yearRow as any)?.propertyPurchaseCashUsed),
+      acquisitionBuyingCosts: safeNum((yearRow as any)?.propertyBuyingCosts),
+      availableEquityRelease,
+      stocksBalance:          stocksTotal,
+      cryptoBalance:          cryptoTotal,
+      monthlySavings:         Math.max(0, surplus),
+    });
+  }, [planFeasibility, cashFlowAnnual, snap.ppor, snap.mortgage, properties, maxRefinanceLVR, stocksTotal, cryptoTotal, surplus]);
+
+  useEffect(() => {
+    registerAuditTrace(buildFundingResolutionTrace({
+      result: fundingResolution,
+      availableLiquidity: planFeasibility.availableLiquidity,
+      requiredLiquidity:  planFeasibility.requiredLiquidity,
+    }));
+  }, [fundingResolution, planFeasibility.availableLiquidity, planFeasibility.requiredLiquidity]);
+
   // ─── Master CF data with event markers ───────────────────────────────────
   const eventsByMonthKey = useMemo<Record<string, string[]>>(() => {
     const events: CashEvent[] = cashEngineResult?.events ?? [];
@@ -2210,6 +2262,11 @@ export default function DashboardPage() {
     // save, forecast, Monte Carlo, or FIRE action is blocked.
     // #FWL_Plan_Feasibility_Layer
     planFeasibility,
+    // ── Funding Gap Resolution Advisor (advisory layer) ──
+    // Candidate solutions + recommendation surfaced INSIDE the Plan
+    // Feasibility card when funding gap < 0. Inform-only.
+    // #FWL_Funding_Gap_Resolution_Advisor
+    fundingResolution,
     year10NW,
     trajectoryP50,
     trajectoryYear,

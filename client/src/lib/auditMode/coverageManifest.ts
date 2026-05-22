@@ -27,6 +27,7 @@ import {
   CASHFLOW_RECONCILIATION_TRACE_IDS,
   CASHFLOW_RECONCILIATION_YEAR_RANGE,
   PLAN_FEASIBILITY_TRACE_ID,
+  FUNDING_RESOLUTION_TRACE_ID,
 } from './engineTraces';
 
 export type EngineSourceKey =
@@ -331,6 +332,18 @@ export const COVERAGE_MANIFEST: CoverageEntry[] = [
     engine: 'dashboard',
     surface: 'ExecutiveDashboard → Plan Execution Capacity (Plan Feasibility card)',
     description: 'Plan Feasibility — Available vs Required Liquidity, Funding Gap, Status',
+    required: true,
+  },
+  // ── Funding Gap Resolution Advisor (advisory layer) ──
+  // #FWL_Funding_Gap_Resolution_Advisor — Candidate solutions (reduce / delay
+  // investment, equity release, asset sale, delay property / reduce deposit)
+  // ranked by lowest disruption, lowest long-term wealth impact, highest
+  // practicality. Only active when Funding Gap < 0.
+  {
+    id: FUNDING_RESOLUTION_TRACE_ID,
+    engine: 'dashboard',
+    surface: 'ExecutiveDashboard → Plan Execution Capacity (Plan Feasibility card → Funding Gap Resolution)',
+    description: 'Funding Gap Resolution — Candidate solutions, ranking logic, selected recommendation',
     required: true,
   },
 ];

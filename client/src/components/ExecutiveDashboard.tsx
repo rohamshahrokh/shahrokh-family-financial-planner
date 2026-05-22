@@ -77,6 +77,7 @@ import {
   cashflowYearTraceId,
   cashflowReconciliationTraceId,
   PLAN_FEASIBILITY_TRACE_ID,
+  FUNDING_RESOLUTION_TRACE_ID,
 } from '@/lib/auditMode/engineTraces';
 import {
   PLAN_FEASIBILITY_WARNING_HEADLINE,
@@ -84,6 +85,7 @@ import {
   planFeasibilityWarningDetail,
   type PlanFeasibilityResult,
 } from '@/lib/planFeasibility';
+import type { FundingResolutionResult } from '@/lib/fundingResolutionAdvisor';
 
 // ─── Public props ────────────────────────────────────────────────────────────
 
@@ -176,6 +178,13 @@ export interface ExecutiveDashboardProps {
    * blocked. #FWL_Plan_Feasibility_Layer
    */
   planFeasibility?: PlanFeasibilityResult | null;
+  /**
+   * Funding Gap Resolution Advisor (advisory layer). Candidate solutions +
+   * ranking + recommendation, rendered inside the Plan Feasibility card
+   * when `planFeasibility.fundingGap < 0`. Inform-only.
+   * #FWL_Funding_Gap_Resolution_Advisor
+   */
+  fundingResolution?: FundingResolutionResult | null;
   /** Deterministic 10y net worth — compatibility only, never rendered as primary. */
   year10NW: number;
   /** Canonical Monte Carlo P50 (median) net worth at the selected horizon. */
@@ -1890,7 +1899,10 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
             #FWL_Plan_Feasibility_Layer
       */}
       {p.planFeasibility ? (
-        <PlanFeasibilityCard feasibility={p.planFeasibility} />
+        <PlanFeasibilityCard
+          feasibility={p.planFeasibility}
+          resolution={p.fundingResolution ?? null}
+        />
       ) : null}
     </section>
   );
@@ -1901,7 +1913,13 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
 // pre-computed `PlanFeasibilityResult` — no engine work happens inside the
 // card. The card is always visible (no toggle); the audit chip routes to
 // the canonical `dashboard:plan-feasibility` trace.
-function PlanFeasibilityCard({ feasibility }: { feasibility: PlanFeasibilityResult }) {
+function PlanFeasibilityCard({
+  feasibility,
+  resolution,
+}: {
+  feasibility: PlanFeasibilityResult;
+  resolution: FundingResolutionResult | null;
+}) {
   const auditCtx = useAuditMode();
   const tone = feasibility.tone;
   const accent =
@@ -2033,6 +2051,147 @@ function PlanFeasibilityCard({ feasibility }: { feasibility: PlanFeasibilityResu
             : `Tight — only ${fmt$(feasibility.fundingGap)} of headroom over the ${feasibility.horizonLabel}.`}
         </div>
       )}
+
+      {/* ── Funding Gap Resolution Advisor (advisory layer) ───────────────
+            Only renders when feasibility.hasFundingGap === true AND the
+            resolution helper produced at least one candidate. Inform-only —
+            no save / forecast / Monte Carlo / FIRE control is gated.
+            #FWL_Funding_Gap_Resolution_Advisor
+      */}
+      {feasibility.hasFundingGap && resolution && resolution.hasGap && resolution.alternatives.length > 0 ? (
+        <FundingResolutionSection resolution={resolution} fundingGap={feasibility.fundingGap} />
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Funding Gap Resolution sub-section ──────────────────────────────────────
+// Compact advisory panel embedded inside the Plan Feasibility card. Reads a
+// pre-computed FundingResolutionResult from props — no engine work happens
+// here. Audit chip routes to `dashboard:funding-resolution`.
+function FundingResolutionSection({
+  resolution,
+  fundingGap,
+}: {
+  resolution: FundingResolutionResult;
+  fundingGap: number;
+}) {
+  const auditCtx = useAuditMode();
+  const fmt$ = (n: number) =>
+    n < 0
+      ? `-$${Math.abs(Math.round(n)).toLocaleString()}`
+      : `$${Math.round(n).toLocaleString()}`;
+  const shortfall = Math.abs(fundingGap);
+
+  return (
+    <div
+      className="mt-2 rounded-md border border-border/40 px-2.5 py-2"
+      style={{ background: 'hsl(0,0%,5% / 0.30)' }}
+      data-testid="funding-resolution-section"
+      data-has-recommendation={resolution.recommendation ? 'true' : 'false'}
+      aria-label="Funding Gap Resolution"
+    >
+      <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
+            Funding Gap Resolution
+          </span>
+          <span
+            className="text-[10px] font-bold tabular-nums"
+            style={{ color: 'hsl(0,72%,65%)' }}
+            data-testid="funding-resolution-gap"
+          >
+            Funding Gap: -{fmt$(shortfall).replace(/^-?\$/, '$')}
+          </span>
+        </div>
+        {auditCtx.auditMode ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); auditCtx.openTrace(FUNDING_RESOLUTION_TRACE_ID); }}
+            aria-label="Open Funding Gap Resolution audit trace"
+            title="Click to see the ranking logic"
+            className="px-2 py-0.5 rounded-md border text-[10px] font-bold tabular-nums fwl-audit-metric"
+            style={{
+              borderColor: 'hsl(var(--border))',
+              color: 'hsl(var(--muted-foreground))',
+              cursor: 'pointer',
+              touchAction: 'manipulation',
+              WebkitTapHighlightColor: 'transparent',
+              userSelect: 'none',
+            }}
+            data-audit-trace-id={FUNDING_RESOLUTION_TRACE_ID}
+            data-audit-mode="on"
+            data-testid="audit-metric-funding-resolution"
+          >
+            🧾 Trace
+          </button>
+        ) : (
+          <span
+            className="px-2 py-0.5 rounded-md border text-[10px] font-bold tabular-nums"
+            style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--muted-foreground))' }}
+            data-audit-trace-id={FUNDING_RESOLUTION_TRACE_ID}
+            data-audit-mode="off"
+            data-testid="audit-metric-funding-resolution"
+          >
+            🧾
+          </span>
+        )}
+      </div>
+
+      {resolution.recommendation ? (
+        <div
+          className="rounded-md border px-2 py-1.5 mb-1.5"
+          style={{ borderColor: 'hsl(142,60%,55% / 0.45)', background: 'hsl(142,60%,10% / 0.30)' }}
+          data-testid="funding-resolution-recommendation"
+        >
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground">
+            ★ Recommended Solution
+          </div>
+          <div
+            className="text-[12px] font-bold leading-snug"
+            style={{ color: 'hsl(142,60%,65%)' }}
+            data-testid="funding-resolution-recommendation-title"
+          >
+            {resolution.recommendation.title}
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5" data-testid="funding-resolution-recommendation-detail">
+            {resolution.recommendation.detail}
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5 italic">
+            Trade-off: {resolution.recommendation.tradeOff}
+          </div>
+        </div>
+      ) : (
+        <div
+          className="text-[10px] text-muted-foreground italic mb-1.5"
+          data-testid="funding-resolution-no-candidates"
+        >
+          No candidate options could be generated from the current planning state. Review the planning inputs.
+        </div>
+      )}
+
+      {resolution.alternatives.length > 1 ? (
+        <div data-testid="funding-resolution-alternatives">
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1">
+            Alternative Solutions
+          </div>
+          <ol className="list-decimal list-inside text-[11px] leading-snug space-y-1 pl-1">
+            {resolution.alternatives.slice(1).map((c) => (
+              <li key={c.kind + c.title} data-testid={`funding-resolution-alternative-${c.kind}`}>
+                <span className="font-semibold">{c.title}</span>
+                <span className="text-muted-foreground"> · closes {fmt$(c.gapClosure)}</span>
+                <span className="text-[9px] text-muted-foreground block ml-4">
+                  Liquidity {c.scores.liquidityImprovement.toFixed(0)} · Wealth {c.scores.wealthImpact.toFixed(0)} · Debt {c.scores.debtImpact.toFixed(0)} · Complexity {c.scores.complexity.toFixed(0)} · rank {c.rank.toFixed(2)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+
+      <div className="text-[9px] text-muted-foreground mt-1.5 italic" data-testid="funding-resolution-no-block-note">
+        Advisory only — saves, forecasts, Monte Carlo, and FIRE analysis continue to run.
+      </div>
     </div>
   );
 }
