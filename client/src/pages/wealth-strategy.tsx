@@ -27,6 +27,9 @@ import FIREPathPage from "./fire-path";
 import MonteCarloDashboard from "@/components/MonteCarloDashboard";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link } from "wouter";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
+import { registerTrace } from "@/lib/auditMode/auditRegistry";
+import { buildWealthStrategyTraces } from "@/lib/auditMode/engineTraces/wealthStrategyTraces";
 import html2canvas from 'html2canvas';
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -2321,10 +2324,35 @@ function AICoach({
     stocksVal +
     cryptoVal;
 
-  const fireProgress = Math.min(
-    100,
-    (investableAssets / Math.max(1, (safeNum(snap.monthly_income) * 12) / 0.04)) * 100
-  );
+  const fireTargetCapital = Math.max(1, (safeNum(snap.monthly_income) * 12) / 0.04);
+  const fireProgress = Math.min(100, (investableAssets / fireTargetCapital) * 100);
+
+  // Audit Mode — register Wealth Strategy Hub Data Summary KPIs.
+  const totalAssetsWS =
+    safeNum(snap.ppor) +
+    safeNum(snap.cash) +
+    safeNum(snap.offset_balance) +
+    safeNum(snap.super_balance) +
+    safeNum(snap.stocks) +
+    safeNum(snap.crypto) +
+    stocksVal +
+    cryptoVal +
+    safeNum(snap.cars) +
+    safeNum(snap.iran_property);
+  const totalDebtWS = safeNum(snap.mortgage) + safeNum(snap.other_debts);
+
+  useEffect(() => {
+    buildWealthStrategyTraces({
+      cash: safeNum(snap.cash),
+      monthlyExpenses: safeNum(snap.monthly_expenses),
+      monthlyIncome: safeNum(snap.monthly_income),
+      monthlySurplus,
+      totalAssets: totalAssetsWS,
+      totalDebt: totalDebtWS,
+      investableAssets,
+      fireTarget: fireTargetCapital,
+    }).forEach(registerTrace);
+  }, [snap, monthlySurplus, totalAssetsWS, totalDebtWS, investableAssets, fireTargetCapital]);
 
   const getData = useCallback(
     () => ({
@@ -2382,9 +2410,30 @@ function AICoach({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <KpiCard label="Net Worth" value={formatCurrency(netWorth)} />
           <KpiCard label="Monthly Surplus" value={formatCurrency(monthlySurplus)} />
-          <KpiCard label="Savings Rate" value={`${savingsRate.toFixed(1)}%`} />
-          <KpiCard label="FIRE Progress" value={`${fireProgress.toFixed(1)}%`} />
-          <KpiCard label="Emergency Months" value={safeNum(snap.monthly_expenses) > 0 ? (safeNum(snap.cash) / safeNum(snap.monthly_expenses)).toFixed(1) : "—"} />
+          <KpiCard
+            label="Savings Rate"
+            value={<AuditableMetric traceId="wealth-strategy:savings-rate">{`${savingsRate.toFixed(1)}%`}</AuditableMetric>}
+          />
+          <KpiCard
+            label="FIRE Progress"
+            value={<AuditableMetric traceId="wealth-strategy:freedom-progress">{`${fireProgress.toFixed(1)}%`}</AuditableMetric>}
+          />
+          <KpiCard
+            label="Cash Buffer"
+            value={
+              <AuditableMetric traceId="wealth-strategy:cash-buffer">
+                {safeNum(snap.monthly_expenses) > 0 ? `${(safeNum(snap.cash) / safeNum(snap.monthly_expenses)).toFixed(1)} mo` : "—"}
+              </AuditableMetric>
+            }
+          />
+          <KpiCard
+            label="Debt/Assets"
+            value={
+              <AuditableMetric traceId="wealth-strategy:debt-to-assets">
+                {totalAssetsWS > 0 ? `${((totalDebtWS / totalAssetsWS) * 100).toFixed(1)}%` : "—"}
+              </AuditableMetric>
+            }
+          />
           <KpiCard label="Properties" value={String(properties.length)} />
           <KpiCard label="Stocks Value" value={formatCurrency(stocksVal)} />
           <KpiCard label="Crypto Value" value={formatCurrency(cryptoVal)} />

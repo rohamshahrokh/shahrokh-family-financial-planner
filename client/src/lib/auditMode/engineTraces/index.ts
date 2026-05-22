@@ -73,3 +73,13 @@ export {
   FINANCIAL_HEALTH_TRACE_IDS,
   LEGACY_RISK_RADAR_TRACE_IDS,
 } from './financialHealthTraces';
+
+export {
+  buildWealthStrategyTraces,
+  buildCashBufferTrace,
+  buildSavingsRateTrace,
+  buildDebtToAssetsTrace,
+  buildFreedomProgressTrace,
+  WEALTH_STRATEGY_TRACE_IDS,
+  type WealthStrategyTraceArgs,
+} from './wealthStrategyTraces';

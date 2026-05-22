@@ -22,8 +22,14 @@ import { useAppStore } from "./lib/store";
 import { PrivacyProvider } from "@/contexts/PrivacyContext";
 import { AuditModeProvider } from "@/lib/auditMode/AuditModeContext";
 import { CalculationTracePanel } from "@/components/auditMode/CalculationTracePanel";
+import { ensureCoverageRegistered } from "@/lib/auditMode/ensureCoverage";
 import { useEffect, useRef } from "react";
 import { trackPageView } from "./lib/analytics";
+
+// Register placeholder factories for every manifest id at app boot so the
+// Audit Coverage report can resolve traces immediately. Live host components
+// overwrite these with real engine output when they mount.
+ensureCoverageRegistered();
 
 import LoginPage          from "./pages/login";
 import DashboardPage      from "./pages/dashboard";

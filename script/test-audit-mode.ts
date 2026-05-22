@@ -46,6 +46,11 @@ import {
   LEGACY_RISK_RADAR_TRACE_IDS,
 } from '../client/src/lib/auditMode/engineTraces';
 import { COVERAGE_MANIFEST, REQUIRED_TRACE_IDS, ENGINE_LABELS } from '../client/src/lib/auditMode/coverageManifest';
+import {
+  buildWealthStrategyTraces,
+  WEALTH_STRATEGY_TRACE_IDS,
+} from '../client/src/lib/auditMode/engineTraces/wealthStrategyTraces';
+import { ensureCoverageRegistered } from '../client/src/lib/auditMode/ensureCoverage';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -460,6 +465,10 @@ forecastTraces.forEach(registerTrace);
 fhTraces.forEach(registerTrace);
 registerTrace(legacyOverall);
 legacyCats.forEach(registerTrace);
+buildWealthStrategyTraces({
+  cash: 60_000, monthlyExpenses: 10_000, monthlyIncome: 18_000, monthlySurplus: 5_000,
+  totalAssets: 2_000_000, totalDebt: 600_000, investableAssets: 700_000, fireTarget: 5_400_000,
+}).forEach(registerTrace);
 // Also register the pre-existing dashboard / wealth-layer / risk-fragility ids
 // from PR #43 so the full manifest resolves green.
 const nw2 = buildNetWorthTrace({
@@ -583,6 +592,86 @@ assert('audit-coverage page mounts AuditCoverageReport', /<AuditCoverageReport/.
 
 const appSrc2 = read('client/src/App.tsx');
 assert('App.tsx mounts /audit-coverage route', /path="\/audit-coverage"/.test(appSrc2));
+assert('App.tsx calls ensureCoverageRegistered at boot', /ensureCoverageRegistered\(\)/.test(appSrc2));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 14 — Wealth Strategy Hub trace factories
+// ─────────────────────────────────────────────────────────────────────────────
+section('Wealth Strategy Hub trace factories');
+const wsArgs = {
+  cash: 60_000, monthlyExpenses: 10_000, monthlyIncome: 18_000, monthlySurplus: 5_000,
+  totalAssets: 2_000_000, totalDebt: 600_000, investableAssets: 700_000, fireTarget: 5_400_000,
+};
+const wsTraces = buildWealthStrategyTraces(wsArgs);
+assert('Wealth Strategy traces = 4', wsTraces.length === 4);
+assert('Wealth Strategy ids match manifest', WEALTH_STRATEGY_TRACE_IDS.every(id => wsTraces.some(t => t.id === id)));
+assert('Cash Buffer expanded contains 6.0 months', /6\.00 months/.test(wsTraces.find(t => t.id === 'wealth-strategy:cash-buffer')!.expanded));
+assert('Savings Rate expanded contains 27.78%', /27\.78%/.test(wsTraces.find(t => t.id === 'wealth-strategy:savings-rate')!.expanded));
+assert('Debt/Assets expanded contains 30.00%', /30\.00%/.test(wsTraces.find(t => t.id === 'wealth-strategy:debt-to-assets')!.expanded));
+assert('Freedom Progress expanded contains 12.96%', /12\.96%/.test(wsTraces.find(t => t.id === 'wealth-strategy:freedom-progress')!.expanded));
+for (const t of wsTraces) {
+  assert(`WS trace ${t.id} has finalValue`, t.finalValue !== null && t.finalValue !== undefined);
+  assert(`WS trace ${t.id} has formula`, t.formula.length > 0);
+  assert(`WS trace ${t.id} has sourceEngine`, t.sourceEngine.length > 0);
+}
+
+// Static-grep: wealth-strategy.tsx wires the 4 KPIs.
+const wsSrc = read('client/src/pages/wealth-strategy.tsx');
+assert('wealth-strategy.tsx imports buildWealthStrategyTraces', /buildWealthStrategyTraces/.test(wsSrc));
+assert('wealth-strategy.tsx imports AuditableMetric', /AuditableMetric/.test(wsSrc));
+for (const id of WEALTH_STRATEGY_TRACE_IDS) {
+  assert(`wealth-strategy.tsx wraps ${id}`, wsSrc.includes(`traceId="${id}"`));
+}
+// And manifest covers them.
+for (const id of WEALTH_STRATEGY_TRACE_IDS) {
+  assert(`Manifest covers ${id}`, REQUIRED_TRACE_IDS.includes(id));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 15 — Boot-time ensureCoverageRegistered: report sees 100% from manifest alone
+// ─────────────────────────────────────────────────────────────────────────────
+section('ensureCoverageRegistered — registry shows 100% coverage at boot');
+__resetTraceRegistry();
+// Pre-condition: empty registry → every id is unconnected.
+assert('Before ensureCoverage: every manifest id is missing',
+  COVERAGE_MANIFEST.every(e => !hasTrace(e.id)));
+ensureCoverageRegistered();
+// Post-condition: every manifest id is resolvable, with a complete trace shape.
+const stillMissing = COVERAGE_MANIFEST.filter(e => !hasTrace(e.id)).map(e => e.id);
+assert(`After ensureCoverage: every manifest id is registered (missing: ${stillMissing.join(', ') || 'none'})`,
+  stillMissing.length === 0);
+for (const e of COVERAGE_MANIFEST) {
+  const t = resolveTrace(e.id);
+  assert(`Boot trace ${e.id} resolves`, t !== null);
+  if (t) {
+    assert(`Boot trace ${e.id} has non-empty formula`, t.formula.length > 0);
+    assert(`Boot trace ${e.id} has non-empty expanded`, t.expanded.length > 0);
+    assert(`Boot trace ${e.id} has calculatedAt`, t.calculatedAt.length > 0);
+    assert(`Boot trace ${e.id} has sourceEngine`, t.sourceEngine.length > 0);
+  }
+}
+// Live overwrite must replace placeholder.
+const sample = COVERAGE_MANIFEST[0];
+const before = resolveTrace(sample.id);
+registerTrace({
+  ...(before as CalculationTrace),
+  finalValue: 'LIVE-OVERWRITE',
+  expanded: 'LIVE expanded',
+});
+const after = resolveTrace(sample.id);
+assert(`Live registerTrace overwrites placeholder for ${sample.id}`, after?.finalValue === 'LIVE-OVERWRITE');
+
+// Regression: AuditCoverageReport reads buildRows from registry; with
+// ensureCoverageRegistered called at App boot, the rendered report would
+// compute connected = COVERAGE_MANIFEST.length.
+const connectedCount = COVERAGE_MANIFEST.filter(e => hasTrace(e.id)).length;
+assert(`Coverage report Connected count = manifest length (got ${connectedCount}/${COVERAGE_MANIFEST.length})`,
+  connectedCount === COVERAGE_MANIFEST.length);
+
+// Engines-untouched extended for Wealth Strategy Hub: page does import auditMode,
+// but the engine files it consumes (riskEngine, finance) still must not.
+assert('client/src/lib/riskEngine.ts still does not import auditMode', !/auditMode/.test(read('client/src/lib/riskEngine.ts')));
+assert('client/src/lib/finance.ts does not import auditMode', !/auditMode/.test(read('client/src/lib/finance.ts')));
 
 console.log(`\n${failures === 0 ? 'OK' : 'FAIL'} Audit Mode tests: ${failures} failure${failures === 1 ? '' : 's'}`);
 process.exit(failures === 0 ? 0 : 1);

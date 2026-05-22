@@ -2,7 +2,8 @@ import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 interface KpiCardProps {
   label: string;
-  value: string;
+  /** Accept ReactNode so callers can wrap the value in an AuditableMetric (or other interactive node). */
+  value: string | React.ReactNode;
   subValue?: string;
   trend?: number; // positive = up, negative = down
   icon?: React.ReactNode;

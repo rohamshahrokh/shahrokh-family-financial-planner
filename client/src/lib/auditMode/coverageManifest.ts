@@ -30,7 +30,8 @@ export type EngineSourceKey =
   | 'fire_engine'
   | 'wealth_layers'
   | 'dashboard'
-  | 'projection_rows';
+  | 'projection_rows'
+  | 'wealth_strategy';
 
 export interface CoverageEntry {
   /** Trace id registered with the audit registry. */
@@ -123,6 +124,13 @@ const legacyRiskDescriptions: Record<string, string> = {
   'risk-radar:category:income': 'Risk Radar page — Income risk category',
 };
 
+const wealthStrategyDescriptions: Record<string, string> = {
+  'wealth-strategy:cash-buffer': 'Wealth Strategy Hub — Cash Buffer (months of expenses)',
+  'wealth-strategy:savings-rate': 'Wealth Strategy Hub — Savings Rate (%)',
+  'wealth-strategy:debt-to-assets': 'Wealth Strategy Hub — Debt-to-Assets ratio (%)',
+  'wealth-strategy:freedom-progress': 'Wealth Strategy Hub — Freedom Progress toward FIRE (%)',
+};
+
 const projectionRequiredDescriptions: Record<string, string> = {
   'dashboard:net-worth': 'Dashboard hero — Net Worth',
   'dashboard:monthly-surplus': 'Dashboard hero — Monthly Surplus',
@@ -202,6 +210,14 @@ export const COVERAGE_MANIFEST: CoverageEntry[] = [
     description,
     required: true,
   })),
+  // ── Wealth Strategy Hub visible KPI tiles ──
+  ...Object.entries(wealthStrategyDescriptions).map<CoverageEntry>(([id, description]) => ({
+    id,
+    engine: 'wealth_strategy',
+    surface: 'pages/wealth-strategy.tsx',
+    description,
+    required: true,
+  })),
 ];
 
 /** Map an engine key to a friendly label. */
@@ -214,6 +230,7 @@ export const ENGINE_LABELS: Record<EngineSourceKey, string> = {
   wealth_layers: 'Canonical Wealth Layers',
   dashboard: 'Dashboard Hero',
   projection_rows: 'Projection Rows',
+  wealth_strategy: 'Wealth Strategy Hub',
 };
 
 /** All required trace ids in a stable order. */
