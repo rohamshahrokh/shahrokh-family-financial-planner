@@ -129,8 +129,30 @@ const PLACEHOLDER_FORMULAS: Record<string, string> = {
   'assumptions:mc:expected-return:super':    'Super mean annual return — feeds MCInput.yearlyAssumptions[*].super_return',
 };
 
+// Per-year Plan Execution Capacity cashflow placeholders — same formula for
+// every year because the dashboard overwrites the entry with a live trace
+// containing the funding-source decomposition the moment the cashflow series
+// finishes building. #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+function isCashflowPlanExecutionId(id: string): boolean {
+  return id.startsWith('cashflow:plan-execution:cash-balance:');
+}
+const CASHFLOW_PLAN_EXECUTION_FORMULA =
+  'Closing Cash = Opening Cash + Net Cashflow (deposits already net of funding source; equity-release adds debt, not cash)';
+
+// Cashflow Reconciliation placeholders. Same formula for every year — replaced
+// at runtime when the dashboard mounts and produces a live trace with all
+// engine-side income / outgoing line items. #FWL_Cashflow_Reconciliation_Trace
+function isCashflowReconciliationId(id: string): boolean {
+  return id.startsWith('cashflow:plan-execution:reconciliation:');
+}
+const CASHFLOW_RECONCILIATION_FORMULA =
+  'Net Cashflow = (Salary + Rental + Tax Refund) - (Living + PPOR Mortgage + IP Loan + Holding + Contributions + Bills) - Acquisition Cash Used';
+
 function buildPlaceholderTrace(entry: CoverageEntry): CalculationTrace {
-  const formula = PLACEHOLDER_FORMULAS[entry.id] ?? entry.description;
+  const formula = PLACEHOLDER_FORMULAS[entry.id]
+    ?? (isCashflowPlanExecutionId(entry.id) ? CASHFLOW_PLAN_EXECUTION_FORMULA
+        : isCashflowReconciliationId(entry.id) ? CASHFLOW_RECONCILIATION_FORMULA
+        : entry.description);
   return {
     id: entry.id,
     label: entry.description,

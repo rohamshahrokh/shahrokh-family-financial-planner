@@ -60,6 +60,7 @@ import type { CanonicalRiskSurface as CanonicalRiskSurfaceData } from '@/lib/can
 import type { WealthLayers } from '@/lib/canonicalWealth';
 import { AuditableMetric } from '@/components/auditMode/AuditableMetric';
 import { registerTrace } from '@/lib/auditMode/auditRegistry';
+import { useAuditMode } from '@/lib/auditMode/AuditModeContext';
 import {
   buildNetWorthTrace,
   buildMonthlySurplusTrace,
@@ -73,6 +74,8 @@ import {
 import {
   buildAllFinancialHealthTraces,
   buildAllForecastHeadlineTraces,
+  cashflowYearTraceId,
+  cashflowReconciliationTraceId,
 } from '@/lib/auditMode/engineTraces';
 
 // ─── Public props ────────────────────────────────────────────────────────────
@@ -90,6 +93,19 @@ export interface CashflowTrajectoryPoint {
   usableEquity: number;
   /** Total deposit power for the year (cash + usable equity − buffer). */
   totalDepositPower: number;
+  /**
+   * Funding-source decomposition for the year. Populated for every year by
+   * the dashboard; only acquisition years carry non-zero values. Surfaced
+   * here so the chart panel can render a per-year audit click target.
+   * #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+   */
+  year?: number;
+  openingCash?: number;
+  propertyPurchaseCashUsed?: number;
+  propertyEquityReleased?: number;
+  propertyAssetSalesUsed?: number;
+  propertyBuyingCosts?: number;
+  isAcquisitionYear?: boolean;
 }
 
 /** Mini summary metrics surfaced above the Deposit Power & Cashflow chart. */
@@ -1173,6 +1189,12 @@ function ReconciliationCard(p: ExecutiveDashboardProps) {
 function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
   const { privacyMode } = useAppStore();
   const mv = (v: string) => maskValue(v, privacyMode);
+  // Direct binding to the audit-mode context so the per-year chip below can
+  // open the trace without relying on an inner <button> inside an outer
+  // <button> (mobile Safari sometimes swallows the synthetic click event
+  // when AuditableMetric's button wraps a styled <span>).
+  // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+  const auditCtx = useAuditMode();
 
   // Local state fallbacks so the panel works even if dashboard.tsx hasn't
   // wired up the setter props yet — the canonical contract still hands the
@@ -1366,6 +1388,10 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
         </div>
         <div className="rounded-lg bg-background/60 border border-border px-2.5 py-1.5">
           <div className="text-[10px] text-muted-foreground mb-0.5">{finalYearLabel} Cash</div>
+          <AuditableMetric
+            traceId={cashflowYearTraceId(parseInt(finalYearLabel, 10) || new Date().getFullYear() + 9)}
+            testId="audit-metric-cashflow-final-year"
+          >
           <div
             className="text-sm sm:text-[15px] font-extrabold tabular-nums leading-tight"
             style={{ color: (finalYearCash ?? 0) >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}
@@ -1373,6 +1399,7 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
           >
             {mv(formatCurrency(finalYearCash ?? 0, true))}
           </div>
+          </AuditableMetric>
         </div>
         <div className="rounded-lg bg-background/60 border border-border px-2.5 py-1.5">
           <div className="text-[10px] text-muted-foreground mb-0.5">{gran === 'monthly' ? 'Monthly Net CF' : 'Annual Net CF'}</div>
@@ -1642,7 +1669,203 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
             </div>
           </div>
         )}
+
       </div>
+
+      {/* ── Per-year audit affordance — native click target for the
+            Plan Execution Capacity cashflow trace. Lives OUTSIDE the
+            chart-area div on purpose: that div carries
+            `userSelect: 'none'` + `touchAction: 'pan-y'` to lock chart
+            panning, and on mobile Safari those styles inherit into nested
+            interactive elements and swallow tap events. Rendering the row
+            as a sibling of the chart area restores native click/tap.
+            Each chip is a real <button type="button"> in Audit Mode (no
+            wrapping AuditableMetric) so iOS Safari fires `click`
+            immediately. Off mode renders a non-interactive <span>.
+            #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+      */}
+      {hasData && (
+        <div
+          className="px-3 pb-2 pt-1 flex flex-wrap items-center gap-1.5 border-t border-border/25"
+          data-testid="plan-execution-audit-row"
+          aria-label="Per-year cashflow audit trace"
+          style={{
+            userSelect: 'auto',
+            touchAction: 'manipulation',
+            pointerEvents: 'auto',
+          }}
+        >
+          <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mr-1">
+            Audit · Cash by year
+          </span>
+          {(() => {
+            // QA fix: render a chip for EVERY visible cashflow year so the
+            // user can audit any year on the chart — not only acquisition
+            // years. Acquisition years keep their visual marker (🏠 + amber
+            // accent). #FWL_CashByYear_Render_Every_Year
+            const traj = p.cashflowTrajectory ?? [];
+            const allYears = traj
+              .map((pt: any) => (typeof pt.year === 'number' ? (pt.year as number) : NaN))
+              .filter((y: number) => Number.isFinite(y));
+            const fallbackYear = (() => {
+              const lastLabel = lastRow?.label;
+              if (lastLabel) {
+                const m = String(lastLabel).match(/\d{4}/);
+                if (m) return parseInt(m[0], 10);
+              }
+              if (traj.length > 0 && typeof (traj[traj.length - 1] as any).year === 'number') {
+                return (traj[traj.length - 1] as any).year as number;
+              }
+              return new Date().getFullYear() + 9;
+            })();
+            const all = Array.from(new Set([...allYears, fallbackYear])).sort((a, b) => a - b);
+            return all.map((yr) => {
+              const pt = traj.find((t: any) => t.year === yr);
+              const isAcq = !!pt?.isAcquisitionYear;
+              const traceId = cashflowYearTraceId(yr);
+              const handleOpen = () => auditCtx.openTrace(traceId);
+              const baseClassName = "px-2.5 py-1 rounded-md border text-[11px] tabular-nums font-semibold inline-flex items-center";
+              const chipStyle: React.CSSProperties = {
+                borderColor: isAcq ? 'hsl(43,90%,55% / 0.55)' : 'hsl(var(--border))',
+                color: isAcq ? 'hsl(43,90%,60%)' : 'hsl(var(--muted-foreground))',
+                background: isAcq ? 'hsl(43,90%,12% / 0.4)' : 'transparent',
+              };
+              const chipLabel = isAcq ? `🏠 ${yr}` : yr;
+              if (!auditCtx.auditMode) {
+                return (
+                  <span
+                    key={`audit-yr-${yr}`}
+                    className={baseClassName}
+                    style={chipStyle}
+                    data-audit-trace-id={traceId}
+                    data-audit-mode="off"
+                    data-testid={`plan-execution-year-${yr}`}
+                    data-acquisition={isAcq ? 'true' : 'false'}
+                  >
+                    {chipLabel}
+                  </span>
+                );
+              }
+              return (
+                <button
+                  key={`audit-yr-${yr}`}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleOpen(); }}
+                  aria-label={`Open Calculation Trace for ${yr}`}
+                  title="Click to see how this was calculated"
+                  className={`${baseClassName} fwl-audit-metric`}
+                  style={{
+                    ...chipStyle,
+                    cursor: 'pointer',
+                    touchAction: 'manipulation',
+                    WebkitTapHighlightColor: 'transparent',
+                    userSelect: 'none',
+                  }}
+                  data-audit-trace-id={traceId}
+                  data-audit-mode="on"
+                  data-testid={`audit-metric-cashflow-${yr}`}
+                  data-plan-execution-year={yr}
+                  data-acquisition={isAcq ? 'true' : 'false'}
+                >
+                  {chipLabel}
+                </button>
+              );
+            });
+          })()}
+        </div>
+      )}
+
+      {/* ── Per-year Cashflow Reconciliation audit affordance ───────────────
+            Same iOS-Safari–friendly construction as the cash-by-year row
+            above (sibling of chart-area, real <button> with explicit
+            touch-action). Each chip opens a trace that itemises every
+            income / outgoing line behind that year's netCashflow so the
+            user can verify there is no double-counting (PPOR mortgage,
+            equity release, IP cashflows, etc.).
+            #FWL_Cashflow_Reconciliation_Trace
+      */}
+      {hasData && (
+        <div
+          className="px-3 pb-2 pt-1 flex flex-wrap items-center gap-1.5 border-t border-border/25"
+          data-testid="plan-execution-reconciliation-row"
+          aria-label="Per-year cashflow reconciliation audit trace"
+          style={{
+            userSelect: 'auto',
+            touchAction: 'manipulation',
+            pointerEvents: 'auto',
+          }}
+        >
+          <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mr-1">
+            Audit → Cashflow Reconciliation
+          </span>
+          {(() => {
+            const traj = p.cashflowTrajectory ?? [];
+            // Reconciliation supports every year in the rolling window — not
+            // just acquisition years — so the user can audit any year's net
+            // cashflow breakdown.
+            const allYears = traj
+              .map((pt: any) => (typeof pt.year === 'number' ? (pt.year as number) : NaN))
+              .filter((y: number) => Number.isFinite(y));
+            const uniqYears = Array.from(new Set(allYears)).sort((a, b) => a - b);
+            if (uniqYears.length === 0) {
+              const yr = new Date().getFullYear() + 9;
+              uniqYears.push(yr);
+            }
+            return uniqYears.map((yr) => {
+              const pt = traj.find((t: any) => t.year === yr);
+              const isAcq = !!pt?.isAcquisitionYear;
+              const traceId = cashflowReconciliationTraceId(yr);
+              const handleOpen = () => auditCtx.openTrace(traceId);
+              const baseClassName = "px-2.5 py-1 rounded-md border text-[11px] tabular-nums font-semibold inline-flex items-center";
+              const chipStyle: React.CSSProperties = {
+                borderColor: isAcq ? 'hsl(43,90%,55% / 0.55)' : 'hsl(var(--border))',
+                color: isAcq ? 'hsl(43,90%,60%)' : 'hsl(var(--muted-foreground))',
+                background: isAcq ? 'hsl(43,90%,12% / 0.4)' : 'transparent',
+              };
+              const chipLabel = isAcq ? `🧾 ${yr}` : yr;
+              if (!auditCtx.auditMode) {
+                return (
+                  <span
+                    key={`audit-recon-${yr}`}
+                    className={baseClassName}
+                    style={chipStyle}
+                    data-audit-trace-id={traceId}
+                    data-audit-mode="off"
+                    data-testid={`plan-execution-reconciliation-year-${yr}`}
+                    data-acquisition={isAcq ? 'true' : 'false'}
+                  >
+                    {chipLabel}
+                  </span>
+                );
+              }
+              return (
+                <button
+                  key={`audit-recon-${yr}`}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleOpen(); }}
+                  aria-label={`Open Cashflow Reconciliation trace for ${yr}`}
+                  title="Click to see income / outgoings breakdown for this year"
+                  className={`${baseClassName} fwl-audit-metric`}
+                  style={{
+                    ...chipStyle,
+                    cursor: 'pointer',
+                    touchAction: 'manipulation',
+                    WebkitTapHighlightColor: 'transparent',
+                    userSelect: 'none',
+                  }}
+                  data-audit-trace-id={traceId}
+                  data-audit-mode="on"
+                  data-testid={`audit-metric-cashflow-reconciliation-${yr}`}
+                  data-plan-execution-reconciliation-year={yr}
+                  data-acquisition={isAcq ? 'true' : 'false'}
+                >
+                  {chipLabel}
+                </button>
+              );
+            });
+          })()}
+        </div>
+      )}
     </section>
   );
 }

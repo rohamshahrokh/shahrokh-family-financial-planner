@@ -11,6 +11,11 @@ import {
   type NGSummary,
 } from "@/lib/finance";
 import { runCashEngine, getCashKPICards, type CashEvent } from "@/lib/cashEngine";
+import { registerTrace as registerAuditTrace } from "@/lib/auditMode/auditRegistry";
+import {
+  buildCashflowYearTrace,
+  buildCashflowReconciliationTrace,
+} from "@/lib/auditMode/engineTraces";
 import { useActiveRegime } from "@/hooks/useActiveRegime";
 // Map the active regime selector → calcNegativeGearing scenario value.
 // The 4-value selector enum from taxPolicyEngine collapses to the 3-value
@@ -1825,21 +1830,118 @@ export default function DashboardPage() {
     (equityTimeline ?? []).forEach((pt: any) => {
       equityByYear.set(pt.year, (pt.ppor_usable_equity ?? 0) + (pt.ip_usable_equity ?? 0));
     });
+    let openingCash = totalLiquidCash;
     return cashFlowAnnual.slice(0, 10).map((a: any) => {
       const yr = a.year as number;
       const cash = a.endingBalance ?? 0;
       const usableEquity = equityByYear.get(yr) ?? 0;
       const dp = Math.max(0, cash + usableEquity - emergencyBuffer);
-      return {
+      // Funding-source decomposition flows through the canonical engine.
+      // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+      const cashUsed   = (a as any).propertyPurchaseCashUsed ?? 0;
+      const equityRel  = (a as any).propertyEquityReleased   ?? 0;
+      const assetSales = (a as any).propertyAssetSalesUsed   ?? 0;
+      const buyingCosts = (a as any).propertyBuyingCosts ?? 0;
+      const isAcq = (cashUsed + equityRel + assetSales + buyingCosts) > 0;
+      const point = {
         label: String(yr),
         cashBalance: cash,
         netCashflow: a.netCashFlow ?? 0,
         taxRefund: a.ngTaxBenefit ?? 0,
         usableEquity,
         totalDepositPower: dp,
+        year: yr,
+        openingCash,
+        propertyPurchaseCashUsed: cashUsed,
+        propertyEquityReleased:   equityRel,
+        propertyAssetSalesUsed:   assetSales,
+        propertyBuyingCosts:      buyingCosts,
+        isAcquisitionYear: isAcq,
       };
+      openingCash = cash;
+      return point;
     });
-  }, [cashFlowAnnual, equityTimeline, emergencyBuffer]);
+  }, [cashFlowAnnual, equityTimeline, emergencyBuffer, totalLiquidCash]);
+
+  // ── Audit Mode: per-year cash-balance traces for the Plan Execution
+  // Capacity / Cashflow chart. The trace decomposes the year's closing cash
+  // into opening cash + net cashflow + property funding-source breakdown so
+  // the user can verify Equity-Release deposits did NOT subtract cash.
+  // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+  useEffect(() => {
+    if (!Array.isArray(cashFlowAnnual) || cashFlowAnnual.length === 0) return;
+    let openingCash = totalLiquidCash;
+    for (const a of cashFlowAnnual) {
+      const cashUsed   = (a as any).propertyPurchaseCashUsed ?? 0;
+      const equityRel  = (a as any).propertyEquityReleased   ?? 0;
+      const assetSales = (a as any).propertyAssetSalesUsed   ?? 0;
+      const buyingCosts = (a as any).propertyBuyingCosts ?? 0;
+      const isAcquisitionYear = (cashUsed + equityRel + assetSales + buyingCosts) > 0;
+      registerAuditTrace(
+        buildCashflowYearTrace({
+          year: a.year,
+          openingCash,
+          closingCash: a.endingBalance ?? 0,
+          netCashflow: a.netCashFlow ?? 0,
+          propertyPurchaseCashUsed: cashUsed,
+          propertyEquityReleased:   equityRel,
+          propertyAssetSalesUsed:   assetSales,
+          propertyBuyingCosts:      buyingCosts,
+          isAcquisitionYear,
+        }),
+      );
+
+      // ── Cashflow Reconciliation (Net Cashflow Breakdown) trace ──
+      // Itemises every income/outgoing line behind netCashflow so the user can
+      // verify there is no double-counting and see exactly which engine line
+      // produced each number. Every line passes through as a separate input
+      // so the displayed arithmetic balances exactly to engine netCashflow.
+      // #FWL_Cashflow_Reconciliation_Trace
+      const fundingSourceLabel =
+        equityRel > 0
+          ? 'equity-release'
+          : assetSales > 0
+            ? 'asset-sale'
+            : cashUsed > 0
+              ? 'cash + offset'
+              : undefined;
+      registerAuditTrace(
+        buildCashflowReconciliationTrace({
+          year: a.year,
+          openingCash,
+          closingCash: a.endingBalance ?? 0,
+          netCashflow: a.netCashFlow ?? 0,
+          // ── INCOME (cash bridge) ──
+          salaryIncome: (a as any).income ?? 0,
+          rentalIncomeByProperty: (a as any).rentalIncomeByProperty ?? {},
+          rentalIncomeTotal: (a as any).rentalIncome ?? 0,
+          taxRefund: (a as any).ngTaxBenefit ?? 0,
+          plannedStockSell: (a as any).plannedStockSell ?? 0,
+          plannedCryptoSell: (a as any).plannedCryptoSell ?? 0,
+          // ── EXPENSES (cash bridge) ──
+          livingExpenses: (a as any).totalExpenses ?? 0,
+          pporMortgage: (a as any).mortgageRepayment ?? 0,
+          investmentLoanRepayment: (a as any).investmentLoanRepayment ?? 0,
+          plannedStockBuy: (a as any).plannedStockBuy ?? 0,
+          plannedCryptoBuy: (a as any).plannedCryptoBuy ?? 0,
+          stockDCAOutflow: (a as any).stockDCAOutflow ?? 0,
+          cryptoDCAOutflow: (a as any).cryptoDCAOutflow ?? 0,
+          billsOutflow: (a as any).billsOutflow ?? 0,
+          acquisitionCashUsed: cashUsed,
+          assetSalesUsed: assetSales,
+          acquisitionBuyingCosts: buyingCosts,
+          // ── INFO (NOT in cash bridge) ──
+          propertyHoldingCost: (a as any).propertyHoldingCost ?? 0,
+          taxPayableInformational: (a as any).taxPayable ?? 0,
+          equityReleased: equityRel,
+          isAcquisitionYear,
+          fundingSourceLabel,
+        }),
+      );
+
+      openingCash = a.endingBalance ?? openingCash;
+    }
+  }, [cashFlowAnnual, totalLiquidCash]);
 
   // ─── Best Move V2 useMemo — MUST be before loading guard (Rules of Hooks) ──────────
   const inlineBestMove_hook = useMemo(() => {

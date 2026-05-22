@@ -22,6 +22,10 @@ import {
   LEGACY_RISK_RADAR_TRACE_IDS,
   PROPERTY_TRACE_IDS,
   FUNDING_SOURCE_TRACE_IDS,
+  CASHFLOW_PLAN_EXECUTION_TRACE_IDS,
+  CASHFLOW_PLAN_EXECUTION_YEAR_RANGE,
+  CASHFLOW_RECONCILIATION_TRACE_IDS,
+  CASHFLOW_RECONCILIATION_YEAR_RANGE,
 } from './engineTraces';
 
 export type EngineSourceKey =
@@ -35,7 +39,8 @@ export type EngineSourceKey =
   | 'projection_rows'
   | 'wealth_strategy'
   | 'property_engine'
-  | 'mc_assumptions';
+  | 'mc_assumptions'
+  | 'cashflow_engine';
 
 export interface CoverageEntry {
   /** Trace id registered with the audit registry. */
@@ -152,6 +157,32 @@ const propertyDescriptions: Record<string, string> = {
   'property:portfolio:lvr': 'Property page — Portfolio LVR (%)',
   'property:portfolio:cashflow': 'Property page — Monthly Investment Cashflow',
 };
+
+/**
+ * Per-year Plan Execution Capacity cashflow trace descriptions. One entry per
+ * year in the rolling 11-year cashflow horizon. Captures the audit value of
+ * the closing cash balance and explicitly calls out the canonical
+ * funding-aware path so the entry tells reviewers what to expect when they
+ * click it. #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+ */
+const cashflowYearDescriptions: Record<string, string> = Object.fromEntries(
+  CASHFLOW_PLAN_EXECUTION_YEAR_RANGE.map((y) => [
+    `cashflow:plan-execution:cash-balance:${y}`,
+    `Plan Execution Capacity — Cashflow chart, ${y} cash balance (opening + net CF + funding-aware property impact)`,
+  ]),
+);
+
+/**
+ * Per-year Cashflow Reconciliation trace descriptions. Itemises every income
+ * and outgoing line that feeds netCashflow and proves no double-counting.
+ * #FWL_Cashflow_Reconciliation_Trace
+ */
+const cashflowReconciliationDescriptions: Record<string, string> = Object.fromEntries(
+  CASHFLOW_RECONCILIATION_YEAR_RANGE.map((y) => [
+    `cashflow:plan-execution:reconciliation:${y}`,
+    `Plan Execution Capacity — Cashflow Reconciliation, ${y} net cashflow breakdown (income lines + outgoings + acquisition decomposition)`,
+  ]),
+);
 
 const fundingSourceDescriptions: Record<string, string> = {
   'property:funding-source:used':              'Property page — Funding Source Used (cash + equity + sales = deposit)',
@@ -272,6 +303,24 @@ export const COVERAGE_MANIFEST: CoverageEntry[] = [
     description: mcAssumptionsDescriptions[id] ?? id,
     required: true,
   })),
+  // ── Plan Execution Capacity per-year cash balance traces ──
+  // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+  ...CASHFLOW_PLAN_EXECUTION_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'cashflow_engine',
+    surface: 'ExecutiveDashboard → Plan Execution Capacity (acquisition year audit row + final-year tile)',
+    description: cashflowYearDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Cashflow Reconciliation per-year traces ──
+  // #FWL_Cashflow_Reconciliation_Trace
+  ...CASHFLOW_RECONCILIATION_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'cashflow_engine',
+    surface: 'ExecutiveDashboard → Plan Execution Capacity (AUDIT · CASHFLOW RECONCILIATION row)',
+    description: cashflowReconciliationDescriptions[id] ?? id,
+    required: true,
+  })),
 ];
 
 /** Map an engine key to a friendly label. */
@@ -287,6 +336,7 @@ export const ENGINE_LABELS: Record<EngineSourceKey, string> = {
   wealth_strategy: 'Wealth Strategy Hub',
   property_engine: 'Property Engine',
   mc_assumptions: 'Monte Carlo Assumptions',
+  cashflow_engine: 'Cashflow Engine',
 };
 
 /** All required trace ids in a stable order. */

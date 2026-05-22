@@ -551,6 +551,61 @@ buildAllFundingTraces({
   }],
 }).forEach(registerTrace);
 
+// Plan Execution Capacity per-year cashflow traces. Mirrors the live
+// dashboard registration loop so the coverage guard sees every year's
+// cash-balance entry. #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+const {
+  buildCashflowYearTrace: __buildCfYr,
+  CASHFLOW_PLAN_EXECUTION_YEAR_RANGE: __cfYears,
+  buildCashflowReconciliationTrace: __buildCfRec,
+  CASHFLOW_RECONCILIATION_YEAR_RANGE: __cfReconYears,
+} = await import('../client/src/lib/auditMode/engineTraces');
+for (const yr of __cfYears) {
+  registerTrace(__buildCfYr({
+    year: yr,
+    openingCash: 220_000,
+    closingCash: 220_000,
+    netCashflow: 50_000,
+    propertyPurchaseCashUsed: 0,
+    propertyEquityReleased: 0,
+    propertyAssetSalesUsed: 0,
+    propertyBuyingCosts: 0,
+    isAcquisitionYear: false,
+  }));
+}
+// Cashflow Reconciliation per-year traces — same shape as the dashboard
+// registration loop. Balanced bridge: 264k income - 214k expenses = 50k.
+// #FWL_Cashflow_Reconciliation_Trace
+for (const yr of __cfReconYears) {
+  registerTrace(__buildCfRec({
+    year: yr,
+    openingCash: 220_000,
+    closingCash: 270_000,
+    netCashflow: 50_000,
+    salaryIncome: 264_000,
+    rentalIncomeByProperty: {},
+    rentalIncomeTotal: 0,
+    taxRefund: 0,
+    plannedStockSell: 0,
+    plannedCryptoSell: 0,
+    livingExpenses: 214_000,
+    pporMortgage: 0,
+    investmentLoanRepayment: 0,
+    plannedStockBuy: 0,
+    plannedCryptoBuy: 0,
+    stockDCAOutflow: 0,
+    cryptoDCAOutflow: 0,
+    billsOutflow: 0,
+    acquisitionCashUsed: 0,
+    assetSalesUsed: 0,
+    acquisitionBuyingCosts: 0,
+    propertyHoldingCost: 0,
+    taxPayableInformational: 0,
+    equityReleased: 0,
+    isAcquisitionYear: false,
+  }));
+}
+
 const missing = REQUIRED_TRACE_IDS.filter(id => !hasTrace(id));
 assert(`All required trace ids are registerable (missing: ${missing.join(', ') || 'none'})`, missing.length === 0);
 for (const id of REQUIRED_TRACE_IDS) {

@@ -65,6 +65,16 @@ export function applyFundingToProperty<P extends Record<string, any>>(
   prop: P,
   ctx: AdapterContext,
 ): EffectiveProperty<P> {
+  // Idempotency guard — if this property has already been routed through the
+  // adapter (e.g. forecastEngine applied funding before passing it down to
+  // buildCashFlowSeries) the `_fundingPlan` side-channel is present. Re-running
+  // would mutate `deposit` a second time and produce wrong cash deduction.
+  // Return the existing effective record unchanged.
+  // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+  if (prop && (prop as any)[FUNDING_PLAN_FIELD]) {
+    return prop as EffectiveProperty<P>;
+  }
+
   // PPOR — return untouched but still attach a zero-impact plan for symmetry.
   if (prop.type === "ppor") {
     return {

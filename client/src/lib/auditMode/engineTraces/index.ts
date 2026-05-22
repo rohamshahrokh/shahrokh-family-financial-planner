@@ -120,3 +120,19 @@ export {
   FUNDING_SOURCE_TRACE_IDS,
   type FundingTraceArgs,
 } from './fundingSourceTraces';
+
+export {
+  buildCashflowYearTrace,
+  cashflowYearTraceId,
+  CASHFLOW_PLAN_EXECUTION_TRACE_IDS,
+  CASHFLOW_PLAN_EXECUTION_YEAR_RANGE,
+  type CashflowYearTraceArgs,
+} from './cashflowChartTraces';
+
+export {
+  buildCashflowReconciliationTrace,
+  cashflowReconciliationTraceId,
+  CASHFLOW_RECONCILIATION_TRACE_IDS,
+  CASHFLOW_RECONCILIATION_YEAR_RANGE,
+  type CashflowReconciliationTraceArgs,
+} from './cashflowReconciliationTraces';
