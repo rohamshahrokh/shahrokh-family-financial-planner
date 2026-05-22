@@ -44,12 +44,21 @@ import {
   buildLegacyRiskCategoryTraces,
   buildLegacyRiskOverallTrace,
   LEGACY_RISK_RADAR_TRACE_IDS,
+  buildAllDecisionCandidateTraces,
+  buildDecisionRankingLogicTrace,
+  buildDecisionTradeoffsTrace,
+  buildDecisionLensTrace,
+  buildLiveFinancialHealthTracesFromRiskRadar,
 } from '../client/src/lib/auditMode/engineTraces';
 import { COVERAGE_MANIFEST, REQUIRED_TRACE_IDS, ENGINE_LABELS } from '../client/src/lib/auditMode/coverageManifest';
 import {
   buildWealthStrategyTraces,
   WEALTH_STRATEGY_TRACE_IDS,
 } from '../client/src/lib/auditMode/engineTraces/wealthStrategyTraces';
+import {
+  buildAllPropertyPortfolioTraces,
+  PROPERTY_TRACE_IDS,
+} from '../client/src/lib/auditMode/engineTraces/propertyTraces';
 import { ensureCoverageRegistered } from '../client/src/lib/auditMode/ensureCoverage';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -500,6 +509,10 @@ for (const id of [
 ]) {
   registerTrace(stub(id, id));
 }
+buildAllPropertyPortfolioTraces({
+  portfolioValue: 1_000_000, portfolioLoans: 600_000, portfolioEquity: 400_000,
+  portfolioLVR: 60, monthlyPortfolioCF: 100, propertyCount: 2,
+}).forEach(registerTrace);
 
 const missing = REQUIRED_TRACE_IDS.filter(id => !hasTrace(id));
 assert(`All required trace ids are registerable (missing: ${missing.join(', ') || 'none'})`, missing.length === 0);
@@ -603,7 +616,7 @@ const wsArgs = {
   totalAssets: 2_000_000, totalDebt: 600_000, investableAssets: 700_000, fireTarget: 5_400_000,
 };
 const wsTraces = buildWealthStrategyTraces(wsArgs);
-assert('Wealth Strategy traces = 4', wsTraces.length === 4);
+assert('Wealth Strategy traces = 5 (incl. net-position)', wsTraces.length === 5);
 assert('Wealth Strategy ids match manifest', WEALTH_STRATEGY_TRACE_IDS.every(id => wsTraces.some(t => t.id === id)));
 assert('Cash Buffer expanded contains 6.0 months', /6\.00 months/.test(wsTraces.find(t => t.id === 'wealth-strategy:cash-buffer')!.expanded));
 assert('Savings Rate expanded contains 27.78%', /27\.78%/.test(wsTraces.find(t => t.id === 'wealth-strategy:savings-rate')!.expanded));
@@ -672,6 +685,355 @@ assert(`Coverage report Connected count = manifest length (got ${connectedCount}
 // but the engine files it consumes (riskEngine, finance) still must not.
 assert('client/src/lib/riskEngine.ts still does not import auditMode', !/auditMode/.test(read('client/src/lib/riskEngine.ts')));
 assert('client/src/lib/finance.ts does not import auditMode', !/auditMode/.test(read('client/src/lib/finance.ts')));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 16 — Audit Coverage navigation: hidden when OFF, visible only when ON
+// ─────────────────────────────────────────────────────────────────────────────
+section('Audit Coverage nav — gated behind Audit Mode ON');
+const layoutSrcNav = read('client/src/components/Layout.tsx');
+assert('Layout imports useAuditMode', /useAuditMode/.test(layoutSrcNav));
+assert('Layout reads auditMode flag', /const \{ auditMode \} = useAuditMode\(\)/.test(layoutSrcNav));
+assert('Layout has Admin · Developer Tools section', /Admin · Developer Tools/.test(layoutSrcNav));
+assert('Layout gates Admin Tools section on auditMode flag', /\{auditMode && \(/.test(layoutSrcNav));
+assert('Layout exposes nav-audit-coverage test id', /data-testid="nav-audit-coverage"/.test(layoutSrcNav));
+assert('Layout link target is /audit-coverage', /["\/]audit-coverage["]/.test(layoutSrcNav));
+assert('Layout uses Microscope icon for Audit Coverage', /Microscope/.test(layoutSrcNav));
+// The Audit Coverage nav appears ONLY inside the auditMode-gated branch — make
+// sure no unconditional /audit-coverage Link is rendered in the sidebar.
+const navAuditMatches = (layoutSrcNav.match(/data-testid="nav-audit-coverage"/g) ?? []).length;
+assert('Layout renders exactly one Audit Coverage nav entry', navAuditMatches === 1);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 17 — Discoverability: representative non-/audit-coverage surfaces wire
+//      AuditableMetric so users can open traces from where they appear.
+// ─────────────────────────────────────────────────────────────────────────────
+section('Discoverability — non-/audit-coverage surfaces wire AuditableMetric');
+const exDashSrc = read('client/src/components/ExecutiveDashboard.tsx');
+assert('ExecutiveDashboard wraps Best Move recommendation', /traceId="decision:bestmove:recommendation-logic"/.test(exDashSrc));
+assert('ExecutiveDashboard wraps Best Move impact', /traceId="decision:bestmove:component-scores"/.test(exDashSrc));
+
+const fcEngineSrc = read('client/src/pages/ai-forecast-engine.tsx');
+assert('Forecast Engine page imports AuditableMetric', /AuditableMetric/.test(fcEngineSrc));
+assert('Forecast Engine page wires P10', /traceId="mc:p10-nw-at-target"/.test(fcEngineSrc));
+assert('Forecast Engine page wires P50', /traceId="mc:p50-nw-at-target"/.test(fcEngineSrc));
+assert('Forecast Engine page wires P90', /traceId="mc:p90-nw-at-target"/.test(fcEngineSrc));
+// Per-goal trace ids replaced the shared aggregate on the visible cards
+// (the aggregate trace is still registered for cross-page consumers).
+assert('Forecast Engine page wires reach-3m', /traceId="mc:reach-3m"/.test(fcEngineSrc));
+assert('Forecast Engine page wires reach-5m', /traceId="mc:reach-5m"/.test(fcEngineSrc));
+assert('Forecast Engine page wires reach-10m', /traceId="mc:reach-10m"/.test(fcEngineSrc));
+assert('Forecast Engine page wires Financial Freedom Prob', /traceId="mc:financial-freedom-prob"/.test(fcEngineSrc));
+assert('Forecast Engine page wires Negative Cashflow Risk', /traceId="mc:neg-cashflow-risk"/.test(fcEngineSrc));
+assert('Forecast Engine page wires Cash Shortfall Risk', /traceId="mc:cash-shortfall-risk"/.test(fcEngineSrc));
+
+const propertySrc = read('client/src/pages/property.tsx');
+assert('Property page imports AuditableMetric', /from "@\/components\/auditMode\/AuditableMetric"/.test(propertySrc));
+assert('Property page imports buildAllPropertyPortfolioTraces', /buildAllPropertyPortfolioTraces/.test(propertySrc));
+assert('Property page wraps Portfolio Value', /property:portfolio:value/.test(propertySrc));
+assert('Property page wraps Portfolio Loans', /property:portfolio:loans/.test(propertySrc));
+assert('Property page wraps Portfolio Equity', /property:portfolio:equity/.test(propertySrc));
+assert('Property page wraps Portfolio LVR', /property:portfolio:lvr/.test(propertySrc));
+assert('Property page wraps Portfolio Cashflow', /property:portfolio:cashflow/.test(propertySrc));
+// Confirm the property tile actually renders the value inside AuditableMetric.
+assert('Property page renders AuditableMetric in KPI tile loop', /<AuditableMetric traceId=\{s\.traceId\}/.test(propertySrc));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 18 — Property portfolio trace factories produce complete records
+// ─────────────────────────────────────────────────────────────────────────────
+section('Property portfolio trace factories');
+const propTraces = buildAllPropertyPortfolioTraces({
+  portfolioValue: 2_400_000,
+  portfolioLoans: 1_400_000,
+  portfolioEquity: 1_000_000,
+  portfolioLVR: 58.3,
+  monthlyPortfolioCF: -250,
+  propertyCount: 3,
+});
+assert('Property portfolio traces = 5', propTraces.length === 5);
+for (const id of PROPERTY_TRACE_IDS) {
+  const t = propTraces.find(x => x.id === id);
+  assert(`Property trace ${id} present`, !!t);
+  if (t) {
+    assert(`Property trace ${id} has finalValue`, t.finalValue !== null && t.finalValue !== undefined);
+    assert(`Property trace ${id} has formula`, t.formula.length > 0);
+    assert(`Property trace ${id} has sourceEngine`, t.sourceEngine.length > 0);
+    assert(`Property trace ${id} included in manifest`, REQUIRED_TRACE_IDS.includes(id));
+  }
+}
+assert('Equity trace expanded uses actual values',
+  /\$2,400,000 − \$1,400,000 = \$1,000,000/.test(
+    propTraces.find(t => t.id === 'property:portfolio:equity')!.expanded));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 19 — Audit indicator — hover/focus class wired on AuditableMetric
+// ─────────────────────────────────────────────────────────────────────────────
+section('Audit indicator — hover/focus class wired');
+const auditableSrc = read('client/src/components/auditMode/AuditableMetric.tsx');
+assert('AuditableMetric uses fwl-audit-metric class', /fwl-audit-metric/.test(auditableSrc));
+const cssSrc = read('client/src/index.css');
+assert('index.css defines .fwl-audit-metric', /\.fwl-audit-metric\s*\{/.test(cssSrc));
+assert('index.css defines :hover state', /\.fwl-audit-metric:hover/.test(cssSrc));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 19b — Native-page discoverability gaps (PR #44 QA follow-up)
+// ─────────────────────────────────────────────────────────────────────────────
+section('Native-page discoverability — Decision Engine');
+const decisionSrc = read('client/src/pages/decision.tsx');
+assert('decision.tsx imports per-candidate trace builder', /buildAllDecisionCandidateTraces/.test(decisionSrc));
+assert('decision.tsx imports ranking-logic builder', /buildDecisionRankingLogicTrace/.test(decisionSrc));
+assert('decision.tsx imports trade-off builder', /buildDecisionTradeoffsTrace/.test(decisionSrc));
+assert('decision.tsx imports lens builder', /buildDecisionLensTrace/.test(decisionSrc));
+assert('decision.tsx wires ranking-logic affordance', /traceId="decision:ranking-logic"/.test(decisionSrc));
+assert('decision.tsx wires trade-off affordance', /traceId="decision:trade-off-analysis"/.test(decisionSrc));
+assert('decision.tsx wires lens trace ids', /traceId=\{`decision:lens:\$\{lens\.key\}`\}/.test(decisionSrc));
+
+const strategyCardSrc = read('client/src/components/decisionEngine/StrategyCard.tsx');
+assert('StrategyCard wraps per-candidate score', /traceId=\{`decision:candidate:\$\{candidate\.id\}:total-score`\}/.test(strategyCardSrc));
+assert('StrategyCard wraps per-candidate rationale', /traceId=\{`decision:candidate:\$\{candidate\.id\}:rationale`\}/.test(strategyCardSrc));
+assert('StrategyCard wraps trade-off section', /traceId="decision:trade-off-analysis"/.test(strategyCardSrc));
+
+section('Native-page discoverability — Risk Radar');
+const riskRadarSrc = read('client/src/pages/risk-radar.tsx');
+assert('risk-radar imports canonical financial-health builder', /buildLiveFinancialHealthTracesFromRiskRadar/.test(riskRadarSrc));
+assert('risk-radar wires canonical Liquidity affordance', /traceId="financial-health:liquidity"/.test(riskRadarSrc));
+assert('risk-radar wires canonical Leverage affordance', /traceId="financial-health:leverage"/.test(riskRadarSrc));
+assert('risk-radar wires canonical Cashflow affordance', /traceId="financial-health:cashflow"/.test(riskRadarSrc));
+assert('risk-radar wires canonical FIRE Progress affordance', /traceId="financial-health:fire-progress"/.test(riskRadarSrc));
+assert('risk-radar wires canonical Overall Health affordance', /traceId="financial-health:overall"/.test(riskRadarSrc));
+assert('risk-radar useMemo guards before early return (no hook order swap)', /useMemo\([\s\S]*?if \(!hasSnap\) return null;/.test(riskRadarSrc));
+
+section('Native-page discoverability — Wealth Strategy Hub');
+const wealthStratSrc = read('client/src/pages/wealth-strategy.tsx');
+assert('wealth-strategy wires Net Position trace at hero', /traceId="wealth-strategy:net-position"/.test(wealthStratSrc));
+assert('wealth-strategy wires Cash Buffer signal tile', /traceId="wealth-strategy:cash-buffer"[\s\S]{0,250}derived\.monthsBuffer/.test(wealthStratSrc));
+assert('wealth-strategy wires Savings Rate signal tile', /traceId="wealth-strategy:savings-rate"[\s\S]{0,250}derived\.savingsRate/.test(wealthStratSrc));
+assert('wealth-strategy wires Debt/Assets signal tile', /traceId="wealth-strategy:debt-to-assets"[\s\S]{0,250}derived\.debtToAsset/.test(wealthStratSrc));
+assert('wealth-strategy wires Freedom Progress signal tile', /traceId="wealth-strategy:freedom-progress"[\s\S]{0,250}derived\.fireProgressPct/.test(wealthStratSrc));
+// Hub-level live registration (NOT only in AICoach sub-component). The hub
+// useEffect must build traces from `derived.*` and pass them to registerTrace
+// so the live values overwrite the boot-time placeholders the moment the
+// /wealth-strategy hub page mounts.
+assert('wealth-strategy hub registers live traces from derived',
+  /buildWealthStrategyTraces\(\{[\s\S]{0,400}cash: derived\.liquidity,[\s\S]{0,400}totalAssets: derived\.totalAssets,[\s\S]{0,400}fireTarget: derived\.requiredFIRE,[\s\S]{0,80}\}\)\.forEach\(registerTrace\)/.test(wealthStratSrc));
+// Two distinct registration sites (hub + AICoach inner) so coverage is
+// guaranteed regardless of which tab is active.
+const wealthRegMatches = wealthStratSrc.match(/buildWealthStrategyTraces\(\{/g) ?? [];
+assert('wealth-strategy buildWealthStrategyTraces called at hub AND AICoach', wealthRegMatches.length >= 2);
+
+section('Native-page discoverability — Monte Carlo / AI Forecast Engine');
+assert('ai-forecast-engine imports registerTrace', /import \{ registerTrace \} from "@\/lib\/auditMode\/auditRegistry"/.test(fcEngineSrc));
+assert('ai-forecast-engine registers live mc traces in useEffect', /registerTrace\([\s\S]*?nwTrace\(/.test(fcEngineSrc));
+assert('ai-forecast-engine registers live fire-probability id', /registerTrace\(\{[\s\S]{0,1200}id: 'mc:fire-probability'/.test(fcEngineSrc));
+assert('ai-forecast-engine registers live confidence-bands id', /id: 'mc:confidence-bands'/.test(fcEngineSrc));
+assert('ai-forecast-engine registers live median-fire-year id', /id: 'mc:median-fire-year'/.test(fcEngineSrc));
+// Per-goal trace ids — each visible $X tile must open its own live trace,
+// not the aggregate. The browser QA flagged that a single shared id is
+// ambiguous in the trace panel.
+assert('ai-forecast-engine $3M card uses mc:reach-3m', /traceId="mc:reach-3m"/.test(fcEngineSrc));
+assert('ai-forecast-engine $5M card uses mc:reach-5m', /traceId="mc:reach-5m"/.test(fcEngineSrc));
+assert('ai-forecast-engine $10M card uses mc:reach-10m', /traceId="mc:reach-10m"/.test(fcEngineSrc));
+assert('ai-forecast-engine registers per-goal reach-3m trace', /registerTrace\(reachTrace\('mc:reach-3m'/.test(fcEngineSrc));
+assert('ai-forecast-engine registers per-goal reach-5m trace', /registerTrace\(reachTrace\('mc:reach-5m'/.test(fcEngineSrc));
+assert('ai-forecast-engine registers per-goal reach-10m trace', /registerTrace\(reachTrace\('mc:reach-10m'/.test(fcEngineSrc));
+
+section('Native-page discoverability — Decision Engine universal affordance row');
+const decisionSrc2 = read('client/src/pages/decision.tsx');
+for (const id of [
+  'decision:winner:component-scores',
+  'decision:winner:weightings',
+  'decision:winner:penalties',
+  'decision:winner:why-this-ranks',
+  'decision:winner:why-not-ranked-higher',
+  'decision:ranking-logic',
+  'decision:trade-off-analysis',
+  'decision:winner:recommendation-logic',
+]) {
+  assert(`decision.tsx universal affordance row wires ${id}`,
+    new RegExp(`<AuditableMetric traceId="${id.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}"`).test(decisionSrc2));
+}
+
+section('Trace factories — FIRE Progress numeric live (no redirect text)');
+// Case 1: extras provided → numeric, formula uses actual values.
+const fhWithExtras = buildLiveFinancialHealthTracesFromRiskRadar({
+  overall_score: 67, overall_level: 'amber', overall_label: 'Moderate', fragility_index: 12,
+  categories: [
+    { id: 'debt',       label: 'Debt Risk',       icon: '🏦', score: 72, level: 'green', factors: [{ id: 'debt_ratio', label: 'Debt/Assets', value: '38%', benchmark: '<40%', score: 80, weight: 1, level: 'green', finding: 'OK', action: 'ok' }], summary: '' },
+    { id: 'cashflow',   label: 'Cashflow Risk',   icon: '💸', score: 60, level: 'amber', factors: [{ id: 'cash_buffer', label: 'Cash Buffer', value: '4.2 months', benchmark: '≥3', score: 78, weight: 1, level: 'green', finding: '', action: '' }, { id: 'surplus_ratio', label: 'Surplus Ratio', value: '22%', benchmark: '≥20%', score: 70, weight: 1, level: 'green', finding: '', action: '' }], summary: '' },
+    { id: 'investment', label: 'Investment Risk', icon: '📈', score: 55, level: 'amber', factors: [], summary: '' },
+    { id: 'income',     label: 'Income Risk',     icon: '💼', score: 65, level: 'amber', factors: [], summary: '' },
+  ],
+  top_risks: [], alerts: [], radar_data: [], data_coverage: 'full' as any,
+} as any, { investable: 600_000, annualExpenses: 264_000, swr: 0.04 });
+const fhFireLive = fhWithExtras.find(x => x.id === 'financial-health:fire-progress')!;
+assert('FIRE Progress finalValue is "N / 100" numeric',
+  /^\d+\s*\/\s*100$/.test(String(fhFireLive.finalValue)));
+assert('FIRE Progress finalValue is NOT "see FIRE Path"', !/see FIRE Path/i.test(String(fhFireLive.finalValue)));
+assert('FIRE Progress expanded shows annual_expenses arithmetic',
+  /annual_expenses\s*=\s*\$264,000/.test(fhFireLive.expanded));
+assert('FIRE Progress expanded shows SWR',
+  /SWR\s*=\s*4\.0%/.test(fhFireLive.expanded));
+assert('FIRE Progress expanded shows FIRE_target_capital arithmetic',
+  /FIRE_target_capital = annual_expenses \/ SWR = \$6,600,000/.test(fhFireLive.expanded));
+assert('FIRE Progress source attributes "live page derivation"',
+  /live page derivation/.test(fhFireLive.dataSource));
+// Case 2: no extras + no fire_progress_pct → still a numeric 0 / 100, never redirect text.
+const fhNoExtras = buildLiveFinancialHealthTracesFromRiskRadar({
+  overall_score: 67, overall_level: 'amber', overall_label: 'Moderate', fragility_index: 12,
+  categories: [
+    { id: 'debt', label: 'Debt Risk', icon: '🏦', score: 72, level: 'green', factors: [], summary: '' },
+    { id: 'cashflow', label: 'Cashflow Risk', icon: '💸', score: 60, level: 'amber', factors: [], summary: '' },
+    { id: 'investment', label: 'Investment Risk', icon: '📈', score: 55, level: 'amber', factors: [], summary: '' },
+    { id: 'income', label: 'Income Risk', icon: '💼', score: 65, level: 'amber', factors: [], summary: '' },
+  ],
+  top_risks: [], alerts: [], radar_data: [], data_coverage: 'full' as any,
+} as any);
+const fhFireNoExtras = fhNoExtras.find(x => x.id === 'financial-health:fire-progress')!;
+assert('FIRE Progress fallback finalValue is "0 / 100" (numeric, never redirect)',
+  String(fhFireNoExtras.finalValue) === '0 / 100');
+assert('FIRE Progress fallback expanded never contains "see FIRE Path"',
+  !/see FIRE Path/i.test(fhFireNoExtras.expanded));
+
+// risk-radar.tsx wires the live extras (investable, annualExpenses, swr).
+const riskRadarSrc2 = read('client/src/pages/risk-radar.tsx');
+assert('risk-radar passes investable to buildLiveFinancialHealthTracesFromRiskRadar',
+  /buildLiveFinancialHealthTracesFromRiskRadar\(resultWithFireProgress as any, \{[\s\S]{0,200}investable,/.test(riskRadarSrc2));
+assert('risk-radar passes annualExpenses to live FH builder',
+  /annualExpenses,/.test(riskRadarSrc2));
+assert('risk-radar passes SWR to live FH builder', /swr:\s*0\.04/.test(riskRadarSrc2));
+
+section('Trace factories — Decision Engine extended');
+const candidateTraces = buildAllDecisionCandidateTraces({
+  rank: 2,
+  candidate: {
+    id: 'cand-2',
+    label: 'ETF DCA',
+    headline: 'Steady DCA',
+    score: {
+      score: 64,
+      baseScore: 71,
+      breakdown: [
+        { axis: 'survivalProbability', rawValue: 0.95, normalisedValue: 0.95, weight: 0.35, contribution: 33.25 },
+        { axis: 'liquidityFactor',     rawValue: 1.5,  normalisedValue: 0.6,  weight: 0.25, contribution: 15.0 },
+      ],
+      penalties: [{ id: 'leverage', magnitude: 7, reason: 'IP LVR > 80%', band: 'elevated' }],
+    },
+    rationale: ['Liquidity buffer at 1.5×', 'Low default-prob exposure'],
+  },
+  investorProfile: 'balanced',
+  generatedAt: '2026-05-22T00:00:00.000Z',
+});
+assert('Candidate trace bundle has 4 entries', candidateTraces.length === 4);
+assert('Candidate total-score id matches pattern', candidateTraces[0].id === 'decision:candidate:cand-2:total-score');
+assert('Candidate component-scores id matches pattern', candidateTraces[1].id === 'decision:candidate:cand-2:component-scores');
+assert('Candidate score expanded shows arithmetic', /Score = 48\.25 − 7\.00 = 64\.00/.test(candidateTraces[0].expanded));
+
+const rankingLogic = buildDecisionRankingLogicTrace({
+  candidates: [
+    { id: 'a', label: 'Top', score: 78, rank: 1 },
+    { id: 'b', label: 'Runner', score: 64, rank: 2 },
+  ],
+  investorProfile: 'balanced',
+  riskMode: 'balanced',
+  weights: { survivalProbability: 0.35, liquidityFactor: 0.25 },
+  totalGenerated: 12,
+  totalDiscarded: 4,
+  generatedAt: '2026-05-22T00:00:00.000Z',
+});
+assert('Ranking logic trace id', rankingLogic.id === 'decision:ranking-logic');
+assert('Ranking logic expanded names every candidate', /#1 Top/.test(rankingLogic.expanded) && /#2 Runner/.test(rankingLogic.expanded));
+assert('Ranking logic expanded names discarded count', /Filtered out \(behavioural \/ safety\): 4/.test(rankingLogic.expanded));
+
+const tradeoffs = buildDecisionTradeoffsTrace({
+  candidateLabel: 'ETF DCA',
+  candidateId: 'cand-2',
+  rank: 2,
+  tradeOffs: { returnPotential: 0.6, riskExposure: 0.3, liquidity: 0.7, cashflowSafety: 0.8, taxEfficiency: 0.5, volatilityTolerance: 0.4 },
+  investorProfile: 'balanced',
+  generatedAt: '2026-05-22T00:00:00.000Z',
+});
+assert('Trade-off trace id', tradeoffs.id === 'decision:trade-off-analysis');
+assert('Trade-off trace expanded shows all six axes', /Return potential/.test(tradeoffs.expanded) && /Volatility tolerance/.test(tradeoffs.expanded));
+
+const lensTrace = buildDecisionLensTrace({
+  lensKey: 'wealthMax',
+  lensLabel: 'Wealth Max',
+  winnerLabel: 'Levered Property',
+  winnerId: 'cand-x',
+  score: 82,
+  whyThisWins: 'Emphasises terminal NW + RAR',
+  investorProfile: 'balanced',
+  generatedAt: '2026-05-22T00:00:00.000Z',
+});
+assert('Lens trace id', lensTrace.id === 'decision:lens:wealthMax');
+assert('Lens trace finalValue mentions winner', /Levered Property/.test(String(lensTrace.finalValue)));
+
+section('Trace factories — Live financial-health from risk-radar');
+const fhLive = buildLiveFinancialHealthTracesFromRiskRadar({
+  overall_score: 67,
+  overall_level: 'amber',
+  overall_label: 'Moderate',
+  fragility_index: 12,
+  categories: [
+    { id: 'debt',       label: 'Debt Risk',       icon: '🏦', score: 72, level: 'green', factors: [{ id: 'debt_ratio', label: 'Debt/Assets', value: '38%', benchmark: '<40%', score: 80, weight: 1, level: 'green', finding: 'OK', action: 'ok' }], summary: '' },
+    { id: 'cashflow',   label: 'Cashflow Risk',   icon: '💸', score: 60, level: 'amber', factors: [{ id: 'cash_buffer',   label: 'Cash Buffer',     value: '4.2 months', benchmark: '≥3', score: 78, weight: 1, level: 'green', finding: '', action: '' }, { id: 'surplus_ratio', label: 'Surplus Ratio', value: '22%', benchmark: '≥20%', score: 70, weight: 1, level: 'green', finding: '', action: '' }], summary: '' },
+    { id: 'investment', label: 'Investment Risk', icon: '📈', score: 55, level: 'amber', factors: [], summary: '' },
+    { id: 'income',     label: 'Income Risk',     icon: '💼', score: 65, level: 'amber', factors: [], summary: '' },
+  ],
+  top_risks: [],
+  alerts: [],
+  radar_data: [],
+  data_coverage: 'full' as any,
+  fire_progress_pct: 27.5,
+} as any);
+assert('Financial-health live bundle returns 5 traces', fhLive.length === 5);
+for (const id of ['financial-health:liquidity', 'financial-health:leverage', 'financial-health:cashflow', 'financial-health:fire-progress', 'financial-health:overall']) {
+  const t = fhLive.find(x => x.id === id);
+  assert(`Live FH trace ${id} present`, !!t);
+  if (t) {
+    assert(`Live FH trace ${id} finalValue populated`, t.finalValue !== null && t.finalValue !== undefined && String(t.finalValue).length > 0);
+    assert(`Live FH trace ${id} formula populated`, t.formula.length > 0);
+    assert(`Live FH trace ${id} sourceEngine populated`, t.sourceEngine.length > 0);
+  }
+}
+const fhFire = fhLive.find(x => x.id === 'financial-health:fire-progress')!;
+assert('FIRE Progress trace pulls live fire_progress_pct', /27\.5/.test(fhFire.expanded));
+
+section('Trace factories — Wealth Strategy net-position');
+const wsTracesNP = buildWealthStrategyTraces({
+  cash: 300_000, monthlyExpenses: 22_000, monthlyIncome: 32_000, monthlySurplus: 10_000,
+  totalAssets: 4_000_000, totalDebt: 1_400_000, investableAssets: 700_000, fireTarget: 2_400_000,
+});
+assert('Wealth strategy bundle returns 5 traces (incl. net-position)', wsTracesNP.length === 5);
+const netPos = wsTracesNP.find(x => x.id === 'wealth-strategy:net-position');
+assert('Net Position trace present', !!netPos);
+if (netPos) {
+  assert('Net Position expanded uses actual values', /\$4,000,000 − \$1,400,000 = \$2,600,000/.test(netPos.expanded));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 20 — Canonical engines remain untouched (extended)
+// ─────────────────────────────────────────────────────────────────────────────
+section('Canonical engines remain untouched (extended)');
+const engineFilesToCheck = [
+  'client/src/lib/equityEngine.ts',
+  'client/src/lib/canonicalWealth.ts',
+  'client/src/lib/canonicalRiskSurface.ts',
+  'client/src/lib/recommendationEngine.ts',
+  'client/src/lib/monteCarloEngine.ts',
+  'client/src/lib/monteCarloCanonical.ts',
+  'client/src/lib/monteCarloV4.ts',
+  'client/src/lib/monteCarloV5.ts',
+  'client/src/lib/taxPolicyEngine.ts',
+  'client/src/lib/taxRulesEngine.ts',
+];
+for (const f of engineFilesToCheck) {
+  try {
+    const src = read(f);
+    assert(`${f} does not import auditMode`, !/from\s+["'][^"']*auditMode["']/.test(src));
+  } catch {
+    // file optional — skip
+  }
+}
 
 console.log(`\n${failures === 0 ? 'OK' : 'FAIL'} Audit Mode tests: ${failures} failure${failures === 1 ? '' : 's'}`);
 process.exit(failures === 0 ? 0 : 1);

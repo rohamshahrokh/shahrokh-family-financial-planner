@@ -86,6 +86,10 @@ function AuditableMetricInner({
     );
   }
 
+  const composedClassName = className
+    ? `${className} fwl-audit-metric`
+    : 'fwl-audit-metric';
+
   return (
     <button
       type="button"
@@ -93,7 +97,7 @@ function AuditableMetricInner({
       data-audit-trace-id={traceId}
       data-audit-mode="on"
       data-testid={testId ?? `audit-metric-${traceId}`}
-      className={className}
+      className={composedClassName}
       style={{
         background: 'transparent',
         border: 'none',
@@ -108,6 +112,7 @@ function AuditableMetricInner({
         textDecorationThickness: '1px',
       }}
       aria-label="Show calculation trace"
+      title="Click to see how this was calculated"
     >
       {children}
     </button>

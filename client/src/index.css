@@ -4212,3 +4212,42 @@ nav a[aria-current="page"] {
   background-color: hsl(var(--success) / 0.08);
   border-color: hsl(var(--success) / 0.30);
 }
+
+/* ─── Audit Mode — interactive metric indicator ────────────────────────────
+   When global Audit Mode is ON, AuditableMetric renders a button with a
+   subtle gold dotted underline. The .fwl-audit-metric class adds hover/tap
+   reinforcement (slightly stronger underline + soft gold tint) so users
+   know exactly which numbers on the page are inspectable.
+
+   Visual language stays premium and quiet:
+     • OFF state — children render unchanged.
+     • ON state  — dotted underline + cursor:pointer.
+     • Hover     — solid 1.5px gold underline + faint gold surface chip.
+     • Active    — slight push (translateY 1px) for tap affordance.
+
+   Mobile parity: hover styles also bind to :focus-visible so keyboard /
+   touch focus shows the same affordance. */
+
+.fwl-audit-metric {
+  position: relative;
+  border-radius: 4px;
+  transition: background-color 120ms ease, text-decoration-color 120ms ease, transform 80ms ease;
+}
+
+.fwl-audit-metric:hover,
+.fwl-audit-metric:focus-visible {
+  background-color: hsl(var(--gold) / 0.08);
+  text-decoration-color: hsl(var(--gold)) !important;
+  text-decoration-thickness: 1.5px !important;
+  outline: none;
+}
+
+.fwl-audit-metric:active {
+  transform: translateY(1px);
+}
+
+@media (max-width: 640px) {
+  .fwl-audit-metric:active {
+    background-color: hsl(var(--gold) / 0.12);
+  }
+}

@@ -20,6 +20,7 @@ import {
   FORECAST_TRACE_IDS,
   FINANCIAL_HEALTH_TRACE_IDS,
   LEGACY_RISK_RADAR_TRACE_IDS,
+  PROPERTY_TRACE_IDS,
 } from './engineTraces';
 
 export type EngineSourceKey =
@@ -31,7 +32,8 @@ export type EngineSourceKey =
   | 'wealth_layers'
   | 'dashboard'
   | 'projection_rows'
-  | 'wealth_strategy';
+  | 'wealth_strategy'
+  | 'property_engine';
 
 export interface CoverageEntry {
   /** Trace id registered with the audit registry. */
@@ -129,6 +131,15 @@ const wealthStrategyDescriptions: Record<string, string> = {
   'wealth-strategy:savings-rate': 'Wealth Strategy Hub — Savings Rate (%)',
   'wealth-strategy:debt-to-assets': 'Wealth Strategy Hub — Debt-to-Assets ratio (%)',
   'wealth-strategy:freedom-progress': 'Wealth Strategy Hub — Freedom Progress toward FIRE (%)',
+  'wealth-strategy:net-position': 'Wealth Strategy Hub — Household Net Position',
+};
+
+const propertyDescriptions: Record<string, string> = {
+  'property:portfolio:value': 'Property page — Portfolio Value (sum of settled IPs)',
+  'property:portfolio:loans': 'Property page — Total Property Loans',
+  'property:portfolio:equity': 'Property page — Total Property Equity',
+  'property:portfolio:lvr': 'Property page — Portfolio LVR (%)',
+  'property:portfolio:cashflow': 'Property page — Monthly Investment Cashflow',
 };
 
 const projectionRequiredDescriptions: Record<string, string> = {
@@ -218,6 +229,14 @@ export const COVERAGE_MANIFEST: CoverageEntry[] = [
     description,
     required: true,
   })),
+  // ── Property page portfolio aggregates ──
+  ...PROPERTY_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'property_engine',
+    surface: 'pages/property.tsx (Portfolio tab)',
+    description: propertyDescriptions[id] ?? id,
+    required: true,
+  })),
 ];
 
 /** Map an engine key to a friendly label. */
@@ -231,6 +250,7 @@ export const ENGINE_LABELS: Record<EngineSourceKey, string> = {
   dashboard: 'Dashboard Hero',
   projection_rows: 'Projection Rows',
   wealth_strategy: 'Wealth Strategy Hub',
+  property_engine: 'Property Engine',
 };
 
 /** All required trace ids in a stable order. */

@@ -16,6 +16,7 @@ export const WEALTH_STRATEGY_TRACE_IDS = [
   'wealth-strategy:savings-rate',
   'wealth-strategy:debt-to-assets',
   'wealth-strategy:freedom-progress',
+  'wealth-strategy:net-position',
 ] as const;
 
 export interface WealthStrategyTraceArgs {
@@ -150,11 +151,56 @@ export function buildFreedomProgressTrace(a: WealthStrategyTraceArgs): Calculati
   };
 }
 
+export function buildNetPositionTrace(a: WealthStrategyTraceArgs): CalculationTrace {
+  const netWorth = a.totalAssets - a.totalDebt;
+  const inputs = [
+    { label: 'Total assets', value: fmtMoney(a.totalAssets), source: 'snapshot canonical sum' },
+    { label: 'Total debt',   value: fmtMoney(a.totalDebt),   source: 'snapshot canonical sum' },
+    { label: 'Investable assets', value: fmtMoney(a.investableAssets), source: 'snapshot.cash + offset + super + stocks + crypto' },
+  ];
+  return {
+    id: 'wealth-strategy:net-position',
+    label: 'Wealth Strategy — Household Net Position',
+    finalValue: fmtMoney(netWorth),
+    plainEnglish:
+      'Household net position — the same canonical Net Worth shown on the Dashboard hero. Calculated as total assets minus total debt across all asset classes (PPOR, cash, offset, super, stocks, crypto, IP equity, cars, Iran property) and liabilities (mortgage, other debts).',
+    formula: 'Net Position = Σ (asset values) − Σ (liabilities)',
+    expanded: `Net Position = ${fmtMoney(a.totalAssets)} − ${fmtMoney(a.totalDebt)} = ${fmtMoney(netWorth)}`,
+    inputs,
+    assumptions: [
+      { label: 'Source', value: 'Canonical snapshot', source: 'dashboardDataContract.selectNetWorth' },
+      { label: 'Includes super', value: 'Yes (locked layer flagged separately)' },
+    ],
+    dataSource: 'Latest snapshot — canonical financial state',
+    sourceEngine: 'Wealth Strategy Hub (Household state)',
+    included: [
+      { label: 'PPOR + IP equity' },
+      { label: 'Cash + offset' },
+      { label: 'Super (Roham + Fara)' },
+      { label: 'Stocks + crypto holdings' },
+      { label: 'Cars + Iran property' },
+    ],
+    excluded: [
+      { label: 'Future cashflows', reason: 'Snapshot only — projection uses Forecast Engine.' },
+    ],
+    calculatedAt: now(),
+    inputHash: hashTraceInputs(inputs),
+    relatedIds: [
+      'dashboard:net-worth',
+      'wealth-strategy:cash-buffer',
+      'wealth-strategy:savings-rate',
+      'wealth-strategy:debt-to-assets',
+      'wealth-strategy:freedom-progress',
+    ],
+  };
+}
+
 export function buildWealthStrategyTraces(a: WealthStrategyTraceArgs): CalculationTrace[] {
   return [
     buildCashBufferTrace(a),
     buildSavingsRateTrace(a),
     buildDebtToAssetsTrace(a),
     buildFreedomProgressTrace(a),
+    buildNetPositionTrace(a),
   ];
 }

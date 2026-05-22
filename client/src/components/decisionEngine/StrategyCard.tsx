@@ -38,6 +38,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
 
 import { StrategyDeepDive } from "./StrategyDeepDive";
 
@@ -131,7 +132,9 @@ export function StrategyCard({ rank, candidate, baseline, fmt, privacyMode }: St
                   {riskLevel.label}
                 </span>
                 <span className={`tabular-nums font-bold text-sm px-2 py-1 rounded-md border ${scoreTone}`}>
-                  {score.toFixed(0)}
+                  <AuditableMetric traceId={`decision:candidate:${candidate.id}:total-score`}>
+                    {score.toFixed(0)}
+                  </AuditableMetric>
                 </span>
               </div>
             </div>
@@ -175,7 +178,7 @@ export function StrategyCard({ rank, candidate, baseline, fmt, privacyMode }: St
             <div className="flex items-center gap-1.5">
               <Sparkles className="h-3.5 w-3.5 text-primary" />
               <span className="text-[11px] uppercase tracking-wide font-semibold text-foreground">
-                Why this ranks
+                <AuditableMetric traceId={`decision:candidate:${candidate.id}:rationale`}>Why this ranks</AuditableMetric>
               </span>
             </div>
             <Button
@@ -214,7 +217,7 @@ export function StrategyCard({ rank, candidate, baseline, fmt, privacyMode }: St
           <div className="flex items-center gap-1.5">
             <Activity className="h-3.5 w-3.5 text-foreground/70" />
             <span className="text-[11px] uppercase tracking-wide font-semibold text-foreground">
-              Trade-offs
+              <AuditableMetric traceId="decision:trade-off-analysis">Trade-offs</AuditableMetric>
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">

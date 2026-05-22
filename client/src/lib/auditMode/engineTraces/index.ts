@@ -33,9 +33,22 @@ export {
   buildDecisionWhyNotRankedHigherTrace,
   buildDecisionRecommendationLogicTrace,
   buildAllBestMoveTraces,
+  buildAllDecisionCandidateTraces,
+  buildDecisionCandidateScoreTrace,
+  buildDecisionCandidateComponentTrace,
+  buildDecisionCandidatePenaltiesTrace,
+  buildDecisionCandidateRationaleTrace,
+  buildDecisionRankingLogicTrace,
+  buildDecisionTradeoffsTrace,
+  buildDecisionLensTrace,
   DECISION_WINNER_TRACE_IDS,
+  DECISION_EXTENDED_TRACE_IDS,
   BESTMOVE_TRACE_IDS,
   type DecisionWinnerTraceArgs,
+  type DecisionCandidateTraceArgs,
+  type DecisionRankingLogicTraceArgs,
+  type DecisionTradeoffsTraceArgs,
+  type DecisionLensTraceArgs,
 } from './decisionTraces';
 
 export {
@@ -70,6 +83,7 @@ export {
   buildFinancialHealthOverallTrace,
   buildLegacyRiskCategoryTraces,
   buildLegacyRiskOverallTrace,
+  buildLiveFinancialHealthTracesFromRiskRadar,
   FINANCIAL_HEALTH_TRACE_IDS,
   LEGACY_RISK_RADAR_TRACE_IDS,
 } from './financialHealthTraces';
@@ -80,6 +94,18 @@ export {
   buildSavingsRateTrace,
   buildDebtToAssetsTrace,
   buildFreedomProgressTrace,
+  buildNetPositionTrace,
   WEALTH_STRATEGY_TRACE_IDS,
   type WealthStrategyTraceArgs,
 } from './wealthStrategyTraces';
+
+export {
+  buildAllPropertyPortfolioTraces,
+  buildPropertyValueTrace,
+  buildPropertyLoansTrace,
+  buildPropertyPortfolioEquityTrace,
+  buildPropertyLvrTrace,
+  buildPropertyCashflowTrace,
+  PROPERTY_TRACE_IDS,
+  type PropertyPortfolioTraceArgs,
+} from './propertyTraces';

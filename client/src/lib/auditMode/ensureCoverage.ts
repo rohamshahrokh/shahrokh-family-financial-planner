@@ -43,6 +43,9 @@ const PLACEHOLDER_FORMULAS: Record<string, string> = {
   'mc:confidence-bands': 'Confidence band width = P90 − P10 across the projection horizon',
   'mc:fire-probability': 'P(FIRE) = #(scenarios reaching FIRE by target age) / N',
   'mc:reach-goal-probabilities': 'CumulativeP(FIRE by age) for each age in horizon',
+  'mc:reach-3m':  'P(NW ≥ $3M)  across MC simulations',
+  'mc:reach-5m':  'P(NW ≥ $5M)  across MC simulations',
+  'mc:reach-10m': 'P(NW ≥ $10M) across MC simulations',
   'mc:neg-cashflow-risk': 'P(negative annual cashflow) within horizon',
   'mc:cash-shortfall-risk': 'P(cash buffer breached) within horizon',
   'mc:financial-freedom-prob': 'Composite P(financial freedom) = blend of FIRE + cashflow + buffer probabilities',
@@ -106,6 +109,13 @@ const PLACEHOLDER_FORMULAS: Record<string, string> = {
   'wealth-strategy:savings-rate': 'Savings Rate = (monthly_surplus / monthly_income) × 100',
   'wealth-strategy:debt-to-assets': 'Debt-to-Assets = (total_debt / total_assets) × 100',
   'wealth-strategy:freedom-progress': 'Freedom Progress = (current_investable_capital / FIRE_target) × 100',
+  'wealth-strategy:net-position': 'Net Position = Σ(asset values) − Σ(liabilities)',
+  // Property Engine — portfolio aggregates
+  'property:portfolio:value': 'Portfolio Value = Σ property.current_value (settled only)',
+  'property:portfolio:loans': 'Total Loans = Σ property.loan_balance (settled only)',
+  'property:portfolio:equity': 'Equity = Portfolio Value − Total Loans',
+  'property:portfolio:lvr': 'LVR = Total Loans ÷ Portfolio Value × 100',
+  'property:portfolio:cashflow': 'Monthly CF = Σ ((rent × (1 − vacancy)) − interest − principal − running_costs) ÷ 12',
 };
 
 function buildPlaceholderTrace(entry: CoverageEntry): CalculationTrace {
