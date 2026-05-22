@@ -5,6 +5,11 @@
 // custom). DO NOT add a parallel tax-policy formula in this file — extend
 // taxRulesEngine instead. (See FWL_TAX_REFORM_MODELLING_ENGINE spec.)
 import { classifyPropertyTaxRegime } from "@/lib/tax/taxRulesEngine";
+import {
+  applyFundingToProperties,
+  buildAdapterContext,
+  FUNDING_PLAN_FIELD,
+} from "@/lib/propertyFundingAdapter";
 
 /**
  * safeNum — converts any value to a finite number.
@@ -1093,6 +1098,16 @@ export interface CashFlowMonth {
   stockDCAOutflow?: number;       // monthly stock DCA contributions (positive outflow)
   cryptoDCAOutflow?: number;      // monthly crypto DCA contributions (positive outflow)
   billsOutflow?: number;          // recurring forecasted bills (positive outflow)
+
+  // ── Funding-source decomposition (per IP settlement month) ─────────────
+  // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+  // `propertyDeposit` above is the CASH-LIKE portion only (it already excludes
+  // equity-release because the adapter zeroes the deposit when funded by an
+  // equity drawdown). These fields surface the raw breakdown so the audit
+  // trace can show "cash used = $0 / equity released = $X" at the IP year.
+  propertyPurchaseCashUsed?: number;  // cash actually deducted at settlement
+  propertyEquityReleased?: number;    // equity drawn from existing IPs/PPOR (loan-funded)
+  propertyAssetSalesUsed?: number;    // stocks/crypto sold to fund the deposit
 }
 
 export function buildCashFlowSeries(params: {
@@ -1192,8 +1207,19 @@ export function buildCashFlowSeries(params: {
   const actualKeys = Array.from(expenseLookup.keys()).sort();
   const lastActualKey = actualKeys.length > 0 ? actualKeys[actualKeys.length - 1] : '';
 
+  // ── Canonical funding-aware property records ───────────────────────────
+  // Every IP record is routed through the property-funding adapter so that
+  // Equity Release / Asset-Sale funded deposits do NOT draw cash from this
+  // series. The adapter is idempotent — callers that already applied funding
+  // (forecastEngine.ts) pass through unchanged.
+  // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+  const fundedProperties = applyFundingToProperties(
+    params.properties as any[],
+    buildAdapterContext({ snapshot: { cash: safeNum(s.cash), offset_balance: safeNum(s.offset_balance) } }),
+  );
+
   // Investment properties: exclude PPOR type
-  const investmentProps = params.properties.filter(p => p.type !== 'ppor');
+  const investmentProps = fundedProperties.filter(p => p.type !== 'ppor');
 
   const results: CashFlowMonth[] = [];
   let cumulativeBalance = safeNum(s.cash) + safeNum(s.offset_balance);
@@ -1240,8 +1266,13 @@ export function buildCashFlowSeries(params: {
 
       // Track one-time cash outflows for this month
       let oneTimeCashOutflow = 0;
-      let propertyDeposit = 0;       // deposit only (IP settlement month)
+      let propertyDeposit = 0;       // deposit only (IP settlement month) — cash-like portion
       let propertyBuyingCosts = 0;   // stamp duty + legal + reno + inspection + setup
+      // Funding-source decomposition for the audit trace.
+      // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+      let propertyPurchaseCashUsed = 0;
+      let propertyEquityReleased   = 0;
+      let propertyAssetSalesUsed   = 0;
 
       for (const prop of investmentProps) {
         // Prefer settlement_date over purchase_date
@@ -1269,6 +1300,9 @@ export function buildCashFlowSeries(params: {
           monthDate.getMonth() === settleDate.getMonth()
         );
         if (isSettlementMonth) {
+          // After the funding adapter ran, `prop.deposit` is already the
+          // CASH-LIKE deposit portion (cash + offset + asset sales). Any
+          // equity-release amount has been moved into `loan_amount`.
           const deposit       = safeNum(prop.deposit);
           const buyingCosts   = safeNum(prop.stamp_duty)
                               + safeNum(prop.legal_fees)
@@ -1278,6 +1312,25 @@ export function buildCashFlowSeries(params: {
           propertyDeposit     += deposit;
           propertyBuyingCosts += buyingCosts;
           oneTimeCashOutflow  += deposit + buyingCosts;
+
+          // Funding plan decomposition (carried inline on the effective record).
+          const plan = (prop as any)[FUNDING_PLAN_FIELD] as
+            | {
+                cashUsed: number;
+                offsetUsed: number;
+                equityReleased: number;
+                stocksSold: number;
+                cryptoSold: number;
+              }
+            | undefined;
+          if (plan) {
+            propertyPurchaseCashUsed += safeNum(plan.cashUsed) + safeNum(plan.offsetUsed);
+            propertyEquityReleased   += safeNum(plan.equityReleased);
+            propertyAssetSalesUsed   += safeNum(plan.stocksSold) + safeNum(plan.cryptoSold);
+          } else {
+            // No funding plan attached (legacy caller). Treat full deposit as cash.
+            propertyPurchaseCashUsed += deposit;
+          }
         }
 
         // Loan repayment: starts from settlement month
@@ -1449,6 +1502,11 @@ export function buildCashFlowSeries(params: {
         // ── Audit / bridge breakdown ──
         propertyDeposit:     Math.round(propertyDeposit),
         propertyBuyingCosts: Math.round(propertyBuyingCosts),
+        // ── Funding-source decomposition (canonical) ──
+        // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+        propertyPurchaseCashUsed: Math.round(propertyPurchaseCashUsed),
+        propertyEquityReleased:   Math.round(propertyEquityReleased),
+        propertyAssetSalesUsed:   Math.round(propertyAssetSalesUsed),
         plannedStockBuy:     Math.round(Math.max(0, -plannedStockCashDelta)  + Math.max(0, -plannedStockOrderDelta)),
         plannedCryptoBuy:    Math.round(Math.max(0, -plannedCryptoCashDelta) + Math.max(0, -plannedCryptoOrderDelta)),
         plannedStockSell:    Math.round(Math.max(0,  plannedStockCashDelta)  + Math.max(0,  plannedStockOrderDelta)),
@@ -1757,6 +1815,16 @@ export interface CashFlowYear {
   netCashFlow: number;
   endingBalance: number;
   hasActualMonths: number; // count of months with actual data
+
+  // ── Funding-source decomposition (annual roll-up) ──────────────────────
+  // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+  // Surfaced so the cashflow chart / audit trace can prove the year's cash
+  // movement excludes equity-release deposits.
+  propertyDeposit?: number;            // cash-like deposit at IP settlement (sum of months)
+  propertyBuyingCosts?: number;        // stamp duty + legal + reno + inspection + setup
+  propertyPurchaseCashUsed?: number;   // cash actually drawn (always equals propertyDeposit + 0)
+  propertyEquityReleased?: number;     // equity drawn from existing IPs/PPOR
+  propertyAssetSalesUsed?: number;     // stocks/crypto sold to fund deposit
 }
 
 export function aggregateCashFlowToAnnual(monthly: CashFlowMonth[]): CashFlowYear[] {
@@ -1769,6 +1837,9 @@ export function aggregateCashFlowToAnnual(monthly: CashFlowMonth[]): CashFlowYea
         mortgageRepayment: 0, investmentLoanRepayment: 0,
         ngTaxBenefit: 0, ngBenefitSpread: 0,
         netCashFlow: 0, endingBalance: 0, hasActualMonths: 0,
+        propertyDeposit: 0, propertyBuyingCosts: 0,
+        propertyPurchaseCashUsed: 0, propertyEquityReleased: 0,
+        propertyAssetSalesUsed: 0,
       });
     }
     const yr = byYear.get(m.year)!;
@@ -1782,6 +1853,12 @@ export function aggregateCashFlowToAnnual(monthly: CashFlowMonth[]): CashFlowYea
     yr.netCashFlow += m.netCashFlow;
     yr.endingBalance = m.cumulativeBalance; // last month of year
     if (m.isActual) yr.hasActualMonths++;
+    // Funding-source roll-up.
+    yr.propertyDeposit          = (yr.propertyDeposit          ?? 0) + (m.propertyDeposit          ?? 0);
+    yr.propertyBuyingCosts      = (yr.propertyBuyingCosts      ?? 0) + (m.propertyBuyingCosts      ?? 0);
+    yr.propertyPurchaseCashUsed = (yr.propertyPurchaseCashUsed ?? 0) + (m.propertyPurchaseCashUsed ?? 0);
+    yr.propertyEquityReleased   = (yr.propertyEquityReleased   ?? 0) + (m.propertyEquityReleased   ?? 0);
+    yr.propertyAssetSalesUsed   = (yr.propertyAssetSalesUsed   ?? 0) + (m.propertyAssetSalesUsed   ?? 0);
   }
   return Array.from(byYear.values()).sort((a, b) => a.year - b.year);
 }

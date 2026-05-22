@@ -11,6 +11,8 @@ import {
   type NGSummary,
 } from "@/lib/finance";
 import { runCashEngine, getCashKPICards, type CashEvent } from "@/lib/cashEngine";
+import { registerTrace as registerAuditTrace } from "@/lib/auditMode/auditRegistry";
+import { buildCashflowYearTrace } from "@/lib/auditMode/engineTraces";
 import { useActiveRegime } from "@/hooks/useActiveRegime";
 // Map the active regime selector → calcNegativeGearing scenario value.
 // The 4-value selector enum from taxPolicyEngine collapses to the 3-value
@@ -1840,6 +1842,37 @@ export default function DashboardPage() {
       };
     });
   }, [cashFlowAnnual, equityTimeline, emergencyBuffer]);
+
+  // ── Audit Mode: per-year cash-balance traces for the Plan Execution
+  // Capacity / Cashflow chart. The trace decomposes the year's closing cash
+  // into opening cash + net cashflow + property funding-source breakdown so
+  // the user can verify Equity-Release deposits did NOT subtract cash.
+  // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+  useEffect(() => {
+    if (!Array.isArray(cashFlowAnnual) || cashFlowAnnual.length === 0) return;
+    let openingCash = totalLiquidCash;
+    for (const a of cashFlowAnnual) {
+      const cashUsed   = (a as any).propertyPurchaseCashUsed ?? 0;
+      const equityRel  = (a as any).propertyEquityReleased   ?? 0;
+      const assetSales = (a as any).propertyAssetSalesUsed   ?? 0;
+      const buyingCosts = (a as any).propertyBuyingCosts ?? 0;
+      const isAcquisitionYear = (cashUsed + equityRel + assetSales + buyingCosts) > 0;
+      registerAuditTrace(
+        buildCashflowYearTrace({
+          year: a.year,
+          openingCash,
+          closingCash: a.endingBalance ?? 0,
+          netCashflow: a.netCashFlow ?? 0,
+          propertyPurchaseCashUsed: cashUsed,
+          propertyEquityReleased:   equityRel,
+          propertyAssetSalesUsed:   assetSales,
+          propertyBuyingCosts:      buyingCosts,
+          isAcquisitionYear,
+        }),
+      );
+      openingCash = a.endingBalance ?? openingCash;
+    }
+  }, [cashFlowAnnual, totalLiquidCash]);
 
   // ─── Best Move V2 useMemo — MUST be before loading guard (Rules of Hooks) ──────────
   const inlineBestMove_hook = useMemo(() => {
