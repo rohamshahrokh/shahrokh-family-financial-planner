@@ -59,6 +59,10 @@ import {
   buildAllPropertyPortfolioTraces,
   PROPERTY_TRACE_IDS,
 } from '../client/src/lib/auditMode/engineTraces/propertyTraces';
+import {
+  buildAllFundingTraces,
+  FUNDING_SOURCE_TRACE_IDS,
+} from '../client/src/lib/auditMode/engineTraces/fundingSourceTraces';
 import { ensureCoverageRegistered } from '../client/src/lib/auditMode/ensureCoverage';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -517,6 +521,34 @@ for (const id of [
 buildAllPropertyPortfolioTraces({
   portfolioValue: 1_000_000, portfolioLoans: 600_000, portfolioEquity: 400_000,
   portfolioLVR: 60, monthlyPortfolioCF: 100, propertyCount: 2,
+}).forEach(registerTrace);
+// Funding source / equity release / emergency buffer / negative gearing traces
+// (Property page boundary — #FWL_Critical_StatePersistence_FundingSource_TaxRegime_Fix).
+buildAllFundingTraces({
+  plans: [{
+    propertyId: 1, propertyName: 'IP1',
+    plan: {
+      source: 'equity-release', deposit: 150_000,
+      cashUsed: 0, offsetUsed: 0, equityReleased: 150_000,
+      stocksSold: 0, cryptoSold: 0, debtIncreaseFromEquityRelease: 150_000,
+    },
+  }],
+  openingCash: 220_000,
+  netCashflowOverHorizon: 50_000,
+  closingCashAfterFunding: 220_000,
+  monthlyExpenses: 14_540,
+  existingLoanBalance: 1_200_000,
+  activeRegimeKind: 'PROPOSED_2027_REFORM',
+  activeRegimeLabel: 'Proposed 2027 reform',
+  negativeGearing: [{
+    propertyName: 'IP1',
+    currentLawRefund: 8_000,
+    reformRefund: 0,
+    lossQuarantined: 18_000,
+    carriedForwardLoss: 18_000,
+    refundAppliedToCashflow: 0,
+    appliedRefundScenario: 'proposed_reform',
+  }],
 }).forEach(registerTrace);
 
 const missing = REQUIRED_TRACE_IDS.filter(id => !hasTrace(id));

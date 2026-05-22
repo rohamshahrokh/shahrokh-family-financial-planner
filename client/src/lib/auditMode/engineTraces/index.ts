@@ -109,3 +109,14 @@ export {
   PROPERTY_TRACE_IDS,
   type PropertyPortfolioTraceArgs,
 } from './propertyTraces';
+
+export {
+  buildAllFundingTraces,
+  buildFundingSourceUsedTrace,
+  buildCashImpactTrace,
+  buildEquityReleaseTrace,
+  buildEmergencyBufferTrace,
+  buildNegativeGearingTrace,
+  FUNDING_SOURCE_TRACE_IDS,
+  type FundingTraceArgs,
+} from './fundingSourceTraces';

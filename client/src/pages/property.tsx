@@ -35,6 +35,13 @@ import * as XLSX from "xlsx";
 import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
 import { registerTrace } from "@/lib/auditMode/auditRegistry";
 import { buildAllPropertyPortfolioTraces } from "@/lib/auditMode/engineTraces";
+import {
+  usePropertyFundingStore,
+  resolveFundingPlan,
+  FUNDING_SOURCE_LABEL,
+  type FundingSourceKey,
+} from "@/lib/propertyFundingStore";
+import { buildAllFundingTraces } from "@/lib/auditMode/engineTraces/fundingSourceTraces";
 
 // ─── QLD Stamp Duty — delegates to australianTax.ts central function ────────
 const estimateStampDuty = estimateQldStampDuty;
@@ -1073,8 +1080,11 @@ export default function PropertyPage() {
   const [ipLiquidateCrypto, setIpLiquidateCrypto] = useState(false);
   const [ipLiquidateStocksPct, setIpLiquidateStocksPct] = useState(50);
   const [ipLiquidateCryptoPct, setIpLiquidateCryptoPct] = useState(50);
-  // Per-property funding source
-  const [fundingSource, setFundingSource] = useState<Record<number, string>>({});
+  // Per-property funding source — canonical, persisted via Zustand store
+  // (was: ephemeral useState that vanished on navigation, see
+  // #FWL_Critical_StatePersistence_FundingSource_TaxRegime_Fix).
+  const fundingChoices = usePropertyFundingStore((s) => s.choices);
+  const setFundingChoice = usePropertyFundingStore((s) => s.setChoice);
 
   // Tab state — detect sessionStorage signal OR #buy-vs-wait in URL hash
   const [activeTab, setActiveTab] = useState<'portfolio' | 'buy-vs-wait' | 'impact'>(() => {
@@ -1187,6 +1197,119 @@ export default function PropertyPage() {
     });
     traces.forEach(registerTrace);
   }, [portfolioValue, portfolioLoans, portfolioEquity, portfolioLVR, monthlyPortfolioCF, properties.length]);
+
+  // ─── Audit Mode — register funding source / equity release / emergency
+  //   buffer / negative gearing traces. These are emitted at the page
+  //   boundary (engines stay free of audit imports) and reflect the user's
+  //   persisted funding choice + the active tax regime.
+  useEffect(() => {
+    // Build per-property resolved plans from the persistent funding store.
+    const stocksTotalValue = (stocks ?? []).reduce(
+      (s: number, x: any) => s + safeNum(x.current_holding) * safeNum(x.current_price), 0,
+    );
+    const cryptoTotalValue = (cryptos ?? []).reduce(
+      (s: number, x: any) => s + safeNum(x.current_holding) * safeNum(x.current_price), 0,
+    );
+    const openingCash =
+      safeNum((snapshot as any)?.cash) + safeNum((snapshot as any)?.offset_balance);
+    const monthlyExpenses = safeNum((snapshot as any)?.monthly_expenses);
+    const annualSalaryIncome = safeNum((snapshot as any)?.monthly_income) * 12;
+
+    const investmentProps = (properties ?? []).filter((p: any) => p.type !== 'ppor');
+
+    const plans = investmentProps.map((p: any) => {
+      const choice = fundingChoices[String(p.id)];
+      const plan = resolveFundingPlan(choice, {
+        deposit: safeNum(p.deposit),
+        availableOffset: safeNum((snapshot as any)?.offset_balance),
+        availableCash:   safeNum((snapshot as any)?.cash),
+        stocksTotalValue,
+        cryptoTotalValue,
+      });
+      return {
+        propertyId: p.id,
+        propertyName: p.name || p.address || `IP #${p.id}`,
+        plan,
+      };
+    });
+
+    // Cash impact aggregation — only cash-like draws hit liquid balances.
+    const totalCashLike = plans.reduce(
+      (s: number, x: any) => s + x.plan.cashUsed + x.plan.offsetUsed, 0,
+    );
+    // Use cashEngine end-of-horizon delta as proxy for net cashflow.
+    const closingCashAfterFunding = Math.max(0, openingCash - totalCashLike);
+
+    // Negative gearing under active regime (Smart Choice = current_law / per-property auto via classify).
+    const ngScenarioRaw = (typeof window !== 'undefined'
+      ? window.localStorage.getItem('fwl.activeRegime')
+      : null) ?? 'AUTO_DETECT';
+    const ngScenario: 'current_law' | 'proposed_reform' | 'custom' =
+      ngScenarioRaw === 'PROPOSED_2027_REFORM' ? 'proposed_reform'
+      : ngScenarioRaw === 'CUSTOM_STRESS_TEST' ? 'custom'
+      : 'current_law';
+
+    const ngCurrent = calcNegativeGearing({
+      properties: investmentProps as any,
+      annualSalaryIncome,
+      jointOwnership: true,
+      scenario: 'current_law',
+    });
+    const ngActive = calcNegativeGearing({
+      properties: investmentProps as any,
+      annualSalaryIncome,
+      jointOwnership: true,
+      scenario: ngScenario,
+    });
+
+    const ngByProp = investmentProps.map((p: any) => {
+      const currentRow = (ngCurrent.perProperty ?? []).find((r: any) => r.propertyId === p.id);
+      const activeRow  = (ngActive.perProperty  ?? []).find((r: any) => r.propertyId === p.id);
+      const currentLawRefund = safeNum(currentRow?.annualTaxBenefit);
+      const reformRefund     = ngScenario === 'proposed_reform'
+        ? safeNum(activeRow?.annualTaxBenefit)
+        : 0;
+      const applied = ngScenario === 'proposed_reform'
+        ? reformRefund
+        : currentLawRefund;
+      return {
+        propertyName: p.name || p.address || `IP #${p.id}`,
+        currentLawRefund,
+        reformRefund,
+        lossQuarantined:     safeNum(activeRow?.lossAccumulatedThisYear),
+        carriedForwardLoss:  safeNum(activeRow?.lossBankBalance),
+        refundAppliedToCashflow: applied,
+        appliedRefundScenario: ngScenario === 'proposed_reform'
+          ? 'proposed_reform' as const
+          : 'current_law' as const,
+      };
+    });
+
+    const regimeLabel = ngScenarioRaw === 'PROPOSED_2027_REFORM' ? 'Proposed 2027 reform'
+      : ngScenarioRaw === 'CURRENT_RULES' ? "Today's rules"
+      : ngScenarioRaw === 'CUSTOM_STRESS_TEST' ? 'Custom what-if'
+      : 'Smart auto-detect';
+
+    const fundingTraces = buildAllFundingTraces({
+      plans,
+      openingCash,
+      netCashflowOverHorizon: 0, // page-level traces show point-in-time impact
+      closingCashAfterFunding,
+      monthlyExpenses,
+      existingLoanBalance: portfolioLoans,
+      activeRegimeKind: ngScenarioRaw,
+      activeRegimeLabel: regimeLabel,
+      negativeGearing: ngByProp,
+    });
+    fundingTraces.forEach(registerTrace);
+  }, [
+    fundingChoices,
+    snapshot,
+    properties,
+    stocks,
+    cryptos,
+    portfolioLoans,
+  ]);
 
   const toggleSelect = (id: number) => {
     setSelected(prev => {
@@ -1589,25 +1712,32 @@ export default function PropertyPage() {
                 privacyMode={privacyMode}
                 wageIncome={safeNum((snapshot as any)?.monthly_income) * 12}
               />
-              {/* Funding Source Selector — only for investment properties */}
-              {(p.type === 'investment' || p.property_type === 'IP') && (
-                <div className="rounded-b-xl border border-t-0 border-primary/20 bg-card/60 px-4 py-3">
+              {/* Funding Source Selector — only for investment properties.
+                  Selection is persisted in propertyFundingStore (localStorage)
+                  so it survives navigation and reload, and is consumed by the
+                  forecast / Monte Carlo / cashflow / deposit-power engines. */}
+              {(p.type === 'investment' || p.property_type === 'IP') && (() => {
+                const choice = fundingChoices[String(p.id)];
+                const activeKey: FundingSourceKey = (choice?.source ?? 'offset+savings') as FundingSourceKey;
+                return (
+                <div className="rounded-b-xl border border-t-0 border-primary/20 bg-card/60 px-4 py-3" data-testid={`funding-source-row-${p.id}`}>
                   <div className="flex flex-wrap items-center gap-3">
                     <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold shrink-0">Funding Source:</span>
-                    {[
-                      { key: 'offset',           label: 'Offset Only' },
-                      { key: 'savings',          label: 'Savings Only' },
-                      { key: 'offset+savings',   label: 'Offset + Savings' },
-                      { key: 'sell-stocks',      label: 'Sell Stocks %' },
-                      { key: 'sell-crypto',      label: 'Sell Crypto %' },
-                      { key: 'equity-release',   label: 'Equity Release' },
-                      { key: 'combination',      label: 'Combination' },
-                    ].map(opt => (
+                    {([
+                      { key: 'offset' as const,           label: 'Offset Only' },
+                      { key: 'savings' as const,          label: 'Savings Only' },
+                      { key: 'offset+savings' as const,   label: 'Offset + Savings' },
+                      { key: 'sell-stocks' as const,      label: 'Sell Stocks %' },
+                      { key: 'sell-crypto' as const,      label: 'Sell Crypto %' },
+                      { key: 'equity-release' as const,   label: 'Equity Release' },
+                      { key: 'combination' as const,      label: 'Combination' },
+                    ]).map(opt => (
                       <button
                         key={opt.key}
-                        onClick={() => setFundingSource(prev => ({ ...prev, [p.id]: opt.key }))}
+                        data-testid={`funding-source-${p.id}-${opt.key}`}
+                        onClick={() => setFundingChoice(p.id, { source: opt.key })}
                         className={`px-2.5 py-1 text-[10px] rounded-full border transition-all font-medium ${
-                          (fundingSource[p.id] ?? 'offset+savings') === opt.key
+                          activeKey === opt.key
                             ? 'border-primary bg-primary/15 text-primary'
                             : 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground'
                         }`}
@@ -1616,11 +1746,14 @@ export default function PropertyPage() {
                       </button>
                     ))}
                     <span className="text-[10px] text-muted-foreground ml-auto">
-                      Selected: <span className="text-primary font-medium">{fundingSource[p.id] ?? 'Offset + Savings'}</span>
+                      Selected: <span className="text-primary font-medium" data-testid={`funding-source-selected-${p.id}`}>
+                        {FUNDING_SOURCE_LABEL[activeKey]}
+                      </span>
                     </span>
                   </div>
                 </div>
-              )}
+                );
+              })()}
             </div>
           ))}
         </div>
