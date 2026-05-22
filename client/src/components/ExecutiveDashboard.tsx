@@ -60,6 +60,7 @@ import type { CanonicalRiskSurface as CanonicalRiskSurfaceData } from '@/lib/can
 import type { WealthLayers } from '@/lib/canonicalWealth';
 import { AuditableMetric } from '@/components/auditMode/AuditableMetric';
 import { registerTrace } from '@/lib/auditMode/auditRegistry';
+import { useAuditMode } from '@/lib/auditMode/AuditModeContext';
 import {
   buildNetWorthTrace,
   buildMonthlySurplusTrace,
@@ -1187,6 +1188,12 @@ function ReconciliationCard(p: ExecutiveDashboardProps) {
 function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
   const { privacyMode } = useAppStore();
   const mv = (v: string) => maskValue(v, privacyMode);
+  // Direct binding to the audit-mode context so the per-year chip below can
+  // open the trace without relying on an inner <button> inside an outer
+  // <button> (mobile Safari sometimes swallows the synthetic click event
+  // when AuditableMetric's button wraps a styled <span>).
+  // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+  const auditCtx = useAuditMode();
 
   // Local state fallbacks so the panel works even if dashboard.tsx hasn't
   // wired up the setter props yet — the canonical contract still hands the
@@ -1662,70 +1669,106 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
           </div>
         )}
 
-        {/* ── Per-year audit affordance — native click target for the
-              Plan Execution Capacity cashflow trace. Renders a compact row
-              of chips: each acquisition year + the final year. In Audit
-              Mode each chip opens the per-year trace; off mode they
-              render as subtle text. Acquisition rows are explicitly
-              labelled because their cashflow already routes through the
-              canonical funding-aware path (Equity Release adds debt, not
-              cash). #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
-        */}
-        {hasData && (
-          <div
-            className="px-3 pb-2 mt-1 flex flex-wrap items-center gap-1.5"
-            data-testid="plan-execution-audit-row"
-            aria-label="Per-year cashflow audit trace"
-          >
-            <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mr-1">
-              Audit · Cash by year
-            </span>
-            {(() => {
-              const traj = p.cashflowTrajectory ?? [];
-              const acquisitionYears = traj
-                .filter((pt: any) => pt.isAcquisitionYear && typeof pt.year === 'number')
-                .map((pt: any) => pt.year as number);
-              const fallbackYear = (() => {
-                const lastLabel = lastRow?.label;
-                if (lastLabel) {
-                  const m = String(lastLabel).match(/\d{4}/);
-                  if (m) return parseInt(m[0], 10);
-                }
-                if (traj.length > 0 && typeof (traj[traj.length - 1] as any).year === 'number') {
-                  return (traj[traj.length - 1] as any).year as number;
-                }
-                return new Date().getFullYear() + 9;
-              })();
-              const all = Array.from(new Set([...acquisitionYears, fallbackYear])).sort((a, b) => a - b);
-              return all.map((yr) => {
-                const pt = traj.find((t: any) => t.year === yr);
-                const isAcq = !!pt?.isAcquisitionYear;
-                return (
-                  <AuditableMetric
-                    key={`audit-yr-${yr}`}
-                    traceId={cashflowYearTraceId(yr)}
-                    testId={`audit-metric-cashflow-${yr}`}
-                    className="inline-flex items-center"
-                  >
-                    <span
-                      className="px-2 py-0.5 rounded-md border text-[11px] tabular-nums font-semibold"
-                      style={{
-                        borderColor: isAcq ? 'hsl(43,90%,55% / 0.55)' : 'hsl(var(--border))',
-                        color: isAcq ? 'hsl(43,90%,60%)' : 'hsl(var(--muted-foreground))',
-                        background: isAcq ? 'hsl(43,90%,12% / 0.4)' : 'transparent',
-                      }}
-                      data-testid={`plan-execution-year-${yr}`}
-                      data-acquisition={isAcq ? 'true' : 'false'}
-                    >
-                      {isAcq ? `🏠 ${yr}` : yr}
-                    </span>
-                  </AuditableMetric>
-                );
-              });
-            })()}
-          </div>
-        )}
       </div>
+
+      {/* ── Per-year audit affordance — native click target for the
+            Plan Execution Capacity cashflow trace. Lives OUTSIDE the
+            chart-area div on purpose: that div carries
+            `userSelect: 'none'` + `touchAction: 'pan-y'` to lock chart
+            panning, and on mobile Safari those styles inherit into nested
+            interactive elements and swallow tap events. Rendering the row
+            as a sibling of the chart area restores native click/tap.
+            Each chip is a real <button type="button"> in Audit Mode (no
+            wrapping AuditableMetric) so iOS Safari fires `click`
+            immediately. Off mode renders a non-interactive <span>.
+            #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+      */}
+      {hasData && (
+        <div
+          className="px-3 pb-2 pt-1 flex flex-wrap items-center gap-1.5 border-t border-border/25"
+          data-testid="plan-execution-audit-row"
+          aria-label="Per-year cashflow audit trace"
+          style={{
+            userSelect: 'auto',
+            touchAction: 'manipulation',
+            pointerEvents: 'auto',
+          }}
+        >
+          <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mr-1">
+            Audit · Cash by year
+          </span>
+          {(() => {
+            const traj = p.cashflowTrajectory ?? [];
+            const acquisitionYears = traj
+              .filter((pt: any) => pt.isAcquisitionYear && typeof pt.year === 'number')
+              .map((pt: any) => pt.year as number);
+            const fallbackYear = (() => {
+              const lastLabel = lastRow?.label;
+              if (lastLabel) {
+                const m = String(lastLabel).match(/\d{4}/);
+                if (m) return parseInt(m[0], 10);
+              }
+              if (traj.length > 0 && typeof (traj[traj.length - 1] as any).year === 'number') {
+                return (traj[traj.length - 1] as any).year as number;
+              }
+              return new Date().getFullYear() + 9;
+            })();
+            const all = Array.from(new Set([...acquisitionYears, fallbackYear])).sort((a, b) => a - b);
+            return all.map((yr) => {
+              const pt = traj.find((t: any) => t.year === yr);
+              const isAcq = !!pt?.isAcquisitionYear;
+              const traceId = cashflowYearTraceId(yr);
+              const handleOpen = () => auditCtx.openTrace(traceId);
+              const baseClassName = "px-2.5 py-1 rounded-md border text-[11px] tabular-nums font-semibold inline-flex items-center";
+              const chipStyle: React.CSSProperties = {
+                borderColor: isAcq ? 'hsl(43,90%,55% / 0.55)' : 'hsl(var(--border))',
+                color: isAcq ? 'hsl(43,90%,60%)' : 'hsl(var(--muted-foreground))',
+                background: isAcq ? 'hsl(43,90%,12% / 0.4)' : 'transparent',
+              };
+              const chipLabel = isAcq ? `🏠 ${yr}` : yr;
+              if (!auditCtx.auditMode) {
+                return (
+                  <span
+                    key={`audit-yr-${yr}`}
+                    className={baseClassName}
+                    style={chipStyle}
+                    data-audit-trace-id={traceId}
+                    data-audit-mode="off"
+                    data-testid={`plan-execution-year-${yr}`}
+                    data-acquisition={isAcq ? 'true' : 'false'}
+                  >
+                    {chipLabel}
+                  </span>
+                );
+              }
+              return (
+                <button
+                  key={`audit-yr-${yr}`}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleOpen(); }}
+                  aria-label={`Open Calculation Trace for ${yr}`}
+                  title="Click to see how this was calculated"
+                  className={`${baseClassName} fwl-audit-metric`}
+                  style={{
+                    ...chipStyle,
+                    cursor: 'pointer',
+                    touchAction: 'manipulation',
+                    WebkitTapHighlightColor: 'transparent',
+                    userSelect: 'none',
+                  }}
+                  data-audit-trace-id={traceId}
+                  data-audit-mode="on"
+                  data-testid={`audit-metric-cashflow-${yr}`}
+                  data-plan-execution-year={yr}
+                  data-acquisition={isAcq ? 'true' : 'false'}
+                >
+                  {chipLabel}
+                </button>
+              );
+            });
+          })()}
+        </div>
+      )}
     </section>
   );
 }

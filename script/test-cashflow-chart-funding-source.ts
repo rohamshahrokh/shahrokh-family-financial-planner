@@ -390,10 +390,25 @@ const dashSrc = await (await import('node:fs')).promises.readFile(
   'client/src/components/ExecutiveDashboard.tsx', 'utf8');
 assert('Imports cashflowYearTraceId from engineTraces',
   /cashflowYearTraceId[\s,]/.test(dashSrc));
-assert('Per-year audit affordance row uses AuditableMetric',
-  /plan-execution-audit-row[\s\S]+?AuditableMetric/.test(dashSrc));
+assert('Imports useAuditMode for direct openTrace binding',
+  /from\s+'@\/lib\/auditMode\/AuditModeContext'/.test(dashSrc));
+// Per-year chips are now real <button type="button"> elements with onClick
+// bound to auditCtx.openTrace — not wrapped in AuditableMetric — so iOS
+// Safari fires the click immediately and the chart-area parent's
+// `touchAction: 'pan-y'` / `userSelect: 'none'` cannot suppress them.
+// #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+assert('Per-year audit affordance row uses native <button> chips',
+  /plan-execution-audit-row[\s\S]+?cashflowYearTraceId\(yr\)[\s\S]+?<button/.test(dashSrc));
+assert('Chip click handler calls auditCtx.openTrace(traceId)',
+  /onClick=\{[^}]*handleOpen\(\)/.test(dashSrc) &&
+  /handleOpen\s*=\s*\(\)\s*=>\s*auditCtx\.openTrace\(traceId\)/.test(dashSrc));
+assert('Chip overrides touch-action and tap highlight for mobile Safari',
+  /touchAction:\s*'manipulation'/.test(dashSrc) &&
+  /WebkitTapHighlightColor:\s*'transparent'/.test(dashSrc));
+assert('Audit row is OUTSIDE the chart-area div (sibling, not child)',
+  /<\/div>\s*\n\s*\{\/\* ── Per-year audit affordance/.test(dashSrc));
 assert('Audit chip wraps trace id from cashflowYearTraceId',
-  /AuditableMetric[\s\S]{0,400}cashflowYearTraceId\(/.test(dashSrc));
+  /cashflowYearTraceId\(yr\)/.test(dashSrc));
 assert('Final-year cash tile wraps AuditableMetric with cashflowYearTraceId',
   /audit-metric-cashflow-final-year/.test(dashSrc) &&
   /cashflowYearTraceId\(parseInt\(finalYearLabel/.test(dashSrc));
@@ -401,6 +416,14 @@ assert('Plan Execution audit row has data-testid for QA',
   /data-testid="plan-execution-audit-row"/.test(dashSrc));
 assert('Acquisition-year chips emit data-acquisition flag',
   /data-acquisition=/.test(dashSrc));
+// Stop event propagation on chip click so a parent click handler can't
+// swallow the event.
+assert('Chip click stops propagation',
+  /onClick=\{\s*\(e\)\s*=>\s*\{[^}]*e\.stopPropagation\(\);[^}]*handleOpen\(\)/.test(dashSrc));
+// data-testid for the chip in Audit Mode = `audit-metric-cashflow-{yr}` so
+// e2e suites can locate the click target without traversing internals.
+assert('Audit-mode chip exposes audit-metric-cashflow-{yr} testid',
+  /data-testid=\{`audit-metric-cashflow-\$\{yr\}`\}/.test(dashSrc));
 
 // Coverage manifest surface string must point at Plan Execution Capacity so
 // the /audit-coverage filter actually surfaces these rows.
