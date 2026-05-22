@@ -45,6 +45,9 @@ import {
 } from "@/lib/scenarioSettingsResolver";
 import { registerUserDefaultsTraces } from "@/lib/auditMode/engineTraces";
 import { getServerSyncState, subscribeServerSync } from "@/lib/userDefaultsApi";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
+import type { UserDefaultsKey } from "@/lib/persistentUserDefaults";
 import type { TaxPolicyRegimeKind } from "@/lib/taxPolicyEngine";
 import type { ProjectionMode } from "@/lib/monteCarloV5/projectionModes";
 
@@ -57,18 +60,59 @@ const SOURCE_COLOURS: Record<string, string> = {
 function SourceChip({ resolved }: { resolved: ResolvedSetting }) {
   const baseLabel = sourceLabel(resolved.source);
   const fullLabel = fullSourceLabel(resolved);
+  const traceId = `user-default:${resolved.key as UserDefaultsKey}`;
+
+  // When Audit Mode is ON, AuditableMetric upgrades the chip into a button
+  // that opens the CalculationTracePanel for `user-default:<key>`. When OFF
+  // it renders a plain span — zero layout shift.
   return (
-    <span
-      className="inline-flex items-center text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5"
+    <AuditableMetric
+      traceId={traceId}
+      testId={`user-default-source-chip-${resolved.key}`}
+      className="inline-flex">
+      <span
+        data-testid={`user-default-source-chip-label-${resolved.key}`}
+        className="inline-flex items-center text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5"
+        style={{
+          background: `${SOURCE_COLOURS[baseLabel]}1f`,
+          color: SOURCE_COLOURS[baseLabel],
+          border: `1px solid ${SOURCE_COLOURS[baseLabel]}44`,
+        }}
+        title={fullLabel}
+      >
+        {fullLabel}
+      </span>
+    </AuditableMetric>
+  );
+}
+
+/**
+ * A dedicated "Trace" affordance shown only when Audit Mode is ON. Lives
+ * next to the row's action buttons so it has its own data-testid and is
+ * easy to discover in tests and for the user. Tapping it opens the same
+ * `user-default:<key>` Calculation Trace panel that the source chip does.
+ */
+function TraceAffordance({ resolvedKey }: { resolvedKey: UserDefaultsKey }) {
+  const { auditMode, openTrace } = useAuditMode();
+  if (!auditMode) return null;
+  const traceId = `user-default:${resolvedKey}`;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); openTrace(traceId); }}
+      data-audit-trace-id={traceId}
+      data-audit-mode="on"
+      data-testid={`user-default-trace-${resolvedKey}`}
+      className="h-7 text-xs px-2 rounded-md"
       style={{
-        background: `${SOURCE_COLOURS[baseLabel]}1f`,
-        color: SOURCE_COLOURS[baseLabel],
-        border: `1px solid ${SOURCE_COLOURS[baseLabel]}44`,
+        background: "transparent",
+        color: "hsl(43,85%,55%)",
+        border: "1px solid hsl(43,85%,55% / 0.5)",
+        cursor: "pointer",
       }}
-      title={fullLabel}
-    >
-      {fullLabel}
-    </span>
+      title="Open Calculation Trace for this user default">
+      Trace
+    </button>
   );
 }
 
@@ -106,7 +150,11 @@ function DefaultRow({ title, description, resolved, onSave, onClear, children }:
           )}
           <SavedAtNote resolved={resolved} />
         </div>
-        <div className="flex items-center gap-1">
+        <div
+          className="flex items-center gap-1"
+          data-testid={`user-default-row-${resolved.key}`}
+          data-audit-trace-id={`user-default:${resolved.key as UserDefaultsKey}`}>
+          <TraceAffordance resolvedKey={resolved.key as UserDefaultsKey} />
           <Button size="sm" variant="outline" className="h-7 gap-1 text-xs"
             onClick={onSave}>
             <Save className="w-3 h-3" />

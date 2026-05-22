@@ -42,7 +42,9 @@ export type EngineSourceKey =
   | 'wealth_strategy'
   | 'property_engine'
   | 'mc_assumptions'
-  | 'cashflow_engine';
+  | 'cashflow_engine'
+  /** Persisted modelling defaults resolved by scenarioSettingsResolver. */
+  | 'user_defaults';
 
 export interface CoverageEntry {
   /** Trace id registered with the audit registry. */
@@ -206,6 +208,31 @@ const projectionRequiredDescriptions: Record<string, string> = {
   'risk:fire-fragility': 'Risk surface — FIRE Fragility',
 };
 
+// ── User Defaults (persistent modelling preferences) ──────────────────────────
+// #FWL_Persistent_UserDefaults_ScenarioOverride
+// Each key persisted by `persistentUserDefaults` / `scenarioSettingsResolver`
+// gets a CalculationTrace at id `user-default:<key>`. Registered as a
+// factory by `registerUserDefaultsTraces()` (also overwritten on the
+// Settings page mount with the live resolver output).
+
+const userDefaultsSurface = 'pages/settings.tsx (User Defaults — Modelling Preferences)';
+
+const userDefaultDescriptions: Record<string, string> = {
+  'user-default:projectionMode':              'User Default — Projection Mode (Median / Conservative / Optimistic / Deterministic Overlay)',
+  'user-default:monteCarloEnabled':           'User Default — Monte Carlo Enabled / Disabled',
+  'user-default:taxPolicyRegime':             'User Default — Tax Policy Regime selector (Auto-Detect / Current Rules / Proposed 2027 Reform / Custom)',
+  'user-default:propertyGrowthAssumption':    'User Default — Property Growth Assumption (%)',
+  'user-default:fundingSourceByProperty':     'User Default — Per-property Funding Source map (incl. IP2 Equity Release)',
+  'user-default:scenarioAssumptionSet':       'User Default — Scenario Assumption Set preset (Conservative / Moderate / Aggressive)',
+  'user-default:riskProfile':                 'User Default — Risk Profile (Risk Radar + Recommendation Engine)',
+  'user-default:investorProfile':             'User Default — Investor Profile (Decision Engine candidate generator)',
+  'user-default:strategyLens':                'User Default — Strategy Lens',
+  'user-default:activeScenarioId':            'User Default — Active Scenario id',
+  'user-default:activeHouseholdFinancialStateId': 'User Default — Active Household Financial State id',
+};
+
+export const USER_DEFAULT_TRACE_IDS: string[] = Object.keys(userDefaultDescriptions);
+
 export const COVERAGE_MANIFEST: CoverageEntry[] = [
   // ── Monte Carlo ──
   ...MONTE_CARLO_TRACE_IDS.map<CoverageEntry>(id => ({
@@ -346,6 +373,18 @@ export const COVERAGE_MANIFEST: CoverageEntry[] = [
     description: 'Funding Gap Resolution — Candidate solutions, ranking logic, selected recommendation',
     required: true,
   },
+  // ── Persistent User Defaults (modelling preferences) ──
+  // #FWL_Persistent_UserDefaults_ScenarioOverride — every key resolved by
+  // scenarioSettingsResolver. Trace shows current value, source
+  // (server-backed / local fallback / local pending / system / scenario),
+  // saved timestamp, backend sync state, and applied modules.
+  ...USER_DEFAULT_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'user_defaults',
+    surface: userDefaultsSurface,
+    description: userDefaultDescriptions[id] ?? id,
+    required: true,
+  })),
 ];
 
 /** Map an engine key to a friendly label. */
@@ -362,6 +401,7 @@ export const ENGINE_LABELS: Record<EngineSourceKey, string> = {
   property_engine: 'Property Engine',
   mc_assumptions: 'Monte Carlo Assumptions',
   cashflow_engine: 'Cashflow Engine',
+  user_defaults: 'Persistent User Defaults',
 };
 
 /** All required trace ids in a stable order. */
