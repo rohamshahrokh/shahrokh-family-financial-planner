@@ -27,10 +27,12 @@ import {
   PROFILE_DEFAULTS,
   sbSaveMCResult,
   DEFAULT_MC_VOLATILITY,
+  DEFAULT_EXPECTED_RETURNS,
   type YearAssumptions,
   type ForecastMode,
   type ForecastProfile,
   type MCVolatilityParams,
+  type ExpectedReturns,
 } from "@/lib/forecastStore";
 import { runMonteCarlo } from "@/lib/monteCarloEngine";
 import {
@@ -245,6 +247,7 @@ export default function AIForecastEnginePage() {
     isSaving, saveToSupabase,
     loadFromSupabase,
     mcVolatility, setMCVolatility, resetMCVolatility,
+    expectedReturns, setExpectedReturns, resetExpectedReturns,
   } = useForecastStore();
 
   useEffect(() => { loadFromSupabase().catch(() => {}); }, []); // eslint-disable-line
@@ -304,6 +307,7 @@ export default function AIForecastEnginePage() {
           {
             yearlyAssumptions,
             volatilityParams: mcVolatility,
+            expectedReturns,
             stockTransactions: stockTx,
             cryptoTransactions: cryptoTx,
             stockDCASchedules: stockDCA,
@@ -346,7 +350,7 @@ export default function AIForecastEnginePage() {
     }, 50);
   }, [isRunningMC, snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expensesRows,
       stockTx, cryptoTx, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, yearlyAssumptions,
-      mcVolatility, setIsRunningMC, setMonteCarloResult, toast, useV4Engine, useV5Engine]);
+      mcVolatility, expectedReturns, setIsRunningMC, setMonteCarloResult, toast, useV4Engine, useV5Engine]);
 
   // Live preview of the canonical reconciliation — even before the user
   // presses Run, the UI shows the starting NW the simulation WILL use.
@@ -366,6 +370,7 @@ export default function AIForecastEnginePage() {
         {
           yearlyAssumptions,
           volatilityParams: mcVolatility,
+          expectedReturns,
           stockTransactions: stockTx,
           cryptoTransactions: cryptoTx,
           stockDCASchedules: stockDCA,
@@ -380,7 +385,7 @@ export default function AIForecastEnginePage() {
       return null;
     }
   }, [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expensesRows,
-      stockTx, cryptoTx, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, yearlyAssumptions, mcVolatility]);
+      stockTx, cryptoTx, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, yearlyAssumptions, mcVolatility, expectedReturns]);
 
   const handleSave = useCallback(async () => {
     await saveToSupabase();
@@ -668,6 +673,92 @@ export default function AIForecastEnginePage() {
     });
   }, [mc, yearlyAssumptions, mcVolatility, useV4Engine, useV5Engine]);
 
+  // ── Audit Mode: register live Expected-Returns assumption traces ─────────
+  // Each click on a Property/Stocks/Crypto/Super expected-return label opens
+  // the calculation trace showing the canonical mean used by the engine, the
+  // default value, the source store path, and the engines it affects.
+  useEffect(() => {
+    const generatedAt = new Date().toISOString();
+    const SOURCE = 'forecastStore.expectedReturns (AI Forecast Engine)';
+
+    function erTrace(
+      id: string,
+      label: string,
+      currentValue: number,
+      defaultValue: number,
+      storeKey: keyof ExpectedReturns,
+      engineField: string,
+    ): CalculationTrace {
+      const inputs: TraceInput[] = [
+        { label: 'Current Value', value: `${currentValue.toFixed(2)}%`, source: `useForecastStore().expectedReturns.${storeKey}` },
+        { label: 'Default Value', value: `${defaultValue.toFixed(2)}%`, source: 'DEFAULT_EXPECTED_RETURNS' },
+      ];
+      return {
+        id,
+        label,
+        finalValue: `${currentValue.toFixed(2)}%`,
+        plainEnglish:
+          `${label}: the user-controlled mean annual return for this asset class. ` +
+          `It is independent of volatility — Mean is the centre of the return distribution; Std-Dev (set in the Monte Carlo Assumptions panel) is its width. ` +
+          `The canonical mapper buildCanonicalMonteCarloInput overrides yearlyAssumptions[*].${engineField} with this value before passing the engine input to runMonteCarlo / runMonteCarloV4 / runMonteCarloV5.`,
+        formula: `mean_${storeKey} = expectedReturns.${storeKey}  →  yearlyAssumptions[*].${engineField}`,
+        expanded:
+          `Current: ${currentValue.toFixed(2)}%\n` +
+          `Default: ${defaultValue.toFixed(2)}%\n` +
+          `Engine field: yearlyAssumptions[*].${engineField}\n` +
+          `Affected engines: monteCarloEngine.runMonteCarlo, monteCarloV4.runMonteCarloV4, monteCarloV5.runMonteCarloV5`,
+        inputs,
+        assumptions: [
+          { label: 'Source', value: SOURCE, source: 'client/src/lib/forecastStore.ts' },
+          { label: 'Mapper', value: 'buildCanonicalMonteCarloInput → MCInput.yearlyAssumptions', source: 'client/src/lib/monteCarloCanonical.ts' },
+        ],
+        dataSource: 'forecastStore.expectedReturns (Zustand persisted store)',
+        sourceEngine: 'Monte Carlo Assumptions',
+        included: [
+          { label: 'Mean (centre of distribution)', value: `${currentValue.toFixed(2)}%` },
+          { label: 'Affects: runMonteCarlo, runMonteCarloV4, runMonteCarloV5' },
+        ],
+        excluded: [
+          { label: 'Volatility / Std-Dev', reason: 'Volatility is a separate parameter set in the Monte Carlo Assumptions panel.' },
+        ],
+        calculatedAt: generatedAt,
+        inputHash: hashTraceInputs(inputs),
+        relatedIds: [
+          'assumptions:mc:expected-return:property',
+          'assumptions:mc:expected-return:stocks',
+          'assumptions:mc:expected-return:crypto',
+          'assumptions:mc:expected-return:super',
+          'mc:p50-nw-at-target',
+        ].filter(rid => rid !== id),
+      };
+    }
+
+    registerTrace(erTrace(
+      'assumptions:mc:expected-return:property',
+      'Property Expected Growth (mean)',
+      expectedReturns.property, DEFAULT_EXPECTED_RETURNS.property,
+      'property', 'property_growth',
+    ));
+    registerTrace(erTrace(
+      'assumptions:mc:expected-return:stocks',
+      'Stocks Expected Return (mean)',
+      expectedReturns.stocks, DEFAULT_EXPECTED_RETURNS.stocks,
+      'stocks', 'stocks_return',
+    ));
+    registerTrace(erTrace(
+      'assumptions:mc:expected-return:crypto',
+      'Crypto Expected Return (mean)',
+      expectedReturns.crypto, DEFAULT_EXPECTED_RETURNS.crypto,
+      'crypto', 'crypto_return',
+    ));
+    registerTrace(erTrace(
+      'assumptions:mc:expected-return:super',
+      'Super Expected Return (mean)',
+      expectedReturns.super, DEFAULT_EXPECTED_RETURNS.super,
+      'super', 'super_return',
+    ));
+  }, [expectedReturns]);
+
 
   const modeBadge = {
     'profile':      { label: 'Profile Mode',  color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
@@ -902,6 +993,97 @@ export default function AIForecastEnginePage() {
         </div>
       )}
 
+      {/* ── 3.9. Expected Returns (canonical means) ────────────────────────────
+           User-editable mean returns. Independent from volatility — Mean is
+           the centre of the distribution, Std-Dev is its width. Wired through
+           buildCanonicalMonteCarloInput → MCInput.yearlyAssumptions so the
+           engine uses these means directly. */}
+      {forecastMode === 'monte-carlo' && (
+        <div className="rounded-xl border border-emerald-700/30 bg-emerald-900/5 p-5"
+             data-testid="expected-returns-panel">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <TrendingUp className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-sm font-bold text-foreground">Expected Returns</h2>
+            <span className="ml-auto text-xs text-muted-foreground">
+              Mean returns only — separate from volatility below
+            </span>
+            <Button size="sm" variant="outline" className="h-7 text-xs ml-2"
+              onClick={() => resetExpectedReturns()}
+              data-testid="reset-canonical-assumptions">
+              <RotateCcw className="w-3 h-3 mr-1" />Reset Canonical Assumptions
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
+            Edit the expected (mean) annual return for each asset class. Use these to scenario-test
+            Property Boom, Property Crash, AI Supercycle, Stock Market Stagnation, Crypto Winter,
+            Crypto Bull Run, etc. — without changing volatility. Defaults: Property 6.5%, Stocks 10%,
+            Crypto 20%, Super 9.5%.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Property */}
+            <div className="rounded-lg border border-amber-700/30 bg-amber-900/10 p-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Home className="w-4 h-4 text-amber-400" />
+                <AuditableMetric traceId="assumptions:mc:expected-return:property">
+                  <span className="text-sm font-bold text-amber-300" data-testid="er-property-label">
+                    Property Expected Growth
+                  </span>
+                </AuditableMetric>
+              </div>
+              <VolInput label="" value={expectedReturns.property}
+                onChange={v => setExpectedReturns({ property: v })}
+                step={0.1}
+                hint="Mean annual capital growth (default 6.5%)" />
+            </div>
+            {/* Stocks */}
+            <div className="rounded-lg border border-blue-700/30 bg-blue-900/10 p-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-blue-400" />
+                <AuditableMetric traceId="assumptions:mc:expected-return:stocks">
+                  <span className="text-sm font-bold text-blue-300" data-testid="er-stocks-label">
+                    Stocks Expected Return
+                  </span>
+                </AuditableMetric>
+              </div>
+              <VolInput label="" value={expectedReturns.stocks}
+                onChange={v => setExpectedReturns({ stocks: v })}
+                step={0.1}
+                hint="Mean annual total return (default 10%)" />
+            </div>
+            {/* Crypto */}
+            <div className="rounded-lg border border-orange-700/30 bg-orange-900/10 p-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Bitcoin className="w-4 h-4 text-orange-400" />
+                <AuditableMetric traceId="assumptions:mc:expected-return:crypto">
+                  <span className="text-sm font-bold text-orange-300" data-testid="er-crypto-label">
+                    Crypto Expected Return
+                  </span>
+                </AuditableMetric>
+              </div>
+              <VolInput label="" value={expectedReturns.crypto}
+                onChange={v => setExpectedReturns({ crypto: v })}
+                step={0.1}
+                hint="Mean annual total return (default 20%)" />
+            </div>
+            {/* Super */}
+            <div className="rounded-lg border border-emerald-700/30 bg-emerald-900/10 p-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-emerald-400" />
+                <AuditableMetric traceId="assumptions:mc:expected-return:super">
+                  <span className="text-sm font-bold text-emerald-300" data-testid="er-super-label">
+                    Super Expected Return
+                  </span>
+                </AuditableMetric>
+              </div>
+              <VolInput label="" value={expectedReturns.super}
+                onChange={v => setExpectedReturns({ super: v })}
+                step={0.1}
+                hint="Mean annual total return (default 9.5%)" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── 4. MC Volatility Assumptions Panel ────────────────────────────────── */}
       {forecastMode === 'monte-carlo' && (
         <div className="rounded-xl border border-border bg-card p-5">
@@ -1038,10 +1220,10 @@ export default function AIForecastEnginePage() {
             </div>
             <div className="rounded-lg border border-border bg-background/50 p-3">
               <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-2">Expected returns &amp; volatility</p>
-              <ExplainRow label="Property" detail={`${yearlyAssumptions[0]?.property_growth ?? 6}% mean / ${mcVolatility.prop_volatility}% std-dev. ${mcVolatility.prop_vacancy_rate}% vacancy, ${mcVolatility.prop_maintenance_pct}% maintenance.`} />
-              <ExplainRow label="Stocks" detail={`${yearlyAssumptions[0]?.stocks_return ?? 10}% mean / ${mcVolatility.stock_volatility}% std-dev. ${mcVolatility.stock_correction_prob}% chance of ${mcVolatility.stock_correction_size}% correction per year.`} />
-              <ExplainRow label="Crypto" detail={`${yearlyAssumptions[0]?.crypto_return ?? 20}% mean / ${mcVolatility.crypto_volatility}% std-dev. ${mcVolatility.crypto_crash_prob}% crash (~${mcVolatility.crypto_crash_size}%), ${mcVolatility.crypto_bull_prob}% bull run (~${mcVolatility.crypto_bull_upside}%).`} />
-              <ExplainRow label="Super" detail={`${yearlyAssumptions[0]?.super_return ?? 10}% mean / 10% std-dev. Compounds monthly.`} />
+              <ExplainRow label="Property" detail={`${expectedReturns.property.toFixed(1)}% mean / ${mcVolatility.prop_volatility}% std-dev. ${mcVolatility.prop_vacancy_rate}% vacancy, ${mcVolatility.prop_maintenance_pct}% maintenance.`} />
+              <ExplainRow label="Stocks" detail={`${expectedReturns.stocks.toFixed(1)}% mean / ${mcVolatility.stock_volatility}% std-dev. ${mcVolatility.stock_correction_prob}% chance of ${mcVolatility.stock_correction_size}% correction per year.`} />
+              <ExplainRow label="Crypto" detail={`${expectedReturns.crypto.toFixed(1)}% mean / ${mcVolatility.crypto_volatility}% std-dev. ${mcVolatility.crypto_crash_prob}% crash (~${mcVolatility.crypto_crash_size}%), ${mcVolatility.crypto_bull_prob}% bull run (~${mcVolatility.crypto_bull_upside}%).`} />
+              <ExplainRow label="Super" detail={`${expectedReturns.super.toFixed(1)}% mean / 10% std-dev. Compounds monthly.`} />
             </div>
             <div className="rounded-lg border border-border bg-background/50 p-3">
               <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-2">Correlations &amp; fat tails</p>

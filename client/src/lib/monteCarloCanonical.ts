@@ -49,7 +49,7 @@ import {
   type CanonicalNetWorth,
 } from "./dashboardDataContract";
 import type { MCInput } from "./monteCarloEngine";
-import type { YearAssumptions, MCVolatilityParams } from "./forecastStore";
+import type { YearAssumptions, MCVolatilityParams, ExpectedReturns } from "./forecastStore";
 
 /**
  * Inputs that the canonical mapper needs in addition to the standard
@@ -59,6 +59,11 @@ import type { YearAssumptions, MCVolatilityParams } from "./forecastStore";
 export interface CanonicalMCExtras {
   yearlyAssumptions: YearAssumptions[];
   volatilityParams?: Partial<MCVolatilityParams>;
+  /** User-controlled expected (mean) returns. When provided, the canonical mapper
+   *  overrides the per-year means in `yearlyAssumptions` so the MC engine uses
+   *  the chosen scenario means (Property/Stocks/Crypto/Super). Volatility comes
+   *  from `volatilityParams` and is independent. */
+  expectedReturns?: Partial<ExpectedReturns>;
   stockTransactions?: any[];
   cryptoTransactions?: any[];
   stockDCASchedules?: any[];
@@ -237,6 +242,21 @@ export function buildCanonicalMonteCarloInput(
     purchase_price: safe(p.purchase_price),
   }));
 
+  // Apply user-controlled expected (mean) returns over the per-year assumptions.
+  // Volatility is left untouched — Mean and Std-Dev are independent parameters.
+  // Only fields the user explicitly set are overridden; missing keys fall back
+  // to the existing per-year means in `yearlyAssumptions`.
+  const er = extras.expectedReturns;
+  const yearlyWithExpectedReturns: YearAssumptions[] = er
+    ? extras.yearlyAssumptions.map((row) => ({
+        ...row,
+        property_growth: er.property ?? row.property_growth,
+        stocks_return:   er.stocks   ?? row.stocks_return,
+        crypto_return:   er.crypto   ?? row.crypto_return,
+        super_return:    er.super    ?? row.super_return,
+      }))
+    : extras.yearlyAssumptions;
+
   const input: MCInput = {
     snapshot: engineSnapshot,
     properties,
@@ -257,7 +277,7 @@ export function buildCanonicalMonteCarloInput(
     plannedStockOrders:   extras.plannedStockOrders  ?? [],
     plannedCryptoOrders:  extras.plannedCryptoOrders ?? [],
     bills:                extras.bills ?? [],
-    yearlyAssumptions:    extras.yearlyAssumptions,
+    yearlyAssumptions:    yearlyWithExpectedReturns,
     volatilityParams:     extras.volatilityParams,
     ngAnnualBenefit:      extras.ngAnnualBenefit,
     ngRefundMode:         extras.ngRefundMode,

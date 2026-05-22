@@ -93,6 +93,24 @@ export interface MCVolatilityParams {
   inflation_volatility:  number;  // std dev of inflation (default 0.5)
 }
 
+// ─── Canonical expected-return assumptions (mean returns) ────────────────────
+// Separate from volatility so users can scenario-test Property Boom / Crash,
+// AI Supercycle, Crypto Winter, etc. by changing means without touching std dev.
+
+export interface ExpectedReturns {
+  property: number; // %, e.g. 6.5
+  stocks:   number; // %, e.g. 10
+  crypto:   number; // %, e.g. 20
+  super:    number; // %, e.g. 9.5
+}
+
+export const DEFAULT_EXPECTED_RETURNS: ExpectedReturns = {
+  property: 6.5,
+  stocks:  10.0,
+  crypto:  20.0,
+  super:    9.5,
+};
+
 export const DEFAULT_MC_VOLATILITY: MCVolatilityParams = {
   prop_volatility:        5,
   prop_vacancy_rate:      3,
@@ -266,6 +284,7 @@ interface ForecastStoreState {
   yearlyAssumptions: YearAssumptions[];  // 2026–2035
   monteCarloResult: MonteCarloResult | null;
   mcVolatility: MCVolatilityParams;      // per-asset volatility + event params
+  expectedReturns: ExpectedReturns;      // canonical mean returns (separate from volatility)
   /** Max LVR % used to compute usable equity / deposit power. Default 80. */
   maxLvr: number;
   isRunningMC: boolean;
@@ -282,6 +301,8 @@ interface ForecastStoreState {
   setIsRunningMC: (v: boolean) => void;
   setMCVolatility: (params: Partial<MCVolatilityParams>) => void;
   resetMCVolatility: () => void;
+  setExpectedReturns: (params: Partial<ExpectedReturns>) => void;
+  resetExpectedReturns: () => void;
 
   // Persistence
   saveToSupabase: () => Promise<void>;
@@ -312,6 +333,7 @@ export const useForecastStore = create<ForecastStoreState>()(
       yearlyAssumptions: DEFAULT_YEARLY,
       monteCarloResult: null,
       mcVolatility: { ...DEFAULT_MC_VOLATILITY },
+      expectedReturns: { ...DEFAULT_EXPECTED_RETURNS },
       maxLvr: 80,
       isRunningMC: false,
       isSaving: false,
@@ -354,6 +376,11 @@ export const useForecastStore = create<ForecastStoreState>()(
         mcVolatility: { ...state.mcVolatility, ...params },
       })),
       resetMCVolatility: () => set({ mcVolatility: { ...DEFAULT_MC_VOLATILITY } }),
+
+      setExpectedReturns: (params) => set(state => ({
+        expectedReturns: { ...state.expectedReturns, ...params },
+      })),
+      resetExpectedReturns: () => set({ expectedReturns: { ...DEFAULT_EXPECTED_RETURNS } }),
 
       saveToSupabase: async () => {
         const { yearlyAssumptions, forecastMode, profile, maxLvr } = get();
@@ -423,6 +450,7 @@ export const useForecastStore = create<ForecastStoreState>()(
         yearlyAssumptions:  state.yearlyAssumptions,
         monteCarloResult:   state.monteCarloResult,
         mcVolatility:       state.mcVolatility,
+        expectedReturns:    state.expectedReturns,
         maxLvr:             state.maxLvr,
       }),
     }

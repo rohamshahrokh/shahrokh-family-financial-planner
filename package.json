@@ -29,6 +29,7 @@
     "test:monte-carlo-canonical": "tsx script/test-monte-carlo-canonical.ts",
     "test:monte-carlo-v4": "tsx script/test-monte-carlo-v4.ts",
     "test:monte-carlo-v5": "tsx script/test-monte-carlo-v5.ts",
+    "test:monte-carlo-expected-returns": "tsx script/test-monte-carlo-expected-returns.ts",
     "test:decision-engine": "tsx script/test-decision-engine.ts",
     "test:narrative-layer": "tsx script/test-narrative-layer.ts",
     "test:behavioural-priorities": "tsx script/test-behavioural-priorities.ts",
