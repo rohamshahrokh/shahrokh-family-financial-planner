@@ -1059,6 +1059,87 @@ if (y2028) {
     typeof (y2028 as any).propertyHoldingCost === 'number');
 }
 
+section('18. Cashflow Reconciliation — per-IP rental rows use friendly property labels');
+// Regression for the confusing "Rental income — IP 3" label, where 3 was the
+// internal Supabase sf_properties.id. With propertyLabels supplied, each row
+// should render the friendly "IP N: <name>" label; the internal id stays in
+// the row's `source` as the technical key. Without propertyLabels, rows fall
+// back to the legacy "IP <id>" rendering — proving the change is opt-in and
+// existing callers/tests are not disturbed.
+{
+  const reconWithLabels = buildCashflowReconciliationTrace({
+    year: 2028,
+    openingCash: 0,
+    closingCash: 0,
+    netCashflow: 0,
+    salaryIncome: 0,
+    rentalIncomeByProperty: { '3': 14_043, '7': 9_021 },
+    propertyLabels: {
+      '3': 'IP 1: New Investment Property',
+      '7': 'IP 2: New Investment Property 2',
+    },
+    rentalIncomeTotal: 23_064,
+    taxRefund: 0,
+    livingExpenses: 0,
+    pporMortgage: 0,
+    investmentLoanRepayment: 0,
+    billsOutflow: 0,
+    acquisitionCashUsed: 0,
+    assetSalesUsed: 0,
+    acquisitionBuyingCosts: 0,
+    propertyHoldingCost: 0,
+    equityReleased: 0,
+    isAcquisitionYear: false,
+  });
+
+  const labels = reconWithLabels.inputs.map((i) => i.label);
+  assert('Friendly label "Rental income — IP 1: New Investment Property" is rendered',
+    labels.includes('Rental income — IP 1: New Investment Property'));
+  assert('Friendly label "Rental income — IP 2: New Investment Property 2" is rendered',
+    labels.includes('Rental income — IP 2: New Investment Property 2'));
+  assert('Internal id no longer appears as the main rental label',
+    !labels.includes('Rental income — IP 3') && !labels.includes('Rental income — IP 7'));
+
+  // IP 1 row must appear before IP 2 row (sorted by friendly numbering).
+  const idx1 = labels.indexOf('Rental income — IP 1: New Investment Property');
+  const idx2 = labels.indexOf('Rental income — IP 2: New Investment Property 2');
+  assert('Friendly rental rows are ordered IP 1 → IP 2', idx1 >= 0 && idx2 > idx1);
+
+  // Internal Supabase id is still carried in the row's `source` as the
+  // technical key so audit/provenance can be traced back to the engine.
+  const ip1Row = reconWithLabels.inputs.find(
+    (i) => i.label === 'Rental income — IP 1: New Investment Property',
+  );
+  assert('Friendly row keeps internal Supabase id in `source`',
+    typeof ip1Row?.source === 'string' && /internal id 3/.test(ip1Row.source));
+
+  // Backwards-compat: without propertyLabels, the legacy "IP <id>" label
+  // is preserved so any existing caller/test that does not supply the map
+  // continues to render as before.
+  const reconLegacy = buildCashflowReconciliationTrace({
+    year: 2028,
+    openingCash: 0,
+    closingCash: 0,
+    netCashflow: 0,
+    salaryIncome: 0,
+    rentalIncomeByProperty: { '3': 14_043 },
+    rentalIncomeTotal: 14_043,
+    taxRefund: 0,
+    livingExpenses: 0,
+    pporMortgage: 0,
+    investmentLoanRepayment: 0,
+    billsOutflow: 0,
+    acquisitionCashUsed: 0,
+    assetSalesUsed: 0,
+    acquisitionBuyingCosts: 0,
+    propertyHoldingCost: 0,
+    equityReleased: 0,
+    isAcquisitionYear: false,
+  });
+  assert('Legacy "Rental income — IP <id>" label preserved when no propertyLabels supplied',
+    reconLegacy.inputs.some((i) => i.label === 'Rental income — IP 3'));
+}
+
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 if (failures > 0) {

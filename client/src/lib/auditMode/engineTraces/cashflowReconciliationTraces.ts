@@ -102,6 +102,16 @@ export interface CashflowReconciliationTraceArgs {
   otherIncome?: number;
   /** Per-IP rental income — engine `CashFlowYear.rentalIncomeByProperty`. */
   rentalIncomeByProperty?: Record<string, number>;
+  /**
+   * Optional map from internal property id (Supabase `sf_properties.id` as a
+   * string) to a friendly display label (e.g. `"IP 1: New Investment
+   * Property"`). When provided, the per-IP rental rows render with this
+   * label instead of the raw internal id; the internal id remains in the
+   * `source` field as the technical key. Friendly numbering is the caller's
+   * responsibility (typically: sort investment properties by purchase /
+   * contract / settlement date ascending and assign 1-based indices).
+   */
+  propertyLabels?: Record<string, string>;
   /** Total rental income across all IPs — engine `CashFlowYear.rentalIncome`. */
   rentalIncomeTotal: number;
   /** Investment income (dividends/yield) — engine does not separately track this today; pass 0. INFO-only unless populated. */
@@ -553,14 +563,31 @@ export function buildCashflowReconciliationTrace(
 
   const b = computeBalance(a);
 
-  // Per-IP rental rows. Sorted by id so the trace order is stable.
+  // Per-IP rental rows. When the caller supplies friendly labels (purchase-
+  // date-ordered "IP N: Name") we render those instead of the raw Supabase
+  // sf_properties.id, while keeping the internal id in `source` as the
+  // technical key. Sort order prefers the friendly label so "IP 1" lands
+  // above "IP 2"; rows without a friendly label fall back to id sort.
+  const propertyLabels = a.propertyLabels ?? {};
   const rentalRows = Object.entries(a.rentalIncomeByProperty ?? {})
-    .sort(([a1], [b1]) => a1.localeCompare(b1))
-    .map(([propId, amt]) => ({
-      label: `Rental income — IP ${propId}`,
-      value: fmt$(amt),
-      source: `CashFlowYear.rentalIncomeByProperty["${propId}"]`,
-    }));
+    .sort(([a1], [b1]) => {
+      const la = propertyLabels[a1];
+      const lb = propertyLabels[b1];
+      if (la && lb) return la.localeCompare(lb, undefined, { numeric: true });
+      if (la) return -1;
+      if (lb) return 1;
+      return a1.localeCompare(b1);
+    })
+    .map(([propId, amt]) => {
+      const friendly = propertyLabels[propId];
+      return {
+        label: friendly
+          ? `Rental income — ${friendly}`
+          : `Rental income — IP ${propId}`,
+        value: fmt$(amt),
+        source: `CashFlowYear.rentalIncomeByProperty["${propId}"] (internal id ${propId})`,
+      };
+    });
 
   const flags = diagnoseDoubleCounting(a, b);
 
