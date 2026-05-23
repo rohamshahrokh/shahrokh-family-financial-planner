@@ -119,6 +119,7 @@ import FamilyOfficeMode from "@/components/FamilyOfficeMode";
 import FutureWorldsPanel from "@/components/FutureWorldsPanel";
 import { getBestMoveRecommendation, type BestMoveLedger } from "@/lib/bestMoveEngine";
 import DepositPowerCard from "@/components/DepositPowerCard";
+import PlanExecutionCard from "@/components/PlanExecutionCard";
 import FIREPathCard from "@/components/FIREPathCard";
 import TaxAlphaCard from "@/components/TaxAlphaCard";
 import RiskRadarCard from "@/components/RiskRadarCard";
@@ -1807,6 +1808,52 @@ export default function DashboardPage() {
     .map((m: any) => m.label || m.monthKey);
   const hasLiquidityStress = negativeCashMonths.length > 0;
 
+  // ─── PLAN EXECUTION — dual-status derivation ─────────────────────────────
+  // UX/derived-status only — no engine recomputation. All values pass through
+  // from existing engines (depositPower → funding side, cashEngine → liquidity).
+  const planExecutionInputs = useMemo(() => {
+    const ledger = cashEngineResult?.ledger ?? [];
+    const currentYear = new Date().getFullYear();
+    const monthsThisYear = ledger.filter((m: any) => m.year === currentYear);
+    if (monthsThisYear.length === 0) return null;
+
+    const opening = monthsThisYear[0].openingCash;
+    const closing = monthsThisYear[monthsThisYear.length - 1].closingCash;
+    let propertyPurchase = 0;
+    let stockInvesting   = 0;
+    let cryptoInvesting  = 0;
+    let inflows          = 0;
+    let outflowsExclInvest = 0;
+    for (const m of monthsThisYear) {
+      propertyPurchase += m.propertyPurchase ?? 0;
+      stockInvesting   += m.stockInvesting   ?? 0;
+      cryptoInvesting  += m.cryptoInvesting  ?? 0;
+      inflows          += m.totalInflows     ?? 0;
+      outflowsExclInvest += (m.totalOutflows ?? 0)
+        - (m.propertyPurchase ?? 0)
+        - (m.stockInvesting   ?? 0)
+        - (m.cryptoInvesting  ?? 0);
+    }
+    const investmentAllocations = stockInvesting + cryptoInvesting;
+    const operatingCashflow     = inflows - outflowsExclInvest;
+
+    // Funding side — pass through depositPower (no recomputation).
+    const fundingCapacity = depositPowerResult?.totalDepositPower         ?? 0;
+    const fundingRequired = depositPowerResult?.nextPropertyRequiredCash  ?? 0;
+
+    return {
+      funding: { fundingCapacity, fundingRequired },
+      liquidity: {
+        openingCash:                 opening,
+        operatingCashflow,
+        investmentAllocations,
+        propertyAcquisitionCashUsed: propertyPurchase,
+        closingCash:                 closing,
+      },
+      year: currentYear,
+    };
+  }, [cashEngineResult, depositPowerResult]);
+
   // Derived labels for inline mini-card (sourced from inlineBestMove_hook above loading guard)
   const bestMoveTitle   = inlineBestMove_hook?.best.action       ?? "Analysing…";
   const bestMoveImpact  = inlineBestMove_hook?.best.benefit_label ?? "";
@@ -2596,36 +2643,35 @@ export default function DashboardPage() {
                         <div className="h-full rounded-full" style={{ width: `${Math.min(100, depositPowerResult?.readinessPct ?? 0)}%`, background: (depositPowerResult?.readinessPct ?? 0) >= 100 ? "hsl(142,55%,42%)" : "hsl(43,85%,52%)" }} />
                       </div>
                     </div>
-                    {/* Est. Ready Date */}
+                    {/* Est. Ready Date — funding side only.
+                        The cash/liquidity side is shown by PlanExecutionCard
+                        below, so this cell no longer carries the misleading
+                        "Equity Rich" wording on its own. */}
                     <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
                       <div className="text-xs text-muted-foreground mb-0.5">Est. Ready Date</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: depositPowerResult?.isEquityRichCashPoor ? "hsl(43,90%,62%)" : depositPowerResult?.isReady ? "hsl(142,60%,52%)" : "hsl(215,15%,65%)" }}>
-                        {depositPowerResult?.isEquityRichCashPoor
-                          ? "⚠ Equity Rich"
-                          : depositPowerResult?.isReady
-                            ? "Ready Now"
-                            : depositPowerResult?.estimatedReadyDate
-                              ? new Date(depositPowerResult.estimatedReadyDate).toLocaleDateString("en-AU", { month: "short", year: "numeric" })
-                              : "—"}
+                      <div className="text-sm font-bold tabular-nums" style={{ color: depositPowerResult?.isReady ? "hsl(142,60%,52%)" : "hsl(215,15%,65%)" }}>
+                        {depositPowerResult?.isReady
+                          ? "Ready Now"
+                          : depositPowerResult?.estimatedReadyDate
+                            ? new Date(depositPowerResult.estimatedReadyDate).toLocaleDateString("en-AU", { month: "short", year: "numeric" })
+                            : "—"}
                       </div>
                       <div className="text-xs text-muted-foreground mt-0.5">
-                        {depositPowerResult?.isEquityRichCashPoor ? "/ Cash Poor" : depositPowerResult?.isReady ? "Deposit ready" : "Projected"}
+                        {depositPowerResult?.isReady ? "Deposit ready" : "Projected"}
                       </div>
                     </div>
                   </div>
 
-                  {/* Equity-rich / Cash-poor warning banner */}
-                  {depositPowerResult?.isEquityRichCashPoor && (
-                    <div className="mb-2 rounded-xl px-4 py-2.5 flex items-start gap-2.5"
-                      style={{ background: "hsl(43,90%,10%)", border: "1px solid hsl(43,90%,35%)" }}>
-                      <span style={{ fontSize: 16, lineHeight: 1.4 }}>⚠</span>
-                      <div>
-                        <div className="text-xs font-bold" style={{ color: "hsl(43,90%,62%)" }}>Equity Rich / Cash Poor</div>
-                        <div className="text-xs mt-0.5" style={{ color: "hsl(43,70%,52%)" }}>
-                          Your equity covers the deposit requirement, but your closing cash would fall below the emergency buffer after settlement.
-                          Consider refinancing to release equity as cash before purchasing, or building more liquid savings first.
-                        </div>
-                      </div>
+                  {/* PLAN EXECUTION — dual-status card (Funding + Liquidity).
+                      Replaces the prior single-status surface so that Funding
+                      Feasibility is never conflated with Year-End Liquidity. */}
+                  {planExecutionInputs && (
+                    <div className="mb-3">
+                      <PlanExecutionCard
+                        funding={planExecutionInputs.funding}
+                        liquidity={planExecutionInputs.liquidity}
+                        year={planExecutionInputs.year}
+                      />
                     </div>
                   )}
 

@@ -27,6 +27,7 @@
     "test:audit-p1": "tsx script/run-audit-p1-tests.ts",
     "test:recommendation-engine": "tsx script/test-recommendation-engine.ts",
     "test:phase5": "tsx script/test-phase5-behavioural-os-scenario.ts",
+    "test:plan-execution-dual-status": "tsx script/test-plan-execution-dual-status.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
