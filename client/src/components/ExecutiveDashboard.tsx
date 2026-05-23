@@ -200,6 +200,18 @@ export interface ExecutiveDashboardProps {
   planExecutionLiquidity?: PlanExecutionLiquidityInputs | null;
   /** Year label the dual-status card applies to (e.g. 2026). */
   planExecutionYear?: number | null;
+  /**
+   * Income engine breakdown — Recurring Monthly / One-Off (last 12 months) /
+   * Total (historical). Sourced from `selectIncomeAggregate`. Surfaced as a
+   * compact strip under the hero so the dashboard exposes the same three
+   * labels the Financial Plan income cards do, without duplicating the
+   * editable inputs. #FWL_Income_Engine_Refactor
+   */
+  incomeBreakdown?: {
+    recurringMonthlyIncome: number;
+    oneOffIncomeLast12Months: number;
+    totalHistoricalIncome: number;
+  } | null;
   /** Deterministic 10y net worth — compatibility only, never rendered as primary. */
   year10NW: number;
   /** Canonical Monte Carlo P50 (median) net worth at the selected horizon. */
@@ -565,6 +577,63 @@ function ExecutiveHeroSnapshot(p: HeroProps) {
           )}
         </div>
       </div>
+
+      {/* Income engine summary strip — Recurring / One-Off / Total.
+          Renders only when the dashboard supplies `incomeBreakdown`. Compact,
+          non-disruptive: a single row under the hero quartet that exposes the
+          three canonical labels and routes through the same
+          `dashboard:income-engine` audit trace as the Financial Plan cards.
+          #FWL_Income_Engine_Refactor */}
+      {p.incomeBreakdown && (
+        <div
+          className="border-t border-border/30 px-5 py-3 grid grid-cols-3 divide-x divide-border/25 gap-0"
+          data-testid="hero-income-engine-strip"
+        >
+          <div className="px-3">
+            <div className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">
+              Recurring Monthly Income
+            </div>
+            <div
+              className="text-sm font-bold tabular-nums mt-1"
+              style={{ color: 'hsl(142,60%,55%)' }}
+              data-testid="hero-recurring-monthly-income"
+            >
+              <AuditableMetric traceId="dashboard:income-engine">
+                {mv(formatCurrency(p.incomeBreakdown.recurringMonthlyIncome, true))}
+              </AuditableMetric>
+              <span className="text-[10px] text-muted-foreground font-normal"> /mo</span>
+            </div>
+          </div>
+          <div className="px-3">
+            <div className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">
+              One-Off Income (last 12 months)
+            </div>
+            <div
+              className="text-sm font-bold tabular-nums mt-1"
+              style={{ color: 'hsl(43,90%,55%)' }}
+              data-testid="hero-one-off-income"
+            >
+              <AuditableMetric traceId="dashboard:income-engine">
+                {mv(formatCurrency(p.incomeBreakdown.oneOffIncomeLast12Months, true))}
+              </AuditableMetric>
+            </div>
+          </div>
+          <div className="px-3">
+            <div className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">
+              Total Income (historical)
+            </div>
+            <div
+              className="text-sm font-bold tabular-nums mt-1"
+              style={{ color: 'hsl(210,80%,65%)' }}
+              data-testid="hero-total-historical-income"
+            >
+              <AuditableMetric traceId="dashboard:income-engine">
+                {mv(formatCurrency(p.incomeBreakdown.totalHistoricalIncome, true))}
+              </AuditableMetric>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

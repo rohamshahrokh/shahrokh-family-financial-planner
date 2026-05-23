@@ -15,7 +15,7 @@
  *  6. Plan Validation + Timeline (read-only summary)
  */
 
-import React, { useMemo, useState, useCallback, useRef } from "react";
+import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { localStore } from "@/lib/localStore";
@@ -23,6 +23,18 @@ import { useLocation } from "wouter";
 import AssumptionsPanel from "@/components/AssumptionsPanel";
 import { computeCanonicalNetWorth } from "@/lib/canonicalNetWorth";
 import { formatCurrency, safeNum } from "@/lib/finance";
+// Income engine — Financial Plan registers the live trace on mount and wraps
+// the three income cards in <AuditableMetric> so the native UI opens the
+// populated `dashboard:income-engine` trace (rather than the architecture
+// placeholder that Audit Coverage shows before any page registers it).
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
+import { registerTrace as registerAuditTrace } from "@/lib/auditMode/auditRegistry";
+import {
+  buildIncomeClassificationTrace,
+  INCOME_ENGINE_TRACE_ID,
+} from "@/lib/auditMode/engineTraces";
+import { Search } from "lucide-react";
 // Single-source-of-truth selectors. Financial Plan now DISPLAYS derived values
 // (income from ledger, expenses from budget, mortgage repayment from debt
 // module, combined super) and only allows manual entry when the user
@@ -265,12 +277,42 @@ function fmtDate(d: string | null | undefined): string {
   return new Date(d).toLocaleDateString("en-AU", { year: "numeric", month: "short", day: "numeric" });
 }
 
+// ─── Native Audit Mode affordance for the Income engine ──────────────────────
+// A small icon button sits beside each income-card heading. Audit Mode OFF →
+// clicking still opens the trace panel (so the affordance is discoverable
+// independent of the global toggle). Audit Mode ON → the wrapped numeric
+// value is also clickable via <AuditableMetric>. Both paths resolve the same
+// `dashboard:income-engine` trace which Financial Plan registers on mount.
+function IncomeEngineTraceButton({
+  openTrace,
+  testId,
+}: {
+  openTrace: (id: string) => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => openTrace(INCOME_ENGINE_TRACE_ID)}
+      className="inline-flex items-center justify-center w-5 h-5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+      title="Open Income Engine audit trace"
+      aria-label="Open Income Engine audit trace"
+      data-testid={testId}
+      data-audit-affordance="income-engine"
+      data-audit-trace-id={INCOME_ENGINE_TRACE_ID}
+    >
+      <Search className="w-3 h-3" />
+    </button>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function MyFinancialPlan() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const qc = useQueryClient();
+  const { openTrace } = useAuditMode();
 
   // ── Data queries ────────────────────────────────────────────────────────────
   const { data: snapshot, isLoading: loadingSnap } = useQuery<any>({
@@ -400,6 +442,23 @@ export default function MyFinancialPlan() {
   // historical), replacing the legacy single "Monthly Income (single
   // source of truth)" row.
   const sotIncomeAggregate  = selectIncomeAggregate(sotInputs);
+
+  // Register the live Income Engine audit trace AS SOON AS this page mounts.
+  // The Audit Coverage manifest can already advertise the
+  // `dashboard:income-engine` trace id before any page renders, but resolves
+  // to the architecture-placeholder until a host registers a populated
+  // trace. Doing it here means: the moment the user navigates to Financial
+  // Plan (where the three income cards live), the placeholder is replaced
+  // with the live, populated trace — Audit Mode click targets and the
+  // explicit "Audit Trace" affordance both open the real values.
+  useEffect(() => {
+    registerAuditTrace(
+      buildIncomeClassificationTrace({
+        aggregate: sotIncomeAggregate,
+        asOf: new Date().toISOString(),
+      }),
+    );
+  }, [sotIncomeAggregate]);
   const sotMonthlyExpenses  = selectMonthlyExpensesLedger(sotInputs);
   const sotMortgageRepayment = selectMortgageRepayment(sotInputs);
   const sotSuperCombined    = selectSuperCombined(sotInputs);
@@ -687,15 +746,26 @@ export default function MyFinancialPlan() {
               single "Monthly Income (single source of truth)" row. The
               recurring figure is what feeds Forecast / Monte Carlo /
               Deposit Power / Affordability — see
-              `incomeClassificationEngine.ts`. */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+              `incomeClassificationEngine.ts`.
+
+              Each card's value is wrapped in <AuditableMetric> so Audit
+              Mode opens the live `dashboard:income-engine` trace (registered
+              on mount in the effect below). A small "Audit Trace" affordance
+              sits beside the heading so the trace is also discoverable when
+              Audit Mode is off. */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3" data-testid="income-engine-cards">
             <div className="rounded-md bg-emerald-500/10 border border-emerald-500/30 p-2.5">
-              <div className="text-[10px] uppercase tracking-wide text-emerald-300/80 flex items-center gap-1">
-                <Lock className="w-2.5 h-2.5" />
-                Recurring Monthly Income
+              <div className="text-[10px] uppercase tracking-wide text-emerald-300/80 flex items-center justify-between gap-1">
+                <span className="flex items-center gap-1">
+                  <Lock className="w-2.5 h-2.5" />
+                  Recurring Monthly Income
+                </span>
+                <IncomeEngineTraceButton openTrace={openTrace} testId="income-engine-trace-recurring" />
               </div>
               <div className="text-base font-mono font-semibold text-foreground mt-1">
-                {formatCurrency(sotIncomeAggregate.recurringMonthlyIncome || sotMonthlyIncome, true)}
+                <AuditableMetric traceId={INCOME_ENGINE_TRACE_ID} testId="recurring-monthly-income-value">
+                  {formatCurrency(sotIncomeAggregate.recurringMonthlyIncome || sotMonthlyIncome, true)}
+                </AuditableMetric>
                 <span className="text-[10px] text-muted-foreground font-normal"> /mo</span>
               </div>
               <div className="text-[10px] text-muted-foreground mt-0.5">
@@ -704,11 +774,14 @@ export default function MyFinancialPlan() {
               </div>
             </div>
             <div className="rounded-md bg-amber-500/10 border border-amber-500/30 p-2.5">
-              <div className="text-[10px] uppercase tracking-wide text-amber-300/80">
-                One-Off Income (last 12 months)
+              <div className="text-[10px] uppercase tracking-wide text-amber-300/80 flex items-center justify-between gap-1">
+                <span>One-Off Income (last 12 months)</span>
+                <IncomeEngineTraceButton openTrace={openTrace} testId="income-engine-trace-oneoff" />
               </div>
               <div className="text-base font-mono font-semibold text-foreground mt-1">
-                {formatCurrency(sotIncomeAggregate.oneOffIncomeLast12Months, true)}
+                <AuditableMetric traceId={INCOME_ENGINE_TRACE_ID} testId="one-off-income-12mo-value">
+                  {formatCurrency(sotIncomeAggregate.oneOffIncomeLast12Months, true)}
+                </AuditableMetric>
               </div>
               <div className="text-[10px] text-muted-foreground mt-0.5">
                 Bonuses, tax refunds, asset sales, gifts / inheritance.
@@ -716,11 +789,14 @@ export default function MyFinancialPlan() {
               </div>
             </div>
             <div className="rounded-md bg-sky-500/10 border border-sky-500/30 p-2.5">
-              <div className="text-[10px] uppercase tracking-wide text-sky-300/80">
-                Total Income (historical)
+              <div className="text-[10px] uppercase tracking-wide text-sky-300/80 flex items-center justify-between gap-1">
+                <span>Total Income (historical)</span>
+                <IncomeEngineTraceButton openTrace={openTrace} testId="income-engine-trace-total" />
               </div>
               <div className="text-base font-mono font-semibold text-foreground mt-1">
-                {formatCurrency(sotIncomeAggregate.totalHistoricalIncome, true)}
+                <AuditableMetric traceId={INCOME_ENGINE_TRACE_ID} testId="total-income-historical-value">
+                  {formatCurrency(sotIncomeAggregate.totalHistoricalIncome, true)}
+                </AuditableMetric>
               </div>
               <div className="text-[10px] text-muted-foreground mt-0.5">
                 Every income record on the ledger, ever.

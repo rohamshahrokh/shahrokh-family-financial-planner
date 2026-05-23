@@ -2296,6 +2296,15 @@ export default function DashboardPage() {
     totalLiab,
     monthlyExpenses: monthlyExpensesSOT,
     passiveIncome,
+    // ── Income engine breakdown ──
+    // Compact strip under the hero quartet exposes Recurring / One-Off /
+    // Total income with the same trace id the Financial Plan cards use.
+    // #FWL_Income_Engine_Refactor
+    incomeBreakdown: {
+      recurringMonthlyIncome:   incomeAggregate.recurringMonthlyIncome,
+      oneOffIncomeLast12Months: incomeAggregate.oneOffIncomeLast12Months,
+      totalHistoricalIncome:    incomeAggregate.totalHistoricalIncome,
+    },
     // ── Plan Feasibility (planning-validation layer) ──
     // Compact card surfaced next to the Plan Execution Capacity audit area.
     // Inform-only: a negative gap renders a warning banner but no engine,

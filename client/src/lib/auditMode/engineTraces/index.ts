@@ -157,5 +157,6 @@ export {
 export {
   buildIncomeClassificationTrace,
   INCOME_ENGINE_TRACE_ID,
+  INCOME_ENGINE_APPLIED_MODULES,
   type IncomeEngineTraceArgs,
 } from './incomeClassificationTraces';

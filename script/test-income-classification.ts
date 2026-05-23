@@ -15,6 +15,12 @@
  *   8. Audit trace surfaces Included / Excluded record lists.
  */
 
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = dirname(__filename);
 import {
   classifyIncomeRecord,
   aggregateIncome,
@@ -25,7 +31,17 @@ import {
   selectIncomeAggregate,
   type DashboardInputs,
 } from "../client/src/lib/dashboardDataContract";
-import { buildIncomeClassificationTrace } from "../client/src/lib/auditMode/engineTraces/incomeClassificationTraces";
+import {
+  buildIncomeClassificationTrace,
+  INCOME_ENGINE_APPLIED_MODULES,
+  INCOME_ENGINE_TRACE_ID,
+} from "../client/src/lib/auditMode/engineTraces/incomeClassificationTraces";
+import {
+  registerTrace,
+  resolveTrace,
+  hasTrace,
+  __resetTraceRegistry,
+} from "../client/src/lib/auditMode/auditRegistry";
 
 let pass = 0;
 let fail = 0;
@@ -225,6 +241,156 @@ console.log("\n[8] Audit trace — included / excluded record lists");
     trace.inputs.some(i => i.label === "Forecast Income Used" && String(i.value).includes("15,000")));
   check("trace lists monteCarloIncomeUsed = $15,000",
     trace.inputs.some(i => i.label === "Monte Carlo Income Used" && String(i.value).includes("15,000")));
+}
+
+// ─── 9. Enriched trace exposes every field QA flagged ────────────────────────
+console.log("\n[9] Enriched trace fields — Recurring Sources / Excluded Events / Forecast / MC / Serviceability / Applied Modules");
+{
+  const agg = aggregateIncome(
+    [
+      { date: "2026-05-01", amount: 15000, income_type: "employment_salary", frequency: "Monthly", member: "Roham" },
+      { date: "2026-04-01", amount: 15000, income_type: "employment_salary", frequency: "Monthly", member: "Roham" },
+      { date: "2026-05-15", amount: 3000,  income_type: "rental_income",     frequency: "Monthly", member: "Family" },
+      { date: "2026-02-15", amount: 80000, income_type: "asset_sale",         frequency: "One-off", member: "Family" },
+      { date: "2026-04-20", amount: 5000,  income_type: "tax_refund",         frequency: "One-off", member: "Roham" },
+    ],
+    TODAY,
+  );
+  const trace = buildIncomeClassificationTrace({ aggregate: agg, asOf: TODAY });
+
+  // Explicit summary rows
+  const recurringSourcesRow = trace.inputs.find(i => i.label === "Recurring Income Sources Used");
+  check("trace exposes 'Recurring Income Sources Used' row", recurringSourcesRow !== undefined);
+  check("recurring sources row names Employment Salary",
+    !!recurringSourcesRow && String(recurringSourcesRow.value).includes("Employment Salary"));
+  check("recurring sources row names Rental Income",
+    !!recurringSourcesRow && String(recurringSourcesRow.value).includes("Rental Income"));
+
+  const excludedEventsRow = trace.inputs.find(i => i.label === "Excluded One-Off Income Events");
+  check("trace exposes 'Excluded One-Off Income Events' row", excludedEventsRow !== undefined);
+  check("excluded events row names Asset Sale",
+    !!excludedEventsRow && String(excludedEventsRow.value).includes("Asset Sale"));
+  check("excluded events row names Tax Refund",
+    !!excludedEventsRow && String(excludedEventsRow.value).includes("Tax Refund"));
+
+  // Serviceability row exists (was already present but now has a note)
+  const serviceabilityRow = trace.inputs.find(i => i.label === "Serviceability Income Used");
+  check("trace exposes 'Serviceability Income Used' row", serviceabilityRow !== undefined);
+
+  // Applied Modules row + the module list itself is non-empty
+  const appliedRow = trace.inputs.find(i => i.label === "Applied Modules");
+  check("trace exposes 'Applied Modules' row", appliedRow !== undefined);
+  check("Applied Modules count > 0", INCOME_ENGINE_APPLIED_MODULES.length > 0);
+  check("Applied Modules note names Forecast Engine",
+    !!appliedRow && String(appliedRow.note ?? "").includes("Forecast Engine"));
+  check("Applied Modules note names Monte Carlo",
+    !!appliedRow && String(appliedRow.note ?? "").includes("Monte Carlo"));
+  check("Applied Modules note names Deposit Power",
+    !!appliedRow && String(appliedRow.note ?? "").includes("Deposit Power"));
+
+  // Included/excluded record reasons expose type/behaviour/treatment
+  const salaryInc = trace.included.find(r => /Employment Salary/i.test(r.label));
+  check("included salary record reason names type",
+    !!salaryInc && /type=Employment Salary/i.test(String(salaryInc.reason ?? "")));
+  check("included salary record reason names behaviour=Recurring",
+    !!salaryInc && /behaviour=Recurring/i.test(String(salaryInc.reason ?? "")));
+  check("included salary record reason names treatment=Include",
+    !!salaryInc && /treatment=Include/i.test(String(salaryInc.reason ?? "")));
+
+  const saleExc = trace.excluded.find(r => /Asset Sale/i.test(r.label));
+  check("excluded asset sale record reason names treatment=Exclude",
+    !!saleExc && /treatment=Exclude/i.test(String(saleExc.reason ?? "")));
+}
+
+// ─── 10. Native AuditableMetric affordance on Financial Plan income cards ────
+console.log("\n[10] Native audit affordance — Financial Plan income cards");
+{
+  const fp = readFileSync(resolve(__dirname, "../client/src/pages/financial-plan.tsx"), "utf8");
+  check("financial-plan imports AuditableMetric",  fp.includes("from \"@/components/auditMode/AuditableMetric\""));
+  check("financial-plan imports useAuditMode",      fp.includes("from \"@/lib/auditMode/AuditModeContext\""));
+  check("financial-plan imports registerAuditTrace", fp.includes("registerTrace as registerAuditTrace"));
+  check("financial-plan imports buildIncomeClassificationTrace", fp.includes("buildIncomeClassificationTrace"));
+  check("financial-plan imports INCOME_ENGINE_TRACE_ID", fp.includes("INCOME_ENGINE_TRACE_ID"));
+
+  // Recurring / One-Off / Total cards each wrap their value in AuditableMetric
+  check("recurring value wrapped in AuditableMetric",
+    /AuditableMetric[^<]*traceId=\{INCOME_ENGINE_TRACE_ID\}[^<]*testId="recurring-monthly-income-value"/s.test(fp));
+  check("one-off value wrapped in AuditableMetric",
+    /AuditableMetric[^<]*traceId=\{INCOME_ENGINE_TRACE_ID\}[^<]*testId="one-off-income-12mo-value"/s.test(fp));
+  check("total value wrapped in AuditableMetric",
+    /AuditableMetric[^<]*traceId=\{INCOME_ENGINE_TRACE_ID\}[^<]*testId="total-income-historical-value"/s.test(fp));
+
+  // Native click affordance button is present per card with consistent data attrs
+  check("native trace button (recurring) present",
+    fp.includes('testId="income-engine-trace-recurring"'));
+  check("native trace button (one-off) present",
+    fp.includes('testId="income-engine-trace-oneoff"'));
+  check("native trace button (total) present",
+    fp.includes('testId="income-engine-trace-total"'));
+  check("native trace button calls openTrace(INCOME_ENGINE_TRACE_ID)",
+    /openTrace\(INCOME_ENGINE_TRACE_ID\)/.test(fp));
+  check("native trace button carries data-audit-affordance=\"income-engine\"",
+    /data-audit-affordance="income-engine"/.test(fp));
+
+  // Live trace registration runs on mount (useEffect)
+  check("financial-plan registers live trace via useEffect",
+    /useEffect\([\s\S]*registerAuditTrace\(\s*buildIncomeClassificationTrace/.test(fp));
+}
+
+// ─── 11. Compact income strip on Executive Overview Dashboard ────────────────
+console.log("\n[11] Dashboard ExecutiveDashboard — compact income strip");
+{
+  const ed = readFileSync(resolve(__dirname, "../client/src/components/ExecutiveDashboard.tsx"), "utf8");
+  check("ExecutiveDashboard accepts incomeBreakdown prop", /incomeBreakdown\?:\s*\{/.test(ed));
+  check("strip carries hero-income-engine-strip testid", ed.includes('data-testid="hero-income-engine-strip"'));
+  check("strip exposes 'Recurring Monthly Income' label", ed.includes("Recurring Monthly Income"));
+  check("strip exposes 'One-Off Income (last 12 months)' label", ed.includes("One-Off Income (last 12 months)"));
+  check("strip exposes 'Total Income (historical)' label", ed.includes("Total Income (historical)"));
+  check("strip wraps recurring value in AuditableMetric/dashboard:income-engine",
+    /data-testid="hero-recurring-monthly-income"[\s\S]*AuditableMetric traceId="dashboard:income-engine"/.test(ed));
+
+  const dash = readFileSync(resolve(__dirname, "../client/src/pages/dashboard.tsx"), "utf8");
+  check("dashboard.tsx passes incomeBreakdown into phase7ExecProps", /incomeBreakdown:\s*\{/.test(dash));
+  check("dashboard.tsx populates incomeBreakdown from incomeAggregate",
+    /incomeBreakdown:[\s\S]*incomeAggregate\.recurringMonthlyIncome/.test(dash));
+}
+
+// ─── 12. Live registration overwrites placeholder + resolves with values ─────
+console.log("\n[12] Runtime: registering the live trace exposes the populated values");
+{
+  __resetTraceRegistry();
+  check("registry empty before mount: hasTrace(income-engine) === false",
+    hasTrace(INCOME_ENGINE_TRACE_ID) === false);
+
+  const agg = aggregateIncome(
+    [
+      { date: "2026-05-01", amount: 15000, income_type: "employment_salary", frequency: "Monthly", member: "Roham" },
+      { date: "2026-02-15", amount: 80000, income_type: "asset_sale",         frequency: "One-off", member: "Family" },
+    ],
+    TODAY,
+  );
+  registerTrace(buildIncomeClassificationTrace({ aggregate: agg, asOf: TODAY }));
+
+  check("after mount: hasTrace(income-engine) === true",
+    hasTrace(INCOME_ENGINE_TRACE_ID) === true);
+  const t = resolveTrace(INCOME_ENGINE_TRACE_ID);
+  check("resolveTrace returns a non-null record", t !== null);
+  if (t) {
+    check("resolved trace has formula populated",
+      typeof t.formula === "string" && t.formula.length > 0);
+    check("resolved trace finalValue includes $15,000",
+      String(t.finalValue).includes("15,000"));
+    check("resolved trace exposes Recurring Income Sources Used",
+      t.inputs.some(i => i.label === "Recurring Income Sources Used"));
+    check("resolved trace exposes Excluded One-Off Income Events",
+      t.inputs.some(i => i.label === "Excluded One-Off Income Events"));
+    check("resolved trace exposes Forecast Income Used",
+      t.inputs.some(i => i.label === "Forecast Income Used"));
+    check("resolved trace exposes Monte Carlo Income Used",
+      t.inputs.some(i => i.label === "Monte Carlo Income Used"));
+    check("resolved trace exposes Applied Modules",
+      t.inputs.some(i => i.label === "Applied Modules"));
+  }
 }
 
 // ─── Summary ──────────────────────────────────────────────────────────────────
