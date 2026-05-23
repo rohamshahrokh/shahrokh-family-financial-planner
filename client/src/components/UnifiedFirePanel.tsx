@@ -19,6 +19,7 @@ import {
 } from '@/lib/recommendationEngine';
 import { maskValue } from '@/components/PrivacyMask';
 import { useAppStore } from '@/lib/store';
+import { MetricExplainer } from '@/components/intelligence/MetricExplainer';
 
 export default function UnifiedFirePanel() {
   const { privacyMode } = useAppStore();
@@ -67,7 +68,11 @@ export default function UnifiedFirePanel() {
             <Flame className="w-4 h-4 text-orange-400" />
           </div>
           <div>
-            <p className="text-sm font-bold text-foreground">FIRE — Strategic brain</p>
+            <p className="text-sm font-bold text-foreground flex items-center gap-1">
+              <span>FIRE — Strategic brain</span>
+              <MetricExplainer metricId="fire-progress" size={11} />
+              <MetricExplainer metricId="withdrawal-sustainability" size={11} />
+            </p>
             <p className="text-[10px] text-muted-foreground">
               From the unified recommendation engine · {result.unified.signalCoverage.length} signals
             </p>

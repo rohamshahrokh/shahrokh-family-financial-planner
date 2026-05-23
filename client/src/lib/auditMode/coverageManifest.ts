@@ -1,0 +1,422 @@
+/**
+ * coverageManifest.ts — Canonical manifest of every engine metric the
+ * platform commits to surfacing under Audit Mode.
+ *
+ * This file is the single source of truth for the Audit Coverage report and
+ * the test:audit-mode coverage guard. It enumerates every required trace id,
+ * grouped by engine, with the surface where the metric is displayed and a
+ * one-line description.
+ *
+ * Adding a new metric? Add an entry here AND register a trace with the same
+ * id from the host component/engine adapter. The coverage report will then
+ * automatically include it.
+ */
+
+import {
+  MONTE_CARLO_TRACE_IDS,
+  DECISION_WINNER_TRACE_IDS,
+  BESTMOVE_TRACE_IDS,
+  FIRE_TRACE_IDS,
+  FORECAST_TRACE_IDS,
+  FINANCIAL_HEALTH_TRACE_IDS,
+  LEGACY_RISK_RADAR_TRACE_IDS,
+  PROPERTY_TRACE_IDS,
+  FUNDING_SOURCE_TRACE_IDS,
+  CASHFLOW_PLAN_EXECUTION_TRACE_IDS,
+  CASHFLOW_PLAN_EXECUTION_YEAR_RANGE,
+  CASHFLOW_RECONCILIATION_TRACE_IDS,
+  CASHFLOW_RECONCILIATION_YEAR_RANGE,
+  PLAN_FEASIBILITY_TRACE_ID,
+  FUNDING_RESOLUTION_TRACE_ID,
+  INCOME_ENGINE_TRACE_ID,
+} from './engineTraces';
+
+export type EngineSourceKey =
+  | 'monte_carlo'
+  | 'decision_engine'
+  | 'forecast_engine'
+  | 'financial_health'
+  | 'fire_engine'
+  | 'wealth_layers'
+  | 'dashboard'
+  | 'projection_rows'
+  | 'wealth_strategy'
+  | 'property_engine'
+  | 'mc_assumptions'
+  | 'cashflow_engine'
+  /** Persisted modelling defaults resolved by scenarioSettingsResolver. */
+  | 'user_defaults';
+
+export interface CoverageEntry {
+  /** Trace id registered with the audit registry. */
+  id: string;
+  /** Engine producing the value. */
+  engine: EngineSourceKey;
+  /** Human-readable surface (page / component) where the value displays. */
+  surface: string;
+  /** One-line description of the metric. */
+  description: string;
+  /** If true, the metric is required to be DISPLAYED under Audit Mode (i.e. a real UI surface). */
+  required: boolean;
+}
+
+const dashboardSurface = 'ExecutiveDashboard';
+const mcSurface = 'MonteCarloDashboard / Wealth Strategy';
+const decisionSurface = 'pages/decision.tsx';
+const bestMoveSurface = 'BestMoveCard + UnifiedFirePanel + UnifiedRiskPanel';
+const fireSurface = 'pages/fire-path.tsx';
+const riskSurface = 'CanonicalRiskSurface + pages/risk-radar.tsx';
+const forecastSurface = 'ExecutiveDashboard projection + Wealth Strategy';
+const projectionSurface = 'ExecutiveDashboard projection table + ProjectionCardListMobile';
+
+const monteCarloDescriptions: Record<string, string> = {
+  'mc:p10-nw-at-target': 'Pessimistic (P10) net worth at FIRE target age',
+  'mc:p50-nw-at-target': 'Median (P50) net worth at FIRE target age',
+  'mc:p90-nw-at-target': 'Optimistic (P90) net worth at FIRE target age',
+  'mc:confidence-bands': 'Width of P10..P90 confidence band',
+  'mc:fire-probability': 'Probability of FIRE by target age',
+  'mc:reach-goal-probabilities': 'Cumulative FIRE probability by age curve',
+  'mc:neg-cashflow-risk': 'Probability of negative cashflow in horizon',
+  'mc:cash-shortfall-risk': 'Probability of cash buffer breach',
+  'mc:financial-freedom-prob': 'Composite financial freedom probability',
+  'mc:median-fire-year': 'Median FIRE year (P50)',
+  'mc:p10-fire-year': 'Pessimistic FIRE year (P10)',
+  'mc:p90-fire-year': 'Optimistic FIRE year (P90)',
+};
+
+const decisionWinnerDescriptions: Record<string, string> = {
+  'decision:winner:total-score': 'Total composite score (0–100) of the winning candidate',
+  'decision:winner:component-scores': 'Per-axis contribution scores',
+  'decision:winner:weightings': 'Profile weights driving the composite score',
+  'decision:winner:penalties': 'Penalties deducted from the base score',
+  'decision:winner:why-this-ranks': 'Engine narrative for why winner ranks #1',
+  'decision:winner:why-not-ranked-higher': 'Engine narrative for what could invalidate',
+  'decision:winner:recommendation-logic': 'Composite recommendation logic',
+};
+
+const bestMoveDescriptions: Record<string, string> = {
+  'decision:bestmove:total-score': 'Best Move composite score',
+  'decision:bestmove:component-scores': 'Best Move quantified impacts',
+  'decision:bestmove:weightings': 'Best Move pillar weighting',
+  'decision:bestmove:penalties': 'Best Move trade-offs / opportunity cost',
+  'decision:bestmove:why-this-ranks': 'Best Move plain-English reasoning',
+  'decision:bestmove:why-not-ranked-higher': 'Best Move "what would change this advice"',
+  'decision:bestmove:recommendation-logic': 'Best Move full recommendation logic',
+};
+
+const fireDescriptions: Record<string, string> = {
+  'fire:date': 'Best-scenario FIRE year (deterministic)',
+  'fire:capital-target': 'FIRE capital target = passive / SWR',
+  'fire:swr-used': 'Safe withdrawal rate used',
+  'fire:passive-gap': 'Capital gap between today and FIRE target',
+  'fire:time-saved-lost': 'Spread of FIRE years across scenarios',
+};
+
+const forecastDescriptions: Record<string, string> = {
+  'forecast:net-worth': 'Forecast Net Worth at final horizon year',
+  'forecast:accessible-net-worth': 'Forecast accessible NW (excl. locked layers)',
+  'forecast:fire-capital': 'FIRE Capital (post-tax)',
+  'forecast:liquidatable-wealth': 'Liquidatable wealth (post selling costs)',
+  'forecast:property-equity': 'Forecast property equity',
+  'forecast:cashflow': 'Annual cashflow (surplus × 12)',
+  'forecast:cagr': 'Overall forecast CAGR',
+};
+
+const financialHealthDescriptions: Record<string, string> = {
+  'financial-health:liquidity': 'Liquidity score (8-axis canonical risk radar)',
+  'financial-health:leverage': 'Leverage score',
+  'financial-health:cashflow': 'Cashflow score',
+  'financial-health:fire-progress': 'FIRE progress score',
+  'financial-health:overall': 'Overall risk score (mean of axes)',
+};
+
+const legacyRiskDescriptions: Record<string, string> = {
+  'risk-radar:overall': 'Risk Radar page — overall safety score',
+  'risk-radar:category:debt': 'Risk Radar page — Debt risk category',
+  'risk-radar:category:cashflow': 'Risk Radar page — Cashflow risk category',
+  'risk-radar:category:investment': 'Risk Radar page — Investment risk category',
+  'risk-radar:category:income': 'Risk Radar page — Income risk category',
+};
+
+const wealthStrategyDescriptions: Record<string, string> = {
+  'wealth-strategy:cash-buffer': 'Wealth Strategy Hub — Cash Buffer (months of expenses)',
+  'wealth-strategy:savings-rate': 'Wealth Strategy Hub — Savings Rate (%)',
+  'wealth-strategy:debt-to-assets': 'Wealth Strategy Hub — Debt-to-Assets ratio (%)',
+  'wealth-strategy:freedom-progress': 'Wealth Strategy Hub — Freedom Progress toward FIRE (%)',
+  'wealth-strategy:net-position': 'Wealth Strategy Hub — Household Net Position',
+};
+
+const mcAssumptionsDescriptions: Record<string, string> = {
+  'assumptions:mc:expected-return:property': 'Monte Carlo assumption — Property expected (mean) annual growth %',
+  'assumptions:mc:expected-return:stocks':   'Monte Carlo assumption — Stocks expected (mean) annual return %',
+  'assumptions:mc:expected-return:crypto':   'Monte Carlo assumption — Crypto expected (mean) annual return %',
+  'assumptions:mc:expected-return:super':    'Monte Carlo assumption — Super expected (mean) annual return %',
+};
+
+export const MC_EXPECTED_RETURN_TRACE_IDS = Object.keys(mcAssumptionsDescriptions);
+
+const propertyDescriptions: Record<string, string> = {
+  'property:portfolio:value': 'Property page — Portfolio Value (sum of settled IPs)',
+  'property:portfolio:loans': 'Property page — Total Property Loans',
+  'property:portfolio:equity': 'Property page — Total Property Equity',
+  'property:portfolio:lvr': 'Property page — Portfolio LVR (%)',
+  'property:portfolio:cashflow': 'Property page — Monthly Investment Cashflow',
+};
+
+/**
+ * Per-year Plan Execution Capacity cashflow trace descriptions. One entry per
+ * year in the rolling 11-year cashflow horizon. Captures the audit value of
+ * the closing cash balance and explicitly calls out the canonical
+ * funding-aware path so the entry tells reviewers what to expect when they
+ * click it. #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+ */
+const cashflowYearDescriptions: Record<string, string> = Object.fromEntries(
+  CASHFLOW_PLAN_EXECUTION_YEAR_RANGE.map((y) => [
+    `cashflow:plan-execution:cash-balance:${y}`,
+    `Plan Execution Capacity — Cashflow chart, ${y} cash balance (opening + net CF + funding-aware property impact)`,
+  ]),
+);
+
+/**
+ * Per-year Cashflow Reconciliation trace descriptions. Itemises every income
+ * and outgoing line that feeds netCashflow and proves no double-counting.
+ * #FWL_Cashflow_Reconciliation_Trace
+ */
+const cashflowReconciliationDescriptions: Record<string, string> = Object.fromEntries(
+  CASHFLOW_RECONCILIATION_YEAR_RANGE.map((y) => [
+    `cashflow:plan-execution:reconciliation:${y}`,
+    `Plan Execution Capacity — Cashflow Reconciliation, ${y} net cashflow breakdown (income lines + outgoings + acquisition decomposition)`,
+  ]),
+);
+
+const fundingSourceDescriptions: Record<string, string> = {
+  'property:funding-source:used':              'Property page — Funding Source Used (cash + equity + sales = deposit)',
+  'property:funding-source:cash-impact':       'Property page — Closing Cash after funding (excludes equity-release deposits)',
+  'property:funding-source:equity-release':    'Property page — New loan balance after Equity Release',
+  'property:funding-source:emergency-buffer':  'Property page — Months of emergency buffer after funding',
+  'property:funding-source:negative-gearing':  'Property page — Negative gearing applied under active regime (current-law vs reform, loss bank)',
+};
+
+const projectionRequiredDescriptions: Record<string, string> = {
+  'dashboard:net-worth': 'Dashboard hero — Net Worth',
+  'dashboard:monthly-surplus': 'Dashboard hero — Monthly Surplus',
+  'dashboard:risk-state': 'Dashboard hero — Risk State',
+  'dashboard:fire-timeline': 'Dashboard hero — FIRE Timeline',
+  'dashboard:wealth-layers:gross': 'Wealth layer — Gross NW',
+  'dashboard:wealth-layers:accessible': 'Wealth layer — Accessible NW',
+  'dashboard:wealth-layers:liquidatable': 'Wealth layer — Liquidatable Wealth',
+  'dashboard:wealth-layers:fire': 'Wealth layer — FIRE Capital',
+  'risk:fire-fragility': 'Risk surface — FIRE Fragility',
+};
+
+// ── User Defaults (persistent modelling preferences) ──────────────────────────
+// #FWL_Persistent_UserDefaults_ScenarioOverride
+// Each key persisted by `persistentUserDefaults` / `scenarioSettingsResolver`
+// gets a CalculationTrace at id `user-default:<key>`. Registered as a
+// factory by `registerUserDefaultsTraces()` (also overwritten on the
+// Settings page mount with the live resolver output).
+
+const userDefaultsSurface = 'pages/settings.tsx (User Defaults — Modelling Preferences)';
+
+const userDefaultDescriptions: Record<string, string> = {
+  'user-default:projectionMode':              'User Default — Projection Mode (Median / Conservative / Optimistic / Deterministic Overlay)',
+  'user-default:monteCarloEnabled':           'User Default — Monte Carlo Enabled / Disabled',
+  'user-default:taxPolicyRegime':             'User Default — Tax Policy Regime selector (Auto-Detect / Current Rules / Proposed 2027 Reform / Custom)',
+  'user-default:propertyGrowthAssumption':    'User Default — Property Growth Assumption (%)',
+  'user-default:fundingSourceByProperty':     'User Default — Per-property Funding Source map (incl. IP2 Equity Release)',
+  'user-default:scenarioAssumptionSet':       'User Default — Scenario Assumption Set preset (Conservative / Moderate / Aggressive)',
+  'user-default:riskProfile':                 'User Default — Risk Profile (Risk Radar + Recommendation Engine)',
+  'user-default:investorProfile':             'User Default — Investor Profile (Decision Engine candidate generator)',
+  'user-default:strategyLens':                'User Default — Strategy Lens',
+  'user-default:activeScenarioId':            'User Default — Active Scenario id',
+  'user-default:activeHouseholdFinancialStateId': 'User Default — Active Household Financial State id',
+};
+
+export const USER_DEFAULT_TRACE_IDS: string[] = Object.keys(userDefaultDescriptions);
+
+export const COVERAGE_MANIFEST: CoverageEntry[] = [
+  // ── Monte Carlo ──
+  ...MONTE_CARLO_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'monte_carlo',
+    surface: mcSurface,
+    description: monteCarloDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Decision Engine (winner) ──
+  ...DECISION_WINNER_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'decision_engine',
+    surface: decisionSurface,
+    description: decisionWinnerDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Decision Engine (best move) ──
+  ...BESTMOVE_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'decision_engine',
+    surface: bestMoveSurface,
+    description: bestMoveDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── FIRE engine ──
+  ...FIRE_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'fire_engine',
+    surface: fireSurface,
+    description: fireDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Forecast engine ──
+  ...FORECAST_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'forecast_engine',
+    surface: forecastSurface,
+    description: forecastDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Financial Health (8-axis canonical) ──
+  ...FINANCIAL_HEALTH_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'financial_health',
+    surface: riskSurface,
+    description: financialHealthDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Risk Radar page (legacy 4-category) ──
+  ...LEGACY_RISK_RADAR_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'financial_health',
+    surface: 'pages/risk-radar.tsx',
+    description: legacyRiskDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Pre-existing required dashboard / projection / risk surface traces ──
+  ...Object.entries(projectionRequiredDescriptions).map<CoverageEntry>(([id, description]) => ({
+    id,
+    engine: id.startsWith('dashboard:wealth') ? 'wealth_layers' :
+            id.startsWith('risk:') ? 'financial_health' :
+            'dashboard',
+    surface: dashboardSurface,
+    description,
+    required: true,
+  })),
+  // ── Wealth Strategy Hub visible KPI tiles ──
+  ...Object.entries(wealthStrategyDescriptions).map<CoverageEntry>(([id, description]) => ({
+    id,
+    engine: 'wealth_strategy',
+    surface: 'pages/wealth-strategy.tsx',
+    description,
+    required: true,
+  })),
+  // ── Property page portfolio aggregates ──
+  ...PROPERTY_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'property_engine',
+    surface: 'pages/property.tsx (Portfolio tab)',
+    description: propertyDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Property funding source + emergency buffer + negative gearing ──
+  ...FUNDING_SOURCE_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'property_engine',
+    surface: 'pages/property.tsx (Funding Source rows)',
+    description: fundingSourceDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Monte Carlo Expected Returns (canonical assumptions) ──
+  ...MC_EXPECTED_RETURN_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'mc_assumptions',
+    surface: 'pages/ai-forecast-engine.tsx (Expected Returns)',
+    description: mcAssumptionsDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Plan Execution Capacity per-year cash balance traces ──
+  // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+  ...CASHFLOW_PLAN_EXECUTION_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'cashflow_engine',
+    surface: 'ExecutiveDashboard → Plan Execution Capacity (acquisition year audit row + final-year tile)',
+    description: cashflowYearDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Cashflow Reconciliation per-year traces ──
+  // #FWL_Cashflow_Reconciliation_Trace
+  ...CASHFLOW_RECONCILIATION_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'cashflow_engine',
+    surface: 'ExecutiveDashboard → Plan Execution Capacity (AUDIT · CASHFLOW RECONCILIATION row)',
+    description: cashflowReconciliationDescriptions[id] ?? id,
+    required: true,
+  })),
+  // ── Plan Feasibility (planning-validation layer) ──
+  // #FWL_Plan_Feasibility_Layer — Available vs Required Liquidity, Funding
+  // Gap, and status. Surfaced as a compact card on the dashboard next to the
+  // Plan Execution Capacity audit area.
+  {
+    id: PLAN_FEASIBILITY_TRACE_ID,
+    engine: 'dashboard',
+    surface: 'ExecutiveDashboard → Plan Execution Capacity (Plan Feasibility card)',
+    description: 'Plan Feasibility — Available vs Required Liquidity, Funding Gap, Status',
+    required: true,
+  },
+  // ── Funding Gap Resolution Advisor (advisory layer) ──
+  // #FWL_Funding_Gap_Resolution_Advisor — Candidate solutions (reduce / delay
+  // investment, equity release, asset sale, delay property / reduce deposit)
+  // ranked by lowest disruption, lowest long-term wealth impact, highest
+  // practicality. Only active when Funding Gap < 0.
+  {
+    id: FUNDING_RESOLUTION_TRACE_ID,
+    engine: 'dashboard',
+    surface: 'ExecutiveDashboard → Plan Execution Capacity (Plan Feasibility card → Funding Gap Resolution)',
+    description: 'Funding Gap Resolution — Candidate solutions, ranking logic, selected recommendation',
+    required: true,
+  },
+  // ── Income Engine — classification + recurring vs one-off split ──
+  // #FWL_Income_Engine_Refactor — every sf_income record is classified by
+  // type / behaviour / forecast treatment. Trace exposes Recurring Monthly
+  // Income, One-Off Income (last 12 months), Total Historical Income, the
+  // included recurring records, the excluded one-off events, and the income
+  // figure consumed by Forecast, Monte Carlo, and serviceability engines.
+  {
+    id: INCOME_ENGINE_TRACE_ID,
+    engine: 'dashboard',
+    surface: 'Financial Plan → Income section (Recurring / One-Off / Total cards)',
+    description: 'Income Engine — Recurring vs One-Off classification, engine inputs, audit trail',
+    required: true,
+  },
+  // ── Persistent User Defaults (modelling preferences) ──
+  // #FWL_Persistent_UserDefaults_ScenarioOverride — every key resolved by
+  // scenarioSettingsResolver. Trace shows current value, source
+  // (server-backed / local fallback / local pending / system / scenario),
+  // saved timestamp, backend sync state, and applied modules.
+  ...USER_DEFAULT_TRACE_IDS.map<CoverageEntry>(id => ({
+    id,
+    engine: 'user_defaults',
+    surface: userDefaultsSurface,
+    description: userDefaultDescriptions[id] ?? id,
+    required: true,
+  })),
+];
+
+/** Map an engine key to a friendly label. */
+export const ENGINE_LABELS: Record<EngineSourceKey, string> = {
+  monte_carlo: 'Monte Carlo Engine',
+  decision_engine: 'Decision Engine',
+  forecast_engine: 'Forecast Engine',
+  financial_health: 'Financial Health Engine',
+  fire_engine: 'FIRE Engine',
+  wealth_layers: 'Canonical Wealth Layers',
+  dashboard: 'Dashboard Hero',
+  projection_rows: 'Projection Rows',
+  wealth_strategy: 'Wealth Strategy Hub',
+  property_engine: 'Property Engine',
+  mc_assumptions: 'Monte Carlo Assumptions',
+  cashflow_engine: 'Cashflow Engine',
+  user_defaults: 'Persistent User Defaults',
+};
+
+/** All required trace ids in a stable order. */
+export const REQUIRED_TRACE_IDS: string[] = COVERAGE_MANIFEST.filter(e => e.required).map(e => e.id);

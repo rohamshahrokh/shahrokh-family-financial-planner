@@ -110,6 +110,16 @@ import type { NarrativeMode } from "@/lib/scenarioV2/decisionEngine/narrativeLay
 // Embedded power-user tab — re-uses every line of premium Scenario Lab UX.
 import ScenarioCompareV2Page from "./scenario-compare-v2";
 import AssumptionsPanel from "@/components/AssumptionsPanel";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
+import { registerTrace } from "@/lib/auditMode/auditRegistry";
+import {
+  buildAllDecisionWinnerTraces,
+  buildAllDecisionCandidateTraces,
+  buildDecisionRankingLogicTrace,
+  buildDecisionTradeoffsTrace,
+  buildDecisionLensTrace,
+} from "@/lib/auditMode/engineTraces";
+import { buildStrategyIntelligence } from "@/lib/scenarioV2/decisionEngine/strategyIntelligence";
 
 // ─── Formatting helpers (mask-aware) ─────────────────────────────────────────
 
@@ -385,6 +395,129 @@ function QuickDecisionTab() {
   const winner = ranked[0];
   const runnerUp = ranked[1];
 
+  // ── Audit Mode: register Decision Engine winner traces whenever the engine
+  //    produces a new ranked output. No math is duplicated — we just pin the
+  //    canonical CompositeScore + comparativeNarrative onto trace records.
+  useEffect(() => {
+    if (!output || !winner) return;
+    const weights: Record<string, number> = {};
+    winner.score.breakdown.forEach(b => { weights[b.axis as string] = b.weight; });
+    const generatedAt = output.generatedAt;
+    const investorProfile = String(output.investorProfile);
+
+    // Winner-scoped (existing)
+    buildAllDecisionWinnerTraces({
+      winnerId: winner.id,
+      winnerLabel: winner.label,
+      totalScore: winner.score.score,
+      baseScore: winner.score.baseScore,
+      weights,
+      breakdown: winner.score.breakdown.map(b => ({
+        axis: String(b.axis),
+        rawValue: b.rawValue,
+        normalisedValue: b.normalisedValue,
+        weight: b.weight,
+        contribution: b.contribution,
+      })),
+      penalties: winner.score.penalties.map(p => ({
+        id: p.id,
+        magnitude: p.magnitude,
+        reason: p.reason,
+        band: p.band,
+      })),
+      rationale: winner.rationale,
+      headline: winner.headline,
+      whyWon: output.comparativeNarrative.whyWon,
+      whatCouldInvalidate: output.comparativeNarrative.whatCouldInvalidate,
+      runnerUpReason: output.comparativeNarrative.secondPlaceAndWhy,
+      investorProfile,
+      generatedAt,
+    }).forEach(registerTrace);
+
+    // Per-candidate (all ranked rows + high-risk paths, so every clickable
+    // candidate label/score has its own trace).
+    const allClickable = [...output.ranked, ...output.highRiskPaths];
+    allClickable.forEach((c, idx) => {
+      buildAllDecisionCandidateTraces({
+        rank: idx + 1,
+        candidate: {
+          id: c.id,
+          label: c.label,
+          headline: c.headline,
+          score: {
+            score: c.score.score,
+            baseScore: c.score.baseScore,
+            breakdown: c.score.breakdown.map(b => ({
+              axis: String(b.axis),
+              rawValue: b.rawValue,
+              normalisedValue: b.normalisedValue,
+              weight: b.weight,
+              contribution: b.contribution,
+            })),
+            penalties: c.score.penalties.map(p => ({
+              id: p.id,
+              magnitude: p.magnitude,
+              reason: p.reason,
+              band: p.band,
+            })),
+          },
+          rationale: c.rationale,
+        },
+        investorProfile,
+        generatedAt,
+      }).forEach(registerTrace);
+    });
+
+    // Page-level ranking logic.
+    registerTrace(buildDecisionRankingLogicTrace({
+      candidates: output.ranked.map((c, i) => ({ id: c.id, label: c.label, score: c.score.score, rank: i + 1 })),
+      investorProfile,
+      riskMode: output.riskControlsApplied?.mode ?? 'balanced',
+      weights,
+      totalGenerated: output.ranked.length + output.discarded.length,
+      totalDiscarded: output.discarded.length,
+      generatedAt,
+    }));
+
+    // Trade-off analysis (winner). Use the same StrategyIntelligence the
+    // StrategyCard renders so the trace mirrors the on-screen radar.
+    try {
+      const intel = buildStrategyIntelligence(winner, output.baseScenarioResult);
+      registerTrace(buildDecisionTradeoffsTrace({
+        candidateLabel: winner.label,
+        candidateId: winner.id,
+        rank: 1,
+        tradeOffs: intel.tradeOffs,
+        investorProfile,
+        generatedAt,
+      }));
+    } catch { /* intentionally swallow — trade-offs are presentational only */ }
+
+    // Multi-winner lens scores.
+    const mw = output.multiWinner;
+    const lensMeta: Array<{ key: 'balanced' | 'wealthMax' | 'cashflowSafe' | 'highRisk'; label: string; why: string }> = [
+      { key: 'balanced',     label: 'Balanced',        why: 'Equal weight across all axes' },
+      { key: 'wealthMax',    label: 'Wealth Max',      why: 'Emphasises terminal NW + risk-adjusted return' },
+      { key: 'cashflowSafe', label: 'Cashflow Safe',   why: 'Emphasises survival, liquidity, low cashflow stress' },
+      { key: 'highRisk',     label: 'High-risk Upside', why: 'Tolerates volatility for tail upside' },
+    ];
+    for (const lens of lensMeta) {
+      const w = mw[lens.key];
+      if (!w) continue;
+      const candidate = allClickable.find(c => c.id === w.id);
+      registerTrace(buildDecisionLensTrace({
+        lensKey: lens.key,
+        lensLabel: lens.label,
+        winnerLabel: candidate?.label ?? w.id,
+        winnerId: w.id,
+        score: w.score,
+        whyThisWins: lens.why,
+        investorProfile,
+        generatedAt,
+      }));
+    }
+  }, [output, winner]);
+
   return (
     <div className="space-y-6">
       {/* ── Question + input panel ──────────────────────────────────────── */}
@@ -635,22 +768,29 @@ function QuickDecisionTab() {
                     Recommended path
                   </Badge>
                 </div>
-                <CardTitle className="text-base sm:text-xl text-foreground">{winner.label}</CardTitle>
+                <CardTitle className="text-base sm:text-xl text-foreground">
+                  <AuditableMetric traceId="decision:winner:recommendation-logic">{winner.label}</AuditableMetric>
+                </CardTitle>
                 <CardDescription className="text-xs text-foreground/75">{sentence(winner.headline)}</CardDescription>
                 {output && (
                   <div className="flex items-center gap-1.5 pt-1">
                     <SlidersHorizontal className="h-3 w-3 text-[hsl(var(--intelligence-light))]" />
                     <span className="text-[10px] uppercase tracking-wide font-semibold text-[hsl(var(--intelligence-light))]">
-                      Ranked under: {output.investorProfile.replace(/_/g, " ")}
+                      Ranked under:{' '}
+                      <AuditableMetric traceId="decision:winner:weightings">
+                        {output.investorProfile.replace(/_/g, " ")}
+                      </AuditableMetric>
                     </span>
                   </div>
                 )}
               </div>
               <div className="flex flex-col items-end gap-2 shrink-0">
                 <div className="text-right">
-                  <div className="text-2xl sm:text-3xl font-bold tabular-nums text-[hsl(var(--success-light))]">
-                    {winner.score.score.toFixed(0)}
-                  </div>
+                  <AuditableMetric traceId="decision:winner:total-score">
+                    <div className="text-2xl sm:text-3xl font-bold tabular-nums text-[hsl(var(--success-light))]">
+                      {winner.score.score.toFixed(0)}
+                    </div>
+                  </AuditableMetric>
                   <div className="text-[10px] uppercase tracking-wide text-foreground/60">/100</div>
                 </div>
                 <Button
@@ -669,6 +809,46 @@ function QuickDecisionTab() {
           </CardHeader>
 
           <CardContent className="space-y-4">
+            {/* Audit Mode — universal click affordances so every Decision
+                Engine metric (Component Scores, Weightings, Penalties,
+                Why This Wins, Why Not Higher, Ranking Logic, Trade-offs) is
+                reachable from a single visible row in *every* narrative mode.
+                In default mode this reads as a plain caption; in Audit Mode
+                each chip becomes a clickable trace target. */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border/40 bg-muted/30 px-2 py-1.5">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Trace:</span>
+              <AuditableMetric traceId="decision:winner:component-scores">
+                <span className="text-[10px] font-medium text-foreground">Component Scores</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:winner:weightings">
+                <span className="text-[10px] font-medium text-foreground">Weightings</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:winner:penalties">
+                <span className="text-[10px] font-medium text-foreground">Penalties</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:winner:why-this-ranks">
+                <span className="text-[10px] font-medium text-foreground">Why This Wins</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:winner:why-not-ranked-higher">
+                <span className="text-[10px] font-medium text-foreground">Why Not Higher</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:ranking-logic">
+                <span className="text-[10px] font-medium text-foreground">Ranking Logic</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:trade-off-analysis">
+                <span className="text-[10px] font-medium text-foreground">Trade-off Analysis</span>
+              </AuditableMetric>
+              <span className="text-muted-foreground/40">·</span>
+              <AuditableMetric traceId="decision:winner:recommendation-logic">
+                <span className="text-[10px] font-medium text-foreground">Recommendation Logic</span>
+              </AuditableMetric>
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <PlainMetric
                 icon={<Shield className="h-3 w-3" />}
@@ -752,7 +932,7 @@ function QuickDecisionTab() {
               <div className="de-result-narrative rounded-lg p-3 space-y-3">
                 <div>
                   <div className="text-[11px] uppercase tracking-wide font-semibold text-[hsl(var(--success-light))] mb-1">
-                    Why this won
+                    <AuditableMetric traceId="decision:winner:why-this-ranks">Why this won</AuditableMetric>
                   </div>
                   <ul className="space-y-1 text-xs">
                     {output.comparativeNarrative.whyWon.map((line, i) => (
@@ -767,7 +947,7 @@ function QuickDecisionTab() {
                 {output.comparativeNarrative.whatCouldInvalidate.length > 0 && (
                   <div>
                     <div className="text-[11px] uppercase tracking-wide font-semibold text-[hsl(var(--warning-light))] mb-1">
-                      What could invalidate this
+                      <AuditableMetric traceId="decision:winner:why-not-ranked-higher">What could invalidate this</AuditableMetric>
                     </div>
                     <ul className="space-y-1 text-xs">
                       {output.comparativeNarrative.whatCouldInvalidate.map((line, i) => (
@@ -880,11 +1060,12 @@ function QuickDecisionTab() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <ListChecks className="h-5 w-5" />
-              All ranked paths ({ranked.length})
+              <AuditableMetric traceId="decision:ranking-logic">All ranked paths ({ranked.length})</AuditableMetric>
               <HelpLink topic={HELP_TOPICS.rankingWeights} variant="icon" ariaLabel="How paths are ranked" />
             </CardTitle>
             <CardDescription>
               Each path is an investment-committee–style explanation with trade-offs, baseline delta, stress, and a deep-dive sheet.
+              {' '}<AuditableMetric traceId="decision:trade-off-analysis">Trade-off analysis</AuditableMetric>.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -1202,7 +1383,9 @@ function MultiWinnerPanel({ output }: { output: QuickDecisionOutput }) {
                 <div className="text-sm font-semibold mt-0.5 truncate text-foreground">{findLabel(v?.id)}</div>
                 <div className="flex items-baseline gap-1.5">
                   <span className="text-base font-bold tabular-nums">
-                    {v ? v.score.toFixed(0) : "—"}
+                    {v
+                      ? <AuditableMetric traceId={`decision:lens:${lens.key}`}>{v.score.toFixed(0)}</AuditableMetric>
+                      : "—"}
                   </span>
                   <span className="text-[10px] opacity-70">{v ? "/100" : "no candidate"}</span>
                 </div>
@@ -1594,7 +1777,7 @@ function CandidateRow({
           {/* Score breakdown */}
           <div>
             <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1.5">
-              Score derivation
+              <AuditableMetric traceId="decision:winner:component-scores">Score derivation</AuditableMetric>
             </div>
             <div className="space-y-1.5">
               {candidate.score.breakdown.map((b) => (
@@ -1615,6 +1798,9 @@ function CandidateRow({
               ))}
               {candidate.score.penalties.length > 0 && (
                 <div className="pt-2 space-y-1">
+                  <div className="text-[10px] uppercase tracking-wide font-semibold text-rose-700 dark:text-rose-400 mb-0.5">
+                    <AuditableMetric traceId="decision:winner:penalties">Penalties applied</AuditableMetric>
+                  </div>
                   {candidate.score.penalties.map((p, i) => (
                     <div key={i} className="flex items-center gap-2 text-[11px] text-rose-700 dark:text-rose-400">
                       <AlertTriangle className="h-3 w-3 shrink-0" />

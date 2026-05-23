@@ -60,9 +60,51 @@ const DEFAULT_STATE: ActiveRegimeState = {
   reformRegime: undefined,
 };
 
+// Persistence — localStorage key shared with the React hook adapter
+// (`useActiveRegime`). Synchronous rehydration on module load means that
+// engines reading `getActiveRegime()` before any React component has
+// mounted still see the user's persisted choice (fixes the "Tax Regime
+// resets to Smart Auto-detect on navigation/reload" bug under
+// #FWL_Critical_StatePersistence_FundingSource_TaxRegime_Fix).
+const REGIME_LS_KEY = "fwl.activeRegime";
+
+const VALID_KINDS: TaxPolicyRegimeKind[] = [
+  "AUTO_DETECT",
+  "CURRENT_RULES",
+  "PROPOSED_2027_REFORM",
+  "CUSTOM_STRESS_TEST",
+];
+
+function readPersistedSelector(): TaxPolicyRegimeKind | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = window.localStorage.getItem(REGIME_LS_KEY);
+    if (!raw) return undefined;
+    return VALID_KINDS.includes(raw as TaxPolicyRegimeKind)
+      ? (raw as TaxPolicyRegimeKind)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writePersistedSelector(kind: TaxPolicyRegimeKind): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(REGIME_LS_KEY, kind);
+  } catch {
+    // Quota / privacy mode — swallow.
+  }
+}
+
 // ─── Internal storage ────────────────────────────────────────────────────────
 
-let _state: ActiveRegimeState = { ...DEFAULT_STATE };
+let _state: ActiveRegimeState = (() => {
+  const persisted = readPersistedSelector();
+  return persisted
+    ? { ...DEFAULT_STATE, selector: persisted }
+    : { ...DEFAULT_STATE };
+})();
 const _listeners = new Set<() => void>();
 
 function notify(): void {
@@ -104,11 +146,15 @@ export function getActiveCustomRegime(): TaxPolicyRegime {
  * beyond the listener notification.
  */
 export function setActiveRegime(next: Partial<ActiveRegimeState>): void {
+  const prevSelector = _state.selector;
   _state = {
     selector:     next.selector     ?? _state.selector,
     customRegime: "customRegime" in next ? next.customRegime : _state.customRegime,
     reformRegime: "reformRegime" in next ? next.reformRegime : _state.reformRegime,
   };
+  if (_state.selector !== prevSelector) {
+    writePersistedSelector(_state.selector);
+  }
   notify();
 }
 

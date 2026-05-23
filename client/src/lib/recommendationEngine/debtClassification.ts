@@ -60,6 +60,16 @@ export interface DebtRecord {
   expiryDateISO?: string;
   /** Mark the debt's interest as tax-deductible. */
   taxDeductible?: boolean;
+  /**
+   * TRUE when this debt represents a PLANNED/FUTURE liability (e.g. a loan for
+   * an IP that has not yet settled, or a roadmap leverage event). Planned debt
+   * MUST be excluded from "current debt", "Best Move" strategic monitoring,
+   * and any Executive Overview / Today snapshot surface. It belongs only to
+   * Events / Forecast Engine / Scenario Lab surfaces, clearly labelled.
+   */
+  planned?: boolean;
+  /** Optional ISO date — when supplied and > today, the debt is treated as planned. */
+  settlementDateISO?: string;
 }
 
 export interface ClassifiedDebt extends DebtRecord {
@@ -164,6 +174,59 @@ export interface DebtPortfolioSummary {
   promosWithUpcomingCliff: ClassifiedDebt[];
   /** True if at least one high_apr_consumer_debt exists with balance > $1k. */
   hasUrgentHighAprDebt: boolean;
+}
+
+/**
+ * Detect whether a debt record represents a PLANNED/FUTURE liability rather
+ * than a current real one. We treat the following as planned:
+ *   - explicit `planned: true` flag
+ *   - `settlementDateISO` strictly in the future
+ *   - `id` / `name` containing "planned" (case-insensitive) — defensive guard
+ *     for legacy seed data that doesn't carry the flag yet.
+ *
+ * IMPORTANT: This is the single canonical separator between
+ * CURRENT_DEBT, PLANNED_DEBT and FORECAST_DEBT. Callers that want to surface
+ * "today" must use `partitionCurrentVsPlanned()` or `classifyCurrentDebtPortfolio()`.
+ */
+export function isPlannedDebt(d: DebtRecord, todayIso?: string): boolean {
+  if (d.planned === true) return true;
+  if (d.settlementDateISO) {
+    const today = todayIso ?? new Date().toISOString().slice(0, 10);
+    if (d.settlementDateISO > today) return true;
+  }
+  const tag = `${d.id ?? ''} ${d.name ?? ''}`.toLowerCase();
+  if (tag.includes('planned')) return true;
+  if (tag.includes('forecast')) return true;
+  return false;
+}
+
+/**
+ * Split a debt list into the CURRENT vs PLANNED partitions. Pure — does not
+ * mutate inputs. The Best Move / Today / Executive Overview surfaces consume
+ * `current`; Events / Forecast Engine consume `planned`.
+ */
+export function partitionCurrentVsPlanned(
+  input: DebtRecord[],
+  todayIso?: string,
+): { current: DebtRecord[]; planned: DebtRecord[] } {
+  const current: DebtRecord[] = [];
+  const planned: DebtRecord[] = [];
+  for (const d of input) {
+    if (isPlannedDebt(d, todayIso)) planned.push(d);
+    else current.push(d);
+  }
+  return { current, planned };
+}
+
+/**
+ * Convenience: classify ONLY the current (real, today) debt records. Use this
+ * for Best Move and any surface that must not include planned/forecast debt.
+ */
+export function classifyCurrentDebtPortfolio(
+  input: DebtRecord[],
+  todayIso?: string,
+): DebtPortfolioSummary {
+  return classifyDebtPortfolio(partitionCurrentVsPlanned(input, todayIso).current);
 }
 
 export function classifyDebtPortfolio(input: DebtRecord[]): DebtPortfolioSummary {

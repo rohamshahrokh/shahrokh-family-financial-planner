@@ -20,8 +20,31 @@ import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { useAppStore } from "./lib/store";
 import { PrivacyProvider } from "@/contexts/PrivacyContext";
+import { AuditModeProvider } from "@/lib/auditMode/AuditModeContext";
+import { CalculationTracePanel } from "@/components/auditMode/CalculationTracePanel";
+import { ensureCoverageRegistered } from "@/lib/auditMode/ensureCoverage";
+import { hydrateUserDefaultsFromServer } from "@/lib/userDefaultsApi";
+import { registerUserDefaultsTraces } from "@/lib/auditMode/engineTraces";
 import { useEffect, useRef } from "react";
 import { trackPageView } from "./lib/analytics";
+
+// Register placeholder factories for every manifest id at app boot so the
+// Audit Coverage report can resolve traces immediately. Live host components
+// overwrite these with real engine output when they mount.
+ensureCoverageRegistered();
+
+// Live user-default trace factories registered at boot so the Audit
+// Coverage page (and any other surface that opens the trace panel BEFORE
+// Settings has mounted) resolves them with real source / tier / savedAt
+// metadata rather than the manifest placeholder.
+// #FWL_Persistent_UserDefaults_ScenarioOverride — audit discoverability
+registerUserDefaultsTraces();
+
+// Fire-and-forget: hydrate persistent user defaults from the durable backend
+// BEFORE any page mounts. The first paint may briefly read system defaults
+// (or stale localStorage values); the server payload then overrides them.
+// #FWL_Persistent_UserDefaults_ScenarioOverride — server tier
+hydrateUserDefaultsFromServer().catch(() => { /* surfaced via getServerSyncState */ });
 
 import LoginPage          from "./pages/login";
 import DashboardPage      from "./pages/dashboard";
@@ -50,6 +73,9 @@ import ScenarioComparePage     from "./pages/scenario-compare";
 import ScenarioCompareV2Page   from "./pages/scenario-compare-v2";
 import WhatIfScenariosPage     from "./pages/what-if-scenarios";
 import DecisionPage            from "./pages/decision";
+import RiskRadarPage           from "./pages/risk-radar";
+import TaxAlphaPage            from "./pages/tax-alpha";
+import AuditCoveragePage       from "./pages/audit-coverage";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -229,6 +255,26 @@ function AppRouter() {
         <Route path="/what-if-scenarios">
           <ProtectedRoute component={WhatIfScenariosPage} title="What-If Scenarios" />
         </Route>
+        {/* Risk Radar — surfaced from Deep Analysis cards & sidebar nav */}
+        <Route path="/risk-radar">
+          <ProtectedRoute component={RiskRadarPage} title="Risk Radar" />
+        </Route>
+        {/* /risk short alias — same target as /risk-radar so direct-typed URLs
+            and any legacy links never land on the 404 page. */}
+        <Route path="/risk">
+          <ProtectedRoute component={RiskRadarPage} title="Risk Radar" />
+        </Route>
+        {/* Tax Strategy — Tax Alpha breakdown surfaced from Deep Analysis cards */}
+        <Route path="/tax-alpha">
+          <ProtectedRoute component={TaxAlphaPage} title="Tax Strategy" />
+        </Route>
+        <Route path="/tax-strategy">
+          <ProtectedRoute component={TaxAlphaPage} title="Tax Strategy" />
+        </Route>
+        {/* Audit Coverage — developer transparency surface for Audit Mode */}
+        <Route path="/audit-coverage">
+          <ProtectedRoute component={AuditCoveragePage} title="Audit Coverage" />
+        </Route>
         {/* 404 */}
         <Route component={NotFound} />
       </Switch>
@@ -310,9 +356,12 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <PrivacyProvider>
-        <AppRouter />
-        <Toaster />
-        <PwaInstallBanner />
+        <AuditModeProvider>
+          <AppRouter />
+          <CalculationTracePanel />
+          <Toaster />
+          <PwaInstallBanner />
+        </AuditModeProvider>
       </PrivacyProvider>
     </QueryClientProvider>
   );

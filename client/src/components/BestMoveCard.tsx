@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { maskValue } from '@/components/PrivacyMask';
+import { SectionExplainer } from '@/components/intelligence/SectionExplainer';
 import { useAppStore } from '@/lib/store';
 import { useForecastStore } from '@/lib/forecastStore';
 import {
@@ -27,6 +28,9 @@ import {
   type LedgerInputs,
 } from '@/lib/bestMoveEngine';
 import { computeUnifiedBestMove, type UnifiedBestMoveResult, type Recommendation } from '@/lib/recommendationEngine';
+import { AuditableMetric } from '@/components/auditMode/AuditableMetric';
+import { registerTrace } from '@/lib/auditMode/auditRegistry';
+import { buildAllBestMoveTraces } from '@/lib/auditMode/engineTraces';
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
 const CACHE_KEY = 'best_move_result_v2';   // bumped key to bust V1 cache
@@ -253,6 +257,15 @@ export default function BestMoveCard() {
 
   useEffect(() => { load(); }, [load]);
 
+  // ── Audit Mode: register Best Move traces whenever the unified engine
+  //    produces a top recommendation. No re-computation — pins canonical
+  //    Recommendation fields onto trace records.
+  useEffect(() => {
+    const top = unified?.unified.topPriorities[0];
+    if (!top) return;
+    buildAllBestMoveTraces(top).forEach(registerTrace);
+  }, [unified]);
+
   // Recompute whenever forecast mode/profile/MC result changes
   const forecastMode    = useForecastStore(s => s.forecastMode);
   const forecastProfile = useForecastStore(s => s.profile);
@@ -311,7 +324,10 @@ export default function BestMoveCard() {
           <div className="w-7 h-7 rounded-lg bg-amber-500/15 flex items-center justify-center">
             <Zap className="w-4 h-4 text-amber-400" />
           </div>
-          <span className="text-sm font-bold text-foreground tracking-tight">Best Move Right Now</span>
+          <span className="text-sm font-bold text-foreground tracking-tight inline-flex items-center gap-1.5">
+            Best Move Right Now
+            <SectionExplainer metricId="best-move" />
+          </span>
         </div>
         <button
           onClick={() => load(true)}
@@ -328,9 +344,11 @@ export default function BestMoveCard() {
         {/* Action title + risk */}
         <div className="flex items-start justify-between gap-2 mb-2">
           <h3 className="text-base font-bold text-foreground leading-snug flex-1">
-            {best.action}
+            <AuditableMetric traceId="decision:bestmove:recommendation-logic">{best.action}</AuditableMetric>
           </h3>
-          <RiskBadge risk={best.risk} />
+          <AuditableMetric traceId="decision:bestmove:penalties">
+            <RiskBadge risk={best.risk} />
+          </AuditableMetric>
         </div>
 
         {/* Benefit pill */}
@@ -403,20 +421,28 @@ export default function BestMoveCard() {
               <div className="text-[10px] text-muted-foreground italic">
                 Risk being reduced: <span className="text-foreground/80 not-italic">{unified.unified.riskBeingReduced}</span>
               </div>
-              {unified.unified.topPriorities.map((r: Recommendation) => (
+              {unified.unified.topPriorities.map((r: Recommendation, idx: number) => (
                 <div key={r.id} className="rounded-xl border border-border/40 bg-background/40 p-2.5 space-y-1">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-xs font-semibold text-foreground leading-snug">
-                      #{r.priorityRank} {r.title}
+                      {idx === 0
+                        ? <AuditableMetric traceId="decision:bestmove:weightings">#{r.priorityRank} {r.title}</AuditableMetric>
+                        : <>#{r.priorityRank} {r.title}</>}
                     </p>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <RiskBadge risk={r.riskLevel} />
                       <span className="text-[9px] text-muted-foreground tabular-nums">
-                        conf {(r.confidenceScore * 100).toFixed(0)}%
+                        {idx === 0
+                          ? <AuditableMetric traceId="decision:bestmove:total-score">conf {(r.confidenceScore * 100).toFixed(0)}%</AuditableMetric>
+                          : <>conf {(r.confidenceScore * 100).toFixed(0)}%</>}
                       </span>
                     </div>
                   </div>
-                  <p className="text-[10px] text-muted-foreground leading-snug line-clamp-3">{r.reasoning}</p>
+                  <p className="text-[10px] text-muted-foreground leading-snug line-clamp-3">
+                    {idx === 0
+                      ? <AuditableMetric traceId="decision:bestmove:why-this-ranks">{r.reasoning}</AuditableMetric>
+                      : r.reasoning}
+                  </p>
                   {r.debtRationale && (
                     <div className="rounded-lg border border-border/30 bg-card/50 px-2 py-1.5 text-[10px] space-y-0.5"
                          data-testid="debt-rationale">
@@ -458,11 +484,17 @@ export default function BestMoveCard() {
                     </div>
                   )}
                   {r.benefitLabel && (
-                    <div className="text-[10px] text-emerald-400 font-mono">{r.benefitLabel}</div>
+                    <div className="text-[10px] text-emerald-400 font-mono">
+                      {idx === 0
+                        ? <AuditableMetric traceId="decision:bestmove:component-scores">{r.benefitLabel}</AuditableMetric>
+                        : r.benefitLabel}
+                    </div>
                   )}
                   {r.opportunityCost?.description && (
                     <div className="text-[10px] text-amber-400/80">
-                      Opportunity cost: {r.opportunityCost.description}
+                      {idx === 0
+                        ? <AuditableMetric traceId="decision:bestmove:why-not-ranked-higher">Opportunity cost: {r.opportunityCost.description}</AuditableMetric>
+                        : <>Opportunity cost: {r.opportunityCost.description}</>}
                     </div>
                   )}
                   {r.reviewTrigger?.reviewByISO && (

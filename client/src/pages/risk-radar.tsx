@@ -21,11 +21,18 @@ import {
   Shield, AlertTriangle, CheckCircle2, AlertCircle,
   ChevronDown, ChevronUp, Info, TrendingDown, Zap,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip, Legend,
 } from 'recharts';
+import { AuditableMetric } from '@/components/auditMode/AuditableMetric';
+import { registerTrace } from '@/lib/auditMode/auditRegistry';
+import {
+  buildLegacyRiskCategoryTraces,
+  buildLegacyRiskOverallTrace,
+  buildLiveFinancialHealthTracesFromRiskRadar,
+} from '@/lib/auditMode/engineTraces';
 
 // ─── Level config ─────────────────────────────────────────────────────────────
 
@@ -149,18 +156,60 @@ export default function RiskRadarPage() {
   const { data: properties = [] } = useQuery<any[]>({ queryKey: ['/api/properties'] });
   const { data: expenses = [] } = useQuery<any[]>({ queryKey: ['/api/expenses'] });
 
-  if (!snap) {
+  // ── React #310 fix: compute risk radar via useMemo BEFORE any early return,
+  //    and run the audit-trace useEffect unconditionally so hook order never
+  //    changes between renders. Guards downstream null-handling.
+  const hasSnap = Boolean(snap && Object.keys(snap as any).length > 0);
+  const result = useMemo(() => {
+    if (!hasSnap) return null;
+    const input = buildRiskInput(snap, properties, expenses);
+    return computeRiskRadar(input);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasSnap, snap, properties, expenses]);
+
+  // Audit Mode: register legacy + canonical traces whenever the engine output
+  // changes. No math is duplicated — both shapes pin the same canonical
+  // RiskRadarResult onto the trace registry.
+  const overallScoreKey = result?.overall_score ?? -1;
+  const categoryScoreKey = result?.categories.map(c => c.score).join('|') ?? '';
+  useEffect(() => {
+    if (!result) return;
+    registerTrace(buildLegacyRiskOverallTrace(result));
+    buildLegacyRiskCategoryTraces(result).forEach(registerTrace);
+    // Live extras for the FIRE Progress canonical trace — same investable +
+    // annual_expenses definition the /wealth-strategy hub uses for
+    // `derived.fireProgressPct`, so the FIRE Progress trace always shows a
+    // numeric live value (never redirect text).
+    const s: any = snap ?? {};
+    const investable =
+      Number(s.cash ?? 0) +
+      Number(s.offset_balance ?? 0) +
+      Number(s.super_balance ?? 0) +
+      Number(s.stocks ?? 0) +
+      Number(s.crypto ?? 0);
+    const annualExpenses = Number(s.monthly_expenses ?? 0) * 12;
+    const resultWithFireProgress = {
+      ...result,
+      fire_progress_pct: (snap as any)?.fire_progress_pct ?? null,
+    };
+    buildLiveFinancialHealthTracesFromRiskRadar(resultWithFireProgress as any, {
+      investable,
+      annualExpenses,
+      swr: 0.04,
+    }).forEach(registerTrace);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, overallScoreKey, categoryScoreKey]);
+
+  if (!hasSnap || !result) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-3 p-3 sm:p-6">
         {[1, 2, 3, 4].map(i => <div key={i} className="h-20 bg-secondary/40 rounded-2xl animate-pulse" />)}
+        <p className="text-xs text-muted-foreground text-center pt-2">Loading risk surface from your live ledger…</p>
       </div>
     );
   }
 
-  const input  = buildRiskInput(snap, properties, expenses);
-  const result = computeRiskRadar(input);
   const { overall_score, overall_level, overall_label, categories, top_risks, alerts, radar_data, fragility_index, data_coverage } = result;
-
   const levelCfg = LEVEL_CFG[overall_level];
   const LevelIcon = levelCfg.Icon;
   const criticalAlerts = alerts.filter(a => a.severity === 'critical' || a.severity === 'high');
@@ -192,12 +241,16 @@ export default function RiskRadarPage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className={`rounded-xl p-3 border ${levelCfg.bg} ${levelCfg.border}`}>
           <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Overall Safety Score</div>
-          <div className={`text-3xl font-black ${levelCfg.text}`}>{overall_score}</div>
+          <AuditableMetric traceId="risk-radar:overall">
+            <div className={`text-3xl font-black ${levelCfg.text}`}>{overall_score}</div>
+          </AuditableMetric>
           <div className="text-[9px] text-muted-foreground mt-0.5">/ 100</div>
         </div>
         <div className="bg-card border border-border rounded-xl p-3">
           <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Risk Level</div>
-          <div className={`text-base font-black ${levelCfg.text}`}>{overall_label}</div>
+          <AuditableMetric traceId="risk-radar:overall">
+            <div className={`text-base font-black ${levelCfg.text}`}>{overall_label}</div>
+          </AuditableMetric>
           <div className="text-[9px] text-muted-foreground mt-0.5">Fragility index: {fragility_index}</div>
         </div>
         <div className="bg-card border border-border rounded-xl p-3">
@@ -234,18 +287,73 @@ export default function RiskRadarPage() {
             />
           </RadarChart>
         </ResponsiveContainer>
-        {/* Category score pills */}
+        {/* Category score pills — clicking the value opens the legacy category
+            trace; clicking the canonical-axis tag below opens the live
+            financial-health:* trace (Liquidity / Leverage / Cashflow / Income). */}
         <div className="grid grid-cols-4 gap-2 mt-3">
           {categories.map(c => {
             const ccfg = LEVEL_CFG[c.level];
+            const canonicalId: string | null = (
+              c.id === 'debt'       ? 'financial-health:leverage' :
+              c.id === 'cashflow'   ? 'financial-health:cashflow' :
+              c.id === 'investment' ? 'financial-health:liquidity' :
+              null
+            );
             return (
               <div key={c.id} className={`rounded-xl p-2 border text-center ${ccfg.bg} ${ccfg.border}`}>
-                <div className={`text-lg font-black ${ccfg.text}`}>{c.score}</div>
+                <AuditableMetric traceId={`risk-radar:category:${c.id}`}>
+                  <div className={`text-lg font-black ${ccfg.text}`}>{c.score}</div>
+                </AuditableMetric>
                 <div className="text-[9px] text-muted-foreground leading-tight">{c.label.replace(' Risk', '')}</div>
                 <div className={`text-[9px] font-semibold ${ccfg.text}`}>{ccfg.label}</div>
+                {canonicalId && (
+                  <div className="text-[9px] text-muted-foreground/70 mt-0.5">
+                    <AuditableMetric traceId={canonicalId}>
+                      {canonicalId === 'financial-health:leverage' ? 'Leverage axis' :
+                       canonicalId === 'financial-health:cashflow' ? 'Cashflow axis' :
+                       'Liquidity axis'}
+                    </AuditableMetric>
+                  </div>
+                )}
               </div>
             );
           })}
+        </div>
+        {/* Canonical 8-axis affordance row — directly traceable for Liquidity,
+            Leverage, Cashflow, FIRE Progress, Overall Health. Visible only when
+            Audit Mode is ON the AuditableMetric wrapper itself becomes clickable;
+            in default mode this row reads as a plain caption. */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-3 text-center">
+          <div className="rounded-md border border-border/60 bg-secondary/20 p-1.5">
+            <div className="text-[9px] uppercase tracking-wide text-muted-foreground">Liquidity</div>
+            <AuditableMetric traceId="financial-health:liquidity">
+              <div className="text-xs font-semibold text-foreground">Open trace</div>
+            </AuditableMetric>
+          </div>
+          <div className="rounded-md border border-border/60 bg-secondary/20 p-1.5">
+            <div className="text-[9px] uppercase tracking-wide text-muted-foreground">Leverage</div>
+            <AuditableMetric traceId="financial-health:leverage">
+              <div className="text-xs font-semibold text-foreground">Open trace</div>
+            </AuditableMetric>
+          </div>
+          <div className="rounded-md border border-border/60 bg-secondary/20 p-1.5">
+            <div className="text-[9px] uppercase tracking-wide text-muted-foreground">Cashflow</div>
+            <AuditableMetric traceId="financial-health:cashflow">
+              <div className="text-xs font-semibold text-foreground">Open trace</div>
+            </AuditableMetric>
+          </div>
+          <div className="rounded-md border border-border/60 bg-secondary/20 p-1.5">
+            <div className="text-[9px] uppercase tracking-wide text-muted-foreground">FIRE Progress</div>
+            <AuditableMetric traceId="financial-health:fire-progress">
+              <div className="text-xs font-semibold text-foreground">Open trace</div>
+            </AuditableMetric>
+          </div>
+          <div className="rounded-md border border-border/60 bg-secondary/20 p-1.5">
+            <div className="text-[9px] uppercase tracking-wide text-muted-foreground">Overall Health</div>
+            <AuditableMetric traceId="financial-health:overall">
+              <div className="text-xs font-semibold text-foreground">Open trace</div>
+            </AuditableMetric>
+          </div>
         </div>
       </div>
 

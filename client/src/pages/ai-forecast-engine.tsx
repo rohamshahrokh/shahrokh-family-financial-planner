@@ -27,10 +27,12 @@ import {
   PROFILE_DEFAULTS,
   sbSaveMCResult,
   DEFAULT_MC_VOLATILITY,
+  DEFAULT_EXPECTED_RETURNS,
   type YearAssumptions,
   type ForecastMode,
   type ForecastProfile,
   type MCVolatilityParams,
+  type ExpectedReturns,
 } from "@/lib/forecastStore";
 import { runMonteCarlo } from "@/lib/monteCarloEngine";
 import {
@@ -58,6 +60,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { maskValue } from "@/components/PrivacyMask";
 import AIInsightsCard from "@/components/AIInsightsCard";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
+import { registerTrace } from "@/lib/auditMode/auditRegistry";
+import type { CalculationTrace, TraceInput } from "@/lib/auditMode/calculationTrace";
+import { hashTraceInputs } from "@/lib/auditMode/calculationTrace";
 import { useToast } from "@/hooks/use-toast";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -96,9 +102,11 @@ const FanTooltip = ({ active, payload }: any) => {
 
 // ─── Probability card ─────────────────────────────────────────────────────────
 
-function ProbCard({ label, value, sub, icon, colorClass, bgClass }: {
+function ProbCard({ label, value, sub, icon, colorClass, bgClass, traceId }: {
   label: string; value: string; sub?: string;
   icon: React.ReactNode; colorClass: string; bgClass: string;
+  /** Optional audit-mode trace id — when present, the value becomes clickable in Audit Mode. */
+  traceId?: string;
 }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-2">
@@ -108,7 +116,11 @@ function ProbCard({ label, value, sub, icon, colorClass, bgClass }: {
           <div className={`w-4 h-4 ${colorClass}`}>{icon}</div>
         </div>
       </div>
-      <p className={`text-xl font-bold num-display ${colorClass}`}>{value}</p>
+      <p className={`text-xl font-bold num-display ${colorClass}`}>
+        {traceId
+          ? <AuditableMetric traceId={traceId}>{value}</AuditableMetric>
+          : value}
+      </p>
       {sub && <p className="text-xs text-muted-foreground leading-snug">{sub}</p>}
     </div>
   );
@@ -235,6 +247,7 @@ export default function AIForecastEnginePage() {
     isSaving, saveToSupabase,
     loadFromSupabase,
     mcVolatility, setMCVolatility, resetMCVolatility,
+    expectedReturns, setExpectedReturns, resetExpectedReturns,
   } = useForecastStore();
 
   useEffect(() => { loadFromSupabase().catch(() => {}); }, []); // eslint-disable-line
@@ -294,6 +307,7 @@ export default function AIForecastEnginePage() {
           {
             yearlyAssumptions,
             volatilityParams: mcVolatility,
+            expectedReturns,
             stockTransactions: stockTx,
             cryptoTransactions: cryptoTx,
             stockDCASchedules: stockDCA,
@@ -336,7 +350,7 @@ export default function AIForecastEnginePage() {
     }, 50);
   }, [isRunningMC, snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expensesRows,
       stockTx, cryptoTx, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, yearlyAssumptions,
-      mcVolatility, setIsRunningMC, setMonteCarloResult, toast, useV4Engine, useV5Engine]);
+      mcVolatility, expectedReturns, setIsRunningMC, setMonteCarloResult, toast, useV4Engine, useV5Engine]);
 
   // Live preview of the canonical reconciliation — even before the user
   // presses Run, the UI shows the starting NW the simulation WILL use.
@@ -356,6 +370,7 @@ export default function AIForecastEnginePage() {
         {
           yearlyAssumptions,
           volatilityParams: mcVolatility,
+          expectedReturns,
           stockTransactions: stockTx,
           cryptoTransactions: cryptoTx,
           stockDCASchedules: stockDCA,
@@ -370,7 +385,7 @@ export default function AIForecastEnginePage() {
       return null;
     }
   }, [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expensesRows,
-      stockTx, cryptoTx, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, yearlyAssumptions, mcVolatility]);
+      stockTx, cryptoTx, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, yearlyAssumptions, mcVolatility, expectedReturns]);
 
   const handleSave = useCallback(async () => {
     await saveToSupabase();
@@ -379,6 +394,371 @@ export default function AIForecastEnginePage() {
 
   const mc = monteCarloResult;
   const fanData = mc?.fan_data ?? [];
+
+  // ── Audit Mode: register live MC traces from the runMonteCarlo output.
+  //    Overwrites the boot-time placeholder factories so clicking any visible
+  //    MC card in Audit Mode shows the actual percentile / probability values
+  //    used to render the card. Engine math is untouched — we just pin the
+  //    canonical MonteCarloResult onto trace records under the same ids that
+  //    /wealth-strategy → MonteCarloDashboard uses, so coverage is consistent.
+  useEffect(() => {
+    if (!mc) return;
+    const generatedAt = mc.ran_at ?? new Date().toISOString();
+    const horizonEndYear = yearlyAssumptions[yearlyAssumptions.length - 1]?.year ?? new Date().getFullYear() + 9;
+    const horizonStartYear = yearlyAssumptions[0]?.year ?? new Date().getFullYear();
+    const sims = mc.simulations;
+    const SOURCE = 'monteCarloEngine.runMonteCarlo (AI Forecast Engine)';
+
+    const commonAssumptions = [
+      { label: 'Simulations', value: sims.toLocaleString(), source: 'MCInput.simulations' },
+      { label: 'Horizon', value: `${horizonStartYear}–${horizonEndYear}`, source: 'YearAssumptions horizon' },
+      { label: 'Step size', value: 'Monthly', source: 'monteCarloEngine.dt' },
+      { label: 'Emergency buffer', value: `$${mcVolatility.emergency_buffer.toLocaleString()}`, source: 'mcVolatility.emergency_buffer' },
+      { label: 'Engine version', value: useV5Engine ? 'V5' : useV4Engine ? 'V4' : 'V3', source: 'page toggle' },
+    ];
+
+    const fmtMoney = (n: number) => Math.abs(n) >= 1_000_000
+      ? `$${(n / 1_000_000).toFixed(2)}M`
+      : Math.abs(n) >= 1000 ? `$${(n / 1000).toFixed(0)}k` : `$${n.toFixed(0)}`;
+    const fmtPct = (n: number) => `${n.toFixed(1)}%`;
+
+    function nwTrace(id: string, label: string, value: number, percentile: 10 | 50 | 90, plain: string): CalculationTrace {
+      const inputs: TraceInput[] = [
+        { label: 'Simulations', value: sims.toLocaleString() },
+        { label: 'Final year', value: horizonEndYear },
+        { label: 'Percentile', value: `P${percentile}` },
+        { label: 'P10 NW', value: fmtMoney(mc.p10) },
+        { label: 'P50 (median) NW', value: fmtMoney(mc.median) },
+        { label: 'P90 NW', value: fmtMoney(mc.p90) },
+      ];
+      return {
+        id,
+        label,
+        finalValue: fmtMoney(value),
+        plainEnglish: plain,
+        formula: `P${percentile} = percentile(NW(year=${horizonEndYear}), ${percentile})`,
+        expanded: `P10 = ${fmtMoney(mc.p10)}\nP50 (median) = ${fmtMoney(mc.median)}\nP90 = ${fmtMoney(mc.p90)}`,
+        inputs,
+        assumptions: commonAssumptions,
+        dataSource: 'MonteCarloResult (live)',
+        sourceEngine: SOURCE,
+        included: [
+          { label: 'Stochastic returns per asset class' },
+          { label: 'Annual fat-tail draws (correction / crash / rate shock)' },
+          { label: 'DCA + planned transactions' },
+        ],
+        excluded: [
+          { label: 'Behavioural drift', reason: 'Decision Engine handles behavioural overlays.' },
+        ],
+        calculatedAt: generatedAt,
+        inputHash: hashTraceInputs(inputs),
+        relatedIds: ['mc:p10-nw-at-target', 'mc:p50-nw-at-target', 'mc:p90-nw-at-target', 'mc:confidence-bands'],
+      };
+    }
+
+    function probTrace(id: string, label: string, finalValue: string, plain: string, formula: string, expanded: string, related?: string[]): CalculationTrace {
+      const inputs: TraceInput[] = [
+        { label: 'Simulations', value: sims.toLocaleString() },
+        { label: 'Horizon', value: `${horizonStartYear}–${horizonEndYear}` },
+        { label: 'Engine', value: useV5Engine ? 'V5' : useV4Engine ? 'V4' : 'V3' },
+      ];
+      return {
+        id,
+        label,
+        finalValue,
+        plainEnglish: plain,
+        formula,
+        expanded,
+        inputs,
+        assumptions: commonAssumptions,
+        dataSource: 'MonteCarloResult (live)',
+        sourceEngine: SOURCE,
+        included: [{ label: 'All 1,000 simulated paths' }],
+        excluded: [],
+        calculatedAt: generatedAt,
+        inputHash: hashTraceInputs(inputs),
+        relatedIds: related ?? [],
+      };
+    }
+
+    registerTrace(nwTrace(
+      'mc:p10-nw-at-target',
+      `Monte Carlo — P10 Net Worth @ ${horizonEndYear}`,
+      mc.p10, 10,
+      `10th-percentile (pessimistic) terminal net worth from ${sims.toLocaleString()} simulations. ` +
+      `Means: under stochastic returns, only 10% of paths end below this number.`,
+    ));
+    registerTrace(nwTrace(
+      'mc:p50-nw-at-target',
+      `Monte Carlo — Median (P50) Net Worth @ ${horizonEndYear}`,
+      mc.median, 50,
+      `Median terminal net worth across ${sims.toLocaleString()} simulations.`,
+    ));
+    registerTrace(nwTrace(
+      'mc:p90-nw-at-target',
+      `Monte Carlo — P90 Net Worth @ ${horizonEndYear}`,
+      mc.p90, 90,
+      `90th-percentile (optimistic) terminal net worth.`,
+    ));
+
+    // Confidence bands width
+    registerTrace({
+      id: 'mc:confidence-bands',
+      label: 'Monte Carlo — Confidence Band Width (P90 − P10)',
+      finalValue: fmtMoney(mc.p90 - mc.p10),
+      plainEnglish: 'Width of the P10..P90 net worth band at the horizon end. Wider = more dispersion/uncertainty in outcomes.',
+      formula: 'band_width = P90 − P10',
+      expanded: `Band = ${fmtMoney(mc.p90)} − ${fmtMoney(mc.p10)} = ${fmtMoney(mc.p90 - mc.p10)}`,
+      inputs: [
+        { label: 'P10', value: fmtMoney(mc.p10) },
+        { label: 'P90', value: fmtMoney(mc.p90) },
+      ],
+      assumptions: commonAssumptions,
+      dataSource: 'MonteCarloResult (live)',
+      sourceEngine: SOURCE,
+      included: [],
+      excluded: [],
+      calculatedAt: generatedAt,
+      inputHash: hashTraceInputs([{ label: 'p10', value: mc.p10 }, { label: 'p90', value: mc.p90 }]),
+      relatedIds: ['mc:p10-nw-at-target', 'mc:p90-nw-at-target'],
+    });
+
+    // Financial Freedom probability
+    registerTrace(probTrace(
+      'mc:financial-freedom-prob',
+      'Monte Carlo — Financial Freedom Probability',
+      fmtPct(mc.prob_ff),
+      `Probability that, by ${horizonEndYear}, the simulated portfolio generates passive income ≥ $120k/yr (default threshold). ` +
+      `${mc.prob_ff.toFixed(1)}% of the ${sims.toLocaleString()} paths reach this threshold.`,
+      'P(FIRE by horizon) = count(scenarios where passive_income ≥ target) / N',
+      `${mc.prob_ff.toFixed(2)}% = ${Math.round((mc.prob_ff / 100) * sims)} / ${sims}`,
+      ['mc:reach-goal-probabilities', 'mc:fire-probability'],
+    ));
+
+    // Reach probabilities — aggregate trace + one per-goal trace (so each
+    // visible $X tile opens its own live value, never a placeholder).
+    registerTrace({
+      id: 'mc:reach-goal-probabilities',
+      label: 'Monte Carlo — Reach NW Goal Probabilities',
+      finalValue: `$3M: ${fmtPct(mc.prob_3m)} · $5M: ${fmtPct(mc.prob_5m)} · $10M: ${fmtPct(mc.prob_10m)}`,
+      plainEnglish:
+        'Cumulative probability of reaching specific net-worth milestones by the horizon end. Each is the share of simulated paths that crossed that NW threshold at least once during the horizon.',
+      formula: 'P(reach $X) = count(scenarios where max(NW(t)) ≥ X) / N',
+      expanded: [
+        `P(reach $3M) = ${mc.prob_3m.toFixed(2)}%  (${Math.round((mc.prob_3m / 100) * sims)} / ${sims})`,
+        `P(reach $5M) = ${mc.prob_5m.toFixed(2)}%  (${Math.round((mc.prob_5m / 100) * sims)} / ${sims})`,
+        `P(reach $10M) = ${mc.prob_10m.toFixed(2)}% (${Math.round((mc.prob_10m / 100) * sims)} / ${sims})`,
+      ].join('\n'),
+      inputs: [
+        { label: 'Simulations', value: sims.toLocaleString() },
+        { label: 'P(NW ≥ $3M)', value: fmtPct(mc.prob_3m) },
+        { label: 'P(NW ≥ $5M)', value: fmtPct(mc.prob_5m) },
+        { label: 'P(NW ≥ $10M)', value: fmtPct(mc.prob_10m) },
+      ],
+      assumptions: commonAssumptions,
+      dataSource: 'MonteCarloResult (live)',
+      sourceEngine: SOURCE,
+      included: [{ label: 'NW peak across full horizon (any year)' }],
+      excluded: [{ label: 'Year-by-year crossings', reason: 'Use FIRE-by-age curve trace instead.' }],
+      calculatedAt: generatedAt,
+      inputHash: hashTraceInputs([{ label: 'p3m', value: mc.prob_3m }, { label: 'p5m', value: mc.prob_5m }, { label: 'p10m', value: mc.prob_10m }]),
+      relatedIds: ['mc:financial-freedom-prob', 'mc:reach-3m', 'mc:reach-5m', 'mc:reach-10m'],
+    });
+
+    // Per-goal traces — each card opens with its specific live probability.
+    function reachTrace(id: string, threshold: number, label: string, prob: number): CalculationTrace {
+      const inputs: TraceInput[] = [
+        { label: 'Simulations', value: sims.toLocaleString() },
+        { label: 'Threshold', value: `$${(threshold / 1_000_000).toFixed(0)}M` },
+        { label: 'Horizon', value: `${horizonStartYear}–${horizonEndYear}` },
+        { label: 'P(reach)', value: fmtPct(prob) },
+      ];
+      return {
+        id,
+        label,
+        finalValue: fmtPct(prob),
+        plainEnglish:
+          `Probability that simulated net worth reaches at least $${(threshold / 1_000_000).toFixed(0)}M at any point in the ${horizonStartYear}–${horizonEndYear} horizon. ` +
+          `${prob.toFixed(1)}% of the ${sims.toLocaleString()} paths crossed this threshold at least once.`,
+        formula: `P(reach $${(threshold / 1_000_000).toFixed(0)}M) = count(scenarios where max(NW(t)) ≥ ${threshold.toLocaleString()}) / N`,
+        expanded: `${prob.toFixed(2)}% = ${Math.round((prob / 100) * sims)} / ${sims}`,
+        inputs,
+        assumptions: commonAssumptions,
+        dataSource: 'MonteCarloResult (live)',
+        sourceEngine: SOURCE,
+        included: [{ label: 'NW peak across full horizon (any year)' }],
+        excluded: [{ label: 'Year-by-year crossings', reason: 'Use FIRE-by-age curve trace instead.' }],
+        calculatedAt: generatedAt,
+        inputHash: hashTraceInputs(inputs),
+        relatedIds: ['mc:reach-goal-probabilities', 'mc:financial-freedom-prob'],
+      };
+    }
+    registerTrace(reachTrace('mc:reach-3m',  3_000_000,  'Monte Carlo — P(NW ≥ $3M)',  mc.prob_3m));
+    registerTrace(reachTrace('mc:reach-5m',  5_000_000,  'Monte Carlo — P(NW ≥ $5M)',  mc.prob_5m));
+    registerTrace(reachTrace('mc:reach-10m', 10_000_000, 'Monte Carlo — P(NW ≥ $10M)', mc.prob_10m));
+
+    // Negative cashflow risk
+    registerTrace(probTrace(
+      'mc:neg-cashflow-risk',
+      'Monte Carlo — Negative Cashflow Risk',
+      fmtPct(mc.prob_neg_cf),
+      `Probability that at least one year in the horizon shows negative annual cashflow (expenses + debt service > income). ` +
+      `${mc.prob_neg_cf.toFixed(1)}% of paths have ≥1 negative-cashflow year.`,
+      'P(neg CF) = count(scenarios with ≥1 year of CF<0) / N',
+      `${mc.prob_neg_cf.toFixed(2)}% = ${Math.round((mc.prob_neg_cf / 100) * sims)} / ${sims}`,
+      ['mc:cash-shortfall-risk'],
+    ));
+
+    // Cash shortfall risk
+    registerTrace(probTrace(
+      'mc:cash-shortfall-risk',
+      'Monte Carlo — Cash Shortfall Risk',
+      fmtPct(mc.prob_cash_shortfall),
+      `Probability that cash ever drops below the $${(mcVolatility.emergency_buffer / 1000).toFixed(0)}k emergency buffer during the horizon. ` +
+      `${mc.prob_cash_shortfall.toFixed(1)}% of paths breach the buffer at some point.`,
+      `P(cash breach) = count(scenarios where min(cash(t)) < emergency_buffer) / N`,
+      `${mc.prob_cash_shortfall.toFixed(2)}% = ${Math.round((mc.prob_cash_shortfall / 100) * sims)} / ${sims}\nbuffer = $${mcVolatility.emergency_buffer.toLocaleString()}`,
+      ['mc:neg-cashflow-risk'],
+    ));
+
+    // FIRE Probability synonym — many surfaces call P(FIRE) the same as financial-freedom.
+    registerTrace({
+      id: 'mc:fire-probability',
+      label: 'Monte Carlo — FIRE Probability',
+      finalValue: fmtPct(mc.prob_ff),
+      plainEnglish:
+        'Probability that the simulated portfolio reaches FIRE (passive income ≥ target). Same engine output as financial-freedom-prob; surfaced under the canonical mc:fire-probability id for cross-page consistency.',
+      formula: 'P(FIRE) = count(paths reaching FIRE by horizon) / N',
+      expanded: `P(FIRE) = ${mc.prob_ff.toFixed(2)}%`,
+      inputs: [
+        { label: 'Simulations', value: sims.toLocaleString() },
+        { label: 'Threshold', value: '$120k/yr passive (default)' },
+      ],
+      assumptions: commonAssumptions,
+      dataSource: 'MonteCarloResult.prob_ff (live)',
+      sourceEngine: SOURCE,
+      included: [],
+      excluded: [],
+      calculatedAt: generatedAt,
+      inputHash: hashTraceInputs([{ label: 'prob_ff', value: mc.prob_ff }]),
+      relatedIds: ['mc:financial-freedom-prob', 'mc:reach-goal-probabilities'],
+    });
+
+    // FIRE year percentiles — derive from MC fan if possible (best-effort)
+    // The runMonteCarlo result doesn't expose explicit fire-year percentiles
+    // for /ai-forecast-engine yet, so we register a synthesis trace pinning
+    // the canonical highest_risk_year and biggest_risk_driver instead, which
+    // are the closest engine outputs available here.
+    registerTrace({
+      id: 'mc:median-fire-year',
+      label: 'Monte Carlo — Highest-risk Year (P50 surrogate)',
+      finalValue: String(mc.highest_risk_year),
+      plainEnglish:
+        'The year across all simulations with the most negative-cashflow events. This /ai-forecast-engine surface does not output explicit FIRE-year percentiles; the canonical "highest risk year" is surfaced under this id for trace continuity. For explicit FIRE-year percentiles, use the FIRE Monte Carlo surface on /wealth-strategy → Monte Carlo tab.',
+      formula: 'highest_risk_year = argmax_y count(scenarios with CF(y) < 0)',
+      expanded: `Highest risk year: ${mc.highest_risk_year}\nBiggest risk driver: ${mc.biggest_risk_driver}`,
+      inputs: [
+        { label: 'Simulations', value: sims.toLocaleString() },
+        { label: 'Highest risk year', value: mc.highest_risk_year },
+        { label: 'Biggest risk driver', value: mc.biggest_risk_driver },
+      ],
+      assumptions: commonAssumptions,
+      dataSource: 'MonteCarloResult.highest_risk_year + biggest_risk_driver',
+      sourceEngine: SOURCE,
+      included: [],
+      excluded: [{ label: 'Per-year FIRE crossing curve', reason: 'Not exposed by this engine variant.' }],
+      calculatedAt: generatedAt,
+      inputHash: hashTraceInputs([{ label: 'hry', value: mc.highest_risk_year }]),
+      relatedIds: ['mc:financial-freedom-prob', 'mc:cash-shortfall-risk'],
+    });
+  }, [mc, yearlyAssumptions, mcVolatility, useV4Engine, useV5Engine]);
+
+  // ── Audit Mode: register live Expected-Returns assumption traces ─────────
+  // Each click on a Property/Stocks/Crypto/Super expected-return label opens
+  // the calculation trace showing the canonical mean used by the engine, the
+  // default value, the source store path, and the engines it affects.
+  useEffect(() => {
+    const generatedAt = new Date().toISOString();
+    const SOURCE = 'forecastStore.expectedReturns (AI Forecast Engine)';
+
+    function erTrace(
+      id: string,
+      label: string,
+      currentValue: number,
+      defaultValue: number,
+      storeKey: keyof ExpectedReturns,
+      engineField: string,
+    ): CalculationTrace {
+      const inputs: TraceInput[] = [
+        { label: 'Current Value', value: `${currentValue.toFixed(2)}%`, source: `useForecastStore().expectedReturns.${storeKey}` },
+        { label: 'Default Value', value: `${defaultValue.toFixed(2)}%`, source: 'DEFAULT_EXPECTED_RETURNS' },
+      ];
+      return {
+        id,
+        label,
+        finalValue: `${currentValue.toFixed(2)}%`,
+        plainEnglish:
+          `${label}: the user-controlled mean annual return for this asset class. ` +
+          `It is independent of volatility — Mean is the centre of the return distribution; Std-Dev (set in the Monte Carlo Assumptions panel) is its width. ` +
+          `The canonical mapper buildCanonicalMonteCarloInput overrides yearlyAssumptions[*].${engineField} with this value before passing the engine input to runMonteCarlo / runMonteCarloV4 / runMonteCarloV5.`,
+        formula: `mean_${storeKey} = expectedReturns.${storeKey}  →  yearlyAssumptions[*].${engineField}`,
+        expanded:
+          `Current: ${currentValue.toFixed(2)}%\n` +
+          `Default: ${defaultValue.toFixed(2)}%\n` +
+          `Engine field: yearlyAssumptions[*].${engineField}\n` +
+          `Affected engines: monteCarloEngine.runMonteCarlo, monteCarloV4.runMonteCarloV4, monteCarloV5.runMonteCarloV5`,
+        inputs,
+        assumptions: [
+          { label: 'Source', value: SOURCE, source: 'client/src/lib/forecastStore.ts' },
+          { label: 'Mapper', value: 'buildCanonicalMonteCarloInput → MCInput.yearlyAssumptions', source: 'client/src/lib/monteCarloCanonical.ts' },
+        ],
+        dataSource: 'forecastStore.expectedReturns (Zustand persisted store)',
+        sourceEngine: 'Monte Carlo Assumptions',
+        included: [
+          { label: 'Mean (centre of distribution)', value: `${currentValue.toFixed(2)}%` },
+          { label: 'Affects: runMonteCarlo, runMonteCarloV4, runMonteCarloV5' },
+        ],
+        excluded: [
+          { label: 'Volatility / Std-Dev', reason: 'Volatility is a separate parameter set in the Monte Carlo Assumptions panel.' },
+        ],
+        calculatedAt: generatedAt,
+        inputHash: hashTraceInputs(inputs),
+        relatedIds: [
+          'assumptions:mc:expected-return:property',
+          'assumptions:mc:expected-return:stocks',
+          'assumptions:mc:expected-return:crypto',
+          'assumptions:mc:expected-return:super',
+          'mc:p50-nw-at-target',
+        ].filter(rid => rid !== id),
+      };
+    }
+
+    registerTrace(erTrace(
+      'assumptions:mc:expected-return:property',
+      'Property Expected Growth (mean)',
+      expectedReturns.property, DEFAULT_EXPECTED_RETURNS.property,
+      'property', 'property_growth',
+    ));
+    registerTrace(erTrace(
+      'assumptions:mc:expected-return:stocks',
+      'Stocks Expected Return (mean)',
+      expectedReturns.stocks, DEFAULT_EXPECTED_RETURNS.stocks,
+      'stocks', 'stocks_return',
+    ));
+    registerTrace(erTrace(
+      'assumptions:mc:expected-return:crypto',
+      'Crypto Expected Return (mean)',
+      expectedReturns.crypto, DEFAULT_EXPECTED_RETURNS.crypto,
+      'crypto', 'crypto_return',
+    ));
+    registerTrace(erTrace(
+      'assumptions:mc:expected-return:super',
+      'Super Expected Return (mean)',
+      expectedReturns.super, DEFAULT_EXPECTED_RETURNS.super,
+      'super', 'super_return',
+    ));
+  }, [expectedReturns]);
+
 
   const modeBadge = {
     'profile':      { label: 'Profile Mode',  color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
@@ -613,6 +993,97 @@ export default function AIForecastEnginePage() {
         </div>
       )}
 
+      {/* ── 3.9. Expected Returns (canonical means) ────────────────────────────
+           User-editable mean returns. Independent from volatility — Mean is
+           the centre of the distribution, Std-Dev is its width. Wired through
+           buildCanonicalMonteCarloInput → MCInput.yearlyAssumptions so the
+           engine uses these means directly. */}
+      {forecastMode === 'monte-carlo' && (
+        <div className="rounded-xl border border-emerald-700/30 bg-emerald-900/5 p-5"
+             data-testid="expected-returns-panel">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <TrendingUp className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-sm font-bold text-foreground">Expected Returns</h2>
+            <span className="ml-auto text-xs text-muted-foreground">
+              Mean returns only — separate from volatility below
+            </span>
+            <Button size="sm" variant="outline" className="h-7 text-xs ml-2"
+              onClick={() => resetExpectedReturns()}
+              data-testid="reset-canonical-assumptions">
+              <RotateCcw className="w-3 h-3 mr-1" />Reset Canonical Assumptions
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
+            Edit the expected (mean) annual return for each asset class. Use these to scenario-test
+            Property Boom, Property Crash, AI Supercycle, Stock Market Stagnation, Crypto Winter,
+            Crypto Bull Run, etc. — without changing volatility. Defaults: Property 6.5%, Stocks 10%,
+            Crypto 20%, Super 9.5%.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Property */}
+            <div className="rounded-lg border border-amber-700/30 bg-amber-900/10 p-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Home className="w-4 h-4 text-amber-400" />
+                <AuditableMetric traceId="assumptions:mc:expected-return:property">
+                  <span className="text-sm font-bold text-amber-300" data-testid="er-property-label">
+                    Property Expected Growth
+                  </span>
+                </AuditableMetric>
+              </div>
+              <VolInput label="" value={expectedReturns.property}
+                onChange={v => setExpectedReturns({ property: v })}
+                step={0.1}
+                hint="Mean annual capital growth (default 6.5%)" />
+            </div>
+            {/* Stocks */}
+            <div className="rounded-lg border border-blue-700/30 bg-blue-900/10 p-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-blue-400" />
+                <AuditableMetric traceId="assumptions:mc:expected-return:stocks">
+                  <span className="text-sm font-bold text-blue-300" data-testid="er-stocks-label">
+                    Stocks Expected Return
+                  </span>
+                </AuditableMetric>
+              </div>
+              <VolInput label="" value={expectedReturns.stocks}
+                onChange={v => setExpectedReturns({ stocks: v })}
+                step={0.1}
+                hint="Mean annual total return (default 10%)" />
+            </div>
+            {/* Crypto */}
+            <div className="rounded-lg border border-orange-700/30 bg-orange-900/10 p-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Bitcoin className="w-4 h-4 text-orange-400" />
+                <AuditableMetric traceId="assumptions:mc:expected-return:crypto">
+                  <span className="text-sm font-bold text-orange-300" data-testid="er-crypto-label">
+                    Crypto Expected Return
+                  </span>
+                </AuditableMetric>
+              </div>
+              <VolInput label="" value={expectedReturns.crypto}
+                onChange={v => setExpectedReturns({ crypto: v })}
+                step={0.1}
+                hint="Mean annual total return (default 20%)" />
+            </div>
+            {/* Super */}
+            <div className="rounded-lg border border-emerald-700/30 bg-emerald-900/10 p-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-emerald-400" />
+                <AuditableMetric traceId="assumptions:mc:expected-return:super">
+                  <span className="text-sm font-bold text-emerald-300" data-testid="er-super-label">
+                    Super Expected Return
+                  </span>
+                </AuditableMetric>
+              </div>
+              <VolInput label="" value={expectedReturns.super}
+                onChange={v => setExpectedReturns({ super: v })}
+                step={0.1}
+                hint="Mean annual total return (default 9.5%)" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── 4. MC Volatility Assumptions Panel ────────────────────────────────── */}
       {forecastMode === 'monte-carlo' && (
         <div className="rounded-xl border border-border bg-card p-5">
@@ -749,10 +1220,10 @@ export default function AIForecastEnginePage() {
             </div>
             <div className="rounded-lg border border-border bg-background/50 p-3">
               <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-2">Expected returns &amp; volatility</p>
-              <ExplainRow label="Property" detail={`${yearlyAssumptions[0]?.property_growth ?? 6}% mean / ${mcVolatility.prop_volatility}% std-dev. ${mcVolatility.prop_vacancy_rate}% vacancy, ${mcVolatility.prop_maintenance_pct}% maintenance.`} />
-              <ExplainRow label="Stocks" detail={`${yearlyAssumptions[0]?.stocks_return ?? 10}% mean / ${mcVolatility.stock_volatility}% std-dev. ${mcVolatility.stock_correction_prob}% chance of ${mcVolatility.stock_correction_size}% correction per year.`} />
-              <ExplainRow label="Crypto" detail={`${yearlyAssumptions[0]?.crypto_return ?? 20}% mean / ${mcVolatility.crypto_volatility}% std-dev. ${mcVolatility.crypto_crash_prob}% crash (~${mcVolatility.crypto_crash_size}%), ${mcVolatility.crypto_bull_prob}% bull run (~${mcVolatility.crypto_bull_upside}%).`} />
-              <ExplainRow label="Super" detail={`${yearlyAssumptions[0]?.super_return ?? 10}% mean / 10% std-dev. Compounds monthly.`} />
+              <ExplainRow label="Property" detail={`${expectedReturns.property.toFixed(1)}% mean / ${mcVolatility.prop_volatility}% std-dev. ${mcVolatility.prop_vacancy_rate}% vacancy, ${mcVolatility.prop_maintenance_pct}% maintenance.`} />
+              <ExplainRow label="Stocks" detail={`${expectedReturns.stocks.toFixed(1)}% mean / ${mcVolatility.stock_volatility}% std-dev. ${mcVolatility.stock_correction_prob}% chance of ${mcVolatility.stock_correction_size}% correction per year.`} />
+              <ExplainRow label="Crypto" detail={`${expectedReturns.crypto.toFixed(1)}% mean / ${mcVolatility.crypto_volatility}% std-dev. ${mcVolatility.crypto_crash_prob}% crash (~${mcVolatility.crypto_crash_size}%), ${mcVolatility.crypto_bull_prob}% bull run (~${mcVolatility.crypto_bull_upside}%).`} />
+              <ExplainRow label="Super" detail={`${expectedReturns.super.toFixed(1)}% mean / 10% std-dev. Compounds monthly.`} />
             </div>
             <div className="rounded-lg border border-border bg-background/50 p-3">
               <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-2">Correlations &amp; fat tails</p>
@@ -863,35 +1334,44 @@ export default function AIForecastEnginePage() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <ProbCard label="Median Net Worth 2035" value={maskValue(fmtM(mc.median), privacyMode)}
               sub="50th percentile outcome" icon={<DollarSign className="w-full h-full" />}
-              colorClass="text-emerald-400" bgClass="bg-emerald-500/15" />
+              colorClass="text-emerald-400" bgClass="bg-emerald-500/15"
+              traceId="mc:p50-nw-at-target" />
             <ProbCard label="P10 — Bad Case" value={maskValue(fmtM(mc.p10), privacyMode)}
               sub="Worst 10% of outcomes" icon={<TrendingDown className="w-full h-full" />}
-              colorClass="text-red-400" bgClass="bg-red-500/15" />
+              colorClass="text-red-400" bgClass="bg-red-500/15"
+              traceId="mc:p10-nw-at-target" />
             <ProbCard label="P90 — Best Case" value={maskValue(fmtM(mc.p90), privacyMode)}
               sub="Best 10% of outcomes" icon={<TrendingUp className="w-full h-full" />}
-              colorClass="text-emerald-400" bgClass="bg-emerald-500/15" />
+              colorClass="text-emerald-400" bgClass="bg-emerald-500/15"
+              traceId="mc:p90-nw-at-target" />
             <ProbCard label="Financial Freedom" value={pct(mc.prob_ff)}
               sub="Passive income ≥ $120k/yr by 2035" icon={<Sparkles className="w-full h-full" />}
-              colorClass="text-primary" bgClass="bg-primary/15" />
+              colorClass="text-primary" bgClass="bg-primary/15"
+              traceId="mc:financial-freedom-prob" />
             <ProbCard label="Reach $3M Net Worth" value={pct(mc.prob_3m)}
               sub="Probability of $3M+ by 2035" icon={<Target className="w-full h-full" />}
-              colorClass="text-teal-400" bgClass="bg-teal-500/15" />
+              colorClass="text-teal-400" bgClass="bg-teal-500/15"
+              traceId="mc:reach-3m" />
             <ProbCard label="Reach $5M Net Worth" value={pct(mc.prob_5m)}
               sub="Probability of $5M+ by 2035" icon={<Target className="w-full h-full" />}
-              colorClass="text-blue-400" bgClass="bg-blue-500/15" />
+              colorClass="text-blue-400" bgClass="bg-blue-500/15"
+              traceId="mc:reach-5m" />
             <ProbCard label="Reach $10M Net Worth" value={pct(mc.prob_10m)}
               sub="Probability of $10M+ by 2035" icon={<Target className="w-full h-full" />}
-              colorClass="text-purple-400" bgClass="bg-purple-500/15" />
+              colorClass="text-purple-400" bgClass="bg-purple-500/15"
+              traceId="mc:reach-10m" />
             <ProbCard label="Negative Cashflow Risk" value={pct(mc.prob_neg_cf)}
               sub="Sims with ≥1 negative cashflow year"
               icon={<ShieldAlert className="w-full h-full" />}
               colorClass={mc.prob_neg_cf > 30 ? 'text-red-400' : 'text-orange-400'}
-              bgClass={mc.prob_neg_cf > 30 ? 'bg-red-500/15' : 'bg-orange-500/15'} />
+              bgClass={mc.prob_neg_cf > 30 ? 'bg-red-500/15' : 'bg-orange-500/15'}
+              traceId="mc:neg-cashflow-risk" />
             <ProbCard label="Cash Shortfall Risk" value={pct(mc.prob_cash_shortfall)}
               sub={`Cash ever below $${(mcVolatility.emergency_buffer / 1000).toFixed(0)}k emergency buffer`}
               icon={<Wallet className="w-full h-full" />}
               colorClass={mc.prob_cash_shortfall > 30 ? 'text-red-400' : 'text-amber-400'}
-              bgClass={mc.prob_cash_shortfall > 30 ? 'bg-red-500/15' : 'bg-amber-500/15'} />
+              bgClass={mc.prob_cash_shortfall > 30 ? 'bg-red-500/15' : 'bg-amber-500/15'}
+              traceId="mc:cash-shortfall-risk" />
             <ProbCard label="Median Lowest Cash" value={maskValue(fmtM(mc.lowest_cash_median), privacyMode)}
               sub="Median of minimum cash across all paths" icon={<Wallet className="w-full h-full" />}
               colorClass={mc.lowest_cash_median < mcVolatility.emergency_buffer ? 'text-red-400' : 'text-emerald-400'}

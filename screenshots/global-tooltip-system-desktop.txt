@@ -1,0 +1,48 @@
+Global Intelligence Tooltip System — Desktop Coverage Map
+==========================================================
+
+[ Executive Dashboard / Above the Fold ]
+  Net Worth                       → ⓘ explainer: "net-worth-reconciliation"
+  Monthly Surplus                 → ⓘ explainer: "safe-surplus"
+  10y Trajectory                  → ⓘ explainer: "monte-carlo-probability" (existing)
+  Risk State (header chip)        → ⓘ explainer: "risk-state" (existing)
+  Macro Regime                    → ⓘ explainer: "macro-regime" (existing)
+  Confidence (recommendation)     → ⓘ explainer: "confidence" (existing)
+  DCA Recommendation              → ⓘ explainer: "dca-recommendation" (existing)
+  Scenario Confidence             → ⓘ explainer: "scenario-confidence" (existing)
+  Daily Briefing                  → ⓘ explainer: "recommendation-engine" (NEW)
+  Strategic Priorities            → ⓘ explainer: "strategic-priorities" (NEW) + "scenario-confidence"
+  Financial Health Strip          → ⓘ per-indicator explainers (existing)
+
+[ Financial OS Centre ]
+  Financial OS Centre header      → ⓘ explainer: "financial-os" (NEW)
+  Behaviour profile               → ⓘ explainer: "behavioural-drift" (NEW)
+  Autonomous OS findings          → ⓘ explainer: "autonomous-os" (NEW)
+
+[ Future Worlds Panel ]
+  Future Worlds header            → ⓘ explainer: "future-worlds" (NEW)
+
+[ Family Office Mode ]
+  Family Office Mode header       → ⓘ explainer: "family-office-mode" (NEW)
+  Portfolio Construction          → ⓘ explainer: "portfolio-construction" (NEW)
+  Tax Intelligence                → ⓘ explainer: "tax-efficiency" (NEW)
+  Execution OS                    → ⓘ explainer: "execution-os" (NEW)
+  Strategic Priority Stack        → ⓘ explainer: "strategic-priorities" (NEW)
+
+[ Risk / FIRE cards ]
+  Risk Radar card header          → ⓘ explainer: "risk-state" (NEW)
+  FIRE Path Optimizer header      → ⓘ explainer: "fire" (NEW)
+  Best Move Right Now             → ⓘ explainer: "best-move" (NEW)
+  Tax Alpha Engine                → ⓘ explainer: "tax-efficiency" (NEW)
+  AI Insights                     → ⓘ explainer: "autonomous-os" (NEW)
+
+[ Monte Carlo ]
+  Monte Carlo FIRE Engine header  → ⓘ explainer: "monte-carlo" (NEW)
+  MonteCarloV5Panel header        → ⓘ explainer: "monte-carlo" (NEW)
+
+Interaction:
+  - Desktop: hover OR click on ⓘ opens a Radix Popover (premium dark
+    surface, gold accents, no native browser tooltip).
+  - Body shows: Title · State chip (if reading) · Definition · Why it
+    matters · Healthy vs risky ranges · What moves it · How to improve ·
+    Source of truth (L3 engines) · Engine cue (when set).

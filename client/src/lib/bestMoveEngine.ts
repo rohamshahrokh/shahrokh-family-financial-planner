@@ -35,6 +35,14 @@
 import { safeNum } from './finance';
 import { computeDepositPower } from './depositPower';
 import { classifyDebtPortfolio, type DebtRecord } from './recommendationEngine/debtClassification';
+import {
+  selectMonthlyIncome as contractMonthlyIncome,
+  selectMonthlyExpensesLedger as contractMonthlyExpenses,
+  selectMonthlySurplus as contractMonthlySurplus,
+  selectMonthlyDebtService as contractMonthlyDebtService,
+  selectExpensesIncludesDebt as contractExpensesIncludeDebt,
+  type DashboardInputs,
+} from './dashboardDataContract';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -762,7 +770,10 @@ function buildLedgerInputs(
 
 export async function computeBestMoveV2(cfg: BestMoveConfig = {}): Promise<BestMoveResult> {
   const _cfg = {
-    mortgageRate:         cfg.mortgageRate         ?? 0.0625,
+    // TODAY snapshot uses the LIVE current PPOR rate (5.82% as of May 2026).
+    // Do NOT use a forecast / blended rate here — Best Move evaluates current
+    // reality only. Forecast rates belong in the Monte Carlo / Forecast Engine.
+    mortgageRate:         cfg.mortgageRate         ?? 0.0582,
     etfExpectedReturn:    cfg.etfExpectedReturn     ?? 0.095,
     cryptoExpectedReturn: cfg.cryptoExpectedReturn  ?? 0.20,
     sgRate:               cfg.sgRate               ?? 0.115,
@@ -821,11 +832,45 @@ export async function computeBestMoveV2(cfg: BestMoveConfig = {}): Promise<BestM
 
   const snap = snapRows?.[0] ?? {};
 
+  // ── CANONICAL surplus reconciliation ───────────────────────────────────
+  // The dashboard headline KPI is computed by `selectMonthlySurplus`, which
+  // is the SAME source of truth used by the Net Worth and Wealth Projection
+  // surfaces. To keep the recommendation engine in lock-step with the
+  // dashboard (so DCA can never exceed the dashboard surplus) we route
+  // income/expenses through the canonical selectors first and only fall
+  // back to legacy snapshot maths if they yield nothing.
+  const contractInputs: DashboardInputs = {
+    snapshot: snap,
+    expenses: [],                                  // we don't have ledger rows here; selectors fall back to snapshot
+    properties: Array.isArray(propRows) ? propRows : [],
+    stocks: Array.isArray(stockRows) ? stockRows : [],
+    cryptos: Array.isArray(cryptoRows) ? cryptoRows : [],
+    income: Array.isArray(incomeRows) ? incomeRows : [],
+  } as any;
+  const canonicalMonthlyIncome   = contractMonthlyIncome(contractInputs);
+  const canonicalMonthlyExpenses = contractMonthlyExpenses(contractInputs);
+  const canonicalMonthlySurplus  = contractMonthlySurplus(contractInputs);
+  const canonicalMonthlyDebt     = contractMonthlyDebtService(contractInputs);
+  const canonicalExpensesIncDebt = contractExpensesIncludeDebt(contractInputs);
+
   const snapMonthlyIncome  = safeNum(snap.monthly_income);
   const snapMonthlyExp     = safeNum(snap.monthly_expenses);
   const incomeFromTracker  = deduplicatedMonthlyIncome(incomeRows);
-  const monthlyIncome      = incomeFromTracker > 0 ? incomeFromTracker : snapMonthlyIncome;
-  const monthlyExpenses    = snapMonthlyExp > 0 ? snapMonthlyExp : 0;
+  // Prefer the canonical selector; legacy fallback only when the selector
+  // could not resolve a value. This is what eliminates the "$17K phantom
+  // surplus" that previously made the engine recommend $9k DCA against a
+  // true $7k dashboard surplus.
+  const monthlyIncome      = canonicalMonthlyIncome > 0
+    ? canonicalMonthlyIncome
+    : (incomeFromTracker > 0 ? incomeFromTracker : snapMonthlyIncome);
+  // For `monthlyExpenses` we want the figure that, when subtracted from
+  // monthlyIncome, gives back the canonical surplus. When the canonical
+  // surplus is available we invert it back into an effective expense figure
+  // so downstream candidates (which compute `surplus = income − expenses`)
+  // see the same surplus the dashboard headline shows.
+  const monthlyExpenses    = canonicalMonthlyIncome > 0
+    ? Math.max(0, monthlyIncome - canonicalMonthlySurplus)
+    : (snapMonthlyExp > 0 ? snapMonthlyExp : 0);
 
   // DCA monthly cost (active)
   const dcaActive = [
@@ -910,7 +955,17 @@ export async function computeBestMoveV2(cfg: BestMoveConfig = {}): Promise<BestM
     properties:           Array.isArray(propRows) ? propRows : [],
     emergencyBuffer,
     maxRefinanceLVR:      _cfg.maxLvr / 100,
-    mortgageRate:         _cfg.mortgageRate,
+    // Prefer the LIVE current PPOR rate from sf_snapshot.mortgage_rate (the
+    // TODAY value the user actually pays). Fall back to the config default
+    // (5.82%) only when missing. Forecast/blended rates must never reach the
+    // Best Move ledger — they belong to the Monte Carlo / Forecast Engine.
+    mortgageRate:         (() => {
+      const live = safeNum(snap.mortgage_rate);
+      // snap.mortgage_rate is stored as PERCENT (e.g. 5.82); ledger expects decimal.
+      if (live > 0 && live < 1) return live;        // already decimal
+      if (live >= 1) return live / 100;
+      return _cfg.mortgageRate;
+    })(),
     etfExpectedReturn:    _cfg.etfExpectedReturn,
     cryptoExpectedReturn: _cfg.cryptoExpectedReturn,
     lowestFutureCash,

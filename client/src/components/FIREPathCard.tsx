@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import { useQuery }    from "@tanstack/react-query";
 import { Link }        from "wouter";
 import { Flame, ChevronRight, Zap } from "lucide-react";
+import { SectionExplainer } from "@/components/intelligence/SectionExplainer";
 import { computeFirePath, buildFirePathInput } from "@/lib/firePathEngine";
 import { maskValue } from "@/components/PrivacyMask";
 import { useAppStore } from "@/lib/store";
@@ -68,7 +69,10 @@ export default function FIREPathCard() {
             <Flame size={15} className="text-orange-400" />
           </div>
           <div>
-            <p className="text-[13px] font-semibold text-foreground">FIRE Path Optimizer</p>
+            <p className="text-[13px] font-semibold text-foreground inline-flex items-center gap-1.5">
+              FIRE Path Optimizer
+              <SectionExplainer metricId="fire" />
+            </p>
             <p className="text-[10px] text-muted-foreground">Fastest path to financial independence</p>
           </div>
         </div>

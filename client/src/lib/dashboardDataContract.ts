@@ -27,6 +27,8 @@
  *    case (see `evaluateDataAvailability` below).
  */
 
+import { aggregateIncome, type AggregatedIncome } from "./incomeClassificationEngine";
+
 export type ContractTier = "actual" | "planned" | "forecast";
 
 export interface BindingSource {
@@ -370,6 +372,11 @@ export function selectSuperCombined(i: DashboardInputs): number {
 /**
  * Average a list of dated amount records over the last `monthsBack` months.
  * Returns 0 when the list is empty or every row is out of window.
+ *
+ * NOTE: this is the LEGACY trailing average — used only by tests and the
+ * expenses ledger. Monthly INCOME goes through `aggregateIncome` so that
+ * one-off events (asset sales, bonuses, tax refunds, inheritances) never
+ * inflate the recurring monthly income figure.
  */
 function trailingMonthlyAverage(
   rows: any[] | undefined,
@@ -390,16 +397,19 @@ function trailingMonthlyAverage(
 }
 
 /**
- * Monthly income (single source of truth).
+ * Monthly RECURRING income (single source of truth).
  * Order of precedence:
- *   1. Trailing 6mo average of sf_income.amount  (ledger — PRIMARY)
+ *   1. sf_income classified as RECURRING (employment salary, rental, dividend,
+ *      interest, business, recurring "other") — see incomeClassificationEngine.
+ *      One-off rows (bonus, tax refund, asset sale, gift/inheritance, one-off
+ *      "other") are EXCLUDED from this figure regardless of dollar amount.
  *   2. Sum of sf_snapshot.{roham,fara}_monthly_income + rental + other
  *   3. sf_snapshot.monthly_income (manual master override — LAST resort)
  */
 export function selectMonthlyIncome(i: DashboardInputs): number {
   const today = todayIsoFor(i);
-  const ledger = trailingMonthlyAverage(i.incomeRecords, today);
-  if (ledger > 0) return Math.round(ledger);
+  const aggregate = aggregateIncome(i.incomeRecords, today);
+  if (aggregate.recurringMonthlyIncome > 0) return aggregate.recurringMonthlyIncome;
   const s = i.snapshot ?? {};
   const subFields =
     num(s.roham_monthly_income) +
@@ -834,7 +844,12 @@ export function selectCanonicalIncome(
 ): CanonicalIncome {
   const s = i.snapshot ?? {};
   const today = todayIsoFor(i);
-  const ledger = trailingMonthlyAverage(i.incomeRecords, today);
+  // Income engine refactor: ledger figure is RECURRING-only. One-off events
+  // (bonus, tax refund, asset sale, gift / inheritance, one-off other) are
+  // excluded from this number so they cannot permanently inflate the
+  // dashboard, forecast, MC, or serviceability inputs.
+  const aggregate = aggregateIncome(i.incomeRecords, today);
+  const ledger = aggregate.recurringMonthlyIncome;
   const rohamMonthly = num(s.roham_monthly_income);
   const faraMonthly = num(s.fara_monthly_income);
   const passive = num(s.rental_income_total) + num(s.other_income);
@@ -897,6 +912,17 @@ export function selectCanonicalIncome(
     taxableOverrideActive: overrideActive,
     taxProfileVariance,
   };
+}
+
+/**
+ * Income-engine aggregate selector — surfaces the recurring / one-off /
+ * historical breakdown to dashboard cards and audit-mode traces. Pure pass-
+ * through to `aggregateIncome` from the classification engine, hoisted here
+ * so call sites stay confined to the dashboard data contract.
+ */
+export function selectIncomeAggregate(i: DashboardInputs): AggregatedIncome {
+  const today = todayIsoFor(i);
+  return aggregateIncome(i.incomeRecords, today);
 }
 
 // ────────────────────────────────────────────────────────────────────────────

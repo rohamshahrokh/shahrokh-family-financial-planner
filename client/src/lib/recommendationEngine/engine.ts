@@ -30,7 +30,13 @@ import type {
   RiskLevel,
 } from './types';
 import { debtVsETF, cashVsInvest } from './opportunityCost';
-import { classifyDebtPortfolio, type DebtRecord, type DebtPortfolioSummary } from './debtClassification';
+import {
+  classifyCurrentDebtPortfolio,
+  partitionCurrentVsPlanned,
+  isPlannedDebt,
+  type DebtRecord,
+  type DebtPortfolioSummary,
+} from './debtClassification';
 
 const PILLAR_RANK: Record<StrategicPillar, number> = {
   prevent_failure: 1,
@@ -211,18 +217,25 @@ function buildEmergencyBuffer(s: UnifiedSignals, signals: SourceSignal[]): Recom
  */
 function buildDebtPortfolio(s: UnifiedSignals): DebtPortfolioSummary {
   const records: DebtRecord[] = [];
+  let portfolioCarriesMortgage = false;
 
   if (Array.isArray(s.debtPortfolio) && s.debtPortfolio.length > 0) {
     for (const d of s.debtPortfolio) {
+      const planned = (d as any).planned === true;
+      const settlementDateISO = (d as any).settlementDateISO as string | undefined;
+      const type = (d.type as DebtRecord['type']) ?? 'other';
+      if (type === 'mortgage') portfolioCarriesMortgage = true;
       records.push({
         id: d.id,
         name: d.name ?? 'Debt',
         balance: typeof d.balance === 'number' ? d.balance : 0,
         ratePct: d.ratePct,                          // preserve null/undefined/0 verbatim
         minPaymentMonthly: d.minPaymentMonthly,
-        type: (d.type as DebtRecord['type']) ?? 'other',
+        type,
         expiryDateISO: d.expiryDateISO,
         taxDeductible: d.taxDeductible,
+        planned,
+        settlementDateISO,
       });
     }
   } else {
@@ -243,9 +256,13 @@ function buildDebtPortfolio(s: UnifiedSignals): DebtPortfolioSummary {
     }
   }
 
-  // Add mortgage as a classified record for strategic evaluation.
+  // Add mortgage as a classified record for strategic evaluation — but ONLY
+  // when the user-supplied debtPortfolio doesn't already carry a mortgage line.
+  // Otherwise PPOR mortgage gets double-counted (once via debt_prefs, once via
+  // s.mortgage), inflating "Strategic debt monitored" by the full mortgage
+  // balance and leaking the look of "$2.40M current debt".
   const mortgageBalance = num(s.mortgage);
-  if (mortgageBalance > 0) {
+  if (mortgageBalance > 0 && !portfolioCarriesMortgage) {
     records.push({
       id: 'mortgage_primary',
       name: 'Home Mortgage',
@@ -255,7 +272,11 @@ function buildDebtPortfolio(s: UnifiedSignals): DebtPortfolioSummary {
     });
   }
 
-  return classifyDebtPortfolio(records);
+  // CURRENT-ONLY classification. Planned IP loans, future leverage events
+  // and forecast debt are filtered out of the Best Move, Strategic Debt
+  // Monitor, and every "today" surface. Planned debt belongs to the Events
+  // / Forecast Engine surfaces, never to current liabilities.
+  return classifyCurrentDebtPortfolio(records);
 }
 
 /**
@@ -685,6 +706,79 @@ function propertyAction(s: UnifiedSignals, signals: SourceSignal[]): Recommendat
   return null;
 }
 
+/**
+ * Compute the maximum monthly $ amount the recommendation engine can safely
+ * deploy AFTER the household's required outflows. This is the cap every
+ * monthly-allocation recommendation (currently DCA) must honour:
+ *
+ *   safeDeployableSurplus =
+ *       canonical monthly surplus (income − expenses)
+ *     − any monthly debt service not already inside expenses
+ *     − a 10% safety buffer slice (rounds the cap down for sequence risk)
+ *     − the monthly amortisation of any emergency-buffer shortfall (so we
+ *       refill the buffer before opening new positions)
+ *
+ * The result is floored at 0 — when surplus turns negative the engine
+ * surfaces a "do not start new DCA" message instead of a negative cap.
+ *
+ * IMPORTANT: this MUST stay <= the dashboard headline surplus (which is
+ * `selectMonthlySurplus`). The dashboard surplus is computed BEFORE the
+ * safety buffer, so as long as we only ever shrink it here we cannot
+ * recommend a DCA that exceeds the user's actual surplus.
+ */
+function computeSafeDeployableSurplus(s: UnifiedSignals): {
+  monthlyIncomeUsed: number;
+  monthlyExpensesUsed: number;
+  monthlyDebtRepaymentsUsed: number;
+  bufferShortfallReserved: number;
+  safeDeployableSurplus: number;
+  /** Plain English description for the reconciliation UI. */
+  explanation: string;
+} {
+  const income = num(s.monthlyIncome);
+  const expenses = num(s.monthlyExpenses);
+  const reportedSurplus = num(s.monthlySurplus);
+  const expensesIncludeDebt = s.expensesIncludeDebt !== false; // default true → don't double-subtract
+  const debtService = expensesIncludeDebt ? 0 : Math.max(0, num(s.monthlyDebtService));
+
+  // Baseline = canonical dashboard surplus. Fall back to income − expenses
+  // (− debt where applicable) only when monthlySurplus wasn't supplied.
+  const baseline = (reportedSurplus !== 0 || (income === 0 && expenses === 0))
+    ? reportedSurplus
+    : Math.max(0, income - expenses - debtService);
+
+  // Reserve a 1/12th amortisation of any emergency-buffer shortfall — refill
+  // the buffer over a year rather than ignoring it.
+  const buffer = num(s.emergencyBufferTarget);
+  const cash = num(s.cashOutsideOffset);
+  const offset = num(s.offsetBalance);
+  const liquid = cash + offset;
+  const shortfall = Math.max(0, buffer - liquid);
+  const bufferAmortisation = shortfall > 0 ? Math.round(shortfall / 12) : 0;
+
+  // 10% safety slice for sequence risk / lumpy spend.
+  const safetySlice = Math.max(0, Math.round(baseline * 0.10));
+
+  const safe = Math.max(0, Math.round(baseline - debtService - bufferAmortisation - safetySlice));
+
+  const parts: string[] = [
+    `monthly income ${fmt(income)} − expenses ${fmt(expenses)}`,
+  ];
+  if (debtService > 0) parts.push(`− debt service ${fmt(debtService)}`);
+  if (bufferAmortisation > 0) parts.push(`− buffer top-up ${fmt(bufferAmortisation)}/mo`);
+  if (safetySlice > 0) parts.push(`− 10% safety slice ${fmt(safetySlice)}`);
+  parts.push(`= safe deployable surplus ${fmt(safe)}/mo`);
+
+  return {
+    monthlyIncomeUsed: Math.round(income),
+    monthlyExpensesUsed: Math.round(expenses),
+    monthlyDebtRepaymentsUsed: Math.round(debtService),
+    bufferShortfallReserved: Math.round(bufferAmortisation),
+    safeDeployableSurplus: safe,
+    explanation: parts.join(' '),
+  };
+}
+
 function etfDCA(
   s: UnifiedSignals,
   signals: SourceSignal[],
@@ -699,20 +793,47 @@ function etfDCA(
   const buffer = num(s.emergencyBufferTarget);
   if (cash + num(s.offsetBalance) < buffer) return null;
 
-  const dca = Math.round(surplus * 0.5 / 100) * 100;
+  // ── Safe deployable surplus cap ─────────────────────────────────────────
+  // The recommended DCA can NEVER exceed the dashboard headline surplus
+  // after required buffers, debt minimums and a small safety slice. Any
+  // discrepancy between the surplus the dashboard renders and the surplus
+  // the recommendation engine uses would otherwise produce contradictory
+  // advice (e.g. "DCA $9k/mo" when the dashboard shows a $7k surplus).
+  const sds = computeSafeDeployableSurplus(s);
+  // Half-of-surplus heuristic, BUT floor at the safe deployable surplus.
+  const half = Math.round(surplus * 0.5 / 100) * 100;
+  const dca = Math.max(0, Math.min(half, Math.floor(sds.safeDeployableSurplus / 100) * 100));
+  if (dca < 200) return null; // not worth surfacing — engine stays quiet
   const retPct = num(s.etfExpectedReturn, 0.095);
   const gain = dca * 12 * retPct;
 
-  return makeRecommendation({
+  const surplusReconciliation = {
+    ...sds,
+    recommendedMonthlyAmount: dca,
+    remainingMonthlyBuffer: Math.max(0, sds.safeDeployableSurplus - dca),
+    explanation: `${sds.explanation}. Recommended DCA capped at ${fmt(dca)}/mo (≤ safe deployable surplus); ${fmt(Math.max(0, sds.safeDeployableSurplus - dca))}/mo remains as flexible buffer.`,
+  };
+
+  // Title makes the cap visible so the UI does not need to interpret it.
+  const dcaTitle = dca < half
+    ? `DCA up to ${fmt(dca)}/month after buffer and debt obligations`
+    : `DCA ${fmt(dca)}/mo of surplus into diversified ETFs`;
+
+  const rec = makeRecommendation({
     id: 'etf_dca',
-    title: `DCA ${fmt(dca)}/mo of surplus into diversified ETFs`,
+    title: dcaTitle,
     actionType: 'etf_dca',
     pillar: 'improve_fire_timeline',
     urgency: 'this_year',
     riskLevel: 'Med',
-    reasoning: `Buffer and debts are clean. Half of monthly surplus (${fmt(dca)}/mo) into broad-market ` +
-      `ETFs (e.g. VAS+VGS) compounds at ~${(retPct * 100).toFixed(1)}%, expected gain ${fmt(gain)}/yr. ` +
-      `Dollar-cost averaging removes market-timing risk.`,
+    reasoning:
+      // Lead with the strategic story (one short sentence) so card previews
+      // and the Daily Briefing summary read cleanly without truncation. The
+      // full reconciliation breakdown lives in the `surplusReconciliation`
+      // block, which the Daily Briefing renders below as a structured grid.
+      `${fmt(dca)}/mo into broad-market ETFs (VAS+VGS) is within your safe deployable surplus ` +
+      `and compounds at ~${(retPct * 100).toFixed(1)}%, an expected ${fmt(gain)}/yr. ` +
+      `Dollar-cost averaging removes market-timing risk. ${surplusReconciliation.explanation}`,
     steps: [
       { step: 'Set up auto-buy on a discount broker' },
       { step: 'Diversify across VAS / VGS / VAE for global coverage' },
@@ -731,6 +852,8 @@ function etfDCA(
     signalsUsed: signals.filter(s => ['ledger_income_expense', 'snapshot'].includes(s)),
     confidence: 0.7,
   });
+  rec.surplusReconciliation = surplusReconciliation;
+  return rec;
 }
 
 function fireAccelerate(s: UnifiedSignals, signals: SourceSignal[]): Recommendation | null {

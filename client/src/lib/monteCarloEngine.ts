@@ -21,6 +21,7 @@
 import { safeNum, calcMonthlyRepayment, calcLoanBalance, dcaMonthlyEquiv, billActualOutflow } from './finance';
 import type { YearAssumptions, MonteCarloResult, MonteCarloFanPoint, MCVolatilityParams } from './forecastStore';
 import { DEFAULT_MC_VOLATILITY } from './forecastStore';
+import { applyFundingToProperties, buildAdapterContext } from './propertyFundingAdapter';
 
 // ─── Box-Muller standard normal ───────────────────────────────────────────────
 
@@ -122,7 +123,20 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
   const NG_MONTH_IDX = 7;
 
   const s = input.snapshot;
-  const investProps = input.properties.filter(p => p.type !== 'ppor');
+  // Apply per-property funding source to convert "Equity Release" deposits
+  // into loan top-ups (no cash drawdown) and cash-from-asset-sales into
+  // smaller cash deposits. The MC engine consumes `deposit` and `loan_amount`
+  // directly so the effective records flow through unchanged.
+  // #FWL_Critical_StatePersistence_FundingSource_TaxRegime_Fix
+  const effectiveProperties = applyFundingToProperties(
+    input.properties as any[],
+    buildAdapterContext({
+      snapshot: s,
+      stocks: input.stocks as any,
+      cryptos: input.cryptos as any,
+    }),
+  );
+  const investProps = effectiveProperties.filter((p: any) => p.type !== 'ppor');
 
   // ── Month index helper ──
   function miOf(dateStr: string): number {

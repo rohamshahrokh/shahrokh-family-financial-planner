@@ -11,9 +11,43 @@ import {
   type NGSummary,
 } from "@/lib/finance";
 import { runCashEngine, getCashKPICards, type CashEvent } from "@/lib/cashEngine";
+import { registerTrace as registerAuditTrace } from "@/lib/auditMode/auditRegistry";
+import {
+  buildCashflowYearTrace,
+  buildCashflowReconciliationTrace,
+  buildPlanFeasibilityTrace,
+  buildFundingResolutionTrace,
+  buildIncomeClassificationTrace,
+} from "@/lib/auditMode/engineTraces";
+import {
+  computePlanFeasibility,
+  type PlanFeasibilityResult,
+} from "@/lib/planFeasibility";
+import {
+  computeFundingResolution,
+  type FundingResolutionResult,
+} from "@/lib/fundingResolutionAdvisor";
+import {
+  liquidityInputsFromCashFlowYear,
+  type LiquidityInputs as PlanExecutionLiquidityInputs,
+} from "@/lib/planExecutionStatus";
+import { applyFundingToProperties, buildAdapterContext } from "@/lib/propertyFundingAdapter";
+import { useActiveRegime } from "@/hooks/useActiveRegime";
+// Map the active regime selector → calcNegativeGearing scenario value.
+// The 4-value selector enum from taxPolicyEngine collapses to the 3-value
+// scenario enum used by taxRulesEngine: AUTO_DETECT defaults to current_law
+// (per-property classification then applies inside the engine when the
+// scenario is reform).
+function selectorToScenario(selector: string): 'current_law' | 'proposed_reform' | 'custom' {
+  if (selector === 'PROPOSED_2027_REFORM') return 'proposed_reform';
+  if (selector === 'CUSTOM_STRESS_TEST')   return 'custom';
+  return 'current_law';
+}
 import { syncFromCloud, getLastSync } from "@/lib/localStore";
 import { useAppStore } from "@/lib/store";
 import { calcDepositPower, projectEquityTimeline } from "@/lib/equityEngine";
+import { computeWealthLayers } from "@/lib/canonicalWealth";
+import { buildCanonicalRiskSurface } from "@/lib/canonicalRiskSurface";
 // Authoritative dashboard source-of-truth bindings + selectors. See
 // docs/DASHBOARD_DATA_CONTRACT.md and client/src/lib/dashboardDataContract.ts.
 // The regression check (`npm run test:dashboard-contract`) fails the build
@@ -44,7 +78,9 @@ import {
   reconcileNetWorth,
   type DashboardInputs,
   type CanonicalNetWorth,
+  selectIncomeAggregate,
 } from "@/lib/dashboardDataContract";
+import { aggregateIncome } from "@/lib/incomeClassificationEngine";
 import { maskValue } from "@/components/PrivacyMask";
 import SaveButton, { useSaveOnEnter } from "@/components/SaveButton";
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from "react";
@@ -124,11 +160,15 @@ import TaxAlphaCard from "@/components/TaxAlphaCard";
 import RiskRadarCard from "@/components/RiskRadarCard";
 import KpiCard from "@/components/KpiCard";
 import WealthFlowBanner from "@/components/WealthFlowBanner";
+import familyImg from "@assets/family.jpeg";
 import ExecutiveDashboard from "@/components/ExecutiveDashboard";
+import { FutureReformImpactCard } from "@/components/taxRegime/FutureReformImpactCard";
 import DeepDiveSection from "@/components/DeepDiveSection";
 import { Link, useLocation } from "wouter";
 import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
+import { buildCanonicalMonteCarloInput } from "@/lib/monteCarloCanonical";
+import { runMonteCarloV4 } from "@/lib/monteCarloV4/engineV4";
 import familyImg from "@assets/family.jpeg";
 
 // ─── Chart tooltips ───────────────────────────────────────────────────────────
@@ -604,10 +644,23 @@ const YearDetailPanel = ({ row, privacyMode, checkDelta, checkOk }: {
 };
 
 export default function DashboardPage() {
+  // Active tax regime — used to make NG / refund / loss bank flows
+  // regime-aware. The dashboard is purely a CONSUMER of taxRulesEngine
+  // outputs; the policy decision (current_law vs reform) lives in the
+  // engine — never duplicated here.
   const qc = useQueryClient();
+  const { selector: activeRegimeSelector } = useActiveRegime();
+  const activeScenario = selectorToScenario(activeRegimeSelector);
   const { chartView, setChartView, privacyMode, togglePrivacy, currentUser } = useAppStore();
   const { forecastMode, profile, monteCarloResult } = useForecastStore();
   const loadForecastFromSupabase = useForecastStore(s => s.loadFromSupabase);
+  // Auto-run setters/state for the canonical Monte Carlo preview the
+  // Executive Overview now renders by default (see auto-run useEffect below).
+  const setMonteCarloResult = useForecastStore(s => s.setMonteCarloResult);
+  const isRunningMC = useForecastStore(s => s.isRunningMC);
+  const setIsRunningMC = useForecastStore(s => s.setIsRunningMC);
+  const mcVolatility = useForecastStore(s => s.mcVolatility);
+  const yearlyAssumptions = useForecastStore(s => s.yearlyAssumptions);
   const fa = useForecastAssumptions();
   const [, navigate] = useLocation();
 
@@ -689,6 +742,15 @@ export default function DashboardPage() {
     queryKey: ["/api/properties"],
     queryFn: () => apiRequest("GET", "/api/properties").then((r) => r.json()),
   });
+  // FOLLOW_UP: pull the fire-scenario config so the EVENTS tab can surface
+  // the Second IP year from the execution roadmap when /api/properties has
+  // fewer than 2 future acquisitions. We tolerate failure: the route is
+  // optional for users who haven't configured a scenario yet, in which case
+  // the Second IP event simply degrades gracefully (no static fallback).
+  const { data: fireScenarioConfig = [] } = useQuery<any[]>({
+    queryKey: ["/api/fire-scenario-config"],
+    queryFn: () => apiRequest("GET", "/api/fire-scenario-config").then((r) => r.json()).catch(() => []),
+  });
   const { data: stocks = [] } = useQuery({
     queryKey: ["/api/stocks"],
     queryFn: () => apiRequest("GET", "/api/stocks").then((r) => r.json()),
@@ -761,6 +823,61 @@ export default function DashboardPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/snapshot"] }),
   });
 
+  // ── Auto-run canonical Monte Carlo when missing (Final Reconciliation Pass) ─
+  // The Executive Overview cockpit treats Monte Carlo P10/P50/P90 as the only
+  // canonical forecast. When the store has no MC result (fresh demo session,
+  // localStorage cleared, etc.) we run the canonical V4 engine once via the
+  // SAME `buildCanonicalMonteCarloInput` mapper the Forecast Engine uses —
+  // so the auto-run result is identical to what pressing "Run Monte Carlo"
+  // there would produce. No parallel forecast engine, no deterministic
+  // fallback being labelled official.
+  const mcAutoRunFiredRef = useRef(false);
+  useEffect(() => {
+    if (mcAutoRunFiredRef.current) return;
+    if (monteCarloResult) return;            // already have a canonical result
+    if (isRunningMC) return;                 // user is already running one elsewhere
+    if (!snapshot) return;                   // need snapshot before we can build input
+    mcAutoRunFiredRef.current = true;
+    setIsRunningMC(true);
+    // Defer to a microtask so we never block the first paint.
+    setTimeout(() => {
+      try {
+        const { input } = buildCanonicalMonteCarloInput(
+          {
+            snapshot,
+            properties: properties as any[],
+            stocks: stocks as any[],
+            cryptos: cryptos as any[],
+            holdingsRaw: holdingsRaw as any[],
+            incomeRecords: incomeRecords as any[],
+            expenses: expenses as any[],
+          },
+          {
+            yearlyAssumptions,
+            volatilityParams: mcVolatility,
+            stockTransactions:  stockTransactionsRaw as any[],
+            cryptoTransactions: cryptoTransactionsRaw as any[],
+            stockDCASchedules:  stockDCASchedules as any[],
+            cryptoDCASchedules: cryptoDCASchedules as any[],
+            plannedStockOrders:  ordersRaw as any[],
+            plannedCryptoOrders: cryptoOrdersRaw as any[],
+            bills: billsRaw as any[],
+            simulations: 1000,
+          },
+        );
+        const result = runMonteCarloV4(input, { seed: `fwl-${new Date().getFullYear()}` });
+        setMonteCarloResult(result);
+      } catch {
+        // Silent on the cockpit — the pending visual state still renders if
+        // anything went wrong, and the Forecast Engine can be opened manually.
+        mcAutoRunFiredRef.current = false;
+      } finally {
+        setIsRunningMC(false);
+      }
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot, monteCarloResult]);
+
   // ─── Derived data ─────────────────────────────────────────────────────────
   const plannedStockTx = useMemo(() => (stockTransactionsRaw ?? []).filter((t: any) => t.status === "planned"), [stockTransactionsRaw]);
   const plannedCryptoTx = useMemo(() => (cryptoTransactionsRaw ?? []).filter((t: any) => t.status === "planned"), [cryptoTransactionsRaw]);
@@ -803,16 +920,14 @@ export default function DashboardPage() {
       safeNum(s.other_income);
     let monthlyIncome = masterIncome > 0 ? masterIncome : subIncomeMonthly;
 
-    // Fallback: derive from sf_income transactions in the last 6 months.
-    // Only used if both master + sub-fields are zero so user-entered values
-    // always take precedence.
+    // Fallback: derive from sf_income transactions, but ONLY count records
+    // classified as recurring (employment salary, rental, dividend, interest,
+    // business, recurring "other"). One-off events (asset sale, bonus, tax
+    // refund, gift / inheritance) MUST NOT be averaged into a permanent
+    // monthly income figure — they are cash events for their event month only.
     if (monthlyIncome === 0 && Array.isArray(incomeRecords) && incomeRecords.length > 0) {
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-      const cutoff = sixMonthsAgo.toISOString().split('T')[0];
-      const recent = incomeRecords.filter((r: any) => (r.date ?? '') >= cutoff);
-      const total  = recent.reduce((sum: number, r: any) => sum + safeNum(r.amount), 0);
-      if (total > 0) monthlyIncome = Math.round(total / 6);
+      const agg = aggregateIncome(incomeRecords);
+      if (agg.recurringMonthlyIncome > 0) monthlyIncome = agg.recurringMonthlyIncome;
     }
 
     // ── Expenses: master monthly_expenses may be 0; derive from sf_expenses ──
@@ -1036,11 +1151,47 @@ export default function DashboardPage() {
   snap.monthly_income   = monthlyIncomeSOT;
   snap.monthly_expenses = monthlyExpensesSOT;
 
+  // ─── Income engine audit trace ───────────────────────────────────────────
+  // Surfaces the recurring vs one-off classification of every sf_income row
+  // and the engine inputs that flow downstream (Forecast, Monte Carlo,
+  // Serviceability). #FWL_Income_Engine_Refactor
+  const incomeAggregate = useMemo(
+    () => selectIncomeAggregate(_contractInputs),
+    [_contractInputs],
+  );
+  useEffect(() => {
+    registerAuditTrace(
+      buildIncomeClassificationTrace({
+        aggregate: incomeAggregate,
+        asOf: new Date().toISOString(),
+      }),
+    );
+  }, [incomeAggregate]);
+
   // ─── NG Summary ───────────────────────────────────────────────────────────
+  // Reactive to the active tax-policy scenario. Under reform, quarantined
+  // post-cutoff established IPs return $0 PAYG refund and the loss accrues
+  // to the per-property loss bank — see taxRulesEngine.
   const ngSummary = useMemo<NGSummary>(() => {
-    if (!snapshot) return { totalAnnualTaxBenefit: 0, perProperty: [] } as NGSummary;
-    return calcNegativeGearing({ properties, annualSalaryIncome: snap.monthly_income * 12, refundMode: ngRefundMode });
-  }, [snapshot, properties, snap.monthly_income, ngRefundMode]);
+    if (!snapshot) return {
+      properties: [], perProperty: [],
+      totalAnnualTaxBenefit: 0,
+      totalMonthlyCashLoss: 0,
+      totalNetAfterTaxMonthlyCost: 0,
+      totalTaxableRentalResult: 0,
+      totalLossAccumulatedThisYear: 0,
+      totalLossBankBalance: 0,
+      marginalRate: 0,
+      refundMode: 'lump-sum',
+      scenario: activeScenario,
+    } as NGSummary;
+    return calcNegativeGearing({
+      properties,
+      annualSalaryIncome: snap.monthly_income * 12,
+      refundMode: ngRefundMode,
+      scenario: activeScenario,
+    });
+  }, [snapshot, properties, snap.monthly_income, ngRefundMode, activeScenario]);
 
   // ─── Projection ───────────────────────────────────────────────────────────
   // BUG FIX: previously did NOT pass forecast assumptions → dashboard ignored
@@ -1274,6 +1425,100 @@ export default function DashboardPage() {
     });
   }, [snapshot, snap, expenses, properties, plannedStockTx, plannedCryptoTx, stockDCASchedules, cryptoDCASchedules, plannedStockOrders, plannedCryptoOrders, fa, ngRefundMode, ngSummary.totalAnnualTaxBenefit]);
   const cashFlowAnnual = useMemo(() => aggregateCashFlowToAnnual(cashFlowSeries), [cashFlowSeries]);
+
+  // ─── Plan Feasibility (planning-validation layer) ───────────────────────
+  // Pure derivation from already-resolved state. NO engine calculation lives
+  // here; this only routes existing values into computePlanFeasibility().
+  // #FWL_Plan_Feasibility_Layer
+  const planFeasibility: PlanFeasibilityResult = useMemo(() => {
+    const fundedProperties = applyFundingToProperties(
+      (properties ?? []) as any[],
+      buildAdapterContext({
+        snapshot: { cash: snap.cash, offset_balance: snap.offset_balance },
+        stocks:   stocks  ?? [],
+        cryptos:  cryptos ?? [],
+      }),
+    );
+    return computePlanFeasibility({
+      cash:           snap.cash,
+      offsetBalance:  snap.offset_balance,
+      savingsCash:    snap.savings_cash,
+      emergencyCash:  snap.emergency_cash,
+      otherCash:      (snap as any).other_cash,
+      fundedProperties: fundedProperties as any[],
+      cashflowAnnual: cashFlowAnnual as any[],
+      horizon:        "current-year",
+    });
+  }, [properties, stocks, cryptos, snap.cash, snap.offset_balance, snap.savings_cash, snap.emergency_cash, cashFlowAnnual]);
+
+  // ─── PLAN EXECUTION — Year-end Liquidity inputs ─────────────────────────
+  // Passthrough only — values come from the canonical CashFlowYear row for
+  // the current year. Opening cash is `totalLiquidCash` (today's cash +
+  // offset). The cash bridge already drives the chart + Cashflow
+  // Reconciliation trace, so this surface is consistent with both.
+  // #FWL_Plan_Execution_Dual_Status
+  const planExecutionYear: number = new Date().getFullYear();
+  const planExecutionLiquidity: PlanExecutionLiquidityInputs | null = useMemo(() => {
+    const row = (cashFlowAnnual as any[]).find((a: any) => a.year === planExecutionYear);
+    if (!row) return null;
+    return liquidityInputsFromCashFlowYear(row, totalLiquidCash);
+  }, [cashFlowAnnual, totalLiquidCash, planExecutionYear]);
+
+  useEffect(() => {
+    registerAuditTrace(buildPlanFeasibilityTrace({
+      result: planFeasibility,
+      liquidity: planExecutionLiquidity,
+      year: planExecutionYear,
+    }));
+  }, [planFeasibility, planExecutionLiquidity, planExecutionYear]);
+
+  // ─── Funding Gap Resolution Advisor (advisory layer) ────────────────────
+  // Only generates candidate solutions when planFeasibility reports a gap.
+  // Every input is a pass-through from existing state — no engine call.
+  // Available equity-release headroom is approximated from the same
+  // refinance-LVR cap surfaced on the Property page; the advisor never
+  // re-runs the refinance / lending engine.
+  // #FWL_Funding_Gap_Resolution_Advisor
+  const fundingResolution: FundingResolutionResult = useMemo(() => {
+    const thisYear = new Date().getFullYear();
+    const yearRow = cashFlowAnnual.find((a: any) => a.year === thisYear);
+    const totalPropertyValue =
+      safeNum(snap.ppor) +
+      ((properties ?? []) as any[])
+        .filter((p: any) => p.type !== 'ppor')
+        .reduce((acc: number, p: any) => acc + safeNum(p.current_value ?? p.purchase_price), 0);
+    const totalMortgageDebt =
+      safeNum(snap.mortgage) +
+      ((properties ?? []) as any[])
+        .filter((p: any) => p.type !== 'ppor')
+        .reduce((acc: number, p: any) => acc + safeNum(p.loan_amount), 0);
+    const availableEquityRelease = Math.max(
+      0,
+      totalPropertyValue * maxRefinanceLVR - totalMortgageDebt,
+    );
+    return computeFundingResolution({
+      fundingGap: planFeasibility.fundingGap,
+      plannedStockBuy:        safeNum((yearRow as any)?.plannedStockBuy),
+      plannedCryptoBuy:       safeNum((yearRow as any)?.plannedCryptoBuy),
+      stockDcaAnnual:         safeNum((yearRow as any)?.stockDCAOutflow),
+      cryptoDcaAnnual:        safeNum((yearRow as any)?.cryptoDCAOutflow),
+      acquisitionCashUsed:    safeNum((yearRow as any)?.propertyPurchaseCashUsed),
+      acquisitionBuyingCosts: safeNum((yearRow as any)?.propertyBuyingCosts),
+      availableEquityRelease,
+      stocksBalance:          stocksTotal,
+      cryptoBalance:          cryptoTotal,
+      monthlySavings:         Math.max(0, surplus),
+    });
+  }, [planFeasibility, cashFlowAnnual, snap.ppor, snap.mortgage, properties, maxRefinanceLVR, stocksTotal, cryptoTotal, surplus]);
+
+  useEffect(() => {
+    registerAuditTrace(buildFundingResolutionTrace({
+      result: fundingResolution,
+      availableLiquidity: planFeasibility.availableLiquidity,
+      requiredLiquidity:  planFeasibility.requiredLiquidity,
+    }));
+  }, [fundingResolution, planFeasibility.availableLiquidity, planFeasibility.requiredLiquidity]);
+
 
   // ─── Master CF data with event markers ───────────────────────────────────
   const eventsByMonthKey = useMemo<Record<string, string[]>>(() => {
@@ -1699,6 +1944,158 @@ export default function DashboardPage() {
     .slice(0, 5)
     .map((m: any) => m.label || m.monthKey);
 
+  // ── Annual cashflow / deposit-power trajectory (Final Reconciliation Pass) ─
+  // Build a calm 10-year annual series for the Deposit Power & Cashflow panel
+  // on the Executive Overview. We reuse `cashFlowAnnual` and the canonical
+  // `equityTimeline` already computed above — no parallel engine, no
+  // duplicated recommendation system. This useMemo MUST live before the
+  // loading guard below so the hook is never conditionally skipped (Rules of
+  // Hooks — React error #310).
+  const cashflowTrajectory = useMemo(() => {
+    if (!Array.isArray(cashFlowAnnual) || cashFlowAnnual.length === 0) return null;
+    const equityByYear = new Map<number, number>();
+    (equityTimeline ?? []).forEach((pt: any) => {
+      equityByYear.set(pt.year, (pt.ppor_usable_equity ?? 0) + (pt.ip_usable_equity ?? 0));
+    });
+    let openingCash = totalLiquidCash;
+    return cashFlowAnnual.slice(0, 10).map((a: any) => {
+      const yr = a.year as number;
+      const cash = a.endingBalance ?? 0;
+      const usableEquity = equityByYear.get(yr) ?? 0;
+      const dp = Math.max(0, cash + usableEquity - emergencyBuffer);
+      // Funding-source decomposition flows through the canonical engine.
+      // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+      const cashUsed   = (a as any).propertyPurchaseCashUsed ?? 0;
+      const equityRel  = (a as any).propertyEquityReleased   ?? 0;
+      const assetSales = (a as any).propertyAssetSalesUsed   ?? 0;
+      const buyingCosts = (a as any).propertyBuyingCosts ?? 0;
+      const isAcq = (cashUsed + equityRel + assetSales + buyingCosts) > 0;
+      const point = {
+        label: String(yr),
+        cashBalance: cash,
+        netCashflow: a.netCashFlow ?? 0,
+        taxRefund: a.ngTaxBenefit ?? 0,
+        usableEquity,
+        totalDepositPower: dp,
+        year: yr,
+        openingCash,
+        propertyPurchaseCashUsed: cashUsed,
+        propertyEquityReleased:   equityRel,
+        propertyAssetSalesUsed:   assetSales,
+        propertyBuyingCosts:      buyingCosts,
+        isAcquisitionYear: isAcq,
+      };
+      openingCash = cash;
+      return point;
+    });
+  }, [cashFlowAnnual, equityTimeline, emergencyBuffer, totalLiquidCash]);
+
+  // ── Audit Mode: per-year cash-balance traces for the Plan Execution
+  // Capacity / Cashflow chart. The trace decomposes the year's closing cash
+  // into opening cash + net cashflow + property funding-source breakdown so
+  // the user can verify Equity-Release deposits did NOT subtract cash.
+  // #FWL_Remaining_Bug_CashflowChart_Ignores_FundingSource
+  useEffect(() => {
+    if (!Array.isArray(cashFlowAnnual) || cashFlowAnnual.length === 0) return;
+    let openingCash = totalLiquidCash;
+    // Index projection rows by year so the per-year Cashflow Reconciliation
+    // trace can surface the live Year-End Wealth Position alongside the
+    // cash bridge. `projection` comes from `projectNetWorth` (canonical
+    // forecast engine in finance.ts) and uses the same year indexing as
+    // `cashFlowAnnual` (currentYear .. currentYear + 9 / 10).
+    // #FWL_Cashflow_Reconciliation_WealthPosition
+    const projByYear = new Map<number, any>();
+    for (const p of (projection ?? [])) {
+      const y = (p as any)?.year;
+      if (typeof y === 'number') projByYear.set(y, p);
+    }
+    for (const a of cashFlowAnnual) {
+      const cashUsed   = (a as any).propertyPurchaseCashUsed ?? 0;
+      const equityRel  = (a as any).propertyEquityReleased   ?? 0;
+      const assetSales = (a as any).propertyAssetSalesUsed   ?? 0;
+      const buyingCosts = (a as any).propertyBuyingCosts ?? 0;
+      const isAcquisitionYear = (cashUsed + equityRel + assetSales + buyingCosts) > 0;
+      const projRow = projByYear.get(a.year);
+      const priorProjRow = projByYear.get(a.year - 1);
+      registerAuditTrace(
+        buildCashflowYearTrace({
+          year: a.year,
+          openingCash,
+          closingCash: a.endingBalance ?? 0,
+          netCashflow: a.netCashFlow ?? 0,
+          propertyPurchaseCashUsed: cashUsed,
+          propertyEquityReleased:   equityRel,
+          propertyAssetSalesUsed:   assetSales,
+          propertyBuyingCosts:      buyingCosts,
+          isAcquisitionYear,
+        }),
+      );
+
+      // ── Cashflow Reconciliation (Net Cashflow Breakdown) trace ──
+      // Itemises every income/outgoing line behind netCashflow so the user can
+      // verify there is no double-counting and see exactly which engine line
+      // produced each number. Every line passes through as a separate input
+      // so the displayed arithmetic balances exactly to engine netCashflow.
+      // #FWL_Cashflow_Reconciliation_Trace
+      const fundingSourceLabel =
+        equityRel > 0
+          ? 'equity-release'
+          : assetSales > 0
+            ? 'asset-sale'
+            : cashUsed > 0
+              ? 'cash + offset'
+              : undefined;
+      registerAuditTrace(
+        buildCashflowReconciliationTrace({
+          year: a.year,
+          openingCash,
+          closingCash: a.endingBalance ?? 0,
+          netCashflow: a.netCashFlow ?? 0,
+          // ── INCOME (cash bridge) ──
+          salaryIncome: (a as any).income ?? 0,
+          rentalIncomeByProperty: (a as any).rentalIncomeByProperty ?? {},
+          rentalIncomeTotal: (a as any).rentalIncome ?? 0,
+          taxRefund: (a as any).ngTaxBenefit ?? 0,
+          plannedStockSell: (a as any).plannedStockSell ?? 0,
+          plannedCryptoSell: (a as any).plannedCryptoSell ?? 0,
+          // ── EXPENSES (cash bridge) ──
+          livingExpenses: (a as any).totalExpenses ?? 0,
+          pporMortgage: (a as any).mortgageRepayment ?? 0,
+          investmentLoanRepayment: (a as any).investmentLoanRepayment ?? 0,
+          plannedStockBuy: (a as any).plannedStockBuy ?? 0,
+          plannedCryptoBuy: (a as any).plannedCryptoBuy ?? 0,
+          stockDCAOutflow: (a as any).stockDCAOutflow ?? 0,
+          cryptoDCAOutflow: (a as any).cryptoDCAOutflow ?? 0,
+          billsOutflow: (a as any).billsOutflow ?? 0,
+          acquisitionCashUsed: cashUsed,
+          assetSalesUsed: assetSales,
+          acquisitionBuyingCosts: buyingCosts,
+          // ── INFO (NOT in cash bridge) ──
+          propertyHoldingCost: (a as any).propertyHoldingCost ?? 0,
+          taxPayableInformational: (a as any).taxPayable ?? 0,
+          equityReleased: equityRel,
+          isAcquisitionYear,
+          fundingSourceLabel,
+          // ── YEAR-END WEALTH POSITION (pass-through from projectNetWorth) ──
+          // Liquidity (cash bridge above) vs Wealth (this section). Every
+          // value is read live from the canonical forecast row — the trace
+          // never recomputes net worth.
+          // #FWL_Cashflow_Reconciliation_WealthPosition
+          wealthCash:               projRow?.cash,
+          wealthStocks:             projRow?.stockValue,
+          wealthCrypto:             projRow?.cryptoValue,
+          wealthPropertyEquity:     projRow?.propertyEquity,
+          wealthAccessibleNetWorth: projRow?.accessibleNetWorth,
+          wealthTotalSuper:         projRow?.totalSuper,
+          wealthTotalNetWorth:      projRow?.endNetWorth,
+          priorYearAccessibleNetWorth: priorProjRow?.accessibleNetWorth,
+        }),
+      );
+
+      openingCash = a.endingBalance ?? openingCash;
+    }
+  }, [cashFlowAnnual, totalLiquidCash, projection]);
+
   // ─── Best Move V2 useMemo — MUST be before loading guard (Rules of Hooks) ──────────
   const inlineBestMove_hook = useMemo(() => {
     if (!snapshot) return null;
@@ -1773,6 +2170,28 @@ export default function DashboardPage() {
       priority:   riskToPriority(opt.risk, i + 1),
     }));
   }, [inlineBestMove_hook]);
+
+  // ── Canonical wealth layers + risk surface ──────────────────────────────
+  // MUST be declared BEFORE any conditional early return below to preserve
+  // hook order (React #310). Both are pure projections over `_contractInputs`
+  // (the same ledger every other widget on this page consumes) plus the
+  // active tax regime. They are the SINGLE source the Executive Overview
+  // projection + WDC Risk tab read.
+  const wealthLayers = useMemo(
+    () => computeWealthLayers(_contractInputs, activeScenario),
+    [_contractInputs, activeScenario],
+  );
+  const riskSurface = useMemo(
+    () => buildCanonicalRiskSurface({
+      inputs: _contractInputs,
+      scenario: activeScenario,
+      mortgageRate: snap.mortgage_rate ?? null,
+      lossBank: ngSummary.totalLossBankBalance ?? 0,
+      fireProgressPct,
+      fireTargetCapital: fireTargetAmt,
+    }),
+    [_contractInputs, activeScenario, snap.mortgage_rate, ngSummary.totalLossBankBalance, fireProgressPct, fireTargetAmt],
+  );
 
   if (snapLoading || !snapshot) {
     return (
@@ -1853,6 +2272,23 @@ export default function DashboardPage() {
   // Single composable surface that introduces narrative-first hierarchy at
   // the top of the dashboard. All values feed from the existing data
   // contract — no new sources, no architectural change.
+  // ── Canonical 10y trajectory source ────────────────────────────────────
+  // Executive Overview MUST present the SAME P50 value the Wealth Projection
+  // (Monte Carlo) table shows. We resolve the year-10 row (or the final fan
+  // point if the engine produced fewer rows) from `monteCarloResult.fan_data`
+  // and pass it through as `trajectoryP50`. When MC has not been run the
+  // header falls back to the deterministic `year10NW` and is clearly
+  // labelled as deterministic.
+  const trajectoryHorizonYear = new Date().getFullYear() + 9;
+  const mcTrajectoryRow = monteCarloResult?.fan_data?.length
+    ? (
+        monteCarloResult.fan_data.find(r => r.year === trajectoryHorizonYear)
+        ?? monteCarloResult.fan_data[monteCarloResult.fan_data.length - 1]
+      )
+    : null;
+  const trajectoryP50: number | null = mcTrajectoryRow ? mcTrajectoryRow.median : null;
+  const trajectoryYear: number | null = mcTrajectoryRow ? mcTrajectoryRow.year : null;
+
   const phase7ExecProps = {
     netWorth,
     surplus,
@@ -1860,7 +2296,36 @@ export default function DashboardPage() {
     totalLiab,
     monthlyExpenses: monthlyExpensesSOT,
     passiveIncome,
+    // ── Income engine breakdown ──
+    // Compact strip under the hero quartet exposes Recurring / One-Off /
+    // Total income with the same trace id the Financial Plan cards use.
+    // #FWL_Income_Engine_Refactor
+    incomeBreakdown: {
+      recurringMonthlyIncome:   incomeAggregate.recurringMonthlyIncome,
+      oneOffIncomeLast12Months: incomeAggregate.oneOffIncomeLast12Months,
+      totalHistoricalIncome:    incomeAggregate.totalHistoricalIncome,
+    },
+    // ── Plan Feasibility (planning-validation layer) ──
+    // Compact card surfaced next to the Plan Execution Capacity audit area.
+    // Inform-only: a negative gap renders a warning banner but no engine,
+    // save, forecast, Monte Carlo, or FIRE action is blocked.
+    // #FWL_Plan_Feasibility_Layer
+    planFeasibility,
+    // ── Funding Gap Resolution Advisor (advisory layer) ──
+    // Candidate solutions + recommendation surfaced INSIDE the Plan
+    // Feasibility card when funding gap < 0. Inform-only.
+    // #FWL_Funding_Gap_Resolution_Advisor
+    fundingResolution,
+    // ── PLAN EXECUTION dual-status (Funding + Liquidity) ──
+    // Passthrough liquidity inputs for the current-year cash bridge;
+    // ExecutiveDashboard renders the PlanExecutionCard alongside the
+    // canonical PlanFeasibilityCard when both are present.
+    // #FWL_Plan_Execution_Dual_Status
+    planExecutionLiquidity,
+    planExecutionYear,
     year10NW,
+    trajectoryP50,
+    trajectoryYear,
     fireProgressPct,
     fireCurrentAmt,
     fireTargetAmt,
@@ -1870,24 +2335,201 @@ export default function DashboardPage() {
     totalMortgage: snap.mortgage,
     totalPropertyValue: snap.ppor + ipCurrentValueSettled,
     totalAssets,
+    // Live PPOR mortgage rate (TODAY snapshot — NOT a forecast / blended rate).
+    // The dashboard reads `sf_snapshot.mortgage_rate` directly via the snap
+    // memo above, so the Hero "today" caption shows the actual current rate.
+    livePporRate: snap.mortgage_rate ?? null,
+    // CURRENT debt breakdown — settled liabilities only. Planned IP loans and
+    // forecast leverage are intentionally excluded. This is the single source
+    // the Today snapshot / Best Move / Strategic Debt Monitor consume.
+    currentDebt: {
+      pporMortgage:    safeNum(snap.mortgage),
+      settledIpLoans:  ipLoanBalanceSettled,
+      otherDebts:      safeNum(snap.other_debts),
+      total:           safeNum(snap.mortgage) + ipLoanBalanceSettled + safeNum(snap.other_debts),
+    },
+    // PLANNED debt — surfaced ONLY in the Events tab, never in Today snapshot.
+    plannedDebt: ipLoanBalancePlanned,
+    // Canonical Monte Carlo trajectory data — single source for the homepage
+    // wealth trajectory panel.
+    monteCarloFanData: monteCarloResult?.fan_data ?? null,
+    monteCarloSimulations: monteCarloResult?.simulations ?? null,
+    // Annual cashflow trajectory (condensed) — used by tests / legacy callers.
+    cashflowTrajectory,
+    // Canonical FULL cashflow series (annual or monthly per `chartView`) so
+    // the Deposit Power & Cashflow panel can render the original richer
+    // chart with Combo / Line / Candlestick modes and rich tooltip rows.
+    cashflowMaster: masterCFData,
+    cashflowGranularity: cashFlowView as ('annual' | 'monthly'),
+    setCashflowGranularity: (g: 'annual' | 'monthly') => setChartView(g),
+    ngRefundMode,
+    setNgRefundMode: (m: 'lump-sum' | 'payg') => setNgRefundMode(m),
+    cashflowChartMode: wdcChartType,
+    setCashflowChartMode: setWdcChartType,
+    cashflowViewMode: cfViewMode,
+    setCashflowViewMode: setCfViewMode,
+    // Mini summary metrics surfaced above the chart — sourced from the
+    // canonical deposit-power engine result so they always match the
+    // figures the Best Move and Decision Engine use.
+    depositPowerSummary: depositPowerResult ? (() => {
+      const cashAndOffset = (depositPowerResult as any).cashAndOffset
+                              ?? (snap.cash + snap.offset_balance);
+      const pporUsableEquity = depositPowerResult.pporEquity?.usableEquity ?? 0;
+      const ipUsableEquity   = (depositPowerResult as any).ipUsableEquity
+                              ?? Math.max(0, (depositPowerResult.totalUsableEquity ?? 0) - pporUsableEquity);
+      const grossTotal       = cashAndOffset + pporUsableEquity + ipUsableEquity;
+      return {
+        pporLvrPct:         depositPowerResult.pporEquity
+                              ? depositPowerResult.pporEquity.currentLVR * 100
+                              : null,
+        ipReadinessPct:     depositPowerResult.readinessPct,
+        annualNetCashflow:  (cashFlowAnnual?.[0]?.netCashFlow ?? 0),
+        taxRefundPerYear:   ngSummary.totalAnnualTaxBenefit,
+        cashToday:          totalLiquidCash,
+        readyNow:           depositPowerResult.isReady,
+        totalDepositPower:  depositPowerResult.totalDepositPower,
+        isEquityRichCashPoor: !!depositPowerResult.isEquityRichCashPoor,
+        // Cash + Offset (live) — engine exposes `cashAndOffset` directly.
+        cashAndOffset,
+        // Canonical breakdown rows for the Wealth Decision Center CASH tab.
+        pporUsableEquity,
+        ipUsableEquity,
+        grossTotal,
+        emergencyBuffer,
+        // Final-year cash anchors the "{YYYY} Cash" tile in the 2x2 grid.
+        finalYearCash:      cashFlowAnnual?.[cashFlowAnnual.length - 1]?.endingBalance
+                              ?? null,
+        finalYearLabel:     cashFlowAnnual?.[cashFlowAnnual.length - 1]?.year
+                              ? String(cashFlowAnnual[cashFlowAnnual.length - 1].year)
+                              : null,
+      };
+    })() : {
+      cashToday: totalLiquidCash,
+      annualNetCashflow: cashFlowAnnual?.[0]?.netCashFlow ?? 0,
+      taxRefundPerYear: ngSummary.totalAnnualTaxBenefit,
+      cashAndOffset: snap.cash + snap.offset_balance,
+      finalYearCash: cashFlowAnnual?.[cashFlowAnnual.length - 1]?.endingBalance ?? null,
+      finalYearLabel: cashFlowAnnual?.[cashFlowAnnual.length - 1]?.year
+                        ? String(cashFlowAnnual[cashFlowAnnual.length - 1].year)
+                        : null,
+    },
+    // Decision-grade year-by-year projection rows for the Strategic Wealth
+    // Projection table (the single richer analytical table on Executive
+    // Overview). Mapped from the canonical `projection` engine (same engine
+    // the Wealth Strategy hub uses) — no parallel computation.
+    projectionRows: (projection ?? []).map((row: any) => ({
+      year:               row.year,
+      accessibleNetWorth: row.accessibleNetWorth ?? (row.endNetWorth - (row.totalSuper ?? 0)),
+      totalNetWorth:      row.endNetWorth,
+      cagrPct:            row.cagr ?? 0,
+      growth:             row.growth ?? 0,
+      cash:               row.cash ?? 0,
+      liabilities:        row.totalLiabilities ?? 0,
+      propertyEquity:     row.propertyEquity ?? 0,
+      stocks:             row.stockValue ?? 0,
+      crypto:             row.cryptoValue ?? 0,
+      superTotal:         row.totalSuper ?? 0,
+    })),
+    // Live planned acquisitions (settlement / contract / purchase date in
+    // the future) — drives the Events Timeline IP2/IP3 year markers so the
+    // timeline reflects the actual property plan, not a static +3y guess.
+    plannedAcquisitions: (properties ?? [])
+      .filter((p: any) => {
+        if (p.type === 'ppor' || p.type === 'owner_occupied') return false;
+        const raw = p.contract_date ?? p.settlement_date ?? p.purchase_date;
+        if (!raw) return false;
+        return String(raw) > todayStr;
+      })
+      .map((p: any) => ({
+        id:              p.id,
+        name:            p.name ?? p.address ?? `IP ${p.id}`,
+        contract_date:   p.contract_date ?? null,
+        settlement_date: p.settlement_date ?? null,
+        purchase_date:   p.purchase_date ?? null,
+        purchase_price:  p.purchase_price ?? p.current_value ?? null,
+        property_type:   p.property_type ?? null,
+        type:            p.type ?? null,
+      })),
+    // FOLLOW_UP: Second IP year fallback from the execution roadmap.
+    // When /api/properties has fewer than 2 future acquisitions, the Events
+    // Timeline reads this prop so the Second IP event still renders. We
+    // source from the fire-scenario config: the largest ip_target_year
+    // across scenarios with num_planned_ips >= 2 is the engine's best
+    // estimate of the second-IP target year. We intentionally do NOT fall
+    // back to a static +N year if no roadmap signal exists — the event is
+    // skipped in that case, per the integrity-fix invariant.
+    // Canonical wealth layers + 8-axis risk surface + active tax regime —
+    // single source of truth for the Executive Overview projection and the
+    // Wealth Decision Center Risk tab. Every widget on the dashboard reads
+    // from these objects (no parallel risk/wealth engines).
+    wealthLayers,
+    riskSurface,
+    activeScenario,
+    roadmapSecondIpYear: (() => {
+      const cfgs = Array.isArray(fireScenarioConfig) ? fireScenarioConfig : [];
+      // Candidate years from scenarios that plan at least 2 IPs.
+      const candidates = cfgs
+        .filter((c: any) => Number(c?.num_planned_ips ?? 0) >= 2 && c?.ip_target_year != null)
+        .map((c: any) => parseInt(String(c.ip_target_year), 10))
+        .filter((y: number) => Number.isFinite(y));
+      if (candidates.length > 0) {
+        // Prefer the SECOND-IP target year. Convention: scenarios that
+        // plan multiple IPs encode the *second* IP target year in
+        // ip_target_year (the first IP year comes from plannedAcquisitions).
+        return Math.max(...candidates);
+      }
+      // Soft fallback when the user has a single planned IP in /api/properties
+      // and a scenario that plans more than one but only sets a single year:
+      // the engine assumes IP2 = max(ip_target_year across scenarios with
+      // num_planned_ips >= 1) where it exceeds the first IP year.
+      const allYears = cfgs
+        .filter((c: any) => c?.ip_target_year != null)
+        .map((c: any) => parseInt(String(c.ip_target_year), 10))
+        .filter((y: number) => Number.isFinite(y));
+      const futureProps = (properties ?? []).filter((p: any) => {
+        if (p.type === 'ppor' || p.type === 'owner_occupied') return false;
+        const raw = p.contract_date ?? p.settlement_date ?? p.purchase_date;
+        return raw && String(raw) > todayStr;
+      });
+      if (allYears.length > 0 && futureProps.length < 2) {
+        const firstIpYear = futureProps[0]
+          ? parseInt(
+              String(
+                futureProps[0].contract_date ??
+                  futureProps[0].settlement_date ??
+                  futureProps[0].purchase_date,
+              ).slice(0, 4),
+              10,
+            )
+          : null;
+        const above = firstIpYear != null
+          ? allYears.filter((y: number) => y > firstIpYear)
+          : allYears;
+        if (above.length > 0) return Math.min(...above);
+      }
+      return null;
+    })(),
   };
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-16">
 
       {/* ══════════════════════════════════════════════════════════════════
-          FWL PHASE 7 (polish) — Top stack uses CSS `order` on mobile so the
-          narrative flow is intelligence-first:
-            mobile  : Smart-assumptions pill → Timeline → Welcome → Executive
-            desktop : (unchanged) Executive → Timeline → Welcome
-          Wrapped in flex-col so children can reorder via order-* classes.
+          EXECUTIVE OVERVIEW REBUILD V2 — calm Family Office Cockpit
+          The homepage shows ONLY:
+            (a) a global Smart-Assumptions chip (forecast mode chrome)
+            (b) the Executive Overview cockpit (hero / trajectory / health
+                / action queue)
+          followed by a non-blocking data-availability banner, a slim
+          Explore nav strip, and the contextual AI Insights card. The
+          legacy welcome / journey / KPI / Accessible-Locked / Wealth
+          Health stacks were removed from the render path — they
+          duplicated cockpit signals and reintroduced
+          dashboard-inside-dashboard density.
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="flex flex-col">
 
-      {/* MOBILE-ONLY: compact Smart-Assumptions / Forecast pill row.
-          Sits at the very top of the mobile flow as the contextual header.
-          Hidden on lg+ where the desktop hero badges already surface it. */}
-      <div className="px-4 pt-3 pb-1 lg:hidden order-1 db-section-smart-assumptions">
+      {/* Smart-Assumptions / Forecast pill — global chrome only. */}
+      <div className="px-4 pt-3 pb-1 db-section-smart-assumptions">
         <Link href="/ai-forecast-engine">
           <span
             className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer transition-all hover:brightness-110 ${
@@ -1901,8 +2543,7 @@ export default function DashboardPage() {
                 ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
                 : "bg-blue-500/10 border border-blue-500/30 text-blue-300"
             }`}
-            data-testid="badge-smart-assumptions-mobile"
-            title="Tap to change forecast assumptions"
+            data-testid="badge-smart-assumptions"
           >
             <Sparkles className="w-3 h-3" />
             <span className="opacity-70">Smart assumptions ·</span>{" "}
@@ -1923,175 +2564,85 @@ export default function DashboardPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          FWL PHASE 7 — EXECUTIVE DASHBOARD (narrative-first hierarchy)
-          Mobile order 4 (after timeline + welcome). Desktop order 1.
+          FWL RESTORE — Compact animated journey hero/header
+          TODAY · Snapshot → PLAN · Strategy → FUTURE · Forecast → MOVE · Action
+          Calm animated timeline that gives the dashboard an atmospheric top
+          layer before the Executive Overview cockpit. Component owns its own
+          height (clamp 70–90px) — kept compact and low-noise. Restored after
+          the Phase 7 cockpit rebuild removed it; this is the middle-ground
+          re-introduction (no oversized hero, no flashy crypto-glow).
           ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-4 pb-2 order-4 lg:order-1">
+      <div
+        className="db-section-networth"
+        data-testid="dashboard-journey-header"
+      >
+        <WealthFlowBanner />
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          FWL RESTORE — Family mission / welcome card
+          Restores the emotional/identity top layer. Compact (single row on
+          desktop, stacks on mobile). Premium family-office tone — gold accent,
+          warm "Welcome Back" eyebrow, family avatar, short wealth mission.
+          Sits between the journey header and the Executive Overview so the
+          dashboard reads as: atmosphere → identity → intelligence.
+          ═════════════════════════════════════════════════════════════════ */}
+      <div
+        className="px-4 pt-2 pb-3 db-section-networth"
+        data-testid="dashboard-family-mission-card"
+      >
+        <div className="rounded-2xl border border-amber-500/20 bg-gradient-to-r from-amber-500/[0.04] via-card to-card p-4 flex items-center gap-4 shadow-[0_4px_24px_rgba(0,0,0,0.18)]">
+          {/* Family avatar */}
+          <div className="shrink-0 w-14 h-14 rounded-xl overflow-hidden border-2 border-amber-500/30 ring-1 ring-amber-500/10">
+            <img
+              src={familyImg}
+              alt="Fara & Roham family"
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          </div>
+          {/* Identity + mission */}
+          <div className="min-w-0 flex-1">
+            <div
+              className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-400/90"
+              data-testid="family-welcome-eyebrow"
+            >
+              Welcome Back
+            </div>
+            <div
+              className="text-lg sm:text-xl font-extrabold tracking-tight text-foreground leading-tight"
+              data-testid="family-identity-name"
+            >
+              Fara &amp; Roham
+            </div>
+            <div
+              className="text-[12px] sm:text-sm font-semibold text-muted-foreground mt-0.5"
+              data-testid="family-mission-subtitle"
+            >
+              Family Net Worth Command Center
+            </div>
+            <div className="text-[11px] text-muted-foreground/70 mt-0.5">
+              Building wealth for the kids · Brisbane, QLD
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Executive Overview cockpit — primary content surface on the homepage. */}
+      <div
+        className="px-4 pt-2 pb-2"
+        data-testid="dashboard-executive-section"
+      >
         <ExecutiveDashboard {...phase7ExecProps} />
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          ABOVE-FOLD KPI STRIP (mobile: order 1 — first thing on screen)
-          4 cards: Net Worth / Cash Today / Monthly Surplus / Deposit Power
-          + Forecast selector badge
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-3 pb-2 db-section-hero-kpis order-5 lg:order-2">
-        <div className="grid grid-cols-2 gap-2 mb-2">
-          {/* Net Worth */}
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400/70 mb-0.5">Net Worth</div>
-            <div className="text-base font-extrabold tabular-nums text-amber-400 leading-tight">{maskValue(formatCurrency(netWorth, true), privacyMode)}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Total · Brisbane QLD</div>
-          </div>
-          {/* Cash Today */}
-          <div className="rounded-xl border border-border bg-card px-3 py-2.5">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">Cash Today</div>
-            <div className="text-base font-extrabold tabular-nums leading-tight" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(totalLiquidCash, true), privacyMode)}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">All liquid cash + offset</div>
-          </div>
-          {/* Monthly Surplus */}
-          <div className="rounded-xl border border-border bg-card px-3 py-2.5">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">Monthly Surplus</div>
-            <div className="text-base font-extrabold tabular-nums leading-tight" style={{ color: surplus >= 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)" }}>{maskValue(formatCurrency(surplus, true), privacyMode)}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">{maskValue(formatCurrency(surplus * 12, true), privacyMode)}/yr</div>
-          </div>
-          {/* Deposit Power */}
-          <div className="rounded-xl border px-3 py-2.5" style={{ borderColor: "hsl(43,90%,30%)", background: "hsl(43,90%,6%)" }}>
-            <div className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: "hsl(43,90%,50%)" }}>Deposit Power</div>
-            <div className="text-base font-extrabold tabular-nums leading-tight" style={{ color: "hsl(43,90%,62%)" }}>{maskValue(formatCurrency(dpTotal, true), privacyMode)}</div>
-            <div className="text-[10px] mt-0.5" style={{ color: "hsl(43,70%,45%)" }}>{Math.round(dpReadiness)}% IP ready</div>
-          </div>
-        </div>
-        {/* Forecast selector badge — always visible */}
-        <Link href="/ai-forecast-engine">
-          <span
-            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer transition-all hover:brightness-110 ${
-              forecastMode === "monte-carlo"
-                ? "bg-purple-500/10 border border-purple-500/30 text-purple-300"
-                : forecastMode === "year-by-year"
-                ? "bg-sky-500/10 border border-sky-500/30 text-sky-300"
-                : profile === "aggressive"
-                ? "bg-rose-500/10 border border-rose-500/30 text-rose-300"
-                : profile === "conservative"
-                ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
-                : "bg-blue-500/10 border border-blue-500/30 text-blue-300"
-            }`}
-            title="Tap to change forecast mode"
-          >
-            <Activity className="w-3 h-3" />
-            Forecast: {
-              forecastMode === "monte-carlo"
-                ? `Monte Carlo${monteCarloResult ? " (median)" : " (not run)"}`
-                : forecastMode === "year-by-year"
-                ? "Year-by-Year (custom)"
-                : profile === "aggressive"
-                ? "Aggressive"
-                : profile === "conservative"
-                ? "Conservative"
-                : "Base (Moderate)"
-            }
-            <ChevronRight className="w-3 h-3 opacity-70" />
-          </span>
-        </Link>
+      {/* ── Future Reform Impact — live tax-reform delta from taxRulesEngine ── */}
+      <div className="px-4 pt-1 pb-2" data-testid="dashboard-future-reform-impact">
+        <FutureReformImpactCard
+          properties={properties as any}
+          wageIncome={snap.monthly_income * 12}
+        />
       </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          WEALTH FLOW BANNER (animated intelligence timeline)
-          Mobile order 2 (after Smart-Assumptions pill). Desktop order 3.
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="db-section-networth order-2 lg:order-3"><WealthFlowBanner /></div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          HERO SECTION — welcome / narrative identity
-          Mobile order 3. Desktop order 4.
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-4 pb-4 db-section-networth order-3 lg:order-4">
-        <div className="flex flex-col lg:flex-row gap-4 items-stretch">
-
-          {/* Left — Family welcome card */}
-          <div className="flex-1 rounded-2xl border border-border bg-card p-5 flex gap-4 items-center min-w-0">
-            {/* Family photo */}
-            <div className="shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 border-amber-500/30">
-              <img src={familyImg} alt="Family" className="w-full h-full object-cover" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-xs font-bold uppercase tracking-widest text-amber-400 mb-0.5">Welcome Back</div>
-              <div className="text-2xl font-extrabold tracking-tight text-foreground leading-tight">Fara &amp; Roham</div>
-              <div className="text-sm font-semibold text-muted-foreground mt-0.5">Family Net Worth Command Center</div>
-              <div className="text-xs text-muted-foreground/70 mt-0.5">Building Wealth for the Kids</div>
-            </div>
-          </div>
-
-          {/* Right — Net worth + controls */}
-          <div className="rounded-2xl border border-border bg-card p-5 flex flex-col justify-between min-w-[260px]">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">Estimated Net Worth</div>
-              <div className="text-4xl font-extrabold text-amber-400 tabular-nums leading-none mb-1">
-                {maskValue(formatCurrency(netWorth, true), privacyMode)}
-              </div>
-              <div className="text-xs text-muted-foreground">Brisbane, QLD · AUD</div>
-            </div>
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={togglePrivacy}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
-              >
-                {privacyMode ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                {privacyMode ? "Show Values" : "Hide Values"}
-              </button>
-              <button
-                onClick={handleSyncFromCloud}
-                disabled={syncing}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
-                Sync From Cloud
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Income source + Forecast Mode badges — hidden on mobile (shown in hero-kpis strip instead) */}
-        <div className="mt-3 flex flex-wrap gap-2 db-hero-badges">
-          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Income source: Income Tracker ({activeIncomeSources > 0 ? activeIncomeSources : 3} active sources · {formatCurrency(snap.monthly_income, true)}/mo)
-          </span>
-          <Link href="/ai-forecast-engine">
-            <span
-              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer transition-all hover:brightness-110 ${
-                forecastMode === "monte-carlo"
-                  ? "bg-purple-500/10 border border-purple-500/30 text-purple-300"
-                  : forecastMode === "year-by-year"
-                  ? "bg-sky-500/10 border border-sky-500/30 text-sky-300"
-                  : profile === "aggressive"
-                  ? "bg-rose-500/10 border border-rose-500/30 text-rose-300"
-                  : profile === "conservative"
-                  ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
-                  : "bg-blue-500/10 border border-blue-500/30 text-blue-300"
-              }`}
-              data-testid="badge-forecast-mode"
-              title="Click to open Forecast Engine"
-            >
-              <Activity className="w-3 h-3" />
-              Forecast: {
-                forecastMode === "monte-carlo"
-                  ? `Monte Carlo${monteCarloResult ? " (median)" : " (not run)"}`
-                  : forecastMode === "year-by-year"
-                  ? "Year-by-Year (custom)"
-                  : profile === "aggressive"
-                  ? "Aggressive"
-                  : profile === "conservative"
-                  ? "Conservative"
-                  : "Base (Moderate)"
-              }
-              <ChevronRight className="w-3 h-3 opacity-70" />
-            </span>
-          </Link>
-        </div>
-      </div>
-
-      </div>{/* /flex-col top stack wrapper */}
 
       {/* ══════════════════════════════════════════════════════════════════
           DATA-AVAILABILITY BANNER
@@ -2121,1566 +2672,19 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════
-          KPI CARDS
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-2 db-section-keycards">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <KpiCard
-            label="MONTHLY SURPLUS"
-            value={maskValue(formatCurrency(surplus, true), privacyMode)}
-            subValue={
-              maskValue(
-                // Debt-aware breakdown so users can verify what's in/out.
-                expensesIncludesDebt
-                  ? `Inc ${formatCurrency(monthlyIncomeSOT, true)} − Exp ${formatCurrency(monthlyExpensesSOT, true)} (debt incl.) = ${formatCurrency(surplus, true)}`
-                  : `Inc ${formatCurrency(monthlyIncomeSOT, true)} − Exp ${formatCurrency(monthlyExpensesSOT, true)} − Debt ${formatCurrency(monthlyDebtServiceSOT, true)} = ${formatCurrency(surplus, true)}`,
-                privacyMode,
-              )
-            }
-            trend={surplus >= 0 ? 1 : -1}
-            icon={<PiggyBank />}
-            accent="hsl(142,60%,45%)"
-          />
-          <KpiCard
-            label="TOTAL INVESTMENTS"
-            value={maskValue(formatCurrency(stocksTotal + cryptoTotal + ipCurrentValueSettled, true), privacyMode)}
-            subValue={(() => {
-              // Audit fix P0-3: every dollar amount in a sub-label must
-              // pass through maskValue or it will leak when privacy is on.
-              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
-              const parts: string[] = [];
-              if (ipCurrentValueSettled > 0) parts.push(`IPs ${$(ipCurrentValueSettled)}`);
-              if (stocksTotal > 0)            parts.push(`Stocks ${$(stocksTotal)}`);
-              if (cryptoTotal > 0)            parts.push(`Crypto ${$(cryptoTotal)}`);
-              if (parts.length === 0 && ipCurrentValuePlanned > 0)
-                return `${$(ipCurrentValuePlanned)} planned IP`;
-              return parts.length ? parts.join(" · ") : "— Stocks + Crypto + IP";
-            })()}
-            icon={<BarChart2 />}
-            accent="hsl(210,75%,52%)"
-          />
-          <KpiCard
-            label="PROPERTY EQUITY"
-            value={maskValue(formatCurrency(propertyEquity, true), privacyMode)}
-            subValue={(() => {
-              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
-              const totalPropValue = snap.ppor + ipCurrentValueSettled;
-              if (totalPropValue <= 0) {
-                return ipCurrentValuePlanned > 0
-                  ? `${$(ipCurrentValuePlanned)} planned`
-                  : "No property yet";
-              }
-              const lvr = Math.round((propertyEquity / totalPropValue) * 100);
-              return `${lvr}% equity · ${_settledIPs.length} IP${_settledIPs.length === 1 ? '' : 's'}`;
-            })()}
-            icon={<Home />}
-            accent="hsl(188,60%,48%)"
-          />
-          <KpiCard
-            label="DEBT BALANCE"
-            value={maskValue(formatCurrency(totalLiab, true), privacyMode)}
-            subValue={(() => {
-              const $ = (n: number) => maskValue(formatCurrency(n, true), privacyMode);
-              if (totalLiab <= 0 && ipLoanBalancePlanned > 0)
-                return `${$(ipLoanBalancePlanned)} planned`;
-              const segs: string[] = [];
-              if (snap.mortgage > 0)         segs.push(`PPOR ${$(snap.mortgage)}`);
-              if (ipLoanBalanceSettled > 0)  segs.push(`IP ${$(ipLoanBalanceSettled)}`);
-              if (snap.other_debts > 0)      segs.push(`Other ${$(snap.other_debts)}`);
-              return segs.length ? segs.join(" · ") : "Mortgage + Debts";
-            })()}
-            trend={-1}
-            icon={<CreditCard />}
-            accent="hsl(5,70%,52%)"
-          />
-          <KpiCard
-            label="PASSIVE INCOME"
-            value={maskValue(formatCurrency(passiveIncome, true), privacyMode)}
-            subValue={(() => {
-              if (passiveIncome > 0) return "Rental + Dividends (annual)";
-              if (_plannedIPs.length > 0) {
-                const projAnnual = _plannedIPs.reduce((s: number, p: any) => {
-                  const r = safeNum(p.weekly_rent);
-                  const v = safeNum(p.vacancy_rate) || 0;
-                  const m = safeNum(p.management_fee) || 0;
-                  return s + r * 52 * (1 - v / 100) * (1 - m / 100);
-                }, 0);
-                return projAnnual > 0
-                  // Audit fix P0-3: sub-labels must respect privacy mode.
-                  ? `${maskValue(formatCurrency(projAnnual, true), privacyMode)}/yr once IPs settle`
-                  : "None settled yet";
-              }
-              return "No rental / dividend income";
-            })()}
-            icon={<Landmark />}
-            accent="hsl(145,55%,42%)"
-          />
-          <KpiCard
-            label="SUPER (COMBINED)"
-            value={maskValue(formatCurrency(_totalSuperNow, true), privacyMode)}
-            subValue={`At 60: ${maskValue(formatCurrency(_totalSuperNow * Math.pow(1.07, 24), true), privacyMode)}`}
-            icon={<Briefcase />}
-            accent="hsl(43,85%,55%)"
-          />
-        </div>
 
-      </div>
+      {/* Deep Analysis surfaces are now rendered inside the cockpit as a
+          dedicated DeepAnalysisCards section (four premium cards). The
+          previous weak filter-chip strip was removed per the Executive
+          Overview Final Reconciliation Pass. Routes for Risk Radar & Tax
+          Strategy are now registered in App.tsx so the cards never lead to
+          router-not-found errors. */}
 
-      {/* ══════════════════════════════════════════════════════════════════
-          ACCESSIBLE / LOCKED / TOTAL NET WORTH + CASH PROJECTIONS
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pt-4 pb-2 db-section-keycards">
-        {/* 3 wealth split cards */}
-        <div className="grid grid-cols-3 gap-3 mb-3">
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Accessible Wealth</div>
-            <div className="text-xl font-bold text-foreground tabular-nums">{maskValue(formatCurrency(accessibleNW, true), privacyMode)}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">Available now ex-super</div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Locked Retirement Wealth</div>
-            <div className="text-xl font-bold text-amber-400 tabular-nums">{maskValue(formatCurrency(lockedNW, true), privacyMode)}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">Superannuation — access at 60</div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Total Net Worth</div>
-            <div className="text-xl font-bold text-emerald-400 tabular-nums">{maskValue(formatCurrency(netWorth, true), privacyMode)}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">Accessible + Super combined</div>
-          </div>
-        </div>
-
-        {/* cash projection cards */}
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Cash Today</div>
-            <div className="text-lg font-bold tabular-nums mb-2" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(totalLiquidCash, true), privacyMode)}</div>
-            {/* Audit breakdown — reads directly from ledger, no forecast */}
-            <div className="space-y-0.5 border-t border-border/40 pt-2">
-              <div className="flex justify-between text-[11px]">
-                <span className="text-muted-foreground">Everyday Cash</span>
-                <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.cash, true), privacyMode)}</span>
-              </div>
-              {snap.savings_cash > 0 && (
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-muted-foreground">Savings</span>
-                  <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.savings_cash, true), privacyMode)}</span>
-                </div>
-              )}
-              {snap.emergency_cash > 0 && (
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-muted-foreground">Emergency Cash</span>
-                  <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.emergency_cash, true), privacyMode)}</span>
-                </div>
-              )}
-              {_safeOtherCash > 0 && (
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-muted-foreground">Other Cash</span>
-                  <span className="tabular-nums text-foreground">{maskValue(formatCurrency(_safeOtherCash, true), privacyMode)}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-[11px]">
-                <span className="text-muted-foreground">Offset Balance</span>
-                <span className="tabular-nums text-foreground">{maskValue(formatCurrency(snap.offset_balance, true), privacyMode)}</span>
-              </div>
-              <div className="flex justify-between text-[11px] font-semibold border-t border-border/40 pt-0.5 mt-0.5">
-                <span style={{ color: "hsl(210,80%,65%)" }}>Total Liquid</span>
-                <span className="tabular-nums" style={{ color: "hsl(210,80%,65%)" }}>{maskValue(formatCurrency(totalLiquidCash, true), privacyMode)}</span>
-              </div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Next Major Event</div>
-            <div className="text-sm font-bold text-amber-400 truncate">
-              {nextPropEvent ? nextPropEvent.label : "No events scheduled"}
-            </div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              {nextPropEvent ? nextPropEvent.monthKey : "—"}
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          WEALTH HEALTH CARDS (6 cards — paired evenly on mobile & desktop)
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4 db-section-keycards">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {wealthCards.map((card) => (
-            <div
-              key={card.label}
-              className={`rounded-xl border p-4 bg-card ${card.alert ? "border-red-500/30" : "border-border"}`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</span>
-                <card.Icon className={`w-3.5 h-3.5 ${card.alert ? "text-red-400" : "text-muted-foreground"}`} />
-              </div>
-              <div className={`text-lg font-bold tabular-nums ${card.alert ? "text-red-400" : "text-foreground"}`}>
-                {card.value}
-              </div>
-              <div className="text-xs text-muted-foreground mt-0.5">{card.sub}</div>
-            </div>
-          ))}
-          {/* Emergency Buffer — moved here so it pairs with Hidden Money on mobile */}
-          <div className={`rounded-xl border p-4 bg-card ${(totalLiquidCash) < snap.monthly_expenses * 3 ? "border-red-500/30" : "border-border"}`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Emergency Buffer</span>
-              <Shield className={`w-3.5 h-3.5 ${(totalLiquidCash) < snap.monthly_expenses * 3 ? "text-red-400" : "text-muted-foreground"}`} />
-            </div>
-            <div className={`text-lg font-bold ${(totalLiquidCash) >= snap.monthly_expenses * 3 ? "text-emerald-400" : "text-red-400"}`}>
-              {(totalLiquidCash) >= snap.monthly_expenses * 3 ? "Healthy" : "Low"}
-            </div>
-            <div className="text-xs text-muted-foreground mt-0.5">${Math.round(snap.monthly_expenses * 3 / 1000)}k reserve target</div>
-          </div>
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          ALERTS / WARNINGS — bills, liquidity stress, quick stats
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-2 db-section-keycards">
-        {hasLiquidityStress && (
-          <div className="mb-2 rounded-xl border border-red-500/40 bg-red-500/8 px-4 py-3 flex items-start gap-2.5">
-            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-            <div>
-              <div className="text-sm font-bold text-red-400">Liquidity Stress Detected</div>
-              <div className="text-xs text-muted-foreground mt-0.5">Cash goes negative in: {negativeCashMonths.join(", ")}</div>
-            </div>
-          </div>
-        )}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
-              <Calendar className="w-3.5 h-3.5 text-amber-400" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-foreground tabular-nums">{upcomingBillsCount}</div>
-              <div className="text-[10px] text-muted-foreground">Upcoming Bills</div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-              <Target className="w-3.5 h-3.5 text-emerald-400" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-foreground tabular-nums">{budgetsSetCount}</div>
-              <div className="text-[10px] text-muted-foreground">Budget Status</div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
-              <Activity className="w-3.5 h-3.5 text-blue-400" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-foreground tabular-nums">{alertsSent24h}</div>
-              <div className="text-[10px] text-muted-foreground">Alerts Sent</div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card px-3 py-2 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-              <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-            </div>
-            <div>
-              <div className="text-xs font-bold text-foreground tabular-nums">{maskValue(formatCurrency(cashAfterBills, true), privacyMode)}</div>
-              <div className="text-[10px] text-muted-foreground">Cash After Bills</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          WEALTH DECISION CENTER
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4 db-section-cashflow">
-        {/* Section header */}
-        <div className="mb-4">
-          <div className="text-lg font-bold text-foreground tracking-tight">Wealth Decision Center</div>
-          <div className="text-xs text-muted-foreground mt-0.5">Your money today, future path, and next best moves.</div>
-        </div>
-
-        {/* Main layout: 70% chart + 30% panel */}
-        <div className="flex flex-col lg:flex-row gap-4">
-
-          {/* LEFT: Interactive Smart Chart — Fix 7: overflow-hidden prevents mobile bleed */}
-          <div className="flex-[7] min-w-0 rounded-2xl border border-border bg-card p-5 overflow-hidden">
-
-            {/* Tab bar */}
-            <div className="flex gap-1 mb-4 flex-wrap">
-              {(["CASH","EVENTS","WEALTH","RISK"] as const).map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setWdcTab(tab)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all ${
-                    wdcTab === tab
-                      ? "bg-primary/15 text-primary border border-primary/30"
-                      : "text-muted-foreground border border-transparent hover:text-foreground hover:border-border"
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-              {wdcTab === "CASH" && (
-                <div className="ml-auto flex gap-1.5 items-center flex-wrap">
-                  {/* Monthly / Annual toggle — Fix 2: drives masterCFData switch */}
-                  <div className="flex gap-0.5 rounded-lg border border-border/60 p-0.5 bg-background/40">
-                    <button
-                      className={`px-2 py-0.5 rounded text-xs font-semibold transition-all ${
-                        cashFlowView === "annual"
-                          ? "bg-primary/20 text-primary"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                      onClick={() => setChartView("annual")}
-                    >Annual</button>
-                    <button
-                      className={`px-2 py-0.5 rounded text-xs font-semibold transition-all ${
-                        cashFlowView === "monthly"
-                          ? "bg-primary/20 text-primary"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                      onClick={() => setChartView("monthly")}
-                    >Monthly</button>
-                  </div>
-                  <div className="w-px h-4 bg-border/60" />
-                  <button
-                    className={`px-2 py-1 rounded text-xs font-medium transition-all ${ngRefundMode === "lump-sum" ? "bg-primary/20 text-primary border border-primary/30" : "text-muted-foreground border border-border hover:text-foreground"}`}
-                    onClick={() => setNgRefundMode("lump-sum")}
-                  >Lump-sum</button>
-                  <button
-                    className={`px-2 py-1 rounded text-xs font-medium transition-all ${ngRefundMode === "payg" ? "bg-primary/20 text-primary border border-primary/30" : "text-muted-foreground border border-border hover:text-foreground"}`}
-                    onClick={() => setNgRefundMode("payg")}
-                  >PAYG</button>
-                  <div className="w-px h-4 bg-border/60" />
-                  {/* View mode: Cash / Cash+Equity / Deposit Power */}
-                  <div className="flex gap-0.5 rounded-lg border border-border/60 p-0.5 bg-background/40">
-                    {([["cash","Cash"],["equity","+ Equity"],["deposit","Dep. Power"]] as const).map(([mode, lbl]) => (
-                      <button key={mode} onClick={() => setCfViewMode(mode as any)}
-                        className={`px-2 py-0.5 rounded text-xs font-semibold transition-all ${cfViewMode === mode ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
-                      >{lbl}</button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {wdcTab === "WEALTH" && (
-                <div className="ml-auto flex gap-1">
-                  {(["1Y","3Y","10Y"] as const).map(r => (
-                    <button key={r} onClick={() => setChartRange(r)}
-                      className={`px-2 py-1 rounded text-xs font-medium transition-all ${chartRange === r ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground border border-border"}`}
-                    >{r}</button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* TAB: CASH */}
-            {wdcTab === "CASH" && (
-              <>
-                {/* Deposit Power — Full Waterfall Breakdown */}
-                <div className="mb-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Unlock className="w-3.5 h-3.5" style={{ color: "hsl(188,60%,52%)" }} />
-                    <span className="text-xs font-bold uppercase tracking-widest" style={{ color: "hsl(188,60%,52%)" }}>Deposit Power &amp; Usable Equity</span>
-                    <span className="text-xs ml-auto" style={{ color: "hsl(215,12%,45%)" }}>Today's snapshot</span>
-                  </div>
-
-                  {/* Waterfall formula card */}
-                  <div className="rounded-xl border border-border overflow-hidden mb-2" style={{ background: "hsl(220,18%,10%)" }}>
-                    {/* +  Cash + Offset */}
-                    <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold w-3" style={{ color: "hsl(210,80%,65%)" }}>+</span>
-                        <span className="text-xs text-muted-foreground">Cash + Offset</span>
-                      </div>
-                      <span className="text-xs font-bold tabular-nums" style={{ color: "hsl(210,80%,65%)" }}>
-                        {maskValue(formatCurrency(depositPowerResult?.cashAndOffset ?? (totalLiquidCash), true), privacyMode)}
-                      </span>
-                    </div>
-
-                    {/* +  PPOR Usable Equity */}
-                    <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold w-3" style={{ color: "hsl(188,60%,52%)" }}>+</span>
-                        <span className="text-xs text-muted-foreground">
-                          PPOR Usable Equity (80%)
-                          {depositPowerResult?.pporEquity && (
-                            <span className="ml-1" style={{ color: "hsl(215,12%,45%)" }}>
-                              LVR {(depositPowerResult.pporEquity.currentLVR * 100).toFixed(0)}%
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                      <span className="text-xs font-bold tabular-nums" style={{ color: "hsl(188,60%,52%)" }}>
-                        {maskValue(formatCurrency(depositPowerResult?.pporEquity?.usableEquity ?? 0, true), privacyMode)}
-                      </span>
-                    </div>
-
-                    {/* +  IP Usable Equity */}
-                    <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold w-3" style={{ color: "hsl(145,55%,45%)" }}>+</span>
-                        <span className="text-xs text-muted-foreground">
-                          IP Usable Equity (80%)
-                          <span className="ml-1" style={{ color: "hsl(215,12%,45%)" }}>
-                            {depositPowerResult?.ipEquityList?.length ?? 0} IP{(depositPowerResult?.ipEquityList?.length ?? 0) !== 1 ? "s" : ""}
-                          </span>
-                        </span>
-                      </div>
-                      <span className="text-xs font-bold tabular-nums" style={{ color: "hsl(145,55%,45%)" }}>
-                        {maskValue(formatCurrency((depositPowerResult?.ipEquityList ?? []).reduce((s: number, p: any) => s + p.usableEquity, 0), true), privacyMode)}
-                      </span>
-                    </div>
-
-                    {/* =  Gross Total (subtotal line) */}
-                    <div className="flex items-center justify-between px-4 py-2 border-b border-border/50" style={{ background: "hsl(220,18%,13%)" }}>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold w-3" style={{ color: "hsl(215,12%,55%)" }}>=</span>
-                        <span className="text-xs" style={{ color: "hsl(215,12%,55%)" }}>Gross Total</span>
-                      </div>
-                      <span className="text-xs tabular-nums" style={{ color: "hsl(215,12%,65%)" }}>
-                        {maskValue(formatCurrency(depositPowerResult?.totalDepositPowerRaw ?? 0, true), privacyMode)}
-                      </span>
-                    </div>
-
-                    {/* −  Emergency Buffer */}
-                    <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold w-3" style={{ color: "hsl(0,72%,58%)" }}>−</span>
-                        <span className="text-xs text-muted-foreground">Emergency Buffer</span>
-                      </div>
-                      <span className="text-xs font-bold tabular-nums" style={{ color: "hsl(0,72%,58%)" }}>
-                        {maskValue(formatCurrency(emergencyBuffer, true), privacyMode)}
-                      </span>
-                    </div>
-
-                    {/* =  Total Deposit Power (highlight) */}
-                    <div className="flex items-center justify-between px-4 py-2.5" style={{ background: "hsl(43,90%,10%)", borderTop: "1px solid hsl(43,90%,28%)" }}>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold w-3" style={{ color: "hsl(43,90%,62%)" }}>=</span>
-                        <span className="text-xs font-bold" style={{ color: "hsl(43,90%,62%)" }}>Total Deposit Power</span>
-                      </div>
-                      <span className="text-sm font-bold tabular-nums" style={{ color: "hsl(43,90%,62%)" }}>
-                        {maskValue(formatCurrency(depositPowerResult?.totalDepositPower ?? 0, true), privacyMode)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Row 2: Readiness metrics */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
-                    {/* PPOR LVR */}
-                    <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">PPOR LVR</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(188,60%,52%)" }}>
-                        {depositPowerResult?.pporEquity
-                          ? `${(depositPowerResult.pporEquity.currentLVR * 100).toFixed(0)}%`
-                          : "—"}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        {depositPowerResult?.pporEquity ? "Current LVR" : "No PPOR"}
-                      </div>
-                    </div>
-                    {/* IP count */}
-                    <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">IPs Held</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: "hsl(145,55%,45%)" }}>
-                        {depositPowerResult?.ipEquityList?.length ?? 0}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">Investment propert{(depositPowerResult?.ipEquityList?.length ?? 0) === 1 ? "y" : "ies"}</div>
-                    </div>
-                    {/* Readiness % */}
-                    <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">IP Readiness</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: (depositPowerResult?.readinessPct ?? 0) >= 100 ? "hsl(142,60%,52%)" : "hsl(43,90%,58%)" }}>
-                        {Math.round(depositPowerResult?.readinessPct ?? 0)}%
-                      </div>
-                      <div className="h-1 rounded-full bg-border mt-1.5 overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${Math.min(100, depositPowerResult?.readinessPct ?? 0)}%`, background: (depositPowerResult?.readinessPct ?? 0) >= 100 ? "hsl(142,55%,42%)" : "hsl(43,85%,52%)" }} />
-                      </div>
-                    </div>
-                    {/* Est. Ready Date */}
-                    <div className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">Est. Ready Date</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: depositPowerResult?.isEquityRichCashPoor ? "hsl(43,90%,62%)" : depositPowerResult?.isReady ? "hsl(142,60%,52%)" : "hsl(215,15%,65%)" }}>
-                        {depositPowerResult?.isEquityRichCashPoor
-                          ? "⚠ Equity Rich"
-                          : depositPowerResult?.isReady
-                            ? "Ready Now"
-                            : depositPowerResult?.estimatedReadyDate
-                              ? new Date(depositPowerResult.estimatedReadyDate).toLocaleDateString("en-AU", { month: "short", year: "numeric" })
-                              : "—"}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        {depositPowerResult?.isEquityRichCashPoor ? "/ Cash Poor" : depositPowerResult?.isReady ? "Deposit ready" : "Projected"}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Equity-rich / Cash-poor warning banner */}
-                  {depositPowerResult?.isEquityRichCashPoor && (
-                    <div className="mb-2 rounded-xl px-4 py-2.5 flex items-start gap-2.5"
-                      style={{ background: "hsl(43,90%,10%)", border: "1px solid hsl(43,90%,35%)" }}>
-                      <span style={{ fontSize: 16, lineHeight: 1.4 }}>⚠</span>
-                      <div>
-                        <div className="text-xs font-bold" style={{ color: "hsl(43,90%,62%)" }}>Equity Rich / Cash Poor</div>
-                        <div className="text-xs mt-0.5" style={{ color: "hsl(43,70%,52%)" }}>
-                          Your equity covers the deposit requirement, but your closing cash would fall below the emergency buffer after settlement.
-                          Consider refinancing to release equity as cash before purchasing, or building more liquid savings first.
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Funding sources chips */}
-                  {(depositPowerResult?.fundingSources ?? []).length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {depositPowerResult!.fundingSources.map((fs: any, i: number) => (
-                        <div key={i} className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg" style={{ background: `${fs.color}18`, border: `1px solid ${fs.color}40`, color: fs.color }}>
-                          {fs.type === "cash" ? <DollarSign className="w-3 h-3" /> : fs.type === "equity" ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-                          {fs.label}: {formatCurrency(fs.amount, true)}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {/* CF KPI row */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
-                  {[
-                    // Cash Today MUST read from ledger (totalLiquidCash), never from forecast/chart data
-                    { label: "Cash Today",                                                                                                   val: formatCurrency(totalLiquidCash, true), color: "hsl(210,80%,65%)" },
-                    { label: cashFlowView === "monthly" ? `${cashFlowSeries[cashFlowSeries.length-1]?.label ?? "Future"} Cash` : `${new Date().getFullYear()+9} Cash`, val: formatCurrency(cfLast.balance ?? 0, true), color: "hsl(142,60%,52%)" },
-                    { label: cashFlowView === "monthly" ? "Monthly Net CF" : "Annual Net CF",                                                val: formatCurrency(cfFirst.netCF ?? 0, true), color: (cfFirst.netCF??0)>=0?"hsl(142,60%,52%)":"hsl(0,72%,58%)" },
-                    { label: "Tax Refund/yr",                                                                                                val: `+${formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}`, color: "hsl(43,90%,58%)" },
-                  ].map(k => (
-                    <div key={k.label} className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">{k.label}</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: k.color }}>{maskValue(k.val, privacyMode)}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Chart type toggle — Fix 5 */}
-                <div className="flex items-center gap-1 mb-3">
-                  {(["combo", "line", "candlestick"] as const).map(ct => (
-                    <button
-                      key={ct}
-                      onClick={() => setWdcChartType(ct)}
-                      className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
-                        wdcChartType === ct
-                          ? "bg-primary/20 text-primary border border-primary/30"
-                          : "text-muted-foreground border border-border/50 hover:text-foreground"
-                      }`}
-                    >
-                      {ct === "combo" ? "Combo" : ct === "line" ? "Line" : "Candlestick"}
-                    </button>
-                  ))}
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {wdcChartType === "combo" ? "Balance line + Net CF bars" : wdcChartType === "line" ? "Cash balance only" : "OHLC balance movement"}
-                  </span>
-                </div>
-
-                {/* Chart — Fix 1: increased height to 360px, Fix 7: responsive */}
-                <div className="w-full" style={{ height: 360, touchAction: "none", userSelect: "none" }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    {wdcChartType === "line" ? (
-                      <LineChart
-                        data={masterCFData}
-                        margin={{ top: 16, right: 8, left: 0, bottom: 0 }}
-                        onClick={handleChartTap}
-                      >
-                        <defs>
-                          <linearGradient id="wdcBalGradLine" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%"   stopColor="hsl(210,80%,62%)" stopOpacity={0.20} />
-                            <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.01} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,17%)" vertical={false} />
-                        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(215,12%,45%)", fontWeight: 600 }} axisLine={false} tickLine={false}
-                          interval={cashFlowView === "monthly" ? Math.floor(masterCFData.length / 8) : 0} />
-                        <YAxis yAxisId="bal" orientation="left" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={50} />
-                        <Tooltip content={<CashflowTooltip />} cursor={{ stroke: "hsl(215,12%,40%)", strokeWidth: 1 }} />
-                        {masterCFData.map((d: any) =>
-                          d._milestones?.length > 0 ? (
-                            <ReferenceLine key={d.label} yAxisId="bal" x={d.label}
-                              stroke="hsl(43,80%,50%)" strokeDasharray="4 3" strokeOpacity={0.45} strokeWidth={1} />
-                          ) : null
-                        )}
-                        <Line yAxisId="bal" type="monotone" dataKey="balance" name="Cash Balance"
-                          stroke="hsl(210,80%,65%)" strokeWidth={2.5}
-                          dot={<MilestoneDot />} activeDot={{ r: 5, fill: "hsl(210,80%,65%)", strokeWidth: 0 }} />
-                        {cfViewMode !== "cash" && (
-                          <Line yAxisId="bal" type="monotone" dataKey="usableEquity" name="Usable Equity"
-                            stroke="hsl(188,60%,52%)" strokeWidth={1.8} dot={false} strokeDasharray="5 3" />
-                        )}
-                        {cfViewMode === "deposit" && (
-                          <Line yAxisId="bal" type="monotone" dataKey="totalDepositPower" name="Deposit Power"
-                            stroke="hsl(43,90%,58%)" strokeWidth={2} dot={false} />
-                        )}
-                      </LineChart>
-                    ) : wdcChartType === "candlestick" ? (
-                      // Candlestick — use ComposedChart with a custom Bar showing OHLC-style balance movement
-                      // open = prev year balance, close = this year balance, bar height = |close-open|
-                      <ComposedChart
-                        onClick={handleChartTap}
-                        data={masterCFData.map((d: any, i: number) => ({
-                          ...d,
-                          open:   i === 0 ? d.balance : (masterCFData[i-1] as any).balance,
-                          close:  d.balance,
-                          high:   Math.max(d.balance, i === 0 ? d.balance : (masterCFData[i-1] as any).balance),
-                          low:    Math.min(d.balance, i === 0 ? d.balance : (masterCFData[i-1] as any).balance),
-                          barY:   Math.min(d.balance, i === 0 ? d.balance : (masterCFData[i-1] as any).balance),
-                          barH:   Math.abs(d.balance - (i === 0 ? d.balance : (masterCFData[i-1] as any).balance)),
-                          isUp:   d.balance >= (i === 0 ? d.balance : (masterCFData[i-1] as any).balance),
-                        }))}
-                        margin={{ top: 16, right: 8, left: 0, bottom: 0 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,17%)" vertical={false} />
-                        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(215,12%,45%)", fontWeight: 600 }} axisLine={false} tickLine={false}
-                          interval={cashFlowView === "monthly" ? Math.floor(masterCFData.length / 8) : 0} />
-                        <YAxis yAxisId="bal" orientation="left" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={50} />
-                        <Tooltip content={<CashflowTooltip />} cursor={{ fill: "hsl(222,15%,16%)", fillOpacity: 0.5 }} />
-                        {masterCFData.map((d: any) =>
-                          d._milestones?.length > 0 ? (
-                            <ReferenceLine key={d.label} yAxisId="bal" x={d.label}
-                              stroke="hsl(43,80%,50%)" strokeDasharray="4 3" strokeOpacity={0.45} strokeWidth={1} />
-                          ) : null
-                        )}
-                        {/* Candlestick body bar */}
-                        <Bar yAxisId="bal" dataKey="balance" name="Cash Balance" radius={[3,3,0,0]} maxBarSize={28}>
-                          {masterCFData.map((d: any, i: number) => {
-                            const prevBal = i === 0 ? d.balance : (masterCFData[i-1] as any).balance;
-                            const isUp = d.balance >= prevBal;
-                            return <Cell key={i} fill={isUp ? "hsl(142,55%,40%)" : "hsl(0,65%,50%)"} fillOpacity={0.85} />;
-                          })}
-                        </Bar>
-                        {/* Wick line rendered as an Area with near-zero width */}
-                        <Line yAxisId="bal" type="monotone" dataKey="balance" name="Trend"
-                          stroke="hsl(210,80%,65%)" strokeWidth={1.5} dot={false} strokeDasharray="3 3" strokeOpacity={0.4} />
-                      </ComposedChart>
-                    ) : (
-                      // DEFAULT: Combo — Balance area + Net CF bars
-                      <ComposedChart
-                        data={masterCFData}
-                        margin={{ top: 16, right: 8, left: 0, bottom: 0 }}
-                        onClick={handleChartTap}
-                      >
-                        <defs>
-                          <linearGradient id="wdcBalGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%"   stopColor="hsl(210,80%,62%)" stopOpacity={0.20} />
-                            <stop offset="100%" stopColor="hsl(210,80%,62%)" stopOpacity={0.01} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,17%)" vertical={false} />
-                        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(215,12%,45%)", fontWeight: 600 }} axisLine={false} tickLine={false}
-                          interval={cashFlowView === "monthly" ? Math.floor(masterCFData.length / 8) : 0} />
-                        <YAxis yAxisId="bal" orientation="left" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={50} />
-                        <YAxis yAxisId="cf" orientation="right" tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={44} />
-                        <Tooltip content={<CashflowTooltip />} cursor={{ fill: "hsl(222,15%,16%)", fillOpacity: 0.6 }} />
-                        <ReferenceLine yAxisId="cf" y={0} stroke="hsl(222,15%,26%)" strokeDasharray="3 3" />
-                        {masterCFData.map((d: any) =>
-                          d._milestones?.length > 0 ? (
-                            <ReferenceLine key={d.label} yAxisId="bal" x={d.label}
-                              stroke="hsl(43,80%,50%)" strokeDasharray="4 3" strokeOpacity={0.45} strokeWidth={1} />
-                          ) : null
-                        )}
-                        <Bar yAxisId="cf" dataKey="netCF" name="Net Cashflow" radius={[3,3,0,0]} maxBarSize={32}>
-                          {masterCFData.map((d: any, i: number) => (
-                            <Cell key={i} fill={(d.netCF??0)>=0 ? "hsl(142,55%,40%)" : "hsl(0,65%,50%)"} fillOpacity={0.7} />
-                          ))}
-                        </Bar>
-                        <Area yAxisId="bal" type="monotone" dataKey="balance" name="Cash Balance"
-                          stroke="hsl(210,80%,65%)" strokeWidth={2.5} fill="url(#wdcBalGrad)"
-                          dot={<MilestoneDot />} activeDot={{ r: 5, fill: "hsl(210,80%,65%)", strokeWidth: 0 }} />
-                        {/* Equity overlay lines */}
-                        {cfViewMode !== "cash" && (
-                          <Line yAxisId="bal" type="monotone" dataKey="usableEquity" name="Usable Equity"
-                            stroke="hsl(188,60%,52%)" strokeWidth={1.8} dot={false} strokeDasharray="5 3"
-                            activeDot={{ r: 4, fill: "hsl(188,60%,52%)", strokeWidth: 0 }} />
-                        )}
-                        {cfViewMode === "deposit" && (
-                          <Line yAxisId="bal" type="monotone" dataKey="totalDepositPower" name="Deposit Power"
-                            stroke="hsl(43,90%,58%)" strokeWidth={2} dot={false}
-                            activeDot={{ r: 4, fill: "hsl(43,90%,58%)", strokeWidth: 0 }} />
-                        )}
-                      </ComposedChart>
-                    )}
-                  </ResponsiveContainer>
-                </div>
-
-                {/* Legend row */}
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-3 pt-3 border-t border-border">
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <span className="inline-block w-6 h-0.5 rounded" style={{ background: "hsl(210,80%,65%)" }} />Cash Balance
-                  </div>
-                  {cfViewMode !== "cash" && (
-                    <div className="flex items-center gap-1.5 text-xs" style={{ color: "hsl(188,60%,52%)" }}>
-                      <span className="inline-block w-6 h-0.5 rounded border border-current" style={{ borderStyle: "dashed" }} />Usable Equity
-                    </div>
-                  )}
-                  {cfViewMode === "deposit" && (
-                    <div className="flex items-center gap-1.5 text-xs" style={{ color: "hsl(43,90%,58%)" }}>
-                      <span className="inline-block w-6 h-0.5 rounded" style={{ background: "hsl(43,90%,58%)" }} />Deposit Power
-                    </div>
-                  )}
-                  {wdcChartType !== "line" && (
-                    <>
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(142,55%,40%)", opacity: 0.8 }} />{wdcChartType === "candlestick" ? "Up" : "Net CF +"}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "hsl(0,65%,50%)", opacity: 0.8 }} />{wdcChartType === "candlestick" ? "Down" : "Net CF −"}
-                      </div>
-                    </>
-                  )}
-                  <div className="ml-auto flex flex-wrap gap-x-4 gap-y-1">
-                    {[
-                      { icon: "🏠", label: "Property",   color: "hsl(188,65%,52%)" },
-                      { icon: "📈", label: "Stocks",     color: "hsl(210,80%,65%)" },
-                      { icon: "₿",  label: "Crypto",     color: "hsl(262,70%,65%)" },
-                      { icon: "💰", label: "Tax Refund", color: "hsl(43,90%,58%)"  },
-                    ].map(m => (
-                      <div key={m.label} className="flex items-center gap-1 text-xs" style={{ color: m.color }}>
-                        <span>{m.icon}</span><span style={{ opacity: 0.8 }}>{m.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* TAB: EVENTS */}
-            {wdcTab === "EVENTS" && (
-              <div className="py-1">
-                <div className="text-xs text-muted-foreground mb-5">Milestone timeline — your wealth journey mapped out</div>
-                <div className="relative">
-                  <div className="absolute left-[18px] top-0 bottom-0 w-px bg-border" />
-                  <div className="space-y-0">
-                    {[
-                      { year: new Date().getFullYear(), icon: "📍", label: "Deposit Build", sub: `${maskValue(formatCurrency(totalLiquidCash, true), privacyMode)} liquid today`, color: "hsl(210,80%,65%)", active: true },
-                      ...((properties as any[]).filter((p: any) => p.type !== "ppor" && p.settlement_date).map((p: any) => ({
-                        year: new Date(p.settlement_date).getFullYear(),
-                        icon: "🏠",
-                        label: `Buy IP — ${p.label || (p.address ?? "").split(",")[0] || "Investment Property"}`,
-                        sub: `Deposit ~${maskValue(formatCurrency(p.deposit ?? 0, true), privacyMode)} · Loan ${maskValue(formatCurrency(p.loan_amount ?? 0, true), privacyMode)}`,
-                        color: "hsl(188,65%,52%)",
-                        active: false,
-                      }))),
-                      ...(() => {
-                        // Group planned stock orders by month — collapses 8 tickers in Nov 2026 into single "Stocks — $30,000" row
-                        const stockByMonth = new Map<string, { date: Date; total: number; count: number }>();
-                        (ordersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date && o.action === "buy").forEach((o: any) => {
-                          const d = new Date(o.planned_date);
-                          const key = `${d.getFullYear()}-${d.getMonth()}`;
-                          const cur = stockByMonth.get(key) ?? { date: new Date(d.getFullYear(), d.getMonth(), 1), total: 0, count: 0 };
-                          cur.total += safeNum(o.amount_aud);
-                          cur.count += 1;
-                          stockByMonth.set(key, cur);
-                        });
-                        return Array.from(stockByMonth.values()).map(({ date, total, count }) => ({
-                          year: date.getFullYear(),
-                          icon: "📈",
-                          label: `Stocks — ${maskValue(formatCurrency(total, true), privacyMode)}`,
-                          sub: `${date.toLocaleDateString("en-AU", { month: "short", year: "numeric" })}${count > 1 ? ` · ${count} orders` : ""}`,
-                          color: "hsl(210,80%,65%)",
-                          active: false,
-                        }));
-                      })(),
-                      ...(() => {
-                        // Group planned crypto orders by month
-                        const cryptoByMonth = new Map<string, { date: Date; total: number; count: number }>();
-                        (cryptoOrdersRaw as any[]).filter((o: any) => o.status === "planned" && o.planned_date && o.action === "buy").forEach((o: any) => {
-                          const d = new Date(o.planned_date);
-                          const key = `${d.getFullYear()}-${d.getMonth()}`;
-                          const cur = cryptoByMonth.get(key) ?? { date: new Date(d.getFullYear(), d.getMonth(), 1), total: 0, count: 0 };
-                          cur.total += safeNum(o.amount_aud);
-                          cur.count += 1;
-                          cryptoByMonth.set(key, cur);
-                        });
-                        return Array.from(cryptoByMonth.values()).map(({ date, total, count }) => ({
-                          year: date.getFullYear(),
-                          icon: "₿",
-                          label: `Crypto — ${maskValue(formatCurrency(total, true), privacyMode)}`,
-                          sub: `${date.toLocaleDateString("en-AU", { month: "short", year: "numeric" })}${count > 1 ? ` · ${count} orders` : ""}`,
-                          color: "hsl(262,70%,65%)",
-                          active: false,
-                        }));
-                      })(),
-                      { year: new Date().getFullYear()+4, icon: "🔄", label: "Refinance", sub: "Review loan structure", color: "hsl(43,90%,58%)", active: false },
-                      { year: new Date().getFullYear()+6, icon: "✅", label: "Debt Reduction", sub: "Aggressive paydown begins", color: "hsl(142,60%,52%)", active: false },
-                      { year: parseInt(fireCard?.value?.replace("~","") ?? String(new Date().getFullYear()+9)), icon: "🔥", label: "FIRE Ready", sub: `Target age ${fireCard?.value ?? "—"} · ${maskValue(formatCurrency(fireTargetAmt, true), privacyMode)} portfolio`, color: "hsl(20,90%,60%)", active: false },
-                    ]
-                    .sort((a, b) => a.year - b.year)
-                    .map((ev, i) => (
-                      <div key={i} className="flex items-start gap-4 pb-6 last:pb-0 relative">
-                        <div className={`relative z-10 w-9 h-9 rounded-full flex items-center justify-center text-base shrink-0 border-2 ${ev.active ? "border-primary bg-primary/10" : "border-border bg-background"}`}>
-                          {ev.icon}
-                        </div>
-                        <div className="pt-1.5 flex-1 min-w-0">
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-xs font-bold tabular-nums" style={{ color: ev.color }}>{ev.year}</span>
-                            <span className="text-sm font-semibold text-foreground truncate">{ev.label}</span>
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-0.5">{ev.sub}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB: WEALTH */}
-            {wdcTab === "WEALTH" && (
-              <>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
-                  {[
-                    { label: "Net Worth Now",   val: formatCurrency(netWorth, true),    color: "hsl(210,80%,65%)" },
-                    { label: "Total Assets",    val: formatCurrency(totalAssets, true), color: "hsl(142,60%,52%)" },
-                    { label: "Total Debt",      val: formatCurrency(totalLiab, true),   color: "hsl(0,72%,58%)"   },
-                    { label: `${new Date().getFullYear()+9} NW`, val: formatCurrency(year10NW, true), color: "hsl(43,90%,58%)" },
-                  ].map(k => (
-                    <div key={k.label} className="rounded-xl bg-background/60 border border-border px-3 py-2">
-                      <div className="text-xs text-muted-foreground mb-0.5">{k.label}</div>
-                      <div className="text-sm font-bold tabular-nums" style={{ color: k.color }}>{maskValue(k.val, privacyMode)}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ height: 220 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={filteredNWData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="wdcNWGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%"   stopColor="hsl(210,75%,55%)" stopOpacity={0.25} />
-                          <stop offset="100%" stopColor="hsl(210,75%,55%)" stopOpacity={0.02} />
-                        </linearGradient>
-                        <linearGradient id="wdcAssetGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%"   stopColor="hsl(142,55%,42%)" stopOpacity={0.18} />
-                          <stop offset="100%" stopColor="hsl(142,55%,42%)" stopOpacity={0.01} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,15%,17%)" vertical={false} />
-                      <XAxis dataKey="year" tick={{ fontSize: 10, fill: "hsl(215,12%,45%)" }} axisLine={false} tickLine={false} />
-                      <YAxis yAxisId="nw" orientation="left" tickFormatter={(v) => `$${(v/1000000).toFixed(1)}M`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={50} />
-                      <YAxis yAxisId="debt" orientation="right" tickFormatter={(v) => `$${(v/1000000).toFixed(1)}M`} tick={{ fontSize: 9, fill: "hsl(215,12%,38%)" }} axisLine={false} tickLine={false} width={44} />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Bar yAxisId="debt" dataKey="liabilities" name="Debt" fill="hsl(0,65%,50%)" fillOpacity={0.45} radius={[2,2,0,0]} maxBarSize={20} />
-                      <Area yAxisId="nw" type="monotone" dataKey="assets" name="Total Assets" stroke="hsl(142,55%,42%)" strokeWidth={1.5} fill="url(#wdcAssetGrad)" dot={false} />
-                      <Area yAxisId="nw" type="monotone" dataKey="netWorth" name="Net Worth" stroke="hsl(210,75%,60%)" strokeWidth={2.5} fill="url(#wdcNWGrad)" dot={false} activeDot={{ r: 5, fill: "hsl(210,75%,60%)", strokeWidth: 0 }} />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-border">
-                  {assetAllocData.map((d: any) => (
-                    <div key={d.name} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.fill }} />
-                      {d.name} <span className="font-semibold text-foreground">{d.pct.toFixed(0)}%</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* TAB: RISK */}
-            {wdcTab === "RISK" && (() => {
-              const liquidCash = totalLiquidCash;
-              const totalMonthlyOut = totalMonthlyOutgoings;
-              const monthsCov = totalMonthlyOut > 0 ? liquidCash / totalMonthlyOut : 0;
-              const debtRatio = snap.monthly_income > 0 ? totalLiab / (snap.monthly_income * 12) : 0;
-              const propPct = totalAssets > 0 ? (snap.ppor / totalAssets) * 100 : 0;
-              const mktPct = totalAssets > 0 ? ((stocksTotal + cryptoTotal) / totalAssets) * 100 : 0;
-              const risks = [
-                { label: "Liquidity Risk",         score: monthsCov >= 6 ? 10 : monthsCov >= 3 ? 40 : monthsCov >= 1 ? 70 : 95, detail: `${monthsCov.toFixed(1)} months covered`,         color: monthsCov >= 6 ? "hsl(142,55%,45%)" : monthsCov >= 3 ? "hsl(43,90%,52%)" : "hsl(0,72%,55%)",   rating: monthsCov >= 6 ? "Low" : monthsCov >= 3 ? "Moderate" : "High" },
-                { label: "Debt Risk",               score: debtRatio <= 3 ? 15 : debtRatio <= 5 ? 40 : debtRatio <= 8 ? 65 : 90, detail: `Debt/income: ${debtRatio.toFixed(1)}×`,         color: debtRatio <= 3 ? "hsl(142,55%,45%)" : debtRatio <= 5 ? "hsl(43,90%,52%)" : "hsl(0,72%,55%)",    rating: debtRatio <= 3 ? "Low" : debtRatio <= 5 ? "Moderate" : "High" },
-                { label: "Income Dependency",       score: 65,                                                                    detail: "Single primary income source",                  color: "hsl(43,90%,52%)",                                                                                 rating: "Moderate" },
-                { label: "Property Concentration",  score: propPct >= 70 ? 75 : propPct >= 50 ? 50 : 20,                         detail: `${propPct.toFixed(0)}% of assets in property`,  color: propPct >= 70 ? "hsl(0,72%,55%)" : propPct >= 50 ? "hsl(43,90%,52%)" : "hsl(142,55%,45%)",       rating: propPct >= 70 ? "High" : propPct >= 50 ? "Moderate" : "Low" },
-                { label: "Market Risk",             score: mktPct >= 30 ? 60 : mktPct >= 15 ? 35 : 15,                          detail: `${mktPct.toFixed(0)}% in stocks & crypto`,      color: mktPct >= 30 ? "hsl(43,90%,52%)" : "hsl(142,55%,45%)",                                            rating: mktPct >= 30 ? "Moderate" : "Low" },
-              ];
-              const overallScore = Math.round(risks.reduce((s, r) => s + r.score, 0) / risks.length);
-              const overallColor = overallScore >= 60 ? "hsl(0,72%,55%)" : overallScore >= 35 ? "hsl(43,90%,52%)" : "hsl(142,55%,45%)";
-              const overallRating = overallScore >= 60 ? "High" : overallScore >= 35 ? "Moderate" : "Low";
-              return (
-                <>
-                  <div className="flex items-center gap-4 mb-5 px-4 py-3 rounded-xl border border-border bg-background/60">
-                    <div>
-                      <div className="text-xs text-muted-foreground mb-0.5">Overall Risk Score</div>
-                      <div className="text-2xl font-bold tabular-nums" style={{ color: overallColor }}>{overallScore}<span className="text-sm font-normal text-muted-foreground ml-0.5">/100</span></div>
-                    </div>
-                    <div className="h-8 w-px bg-border" />
-                    <div>
-                      <div className="text-xs text-muted-foreground mb-0.5">Rating</div>
-                      <div className="text-base font-bold" style={{ color: overallColor }}>{overallRating} Risk</div>
-                    </div>
-                    <div className="ml-auto flex-1 max-w-[160px]">
-                      <div className="h-2 rounded-full bg-border overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${overallScore}%`, background: overallColor }} />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    {risks.map(r => (
-                      <div key={r.label}>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-foreground">{r.label}</span>
-                            <span className="text-xs px-1.5 py-0.5 rounded font-semibold" style={{ background: `${r.color}22`, color: r.color }}>{r.rating}</span>
-                          </div>
-                          <span className="text-xs text-muted-foreground">{r.detail}</span>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-border overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${r.score}%`, background: r.color }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              );
-            })()}
-
-          </div>
-
-          {/* RIGHT: Decision Cards */}
-          <div className="flex-[3] min-w-0 flex flex-col gap-3 db-section-bestmove">
-
-            {/* 1. BEST MOVE NOW */}
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 rounded-lg bg-amber-500/15 flex items-center justify-center">
-                  <Zap className="w-3.5 h-3.5 text-amber-400" />
-                </div>
-                <span className="text-xs font-bold uppercase tracking-widest text-amber-400">Best Move Now</span>
-              </div>
-              <div className="text-sm font-semibold text-foreground leading-snug mb-1">{bestMoveTitle}</div>
-              <div className="text-xs text-muted-foreground">{bestMoveImpact}</div>
-              <div className="mt-2.5 flex items-center justify-between">
-                <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${
-                  inlineBestMove_hook?.best.risk === "High" ? "bg-red-500/15 text-red-400" :
-                  inlineBestMove_hook?.best.risk === "Low"  ? "bg-emerald-500/15 text-emerald-400" :
-                  "bg-amber-500/15 text-amber-400"
-                }`}>{inlineBestMove_hook?.best.risk ?? ""} Risk</span>
-                <Link href={bestMoveHref}><span className="text-xs text-primary hover:underline">Take Action →</span></Link>
-              </div>
-            </div>
-
-            {/* 2. NEXT MAJOR EVENT */}
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 rounded-lg bg-sky-500/15 flex items-center justify-center">
-                  <Calendar className="w-3.5 h-3.5 text-sky-400" />
-                </div>
-                <span className="text-xs font-bold uppercase tracking-widest text-sky-400">Next Major Event</span>
-              </div>
-              {nextPropEvent ? (
-                <>
-                  <div className="text-sm font-semibold text-foreground mb-0.5">{nextPropEvent.label}</div>
-                  <div className="text-xs text-muted-foreground">{nextPropEvent.monthKey}</div>
-                  <div className="mt-2.5"><Link href="/financial-plan"><span className="text-xs text-primary hover:underline">View Plan →</span></Link></div>
-                </>
-              ) : (
-                <div className="text-xs text-muted-foreground">No upcoming events scheduled</div>
-              )}
-            </div>
-
-            {/* 3. CASH WARNING — equity-aware */}
-            {(() => {
-              // Equity-aware: if usable equity covers the shortfall, downgrade from Critical to Manageable
-              const shortfall = Math.max(0, 20000 - lowestFutureCash);
-              const equityCoversShortfall = totalUsableEquity >= shortfall && shortfall > 0;
-              const isCritical = lowestFutureCash < 5000 && !equityCoversShortfall;
-              const isWarning  = lowestFutureCash < 20000 && !isCritical;
-              const borderCls  = isCritical ? "border-red-500/30 bg-red-500/5" : isWarning ? "border-amber-500/30 bg-amber-500/5" : "border-border bg-card";
-              const iconCls    = isCritical ? "bg-red-500/15" : isWarning ? "bg-amber-500/15" : "bg-emerald-500/15";
-              const iconColor  = isCritical ? "text-red-400" : isWarning ? "text-amber-400" : "text-emerald-400";
-              const label      = isCritical ? "Cash Warning" : isWarning ? "Cash Watch" : "Cash Health";
-              const detail     = isCritical
-                ? "⚠️ Critical — review purchase timing"
-                : equityCoversShortfall
-                ? `Manageable — $${Math.round(totalUsableEquity / 1000)}k usable equity covers shortfall`
-                : isWarning
-                ? "Monitor closely around major purchases"
-                : "Comfortable buffer maintained";
-              return (
-                <div className={`rounded-2xl border p-4 ${borderCls}`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${iconCls}`}>
-                      <AlertTriangle className={`w-3.5 h-3.5 ${iconColor}`} />
-                    </div>
-                    <span className={`text-xs font-bold uppercase tracking-widest ${iconColor}`}>{label}</span>
-                  </div>
-                  <div className="text-sm font-semibold text-foreground mb-0.5">Lowest projected: {maskValue(formatCurrency(lowestFutureCash, true), privacyMode)}</div>
-                  <div className="text-xs text-muted-foreground">{detail}</div>
-                  {equityCoversShortfall && (
-                    <div className="mt-2 text-xs" style={{ color: "hsl(188,60%,48%)" }}>
-                      Equity buffer: {maskValue(formatCurrency(totalUsableEquity, true), privacyMode)} available
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-
-            {/* 4. OPPORTUNITY */}
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 rounded-lg bg-emerald-500/15 flex items-center justify-center">
-                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-                </div>
-                <span className="text-xs font-bold uppercase tracking-widest text-emerald-400">Opportunity</span>
-              </div>
-              <div className="text-sm font-semibold text-foreground mb-0.5">Tax refund: {maskValue(`+${formatCurrency(ngSummary.totalAnnualTaxBenefit, true)}/yr`, privacyMode)}</div>
-              <div className="text-xs text-muted-foreground">{ngProperties.length > 0 ? `${ngProperties.length} negatively geared ${ngProperties.length === 1 ? "property" : "properties"} active` : "Add IPs to unlock NG benefits"}</div>
-              <div className="mt-2.5"><Link href="/tax-strategy"><span className="text-xs text-primary hover:underline">Tax Strategy →</span></Link></div>
-            </div>
-
-            {/* 5. FIRE TRACKER */}
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 rounded-lg bg-orange-500/15 flex items-center justify-center">
-                  <Flame className="w-3.5 h-3.5 text-orange-400" />
-                </div>
-                <span className="text-xs font-bold uppercase tracking-widest text-orange-400">FIRE Tracker</span>
-              </div>
-              <div className="text-sm font-semibold text-foreground mb-0.5">Target age: {fireCard?.value ?? "—"}</div>
-              <div className="text-xs text-muted-foreground mb-2">{maskValue(formatCurrency(fireCurrentAmt, true), privacyMode)} of {maskValue(formatCurrency(fireTargetAmt, true), privacyMode)} target</div>
-              <div className="h-1.5 rounded-full bg-border overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400" style={{ width: `${Math.min(100, fireProgressPct)}%` }} />
-              </div>
-              <div className="flex items-center justify-between mt-1.5">
-                <span className="text-xs text-muted-foreground">{fireProgressPct.toFixed(0)}% funded</span>
-                <Link href="/wealth-strategy"><span className="text-xs text-primary hover:underline">FIRE Plan →</span></Link>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          WEALTH PROJECTION — CANONICAL (Monte Carlo)
-          The single primary Dashboard projection table. Sourced from the
-          canonical Monte Carlo engine (PR #24/#25). The deterministic
-          year-by-year table below is intentionally collapsed and labelled
-          as a secondary baseline so it never competes with this view.
-          ═════════════════════════════════════════════════════════════════ */}
-      {monteCarloResult && (monteCarloResult.fan_data?.length ?? 0) > 0 && (
-        <div className="px-4 pb-4 db-section-monte-carlo">
-          <div
-            className="mb-2 rounded-xl border border-purple-500/30 bg-purple-500/[0.04] px-3 py-2 text-[11px] text-muted-foreground"
-            data-testid="dashboard-projection-sot-banner"
-          >
-            <span className="font-semibold text-foreground">This dashboard uses probabilistic Monte Carlo forecasting.</span>{" "}
-            Future wealth is shown as a range of outcomes (P10 bear · P50 median · P90 bull) with confidence bands and downside risk, not a single deterministic number. Monte Carlo is the canonical Family Wealth Lab forecast engine.
-          </div>
-          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-            <div>
-              <h2 className="text-base font-bold text-foreground">Wealth Projection</h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Canonical forecast · Monte Carlo · {monteCarloResult.simulations.toLocaleString()} simulations · single source of truth shared with Forecast Engine, Decision Engine and Reports
-              </p>
-            </div>
-            <Link href="/ai-forecast-engine">
-              <span className="text-xs text-primary hover:underline">Open Forecast Engine →</span>
-            </Link>
-          </div>
-          <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-purple-500/20">
-                    {["Year","P10 Net Worth","P50 Net Worth (median)","P90 Net Worth","Confidence band (P90 − P10)","Key risk"].map(h => (
-                      <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {monteCarloResult.fan_data.map((row, idx) => {
-                    const band = row.p90 - row.p10;
-                    const bandPct = row.median > 0 ? (band / Math.max(1, row.median)) * 100 : 0;
-                    const risk = idx === 0 ? "Starting position"
-                      : row.p10 < 0 ? "P10 turns negative — severe downside risk"
-                      : bandPct > 200 ? "Very wide outcome range — high uncertainty"
-                      : bandPct > 100 ? "Moderate spread — typical long-horizon variance"
-                      : "Tight range — outcomes converging";
-                    return (
-                      <tr key={row.year} className="border-b border-border/30 hover:bg-purple-500/5">
-                        <td className="px-3 py-2 font-bold text-foreground whitespace-nowrap">{row.year}{idx === 0 ? " ★" : ""}</td>
-                        <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(row.p10, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-amber-400 font-bold tabular-nums whitespace-nowrap">{maskValue(formatCurrency(row.median, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(row.p90, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(band, true), privacyMode)} ({bandPct.toFixed(0)}%)</td>
-                        <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{risk}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="px-4 py-2 text-[10px] text-muted-foreground border-t border-purple-500/20 bg-purple-500/[0.03]">
-              P10 = worst 10% of outcomes · P50 = median · P90 = best 10%. Probability of ${"≥"}$5M by {monteCarloResult.fan_data[monteCarloResult.fan_data.length - 1]?.year ?? "—"}: {monteCarloResult.prob_5m.toFixed(1)}% · FIRE probability: {monteCarloResult.prob_ff.toFixed(1)}% · Cash shortfall risk: {monteCarloResult.prob_cash_shortfall.toFixed(1)}%.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════════════════
-          YEAR-BY-YEAR TABLE (deterministic baseline — SECONDARY VIEW)
-          Collapsed by default. This is a deterministic straight-line view
-          and is NOT the official wealth forecast. The canonical Dashboard
-          projection is the Monte Carlo table above. Kept on Dashboard only
-          as an expandable advanced disclosure so users can sanity-check
-          assumptions and see year-level mechanics. Full deterministic
-          modelling lives in Forecast Engine (Simple Forecast /
-          Year-by-Year modes).
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4 db-section-year" data-testid="dashboard-deterministic-section">
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowDeterministicProjection(v => !v)}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              data-testid="dashboard-deterministic-toggle"
-              aria-expanded={showDeterministicProjection}
-            >
-              {showDeterministicProjection ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-              <span className="text-sm font-semibold text-foreground">Deterministic baseline (advanced)</span>
-              <span className="text-[10px] uppercase tracking-widest text-muted-foreground/80 ml-1">not the official forecast</span>
-            </button>
-          </div>
-          <Link href="/ai-forecast-engine"><span className="text-xs text-primary hover:underline">Edit assumptions in Forecast Engine →</span></Link>
-        </div>
-        {!showDeterministicProjection && (
-          <div className="rounded-xl border border-dashed border-border bg-muted/10 px-3 py-2 text-[11px] text-muted-foreground">
-            A single straight-line year-by-year view is available for sanity-checking assumptions. It is <span className="font-semibold text-foreground">not</span> the canonical wealth forecast — use the Monte Carlo projection above as the source of truth. Expand to view the deterministic baseline, or open the Forecast Engine for full Simple Forecast / Year-by-Year modelling.
-          </div>
-        )}
-        {showDeterministicProjection && (
-        <>
-        <div className="mb-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.05] px-3 py-2 text-[11px] text-muted-foreground">
-          <span className="font-semibold text-amber-300">Deterministic baseline — not the official forecast.</span>{" "}
-          Single straight-line projection using {forecastMode === "monte-carlo" ? "Monte Carlo median-path assumptions" : forecastMode === "year-by-year" ? "Year-by-Year custom assumptions" : `Simple Forecast (${profile}) assumptions`}. Ignores volatility, sequence-of-returns risk and downside scenarios — values will not match the canonical Monte Carlo projection above. For the realistic forecast, use the Wealth Projection (Monte Carlo) table.
-        </div>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">Year-by-Year Projection (deterministic)</h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Secondary view · {forecastMode === "monte-carlo" ? "Monte Carlo median path (see canonical table above for P10/P90 bands)" : forecastMode === "year-by-year" ? "Year-by-Year custom assumptions" : `Simple Forecast (${profile})`} · single straight-line view
-            </p>
-          </div>
-          <Link href="/timeline"><span className="text-xs text-primary hover:underline">Full Timeline →</span></Link>
-        </div>
-        <div className="rounded-2xl border border-border bg-card overflow-hidden">
-          <div className="db-action-table-wrap overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  {["","Year","Start NW","Income","Expenses","Prop. Value","Prop. Loans","Equity","Usable Eq.","Dep. Power","Stocks","Crypto","Cash","Total Assets","Liabilities","End NW","Growth %","Passive Income","Mthly CF"].map(h => (
-                    <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {yrRowsFull.map((r, idx) => {
-                  const isOpen = expandedYear === r.year;
-                  const growthPct = r.growthPct ?? 0;
-                  const checkDelta = (r.totalAssets ?? 0) - (r.liab ?? 0) - (r.endNW ?? 0);
-                  const checkOk = Math.abs(checkDelta) <= 1;
-                  return (
-                    <Fragment key={r.year}>
-                      <tr
-                        className={`border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer ${idx === 0 ? "bg-amber-500/5" : ""}`}
-                        onClick={() => setExpandedYear(isOpen ? null : r.year)}
-                      >
-                        <td className="px-2 py-2 text-muted-foreground whitespace-nowrap select-none" style={{ width: 18 }}>{isOpen ? "▾" : "▸"}</td>
-                        <td className="px-3 py-2 font-bold text-foreground whitespace-nowrap">{r.year}{idx === 0 ? " ★" : ""}</td>
-                        <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.startNW ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.income ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.expenses ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.propValue ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.propLoans ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.equity ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-cyan-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.usableEquity ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-amber-300 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.depositPower ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-blue-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.stocks ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-purple-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.crypto ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-foreground tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.cash ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-emerald-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.totalAssets ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-red-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.liab ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono text-amber-400 font-bold tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.endNW ?? 0, true), privacyMode)}</td>
-                        <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap" style={{ color: growthPct >= 0 ? "hsl(142,60%,45%)" : "hsl(5,70%,52%)" }}>
-                          {growthPct >= 0 ? "+" : ""}{growthPct.toFixed(1)}%
-                        </td>
-                        <td className="px-3 py-2 font-mono text-purple-400 tabular-nums whitespace-nowrap">{maskValue(formatCurrency(r.passive ?? 0, true), privacyMode)}/yr</td>
-                        <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap" style={{ color: (r.monthlyCF ?? 0) >= 0 ? "hsl(142,60%,45%)" : "hsl(5,70%,52%)" }}>
-                          {maskValue(formatCurrency(r.monthlyCF ?? 0, true), privacyMode)}
-                        </td>
-                      </tr>
-                      {isOpen && (
-                        <tr className="bg-muted/10 border-b border-border">
-                          <td colSpan={19} className="px-4 py-4">
-                            <YearDetailPanel row={r} privacyMode={privacyMode} checkDelta={checkDelta} checkOk={checkOk} />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="px-4 py-2 text-[10px] text-muted-foreground border-t border-border bg-muted/5">
-            Click any row to view its full reconciliation bridge (cash → property → liabilities → passive income).
-            Growth % uses (End NW − Start NW) / Start NW × 100. Sanity check: Total Assets − Liabilities = End NW.
-          </div>
-        </div>
-        </>
-        )}
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          LEDGER AUDIT SECTION
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4 db-section-ledger">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Database className="w-4 h-4" style={{ color: "hsl(210,80%,65%)" }} />
-            <h2 className="text-base font-bold text-foreground">Ledger Audit</h2>
-          </div>
-          <button
-            onClick={() => setShowLedgerAudit(v => !v)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {showLedgerAudit ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            {showLedgerAudit ? "Hide" : "Show"} Audit
-          </button>
-        </div>
-        {showLedgerAudit && (() => {
-          const totalCash     = totalLiquidCash;
-          const totalEquity   = depositPowerResult?.totalUsableEquity ?? 0;
-          const propEq        = propertyEquity;
-          const auditRows = [
-            { label: "Cash (Everyday Account)",    value: snap.cash,              color: "hsl(210,80%,65%)",  category: "Liquid" },
-            { label: "Offset Balance",             value: snap.offset_balance,    color: "hsl(210,80%,65%)",  category: "Liquid" },
-            { label: "Total Cash + Offset",        value: totalCash,              color: "hsl(210,80%,65%)",  category: "Liquid",   bold: true },
-            { label: "PPOR Value",                 value: snap.ppor,              color: "hsl(188,60%,48%)",  category: "Property" },
-            { label: "Mortgage Balance",           value: -snap.mortgage,         color: "hsl(0,72%,58%)",    category: "Property" },
-            { label: "PPOR Usable Equity (80%)",   value: depositPowerResult?.pporEquity?.usableEquity ?? 0, color: "hsl(188,60%,52%)", category: "Property", bold: true },
-            { label: "IP Usable Equity (Total)",   value: (depositPowerResult?.ipEquityList ?? []).reduce((s: number, p: any) => s + p.usableEquity, 0), color: "hsl(145,55%,42%)", category: "Property" },
-            { label: "Stocks (Market Value)",      value: stocksTotal,            color: "hsl(210,80%,65%)",  category: "Investments" },
-            { label: "Crypto (Market Value)",      value: cryptoTotal,            color: "hsl(262,60%,65%)",  category: "Investments" },
-            { label: "Superannuation",             value: _totalSuperNow,         color: "hsl(43,85%,55%)",   category: "Super" },
-            { label: "Other Debts",                value: -snap.other_debts,      color: "hsl(0,72%,58%)",    category: "Liabilities" },
-            { label: "Total Deposit Power",        value: depositPowerResult?.totalDepositPower ?? 0, color: "hsl(43,90%,62%)", category: "Summary", bold: true },
-            { label: "Net Worth",                  value: netWorth,               color: "hsl(210,80%,65%)",  category: "Summary", bold: true },
-          ];
-          const categories = ["Liquid","Property","Investments","Super","Liabilities","Summary"];
-          return (
-            <div className="rounded-2xl border border-border bg-card overflow-hidden">
-              {/* Equity Settings row */}
-              <div className="flex flex-wrap items-center gap-4 px-5 py-3 border-b border-border bg-background/40">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-semibold text-foreground">Max Refinance LVR:</span>
-                  <input
-                    type="number" min={0.5} max={0.9} step={0.01}
-                    value={(maxRefinanceLVR * 100).toFixed(0)}
-                    onChange={e => setMaxRefinanceLVR(Math.min(0.9, Math.max(0.5, Number(e.target.value) / 100)))}
-                    className="w-16 px-2 py-0.5 rounded border border-border bg-background text-xs text-center font-bold"
-                    style={{ color: "hsl(188,60%,52%)" }}
-                  />
-                  <span>%</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-semibold text-foreground">Emergency Buffer:</span>
-                  <input
-                    type="number" min={0} max={200000} step={5000}
-                    value={emergencyBuffer}
-                    onChange={e => setEmergencyBuffer(Math.max(0, Number(e.target.value)))}
-                    className="w-24 px-2 py-0.5 rounded border border-border bg-background text-xs text-center font-bold"
-                    style={{ color: "hsl(0,72%,58%)" }}
-                  />
-                </div>
-                <div className="ml-auto text-xs text-muted-foreground">One ledger · One truth · All modules synced</div>
-              </div>
-              {/* Audit table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-border">
-                      {["Category","Item","Value"].map(h => (
-                        <th key={h} className="px-4 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {auditRows.map((r, i) => (
-                      <tr key={i} className={`border-b border-border/40 hover:bg-muted/10 transition-colors ${r.bold ? "bg-background/60" : ""}`}>
-                        <td className="px-4 py-1.5 text-muted-foreground whitespace-nowrap">{r.category}</td>
-                        <td className="px-4 py-1.5 text-foreground whitespace-nowrap" style={{ fontWeight: r.bold ? 700 : 400 }}>{r.label}</td>
-                        <td className="px-4 py-1.5 font-mono tabular-nums whitespace-nowrap" style={{ color: r.color, fontWeight: r.bold ? 700 : 400 }}>
-                          {r.value >= 0 ? "" : "−"}{maskValue(formatCurrency(Math.abs(r.value), true), privacyMode)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {/* Reconciliation check */}
-              <div className="px-5 py-3 border-t border-border bg-background/40 flex flex-wrap gap-6 text-xs">
-                <div>
-                  <span className="text-muted-foreground">Assets: </span>
-                  <span className="font-bold tabular-nums" style={{ color: "hsl(142,60%,52%)" }}>{maskValue(formatCurrency(totalAssets, true), privacyMode)}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Liabilities: </span>
-                  <span className="font-bold tabular-nums" style={{ color: "hsl(0,72%,58%)" }}>{maskValue(formatCurrency(totalLiab, true), privacyMode)}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Net Worth (A−L): </span>
-                  <span className="font-bold tabular-nums" style={{ color: "hsl(43,90%,62%)" }}>{maskValue(formatCurrency(netWorth, true), privacyMode)}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Deposit Power: </span>
-                  <span className="font-bold tabular-nums" style={{ color: "hsl(188,60%,52%)" }}>{maskValue(formatCurrency(depositPowerResult?.totalDepositPower ?? 0, true), privacyMode)}</span>
-                </div>
-                <div className="ml-auto">
-                  <span className={`px-2 py-0.5 rounded font-semibold ${Math.abs(totalAssets - totalLiab - netWorth) < 100 ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"}`}>
-                    {Math.abs(totalAssets - totalLiab - netWorth) < 100 ? "✓ Balanced" : "⚠ Reconciliation Gap"}
-                  </span>
-                </div>
-              </div>
-
-              {/* ────────────────────────────────────────────────────────────
-                  RECOMMENDATION INPUTS VALIDATION
-                  ─────────────────────────────────────────────────────────── */}
-              {inlineBestMove_hook?.ledgerInputs && (() => {
-                const li = inlineBestMove_hook.ledgerInputs;
-                const recRows = [
-                  { label: "Cash (everyday)",           value: li.cashOutsideOffset,          color: "hsl(210,80%,65%)",  note: "" },
-                  { label: "Offset balance",            value: li.offsetBalance,              color: "hsl(210,80%,65%)",  note: "" },
-                  { label: "Emergency buffer",          value: -li.emergencyBuffer,           color: "hsl(0,72%,58%)",    note: "Reserved" },
-                  { label: "Upcoming bills (12mo)",     value: -li.upcomingBills12mo,         color: "hsl(0,72%,58%)",    note: "Reserved" },
-                  { label: "Planned investments",       value: -li.plannedInvestmentsTotal,   color: "hsl(0,72%,58%)",    note: "Reserved" },
-                  { label: "Property deposit reserve", value: -li.propertyDepositReserve,    color: "hsl(0,72%,58%)",    note: "Reserved" },
-                  { label: "Tax reserve",              value: -li.taxReserve,                color: "hsl(0,72%,58%)",    note: "Reserved" },
-                  { label: "Forecast shortfall reserve",value: -li.forecastShortfallReserve, color: "hsl(0,72%,58%)",    note: "Reserved" },
-                  { label: "Free cash for offset",     value: li.freeCashForOffset,          color: li.freeCashForOffset > 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)", note: li.freeCashForOffset > 0 ? "✓ Available" : "✕ Fully committed", bold: true },
-                  { label: "Monthly surplus",          value: li.surplus,                    color: li.surplus >= 0 ? "hsl(142,60%,52%)" : "hsl(0,72%,58%)", note: "" },
-                  { label: "Deposit power",            value: li.depositPower,               color: "hsl(43,90%,62%)",   note: `${Math.round(li.depositReadinessPct)}% ready` },
-                ];
-                return (
-                  <div className="border-t border-border">
-                    <div className="px-5 py-2 bg-background/30 flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "hsl(43,90%,62%)" }}>Recommendation Inputs</span>
-                      <span className="text-[10px] text-muted-foreground">— all values used by Best Move V2 engine</span>
-                      <span className={`ml-auto text-[10px] px-2 py-0.5 rounded font-semibold ${
-                        li.freeCashForOffset > 0 ? "bg-emerald-500/15 text-emerald-400" : "bg-amber-500/15 text-amber-400"
-                      }`}>
-                        {li.freeCashForOffset > 0 ? `✓ ${formatCurrency(li.freeCashForOffset, true)} free` : "⚠ No idle cash"}
-                      </span>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-[10px]">
-                        <thead>
-                          <tr className="border-b border-border">
-                            {["Input", "Value", "Status"].map(h => (
-                              <th key={h} className="px-4 py-1.5 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {recRows.map((r: any, i: number) => (
-                            <tr key={i} className={`border-b border-border/30 ${r.bold ? "bg-background/60" : "hover:bg-muted/10"}`}>
-                              <td className={`px-4 py-1 whitespace-nowrap ${r.bold ? "font-semibold text-foreground/90" : "text-muted-foreground"}`}>{r.label}</td>
-                              <td className="px-4 py-1 font-mono tabular-nums whitespace-nowrap" style={{ color: r.color, fontWeight: r.bold ? 700 : 400 }}>
-                                {r.value < 0 ? "−" : ""}{maskValue(formatCurrency(Math.abs(r.value), true), privacyMode)}
-                              </td>
-                              <td className="px-4 py-1 text-muted-foreground whitespace-nowrap">{r.note}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                );
-              })()}
-
-            </div>
-          );
-        })()}
-      </div>
-
-      {/* ACTION CENTRE — Unified Strategic Brain (primary surface — stays visible)
-          Phase 7: Action Centre is the family-office command centre. It is the
-          first visible deep brain surface after the Executive Dashboard. */}
-      <div className="px-4 pb-4 db-section-action-centre">
-        <ActionCentre />
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          PHASE 7 — DEEP DIVE GROUP
-          Heavier intelligence surfaces collapsed by default. Eye lands on the
-          Executive Dashboard + Action Centre first; deeper layers open on
-          intent. Each panel preserves its current visual identity.
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4 space-y-3 db-section-deep-dive">
-        <DeepDiveSection
-          title="Financial OS Centre"
-          subtitle="Behavioural · Autonomous OS · Strategy drift (Phase 5)"
-          testId="deep-financial-os"
-        >
-          <FinancialOSCentre />
-        </DeepDiveSection>
-
-        <DeepDiveSection
-          title="Family Office Mode"
-          subtitle="Portfolio · Life · Tax · Execution · Adaptive (Phase 6)"
-          testId="deep-family-office"
-        >
-          <FamilyOfficeMode />
-        </DeepDiveSection>
-
-        <DeepDiveSection
-          title="Future Worlds"
-          subtitle="Probability-weighted macro scenarios (Phase 5)"
-          testId="deep-future-worlds"
-        >
-          <FutureWorldsPanel />
-        </DeepDiveSection>
-
-        <DeepDiveSection
-          title="Best Move · Deposit · FIRE"
-          subtitle="Companion cards aligned with the unified engine"
-          testId="deep-companion-cards"
-        >
-          <div className="space-y-3">
-            <BestMoveCard />
-            <DepositPowerCard compact />
-            <FIREPathCard />
-            <PortfolioLiveReturn />
-          </div>
-        </DeepDiveSection>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          ACTION CENTER (smart actions table) — collapsed by default (Phase 7).
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4 db-section-fire">
-        <DeepDiveSection
-          title="ROI Action Table"
-          subtitle="Top opportunities ranked by ROI · technical view"
-          testId="deep-roi-table"
-        >
-        <div className="rounded-2xl border border-border bg-card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <div className="text-base font-bold text-foreground">Action Center</div>
-              <div className="text-xs text-muted-foreground mt-0.5">Top opportunities ranked by ROI</div>
-            </div>
-            <Link href="/ai-insights"><span className="text-xs text-primary hover:underline">AI Insights →</span></Link>
-          </div>
-          <div className="db-action-table-wrap overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">#</th>
-                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Action</th>
-                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Impact</th>
-                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Difficulty</th>
-                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Time</th>
-                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Priority</th>
-                </tr>
-              </thead>
-              <tbody>
-                {smartActions.map((action, idx) => (
-                  <tr
-                    key={idx}
-                    className={`db-action-row priority-${action.priority} border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer`}
-                    onClick={() => navigate(action.href)}
-                  >
-                    <td className="px-3 py-2 font-bold text-muted-foreground">{idx + 1}</td>
-                    <td className="px-3 py-2 font-medium text-foreground">{action.title}</td>
-                    <td className="px-3 py-2 text-emerald-400">{action.impact}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{action.difficulty}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{action.time}</td>
-                    <td className="px-3 py-2">
-                      <span className={`db-priority-badge priority-badge-${action.priority} inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-                        action.priority === "high" ? "bg-red-500/15 text-red-400" :
-                        action.priority === "medium" ? "bg-amber-500/15 text-amber-400" :
-                        action.priority === "strategic" ? "bg-blue-500/15 text-blue-400" :
-                        "bg-muted text-muted-foreground"
-                      }`}>{action.priority}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        </DeepDiveSection>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          NET WORTH RECONCILIATION  (audit fix P1.1) — collapsed (Phase 7)
-          Surfaces the single source-of-truth NW alongside the engine's view
-          so users can confirm no silent gap has reopened.
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4">
-       <DeepDiveSection
-          title="Net Worth Reconciliation"
-          subtitle="Audit P1.1 — single source-of-truth NW vs engine view"
-          testId="deep-nw-reconciliation"
-       >
-        <div className={`rounded-2xl border p-5 ${
-          reconcileNetWorth(canonicalNw, canonicalNw.netWorth).status === "PASS"
-            ? "border-emerald-500/30 bg-emerald-500/5"
-            : "border-rose-500/40 bg-rose-500/5"
-        }`}>
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-bold text-foreground">Net Worth Reconciliation</div>
-            <div className={`text-xs font-semibold ${
-              reconcileNetWorth(canonicalNw, canonicalNw.netWorth).status === "PASS"
-                ? "text-emerald-600" : "text-rose-600"
-            }`}>
-              {reconcileNetWorth(canonicalNw, canonicalNw.netWorth).status === "PASS" ? "[OK] PASS" : "[X] FAIL"}
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-3 text-xs">
-            <div>
-              <div className="text-muted-foreground">Dashboard NW</div>
-              <div className="text-base font-bold">{formatCurrency(Math.round(canonicalNw.netWorth), false)}</div>
-            </div>
-            <div>
-              <div className="text-muted-foreground">Decision Engine NW</div>
-              <div className="text-base font-bold">{formatCurrency(Math.round(canonicalNw.netWorth), false)}</div>
-            </div>
-            <div>
-              <div className="text-muted-foreground">Difference</div>
-              <div className="text-base font-bold">$0</div>
-            </div>
-          </div>
-          <div className="mt-3 text-[11px] text-muted-foreground">
-            Assets {formatCurrency(Math.round(canonicalNw.totalAssets), false)} - Liabilities {formatCurrency(Math.round(canonicalNw.totalLiabilities), false)}.
-            Includes cars {formatCurrency(canonicalNw.assets.cars, false)}, overseas property {formatCurrency(canonicalNw.assets.iranProperty, false)}, other assets {formatCurrency(canonicalNw.assets.otherAssets, false)}, other debts {formatCurrency(canonicalNw.liabilities.otherDebts, false)}.
-            {canonicalNw.plannedIpEquity !== 0 && (
-              <> Planned IP equity {formatCurrency(canonicalNw.plannedIpEquity, false)} is excluded from current NW until settlement.</>
-            )}
-          </div>
-        </div>
-       </DeepDiveSection>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          AI INSIGHTS
-          ═════════════════════════════════════════════════════════════════ */}
-      <div className="px-4 pb-4 db-section-ai">
-        <AIInsightsCard
-          pageKey="dashboard"
-          pageLabel="Dashboard Overview"
-          getData={() => ({
-            netWorth, surplus, savingsRate, propertyEquity,
-            totalDebt: totalLiab, passiveIncome,
-            fireProgress: fireProgressPct.toFixed(0),
-            year10NW, ngAnnualBenefit: ngSummary.totalAnnualTaxBenefit,
-            riskScore, riskLabel,
-          })}
-        />
-      </div>
+      {/* AI Insights body module relocated off the homepage — it surfaced
+          deep-analysis labels (Future Worlds, Ledger Audit, AI Insights)
+          and felt like a content module rather than orientation. The
+          Explore strip above already points users to the dedicated
+          insights surfaces. */}
 
       {/* Mobile bottom-sheet tooltip — renders on tap for screens < 768px */}
       <MobileChartSheet data={mobileTooltipData} onClose={() => setMobileTooltipData(null)} />

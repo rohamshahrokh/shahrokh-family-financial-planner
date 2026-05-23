@@ -26,6 +26,7 @@ import {
 } from "@/lib/finance";
 import { runCashEngine } from "@/lib/cashEngine";
 import { computeCanonicalNetWorth } from "@/lib/canonicalNetWorth";
+import { useActiveRegime } from "@/hooks/useActiveRegime";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend, LineChart, Line,
@@ -74,6 +75,13 @@ export default function TimelinePage() {
   const { toast } = useToast();
   // Use global chartView from store (controlled by the header toggle)
   const { chartView: view } = useAppStore();
+  // Active tax regime — drives negative gearing scenario across all engines.
+  // #FWL_Critical_StatePersistence_FundingSource_TaxRegime_Fix
+  const { selector: activeRegimeSelector } = useActiveRegime();
+  const activeScenario: 'current_law' | 'proposed_reform' | 'custom' =
+    activeRegimeSelector === 'PROPOSED_2027_REFORM' ? 'proposed_reform'
+    : activeRegimeSelector === 'CUSTOM_STRESS_TEST' ? 'custom'
+    : 'current_law';
   const [activeChart, setActiveChart] = useState<'networth' | 'assets' | 'cashflow' | 'equity'>('networth');
   const [showPropertyDetail, setShowPropertyDetail] = useState(false);
 
@@ -179,15 +187,17 @@ export default function TimelinePage() {
   const liveStocks = stocksTotal > 0 ? stocksTotal : snap.stocks;
   const liveCrypto = cryptoTotal > 0 ? cryptoTotal : snap.crypto;
 
-  // ── NG summary for real cash engine
+  // ── NG summary for real cash engine (consumes active tax regime)
   const ngSummary = useMemo<NGSummary>(() =>
     calcNegativeGearing({
       properties: properties as any[],
       annualSalaryIncome: safeNum(snap.monthly_income) * 12,
       refundMode: 'lump-sum',
+      jointOwnership: true,
+      scenario: activeScenario,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [properties, snap.monthly_income]
+    [properties, snap.monthly_income, activeScenario]
   );
 
   const projection: YearlyProjection[] = useMemo(() =>

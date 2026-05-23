@@ -27,6 +27,9 @@ import FIREPathPage from "./fire-path";
 import MonteCarloDashboard from "@/components/MonteCarloDashboard";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link } from "wouter";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
+import { registerTrace } from "@/lib/auditMode/auditRegistry";
+import { buildWealthStrategyTraces } from "@/lib/auditMode/engineTraces/wealthStrategyTraces";
 import html2canvas from 'html2canvas';
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -121,7 +124,8 @@ function KpiCard({
   icon,
 }: {
   label: string;
-  value: string;
+  /** Accept ReactNode so callers can wrap the value in an AuditableMetric. */
+  value: string | React.ReactNode;
   sub?: string;
   color?: string;
   icon?: React.ReactNode;
@@ -2321,10 +2325,35 @@ function AICoach({
     stocksVal +
     cryptoVal;
 
-  const fireProgress = Math.min(
-    100,
-    (investableAssets / Math.max(1, (safeNum(snap.monthly_income) * 12) / 0.04)) * 100
-  );
+  const fireTargetCapital = Math.max(1, (safeNum(snap.monthly_income) * 12) / 0.04);
+  const fireProgress = Math.min(100, (investableAssets / fireTargetCapital) * 100);
+
+  // Audit Mode — register Wealth Strategy Hub Data Summary KPIs.
+  const totalAssetsWS =
+    safeNum(snap.ppor) +
+    safeNum(snap.cash) +
+    safeNum(snap.offset_balance) +
+    safeNum(snap.super_balance) +
+    safeNum(snap.stocks) +
+    safeNum(snap.crypto) +
+    stocksVal +
+    cryptoVal +
+    safeNum(snap.cars) +
+    safeNum(snap.iran_property);
+  const totalDebtWS = safeNum(snap.mortgage) + safeNum(snap.other_debts);
+
+  useEffect(() => {
+    buildWealthStrategyTraces({
+      cash: safeNum(snap.cash),
+      monthlyExpenses: safeNum(snap.monthly_expenses),
+      monthlyIncome: safeNum(snap.monthly_income),
+      monthlySurplus,
+      totalAssets: totalAssetsWS,
+      totalDebt: totalDebtWS,
+      investableAssets,
+      fireTarget: fireTargetCapital,
+    }).forEach(registerTrace);
+  }, [snap, monthlySurplus, totalAssetsWS, totalDebtWS, investableAssets, fireTargetCapital]);
 
   const getData = useCallback(
     () => ({
@@ -2380,11 +2409,35 @@ function AICoach({
       <div className="bg-card border border-border rounded-2xl p-5">
         <SectionTitle>Data Summary (Sent to AI)</SectionTitle>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <KpiCard label="Net Worth" value={formatCurrency(netWorth)} />
+          <KpiCard
+            label="Net Worth"
+            value={<AuditableMetric traceId="wealth-strategy:net-position">{formatCurrency(netWorth)}</AuditableMetric>}
+          />
           <KpiCard label="Monthly Surplus" value={formatCurrency(monthlySurplus)} />
-          <KpiCard label="Savings Rate" value={`${savingsRate.toFixed(1)}%`} />
-          <KpiCard label="FIRE Progress" value={`${fireProgress.toFixed(1)}%`} />
-          <KpiCard label="Emergency Months" value={safeNum(snap.monthly_expenses) > 0 ? (safeNum(snap.cash) / safeNum(snap.monthly_expenses)).toFixed(1) : "—"} />
+          <KpiCard
+            label="Savings Rate"
+            value={<AuditableMetric traceId="wealth-strategy:savings-rate">{`${savingsRate.toFixed(1)}%`}</AuditableMetric>}
+          />
+          <KpiCard
+            label="FIRE Progress"
+            value={<AuditableMetric traceId="wealth-strategy:freedom-progress">{`${fireProgress.toFixed(1)}%`}</AuditableMetric>}
+          />
+          <KpiCard
+            label="Cash Buffer"
+            value={
+              <AuditableMetric traceId="wealth-strategy:cash-buffer">
+                {safeNum(snap.monthly_expenses) > 0 ? `${(safeNum(snap.cash) / safeNum(snap.monthly_expenses)).toFixed(1)} mo` : "—"}
+              </AuditableMetric>
+            }
+          />
+          <KpiCard
+            label="Debt/Assets"
+            value={
+              <AuditableMetric traceId="wealth-strategy:debt-to-assets">
+                {totalAssetsWS > 0 ? `${((totalDebtWS / totalAssetsWS) * 100).toFixed(1)}%` : "—"}
+              </AuditableMetric>
+            }
+          />
           <KpiCard label="Properties" value={String(properties.length)} />
           <KpiCard label="Stocks Value" value={formatCurrency(stocksVal)} />
           <KpiCard label="Crypto Value" value={formatCurrency(cryptoVal)} />
@@ -2602,7 +2655,7 @@ function StatusChip({ status }: { status: StabilityStatus }) {
   );
 }
 
-function SignalTile({ label, value, tone }: { label: string; value: string; tone: StabilityStatus }) {
+function SignalTile({ label, value, tone }: { label: string; value: React.ReactNode; tone: StabilityStatus }) {
   const t = STATUS_TONE[tone];
   return (
     <div className="rounded-xl border border-border bg-background/40 p-3">
@@ -3044,6 +3097,34 @@ export default function WealthStrategyPage() {
     };
   }, [snap, properties, stocks, crypto]);
 
+  // ── Audit Mode: register the Wealth Strategy Hub *hub-level* live traces.
+  //    The QA matrix calls out that the visible hero metrics (Household Net
+  //    Position, Cash Buffer, Savings Rate, Debt/Assets, Freedom Progress) and
+  //    the Data Summary Net Worth tile must show LIVE values when clicked
+  //    under Audit Mode — not the boot-time architecture-ready placeholder.
+  //
+  //    These traces are built from `derived` (already computed above for
+  //    rendering) so no engine math is duplicated. `registerTrace` overwrites
+  //    any existing entry under the same id, which is exactly what we want:
+  //    placeholder factories registered at boot are replaced with live values
+  //    as soon as this page mounts. Re-runs when any source signal changes.
+  useEffect(() => {
+    buildWealthStrategyTraces({
+      cash: derived.liquidity,
+      monthlyExpenses: derived.monthlyExpenses,
+      monthlyIncome: derived.monthlyIncome,
+      monthlySurplus: derived.monthlySurplus,
+      totalAssets: derived.totalAssets,
+      totalDebt: derived.totalDebt,
+      investableAssets: derived.investable,
+      fireTarget: derived.requiredFIRE,
+    }).forEach(registerTrace);
+  }, [
+    derived.liquidity, derived.monthlyExpenses, derived.monthlyIncome,
+    derived.monthlySurplus, derived.totalAssets, derived.totalDebt,
+    derived.investable, derived.requiredFIRE,
+  ]);
+
   // ─── Status classifications (calm advisor tone) ────────────────────────────
   const emergencyStatus: StabilityStatus =
     derived.monthsBuffer >= derived.bufferTargetMo ? "good"
@@ -3238,7 +3319,7 @@ export default function WealthStrategyPage() {
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-2xl sm:text-3xl font-bold text-foreground">
-                    {fmtAUD0(derived.netWorth)}
+                    <AuditableMetric traceId="wealth-strategy:net-position">{fmtAUD0(derived.netWorth)}</AuditableMetric>
                   </span>
                   <span className="text-xs text-muted-foreground">net position</span>
                 </div>
@@ -3251,10 +3332,26 @@ export default function WealthStrategyPage() {
             </p>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-              <SignalTile label="Cash buffer"        value={`${derived.monthsBuffer.toFixed(1)} mo`}  tone={emergencyStatus} />
-              <SignalTile label="Savings rate"       value={`${derived.savingsRate.toFixed(0)}%`}     tone={cashflowStatus} />
-              <SignalTile label="Debt / assets"      value={`${derived.debtToAsset.toFixed(0)}%`}     tone={debtStatus} />
-              <SignalTile label="Freedom progress"   value={`${derived.fireProgressPct.toFixed(0)}%`} tone={fireStatus} />
+              <SignalTile
+                label="Cash buffer"
+                value={<AuditableMetric traceId="wealth-strategy:cash-buffer">{`${derived.monthsBuffer.toFixed(1)} mo`}</AuditableMetric>}
+                tone={emergencyStatus}
+              />
+              <SignalTile
+                label="Savings rate"
+                value={<AuditableMetric traceId="wealth-strategy:savings-rate">{`${derived.savingsRate.toFixed(0)}%`}</AuditableMetric>}
+                tone={cashflowStatus}
+              />
+              <SignalTile
+                label="Debt / assets"
+                value={<AuditableMetric traceId="wealth-strategy:debt-to-assets">{`${derived.debtToAsset.toFixed(0)}%`}</AuditableMetric>}
+                tone={debtStatus}
+              />
+              <SignalTile
+                label="Freedom progress"
+                value={<AuditableMetric traceId="wealth-strategy:freedom-progress">{`${derived.fireProgressPct.toFixed(0)}%`}</AuditableMetric>}
+                tone={fireStatus}
+              />
             </div>
 
             <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 flex items-start gap-3">

@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, Compass, ShieldAlert, Target, TrendingUp, Layers } from 'lucide-react';
+import { SectionExplainer } from '@/components/intelligence/SectionExplainer';
 import { useForecastStore } from '@/lib/forecastStore';
 import { inferBehaviouralProfile, type BehaviouralProfile } from '@/lib/behaviouralEngine';
 import { runAutonomousOS, type OSReport } from '@/lib/autonomousOS';
@@ -110,7 +111,10 @@ export default function FinancialOSCentre() {
             <Compass className="w-4 h-4 text-indigo-300" />
           </div>
           <div>
-            <p className="text-sm font-bold text-foreground">Financial OS Centre</p>
+            <p className="text-sm font-bold text-foreground inline-flex items-center gap-1.5">
+              Financial OS Centre
+              <SectionExplainer metricId="financial-os" />
+            </p>
             <p className="text-[10px] text-muted-foreground">
               Behaviour · Autonomous OS · Readiness · Strategy Drift · {signals.length} signals
             </p>
@@ -124,7 +128,10 @@ export default function FinancialOSCentre() {
         <section className="p-4">
           <div className="flex items-center gap-2 mb-2">
             <Activity className="w-3.5 h-3.5 text-muted-foreground" />
-            <p className="text-xs font-semibold text-foreground">Behaviour profile</p>
+            <p className="text-xs font-semibold text-foreground inline-flex items-center gap-1.5">
+              Behaviour profile
+              <SectionExplainer metricId="behavioural-drift" size={11} />
+            </p>
           </div>
           <p className="text-sm font-bold text-foreground">{behavioural.primaryLabel}</p>
           <p className="text-xs text-muted-foreground mt-1">{behavioural.narrative}</p>
@@ -166,7 +173,10 @@ export default function FinancialOSCentre() {
       <section className="px-4 py-4 border-t border-border">
         <div className="flex items-center gap-2 mb-2">
           <ShieldAlert className="w-3.5 h-3.5 text-muted-foreground" />
-          <p className="text-xs font-semibold text-foreground">Autonomous OS findings</p>
+          <p className="text-xs font-semibold text-foreground inline-flex items-center gap-1.5">
+            Autonomous OS findings
+            <SectionExplainer metricId="autonomous-os" size={11} />
+          </p>
           <span className="text-[10px] text-muted-foreground">({osReport.findings.length})</span>
         </div>
         {osReport.findings.length === 0 ? (

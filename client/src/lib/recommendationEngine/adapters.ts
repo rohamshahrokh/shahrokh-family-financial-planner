@@ -22,6 +22,12 @@ export function fromBestMoveLedger(ledger: BestMoveLedger): UnifiedSignals {
     monthlyIncome: ledger.monthlyIncome,
     monthlyExpenses: ledger.monthlyExpenses,
     monthlySurplus: surplus,
+    // Best Move builds `monthlyExpenses` from the canonical surplus selector
+    // (see computeBestMoveV2 — `monthlyExpenses = monthlyIncome − canonicalSurplus`).
+    // That means debt service is already baked into expenses; do NOT subtract
+    // it again when computing the safe deployable surplus cap.
+    expensesIncludeDebt: true,
+    monthlyDebtService: 0,
     rohamGrossAnnual: ledger.rohamGrossAnnual,
     superContribAnnualised: ledger.superContribAnnual,
     superCapRemaining: Math.max(0, SUPER_CAP - (ledger.superContribAnnual ?? 0)),
@@ -287,6 +293,12 @@ export function fromDebtPrefsDebts(rawDebts: any[] | undefined | null): Partial<
         type: d.type,
         expiryDateISO: d.expiryDateISO,
         taxDeductible: d.taxDeductible === true,
+        // Preserve planned/future markers so the recommendation engine can
+        // partition CURRENT vs PLANNED debt. The Best Move surface only ever
+        // looks at the CURRENT partition.
+        planned: d.planned === true || d.settlementDateISO != null
+          || /planned|forecast/i.test(String(d.id ?? '') + ' ' + String(d.name ?? '')),
+        settlementDateISO: d.settlementDateISO,
       };
     })
     .filter(d => d.balance > 0);
