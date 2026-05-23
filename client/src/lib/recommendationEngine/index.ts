@@ -11,4 +11,3 @@ export * from './adapters';
 export * from './history';
 export * from './surfaces';
 export * from './bestMoveBridge';
-export * from './quickDecisionStore';
