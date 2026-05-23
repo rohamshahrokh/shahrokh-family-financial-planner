@@ -86,6 +86,8 @@ import {
   type PlanFeasibilityResult,
 } from '@/lib/planFeasibility';
 import type { FundingResolutionResult } from '@/lib/fundingResolutionAdvisor';
+import PlanExecutionCard from '@/components/PlanExecutionCard';
+import type { LiquidityInputs as PlanExecutionLiquidityInputs } from '@/lib/planExecutionStatus';
 
 // ─── Public props ────────────────────────────────────────────────────────────
 
@@ -185,6 +187,19 @@ export interface ExecutiveDashboardProps {
    * #FWL_Funding_Gap_Resolution_Advisor
    */
   fundingResolution?: FundingResolutionResult | null;
+  /**
+   * Year-end Liquidity inputs for the PLAN EXECUTION dual-status card.
+   * Sourced from the canonical cash bridge (`projection[i].cashBridge`) or
+   * the equivalent `CashFlowYear` row via
+   * `liquidityInputsFromCashBridge` / `liquidityInputsFromCashFlowYear`.
+   * When provided AND `planFeasibility` is also provided, the Plan
+   * Execution Capacity panel renders the dual-status card alongside the
+   * canonical Plan Feasibility card.
+   * #FWL_Plan_Execution_Dual_Status
+   */
+  planExecutionLiquidity?: PlanExecutionLiquidityInputs | null;
+  /** Year label the dual-status card applies to (e.g. 2026). */
+  planExecutionYear?: number | null;
   /** Deterministic 10y net worth — compatibility only, never rendered as primary. */
   year10NW: number;
   /** Canonical Monte Carlo P50 (median) net worth at the selected horizon. */
@@ -1903,6 +1918,26 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
           feasibility={p.planFeasibility}
           resolution={p.fundingResolution ?? null}
         />
+      ) : null}
+
+      {/* ── PLAN EXECUTION — dual-status (Funding + Liquidity) ─────────────
+            Sits next to the canonical PlanFeasibilityCard. PlanFeasibilityCard
+            answers "Can I fund the plan?" (Funding); this card adds a separate
+            "What's my year-end cash?" surface (Liquidity) so a Fully Funded
+            plan with negative closing cash can no longer pass without warning.
+            INFORM-ONLY: never gates engines, save, forecast, Monte Carlo, or
+            FIRE. Funding side is a passthrough from PlanFeasibilityResult.
+            Liquidity side is a passthrough from the canonical cash bridge.
+            #FWL_Plan_Execution_Dual_Status
+      */}
+      {p.planFeasibility && p.planExecutionLiquidity ? (
+        <div className="px-3 pb-3 pt-2 border-t border-border/25">
+          <PlanExecutionCard
+            feasibility={p.planFeasibility}
+            liquidity={p.planExecutionLiquidity}
+            year={p.planExecutionYear ?? new Date().getFullYear()}
+          />
+        </div>
       ) : null}
     </section>
   );

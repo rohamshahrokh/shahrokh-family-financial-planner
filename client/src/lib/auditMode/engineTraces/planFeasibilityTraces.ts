@@ -22,6 +22,10 @@ import {
   PLAN_FEASIBILITY_WARNING_ASSUMPTION,
   planFeasibilityWarningDetail,
 } from "../../planFeasibility";
+import {
+  derivePlanExecutionStatus,
+  type LiquidityInputs,
+} from "../../planExecutionStatus";
 
 export const PLAN_FEASIBILITY_TRACE_ID = "dashboard:plan-feasibility";
 
@@ -34,6 +38,17 @@ const ts = () => new Date().toISOString();
 
 export interface PlanFeasibilityTraceArgs {
   result: PlanFeasibilityResult;
+  /**
+   * Optional Year-End Liquidity inputs from the canonical cash bridge.
+   * When provided, the trace appends a PLAN EXECUTION dual-status section
+   * that distinguishes Funding Status (this PlanFeasibilityResult) from
+   * Liquidity Status (year-end closing cash). The existing trace shape is
+   * preserved for back-compat with `script/test-plan-feasibility.ts`.
+   * #FWL_Plan_Execution_Dual_Status
+   */
+  liquidity?: LiquidityInputs | null;
+  /** Year label to surface in the dual-status section. */
+  year?: number | null;
 }
 
 /**
@@ -103,6 +118,45 @@ export function buildPlanFeasibilityTrace(args: PlanFeasibilityTraceArgs): Calcu
         },
       ];
 
+  // ── PLAN EXECUTION — dual-status section ─────────────────────────────────
+  // Surfaces Funding Status and Liquidity Status as two distinct rows so the
+  // audit trace text mirrors the PlanExecutionCard UI (#FWL_Plan_Execution_Dual_Status).
+  const dualStatus = args.liquidity
+    ? derivePlanExecutionStatus(r, args.liquidity)
+    : null;
+  const dualStatusRows = dualStatus
+    ? [
+        { label: "─ PLAN EXECUTION (dual-status) ─", value: "" },
+        {
+          label: "Q1: Can I fund all planned acquisitions and investments?",
+          value: `${dualStatus.funding.icon} ${dualStatus.funding.label}`,
+          source: "Funding Status — passthrough from PlanFeasibilityResult.status (this same trace's Funding Gap calculation above)",
+        },
+        {
+          label: "Q2: What is my remaining cash after executing the plan?",
+          value: `${dualStatus.liquidity.icon} ${dualStatus.liquidity.label}`,
+          source: "Liquidity Status — derived from year-end (closing) cash on the canonical cash bridge. Closing > $50k: Healthy; $0–$50k: Tight; < $0: Liquidity Stress.",
+        },
+        { label: "Opening Cash", value: fmt$(dualStatus.liquidity.openingCash),
+          source: "cashBridge.startCash (canonical)" },
+        { label: "Operating Cashflow", value: fmt$(dualStatus.liquidity.operatingCashflow),
+          source: "income + rentalIncome + ngTaxBenefit − totalExpenses − pporRepayments − investmentLoanRepayments (canonical cash bridge)" },
+        { label: "Investment Allocations", value: fmt$(-Math.abs(dualStatus.liquidity.investmentAllocations)),
+          source: "plannedStockBuy + plannedCryptoBuy + stockDCAOutflow + cryptoDCAOutflow (canonical cash bridge)" },
+        { label: "Property Acquisition Cash Used", value: fmt$(-Math.abs(dualStatus.liquidity.propertyAcquisitionCashUsed)),
+          source: "propertyPurchaseCashUsed + propertyBuyingCosts (canonical cash bridge — equity-release portion excluded)" },
+        { label: "Closing Cash", value: fmt$(dualStatus.liquidity.closingCash),
+          source: "cashBridge.endingBalance (canonical)" },
+        ...(dualStatus.showContextualExplanation
+          ? [{
+              label: "Note (Fully Funded + Liquidity Stress)",
+              value: dualStatus.contextualExplanation ?? "",
+              source: "Plan Execution dual-status — funding is fully fundable but year-end cash is negative",
+            }]
+          : []),
+      ]
+    : [];
+
   return {
     id: PLAN_FEASIBILITY_TRACE_ID,
     label: "Plan Feasibility — Funding Gap",
@@ -139,6 +193,7 @@ export function buildPlanFeasibilityTrace(args: PlanFeasibilityTraceArgs): Calcu
         source: "Planning horizon over which Required Liquidity was summed" },
 
       ...warningRows,
+      ...dualStatusRows,
     ],
     assumptions: [
       { label: "Plan Feasibility is a UI / planning-validation layer — it does NOT change any engine calculation.", source: "client/src/lib/planFeasibility.ts (no engine imports)" },

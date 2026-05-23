@@ -26,6 +26,10 @@ import {
   computeFundingResolution,
   type FundingResolutionResult,
 } from "@/lib/fundingResolutionAdvisor";
+import {
+  liquidityInputsFromCashFlowYear,
+  type LiquidityInputs as PlanExecutionLiquidityInputs,
+} from "@/lib/planExecutionStatus";
 import { applyFundingToProperties, buildAdapterContext } from "@/lib/propertyFundingAdapter";
 import { useActiveRegime } from "@/hooks/useActiveRegime";
 // Map the active regime selector → calcNegativeGearing scenario value.
@@ -1429,9 +1433,26 @@ export default function DashboardPage() {
     });
   }, [properties, stocks, cryptos, snap.cash, snap.offset_balance, snap.savings_cash, snap.emergency_cash, cashFlowAnnual]);
 
+  // ─── PLAN EXECUTION — Year-end Liquidity inputs ─────────────────────────
+  // Passthrough only — values come from the canonical CashFlowYear row for
+  // the current year. Opening cash is `totalLiquidCash` (today's cash +
+  // offset). The cash bridge already drives the chart + Cashflow
+  // Reconciliation trace, so this surface is consistent with both.
+  // #FWL_Plan_Execution_Dual_Status
+  const planExecutionYear: number = new Date().getFullYear();
+  const planExecutionLiquidity: PlanExecutionLiquidityInputs | null = useMemo(() => {
+    const row = (cashFlowAnnual as any[]).find((a: any) => a.year === planExecutionYear);
+    if (!row) return null;
+    return liquidityInputsFromCashFlowYear(row, totalLiquidCash);
+  }, [cashFlowAnnual, totalLiquidCash, planExecutionYear]);
+
   useEffect(() => {
-    registerAuditTrace(buildPlanFeasibilityTrace({ result: planFeasibility }));
-  }, [planFeasibility]);
+    registerAuditTrace(buildPlanFeasibilityTrace({
+      result: planFeasibility,
+      liquidity: planExecutionLiquidity,
+      year: planExecutionYear,
+    }));
+  }, [planFeasibility, planExecutionLiquidity, planExecutionYear]);
 
   // ─── Funding Gap Resolution Advisor (advisory layer) ────────────────────
   // Only generates candidate solutions when planFeasibility reports a gap.
@@ -1479,6 +1500,7 @@ export default function DashboardPage() {
       requiredLiquidity:  planFeasibility.requiredLiquidity,
     }));
   }, [fundingResolution, planFeasibility.availableLiquidity, planFeasibility.requiredLiquidity]);
+
 
   // ─── Master CF data with event markers ───────────────────────────────────
   const eventsByMonthKey = useMemo<Record<string, string[]>>(() => {
@@ -2267,6 +2289,13 @@ export default function DashboardPage() {
     // Feasibility card when funding gap < 0. Inform-only.
     // #FWL_Funding_Gap_Resolution_Advisor
     fundingResolution,
+    // ── PLAN EXECUTION dual-status (Funding + Liquidity) ──
+    // Passthrough liquidity inputs for the current-year cash bridge;
+    // ExecutiveDashboard renders the PlanExecutionCard alongside the
+    // canonical PlanFeasibilityCard when both are present.
+    // #FWL_Plan_Execution_Dual_Status
+    planExecutionLiquidity,
+    planExecutionYear,
     year10NW,
     trajectoryP50,
     trajectoryYear,
