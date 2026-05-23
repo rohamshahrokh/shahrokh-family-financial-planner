@@ -497,6 +497,29 @@ export default function BestMoveCard() {
                         : <>Opportunity cost: {r.opportunityCost.description}</>}
                     </div>
                   )}
+                  {/* P1 — structured score breakdown audit trace */}
+                  {r.scoreBreakdown && (
+                    <details className="text-[10px] text-slate-500" data-testid="score-breakdown">
+                      <summary className="cursor-pointer text-slate-400 hover:text-slate-300">
+                        Score breakdown · base {Math.round(r.scoreBreakdown.baseScore)} → final {Math.round(r.scoreBreakdown.finalScore)} · pillar {r.scoreBreakdown.pillarRank}
+                      </summary>
+                      {r.scoreBreakdown.modifiers.length === 0 ? (
+                        <div className="pl-2 pt-1 text-slate-500">No soft modifiers applied.</div>
+                      ) : (
+                        <ul className="pl-2 pt-1 space-y-0.5">
+                          {r.scoreBreakdown.modifiers.map((m, i) => (
+                            <li key={i} className="flex items-start gap-1.5">
+                              <span className={`tabular-nums font-mono ${m.multiplier >= 1 ? 'text-emerald-400/80' : 'text-rose-400/80'}`}>
+                                ×{m.multiplier.toFixed(2)}
+                              </span>
+                              <span className="text-slate-400">{m.reason}</span>
+                              <span className="text-slate-600">[{m.source}]</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </details>
+                  )}
                   {r.reviewTrigger?.reviewByISO && (
                     <div className="text-[9px] text-slate-500">
                       Review by {new Date(r.reviewTrigger.reviewByISO).toLocaleDateString()}

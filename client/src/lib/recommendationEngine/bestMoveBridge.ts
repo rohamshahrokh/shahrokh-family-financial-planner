@@ -20,6 +20,7 @@ import {
 } from './adapters';
 import type { UnifiedRecommendationResult, UnifiedSignals, Recommendation } from './types';
 import { snapshotHistory, type RecommendationChange } from './history';
+import { readLatestQuickDecision } from './quickDecisionStore';
 
 // We rebuild the ledger from BestMoveResult.ledgerInputs (everything we need
 // for unified signals is already in the audit panel inputs).
@@ -124,6 +125,13 @@ export async function computeUnifiedBestMove(args: {
       // ignore — legacy fallback path handles missing portfolio
     }
   }
+  // P1 — actual dashboard consumption of scenarioV2 QuickDecisionOutput.
+  // If the caller didn't pass an explicit `quickDecision`, fall back to the
+  // session-scoped quickDecisionStore that the /decision page writes to.
+  // The store is empty when the user has never run a quick decision this
+  // session — the engine then behaves exactly as before (legacy fallback).
+  // This is read-only consumption — no scenarioV2 generation is invoked.
+  const quickDecision = args.quickDecision ?? readLatestQuickDecision();
   const signals = mergeSignals(
     baseSignals,
     fromRiskRadar(args.riskRadar),
@@ -139,7 +147,7 @@ export async function computeUnifiedBestMove(args: {
     fromExecutionOS(args.executionOS),
     fromAdaptiveLearning(args.adaptive),
     fromDebtPrefsDebts(debtPrefsDebts),
-    fromQuickDecision(args.quickDecision),
+    fromQuickDecision(quickDecision),
   );
   const unified = computeUnifiedRecommendations(signals);
   const changes = snapshotHistory(unified);

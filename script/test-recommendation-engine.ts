@@ -29,6 +29,9 @@ import {
   fromQuickDecision,
   mergeSignals,
   fromBestMoveLedger,
+  writeLatestQuickDecision,
+  readLatestQuickDecision,
+  __resetQuickDecisionStoreForTests,
   type UnifiedSignals,
 } from '../client/src/lib/recommendationEngine';
 
@@ -620,6 +623,49 @@ section('P1 — fromQuickDecision adapter');
   // Accepts 0..1 scores too.
   const overlay2 = fromQuickDecision({ ranked: [{ label: 'x', score: { score: 0.65 } }] });
   assert('adapter passes through 0..1 confidence', overlay2.decisionConfidence === 0.65);
+}
+
+// ─── Test 23: P1 — quickDecisionStore round-trip + auto-consumption ────────
+section('P1 — scenarioV2 quickDecisionStore actual consumption wiring');
+{
+  __resetQuickDecisionStoreForTests();
+  assert('store starts empty', readLatestQuickDecision() === null);
+
+  // Simulate /decision page publishing a winner.
+  const fakeQd = {
+    ranked: [{ label: 'ETF 70 / Offset 30 — DCA 12mo', score: { score: 81 } }],
+  };
+  writeLatestQuickDecision(fakeQd);
+  assert('store retains last write', readLatestQuickDecision() === fakeQd);
+
+  // Auto-consume the store via fromQuickDecision(readLatestQuickDecision())
+  // — exactly the path the bridge takes when no explicit quickDecision is
+  // passed in. We bypass computeUnifiedBestMove (which calls Supabase) and
+  // assert on computeUnifiedRecommendations directly because the unit-test
+  // harness has no live network. The wiring under test is identical: bridge
+  // does `args.quickDecision ?? readLatestQuickDecision()` then merges via
+  // `fromQuickDecision`.
+  const baseSignalsForBridge: UnifiedSignals = {
+    ...HEALTHY,
+  };
+  const auto = fromQuickDecision(readLatestQuickDecision());
+  const mergedAuto = mergeSignals(baseSignalsForBridge, auto);
+  const resultAuto = computeUnifiedRecommendations(mergedAuto);
+  assert('auto-consumed result surfaces decision_engine in signalCoverage',
+    resultAuto.signalCoverage.includes('decision_engine'));
+  assert('auto-consumed signals carry decisionTopAction from the store',
+    mergedAuto.decisionTopAction === 'ETF 70 / Offset 30 — DCA 12mo');
+  assert('auto-consumed signals carry normalised decisionConfidence',
+    typeof mergedAuto.decisionConfidence === 'number' &&
+      Math.abs(mergedAuto.decisionConfidence! - 0.81) < 1e-6);
+
+  // Empty store → engine falls back, no decision_engine signal.
+  __resetQuickDecisionStoreForTests();
+  const empty = fromQuickDecision(readLatestQuickDecision());
+  const mergedEmpty = mergeSignals(baseSignalsForBridge, empty);
+  const resultEmpty = computeUnifiedRecommendations(mergedEmpty);
+  assert('empty store → no decision_engine signal',
+    !resultEmpty.signalCoverage.includes('decision_engine'));
 }
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
