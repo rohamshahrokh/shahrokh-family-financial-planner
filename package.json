@@ -34,6 +34,7 @@
     "test:cashflow-chart-funding-source": "tsx script/test-cashflow-chart-funding-source.ts",
     "test:plan-feasibility": "tsx script/test-plan-feasibility.ts",
     "test:funding-resolution": "tsx script/test-funding-resolution.ts",
+    "test:plan-execution-dual-status": "tsx script/test-plan-execution-dual-status.ts",
     "test:persistent-user-defaults": "tsx script/test-persistent-user-defaults.ts",
     "test:persistent-user-defaults-backend": "tsx script/test-persistent-user-defaults-backend.ts",
     "test:user-defaults-audit-affordance": "tsx script/test-user-defaults-audit-affordance.ts",
