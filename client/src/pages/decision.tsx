@@ -121,6 +121,12 @@ import {
 } from "@/lib/auditMode/engineTraces";
 import { buildStrategyIntelligence } from "@/lib/scenarioV2/decisionEngine/strategyIntelligence";
 
+// P1 — publish the latest quick-decision result to the session-scoped store
+// so dashboard recommendation surfaces (BestMoveCard, ActionCentre, etc.)
+// can consume it via computeUnifiedBestMove. The store is in-memory only;
+// no persistence, no new generation path.
+import { writeLatestQuickDecision } from "@/lib/recommendationEngine";
+
 // ─── Formatting helpers (mask-aware) ─────────────────────────────────────────
 
 const pctRaw = (n: number, d = 1) => `${(n * 100).toFixed(d)}%`;
@@ -359,6 +365,9 @@ function QuickDecisionTab() {
         behaviouralPriorities: priorities,
       });
       setOutput(out);
+      // P1 — publish to the session-scoped store so dashboard recommendation
+      // surfaces consume the strongest available decision output.
+      writeLatestQuickDecision(out);
       if (out.ranked.length > 0) setExpandedCandidateId(out.ranked[0].id);
     } catch (err: any) {
       setError(err?.message ?? String(err));

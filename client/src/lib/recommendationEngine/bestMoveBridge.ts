@@ -16,10 +16,74 @@ import {
   fromBestMoveLedger, mergeSignals, fromRiskRadar, fromFirePath, fromMonteCarloV5,
   fromBehaviouralProfile, fromAutonomousOS, fromScenarioTree,
   fromPortfolioConstruction, fromLifePlan, fromTaxIntelligence, fromExecutionOS, fromAdaptiveLearning,
-  fromDebtPrefsDebts,
+  fromDebtPrefsDebts, fromQuickDecision,
 } from './adapters';
 import type { UnifiedRecommendationResult, UnifiedSignals, Recommendation } from './types';
 import { snapshotHistory, type RecommendationChange } from './history';
+
+// ─── Session-scoped scenarioV2 QuickDecision cache (folded inline) ──────────
+/**
+ * In-memory, session-scoped cache for the latest scenarioV2
+ * `QuickDecisionOutput` produced by the /decision page.
+ *
+ * Why this lives here (inlined, no new module):
+ *   The unified recommendation engine wants to consume the strongest
+ *   available decision output when forming dashboard recommendations. The
+ *   scenarioV2 candidate generator is the strongest available source but it
+ *   is expensive to run, and P1 scope forbids invoking or modifying scenario
+ *   generation. /decision already produces a `QuickDecisionOutput` whenever
+ *   the user runs a quick decision — we capture it here and let downstream
+ *   consumers (BestMoveCard, ActionCentre, etc.) read it via
+ *   `computeUnifiedBestMove`. When no run has happened, the engine falls
+ *   back to legacy behaviour.
+ *
+ * Pattern matches `autonomousMemoryStore`: in-memory only — no localStorage
+ * / sessionStorage / IndexedDB / cookies (the deployed iframe environment
+ * can block them). Single latest result per session; no history.
+ */
+type _QuickDecisionListener = () => void;
+const _quickDecisionCache: { latest: unknown | null; generatedAt: string | null } = {
+  latest: null,
+  generatedAt: null,
+};
+const _quickDecisionListeners: _QuickDecisionListener[] = [];
+function _notifyQuickDecision(): void {
+  const snapshot = _quickDecisionListeners.slice();
+  for (let i = 0; i < snapshot.length; i++) snapshot[i]();
+}
+
+/** Write the latest scenarioV2 QuickDecisionOutput. Called by /decision. */
+export function writeLatestQuickDecision(output: unknown): void {
+  _quickDecisionCache.latest = output;
+  _quickDecisionCache.generatedAt = new Date().toISOString();
+  _notifyQuickDecision();
+}
+
+/** Read the latest scenarioV2 QuickDecisionOutput, or null if none. */
+export function readLatestQuickDecision(): unknown | null {
+  return _quickDecisionCache.latest;
+}
+
+/** When the cache was last written. Null when never written this session. */
+export function readLatestQuickDecisionGeneratedAt(): string | null {
+  return _quickDecisionCache.generatedAt;
+}
+
+/** Subscribe to changes. Returns unsubscribe fn. */
+export function subscribeQuickDecision(l: _QuickDecisionListener): () => void {
+  _quickDecisionListeners.push(l);
+  return () => {
+    const idx = _quickDecisionListeners.indexOf(l);
+    if (idx >= 0) _quickDecisionListeners.splice(idx, 1);
+  };
+}
+
+/** Test-only: reset the cache. */
+export function __resetQuickDecisionStoreForTests(): void {
+  _quickDecisionCache.latest = null;
+  _quickDecisionCache.generatedAt = null;
+  _notifyQuickDecision();
+}
 
 // We rebuild the ledger from BestMoveResult.ledgerInputs (everything we need
 // for unified signals is already in the audit panel inputs).
@@ -92,6 +156,14 @@ export async function computeUnifiedBestMove(args: {
    * `otherDebts × personalDebtRate` heuristic.
    */
   debtPrefsDebts?: any[];
+  /**
+   * P1 — Optional scenarioV2 Quick Decision result. When provided, its
+   * winning candidate's label + composite score are surfaced as
+   * `decisionTopAction` + `decisionConfidence` so headline recommendation
+   * surfaces consume the stronger scenarioV2 output. Scenario generation
+   * logic is untouched — this is a read-only consume.
+   */
+  quickDecision?: any;
 } = {}): Promise<UnifiedBestMoveResult> {
   const legacy = await computeBestMoveV2(args.cfg ?? {});
   const partial = ledgerFromInputs(legacy);
@@ -116,6 +188,13 @@ export async function computeUnifiedBestMove(args: {
       // ignore — legacy fallback path handles missing portfolio
     }
   }
+  // P1 — actual dashboard consumption of scenarioV2 QuickDecisionOutput.
+  // If the caller didn't pass an explicit `quickDecision`, fall back to the
+  // session-scoped quickDecisionStore that the /decision page writes to.
+  // The store is empty when the user has never run a quick decision this
+  // session — the engine then behaves exactly as before (legacy fallback).
+  // This is read-only consumption — no scenarioV2 generation is invoked.
+  const quickDecision = args.quickDecision ?? readLatestQuickDecision();
   const signals = mergeSignals(
     baseSignals,
     fromRiskRadar(args.riskRadar),
@@ -131,6 +210,7 @@ export async function computeUnifiedBestMove(args: {
     fromExecutionOS(args.executionOS),
     fromAdaptiveLearning(args.adaptive),
     fromDebtPrefsDebts(debtPrefsDebts),
+    fromQuickDecision(quickDecision),
   );
   const unified = computeUnifiedRecommendations(signals);
   const changes = snapshotHistory(unified);

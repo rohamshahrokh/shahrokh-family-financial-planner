@@ -305,6 +305,39 @@ export function fromDebtPrefsDebts(rawDebts: any[] | undefined | null): Partial<
   return debtPortfolio.length > 0 ? { debtPortfolio } : {};
 }
 
+// ─── ScenarioV2 Quick Decision output → signal overlay (P1) ─────────────────
+/**
+ * Adapter that ingests the WINNING candidate from a `QuickDecisionOutput`
+ * (produced by `scenarioV2/decisionEngine/candidateGenerator.generateQuickDecisionCandidates`)
+ * and surfaces its score + rationale as a `decisionTopAction` overlay on
+ * UnifiedSignals.
+ *
+ * Strict scope: this does NOT modify scenario generation logic. It is a
+ * read-only adapter — given a candidate result that already exists, expose
+ * its top action + confidence to the unified engine so the dashboard
+ * recommendation surface reflects the stronger scenarioV2 decision output
+ * when it is available.
+ *
+ * The shape is intentionally loose (`any`) to avoid a build-time coupling
+ * with scenarioV2 internals — the engine just needs `ranked[0].label` and
+ * `ranked[0].score.score`.
+ */
+export function fromQuickDecision(out: any): Partial<UnifiedSignals> {
+  if (!out || !Array.isArray(out.ranked) || out.ranked.length === 0) return {};
+  const winner = out.ranked[0];
+  const label: string | undefined = winner.label ?? winner.shortLabel ?? winner.id;
+  // CompositeScore.score is 0..100 — normalise to 0..1 for decisionConfidence
+  let confidence: number | undefined;
+  const raw = winner?.score?.score;
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    confidence = raw > 1 ? Math.max(0, Math.min(1, raw / 100)) : Math.max(0, Math.min(1, raw));
+  }
+  return {
+    decisionTopAction: label,
+    decisionConfidence: confidence,
+  };
+}
+
 // ─── Merge helper ────────────────────────────────────────────────────────────
 export function mergeSignals(...parts: Array<Partial<UnifiedSignals> | undefined>): UnifiedSignals {
   const merged: UnifiedSignals = {};

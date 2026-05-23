@@ -1010,11 +1010,14 @@ export function computeUnifiedRecommendations(s: UnifiedSignals): UnifiedRecomme
   }
 
   // ─── Hard-priority sort by pillar, then by confidence × magnitude ──────────
-  const sorted = candidates
-    .map(c => ({
-      rec: c,
-      score: scoreCandidate(c, s),
-    }))
+  const scored = candidates.map(c => {
+    const { score, breakdown } = scoreCandidateWithBreakdown(c, s);
+    // Attach the breakdown so every consumer can render score transparency.
+    c.scoreBreakdown = breakdown;
+    return { rec: c, score };
+  });
+
+  const sorted = scored
     .sort((a, b) => {
       const pa = PILLAR_RANK[a.rec.pillar];
       const pb = PILLAR_RANK[b.rec.pillar];
@@ -1040,32 +1043,86 @@ export function computeUnifiedRecommendations(s: UnifiedSignals): UnifiedRecomme
     riskBeingReduced: deriveRiskBeingReduced(best),
     signalCoverage: signals,
     generatedAt: new Date().toISOString(),
+    deprecatedActionTypes: [...DEPRECATED_ACTION_TYPES],
   };
 }
 
-function scoreCandidate(rec: Recommendation, s: UnifiedSignals): number {
-  let score = (rec.expectedFinancialImpact.annualDollar ?? 0) * (rec.confidenceScore || 0.5);
+/**
+ * Action types that are declared in the ActionType union (for backward-compat
+ * with downstream consumers) but are NOT currently emitted by any candidate
+ * builder. The audit surfaces these so the dashboard can show that they were
+ * considered and intentionally skipped rather than appearing dead/stale.
+ *
+ * Per P1 audit findings:
+ *  - crypto_dca: ungrounded; no candidate builder. Surface remains but is
+ *    not part of headline recommendations until a real builder lands.
+ *  - refinance_restructure: no builder. monitor_strategic_debt covers refi
+ *    monitoring; explicit restructure advice requires deeper input.
+ *  - pause_investing: shallow; covered by stress-flag dampening of etf_dca.
+ *  - improve_cashflow: shallow; covered by buildEmergencyBuffer + holdCashOffset.
+ *  - tax_optimisation: shallow; increase_super carries the tax pillar.
+ */
+const DEPRECATED_ACTION_TYPES: ActionType[] = [
+  'crypto_dca',
+  'refinance_restructure',
+  'pause_investing',
+  'improve_cashflow',
+  'tax_optimisation',
+];
+
+interface ScoreModifier {
+  id: string;
+  source: NonNullable<Recommendation['scoreBreakdown']>['modifiers'][number]['source'];
+  multiplier: number;
+  reason: string;
+}
+
+/**
+ * Compute the ranking score AND a structured breakdown of every modifier that
+ * was applied. Behaviour is identical to the prior `scoreCandidate(rec, s)`
+ * function — only the return shape changed.
+ */
+function scoreCandidateWithBreakdown(
+  rec: Recommendation,
+  s: UnifiedSignals,
+): { score: number; breakdown: NonNullable<Recommendation['scoreBreakdown']> } {
+  const baseScore = (rec.expectedFinancialImpact.annualDollar ?? 0) * (rec.confidenceScore || 0.5);
+  let score = baseScore;
+  const modifiers: ScoreModifier[] = [];
+  const apply = (id: string, source: ScoreModifier['source'], multiplier: number, reason: string) => {
+    if (!Number.isFinite(multiplier) || multiplier === 1) return;
+    score *= multiplier;
+    modifiers.push({ id, source, multiplier, reason });
+  };
+
   // Investor-preference soft tilts (within same pillar only)
   const pref = s.preference;
   if (pref) {
     if (rec.actionType === 'etf_dca' || rec.actionType === 'fire_acceleration') {
-      score *= 1 + 0.2 * (pref.riskTolerance ?? 0);
-      score *= 1 + 0.3 * (pref.fireUrgency ?? 0);
+      apply('pref_risk_tolerance', 'preference', 1 + 0.2 * (pref.riskTolerance ?? 0),
+        `risk tolerance tilt (${(pref.riskTolerance ?? 0).toFixed(2)})`);
+      apply('pref_fire_urgency', 'preference', 1 + 0.3 * (pref.fireUrgency ?? 0),
+        `FIRE urgency tilt (${(pref.fireUrgency ?? 0).toFixed(2)})`);
     }
     if (rec.actionType === 'proceed_property_purchase' || rec.actionType === 'delay_property_purchase') {
-      score *= 1 + 0.2 * (pref.propertyBias ?? 0);
+      apply('pref_property_bias', 'preference', 1 + 0.2 * (pref.propertyBias ?? 0),
+        `property bias tilt (${(pref.propertyBias ?? 0).toFixed(2)})`);
     }
     if (rec.actionType === 'increase_super') {
-      score *= 1 + 0.3 * (pref.taxOptimisation ?? 0);
-    }
-    if (rec.actionType === 'crypto_dca' && (pref.riskTolerance ?? 0) < 0) {
-      score *= 0.5;
+      apply('pref_tax_optimisation', 'preference', 1 + 0.3 * (pref.taxOptimisation ?? 0),
+        `tax-opt preference tilt (${(pref.taxOptimisation ?? 0).toFixed(2)})`);
     }
   }
-  // Stress flag pushes toward conservatism
+  // Stress flag pushes toward conservatism. The legacy code also penalised
+  // crypto_dca, but no candidate builder emits it — dead path, intentionally
+  // skipped (see DEPRECATED_ACTION_TYPES).
   if (s.mcStressFlag === 'severe') {
-    if (rec.actionType === 'etf_dca' || rec.actionType === 'crypto_dca') score *= 0.7;
-    if (rec.pillar === 'protect_liquidity' || rec.pillar === 'reduce_high_interest_debt') score *= 1.3;
+    if (rec.actionType === 'etf_dca') {
+      apply('stress_dampen_growth', 'stress', 0.7, 'severe MC stress dampens growth-asset DCA');
+    }
+    if (rec.pillar === 'protect_liquidity' || rec.pillar === 'reduce_high_interest_debt') {
+      apply('stress_boost_safety', 'stress', 1.3, 'severe MC stress boosts safety pillars');
+    }
   }
 
   // Phase 5 — Behavioural soft tilts (intra-pillar only).
@@ -1073,23 +1130,24 @@ function scoreCandidate(rec: Recommendation, s: UnifiedSignals): number {
   if (bp?.scores) {
     const sc = bp.scores;
     if (sc.fireUrgency != null && (rec.actionType === 'etf_dca' || rec.actionType === 'fire_acceleration')) {
-      score *= 1 + 0.25 * (sc.fireUrgency - 0.5);
-    }
-    if (sc.cryptoBias != null && rec.actionType === 'crypto_dca') {
-      score *= 1 + 0.3 * sc.cryptoBias;
+      apply('bp_fire_urgency', 'behavioural', 1 + 0.25 * (sc.fireUrgency - 0.5),
+        `behavioural FIRE urgency (${sc.fireUrgency.toFixed(2)})`);
     }
     if (sc.propertyBias != null && (rec.actionType === 'proceed_property_purchase' || rec.actionType === 'delay_property_purchase')) {
-      score *= 1 + 0.2 * sc.propertyBias;
+      apply('bp_property_bias', 'behavioural', 1 + 0.2 * sc.propertyBias,
+        `behavioural property bias (${sc.propertyBias.toFixed(2)})`);
     }
     if (sc.debtAversion != null && rec.pillar === 'reduce_high_interest_debt') {
-      score *= 1 + 0.3 * (sc.debtAversion - 0.5);
+      apply('bp_debt_aversion', 'behavioural', 1 + 0.3 * (sc.debtAversion - 0.5),
+        `behavioural debt aversion (${sc.debtAversion.toFixed(2)})`);
     }
     if (sc.liquidityPreference != null && rec.pillar === 'protect_liquidity') {
-      score *= 1 + 0.2 * sc.liquidityPreference;
+      apply('bp_liquidity_preference', 'behavioural', 1 + 0.2 * sc.liquidityPreference,
+        `behavioural liquidity preference (${sc.liquidityPreference.toFixed(2)})`);
     }
-    if (sc.volatilityTolerance != null && (rec.actionType === 'etf_dca' || rec.actionType === 'crypto_dca')) {
-      // Pull back risk assets when user is loss averse.
-      if (sc.volatilityTolerance < -0.2) score *= 0.85;
+    if (sc.volatilityTolerance != null && rec.actionType === 'etf_dca' && sc.volatilityTolerance < -0.2) {
+      apply('bp_low_volatility_tolerance', 'behavioural', 0.85,
+        `low volatility tolerance dampens growth DCA`);
     }
   }
 
@@ -1100,65 +1158,103 @@ function scoreCandidate(rec: Recommendation, s: UnifiedSignals): number {
       const sevBoost = f.severity === 'critical' ? 1.4 :
                        f.severity === 'elevated' ? 1.2 :
                        f.severity === 'watch'    ? 1.05 : 1.0;
-      score *= sevBoost;
+      apply(`os_${f.detector ?? f.id}`, 'autonomous_os', sevBoost,
+        `OS finding ${f.detector ?? f.id} severity=${f.severity}`);
     }
   }
 
-  // Phase 5 — Scenario tree tilt: high probability-weighted liquidity/insolvency risk
-  // amplifies safety pillars; low risk amplifies wealth pillars.
+  // Phase 5 — Scenario tree tilt.
   const ctx = s.scenarioContext;
   if (ctx) {
     const insolvency = ctx.probWeightedInsolvencyRisk ?? 0;
     if (insolvency > 0.15) {
-      if (rec.pillar === 'protect_liquidity' || rec.pillar === 'prevent_failure') score *= 1 + insolvency;
-      if (rec.pillar === 'maximise_wealth') score *= Math.max(0.6, 1 - insolvency);
+      if (rec.pillar === 'protect_liquidity' || rec.pillar === 'prevent_failure') {
+        apply('scenario_safety_boost', 'scenario', 1 + insolvency,
+          `prob-weighted insolvency risk ${(insolvency * 100).toFixed(0)}% boosts safety`);
+      }
+      if (rec.pillar === 'maximise_wealth') {
+        apply('scenario_wealth_dampen', 'scenario', Math.max(0.6, 1 - insolvency),
+          `prob-weighted insolvency risk dampens wealth-max`);
+      }
     }
   }
 
-  // Phase 6 — Portfolio construction soft tilts (intra-pillar only).
+  // Phase 6 — Portfolio construction soft tilts.
   const pt = s.portfolioTilts;
   if (pt) {
-    if (rec.actionType === 'etf_dca' && pt.etfPush) score *= 1 + 0.5 * pt.etfPush;
-    if ((rec.actionType === 'proceed_property_purchase' || rec.actionType === 'delay_property_purchase') && pt.propertyPush) score *= 1 + 0.4 * pt.propertyPush;
-    if (rec.actionType === 'hold_cash_offset' && pt.cashHold) score *= 1 + 0.4 * pt.cashHold;
-    if (rec.actionType === 'pay_high_interest_debt' && pt.debtPay) score *= 1 + 0.4 * pt.debtPay;
-    if (rec.actionType === 'increase_super' && pt.superPush) score *= 1 + 0.5 * pt.superPush;
-    if (rec.actionType === 'crypto_dca' && pt.cryptoTrim) score *= Math.max(0.5, 1 - 0.6 * pt.cryptoTrim);
+    if (rec.actionType === 'etf_dca' && pt.etfPush) {
+      apply('pt_etf_push', 'portfolio', 1 + 0.5 * pt.etfPush, `portfolio etfPush=${pt.etfPush.toFixed(2)}`);
+    }
+    if ((rec.actionType === 'proceed_property_purchase' || rec.actionType === 'delay_property_purchase') && pt.propertyPush) {
+      apply('pt_property_push', 'portfolio', 1 + 0.4 * pt.propertyPush, `portfolio propertyPush=${pt.propertyPush.toFixed(2)}`);
+    }
+    if (rec.actionType === 'hold_cash_offset' && pt.cashHold) {
+      apply('pt_cash_hold', 'portfolio', 1 + 0.4 * pt.cashHold, `portfolio cashHold=${pt.cashHold.toFixed(2)}`);
+    }
+    if (rec.actionType === 'pay_high_interest_debt' && pt.debtPay) {
+      apply('pt_debt_pay', 'portfolio', 1 + 0.4 * pt.debtPay, `portfolio debtPay=${pt.debtPay.toFixed(2)}`);
+    }
+    if (rec.actionType === 'increase_super' && pt.superPush) {
+      apply('pt_super_push', 'portfolio', 1 + 0.5 * pt.superPush, `portfolio superPush=${pt.superPush.toFixed(2)}`);
+    }
   }
 
-  // Phase 6 — Life context tilt: pending stress / buffer drain amplifies liquidity pillar.
+  // Phase 6 — Life context tilt.
   const life = s.lifeContext;
   if (life) {
-    if ((life.stressProbability ?? 0) > 0.35 && rec.pillar === 'protect_liquidity') score *= 1.25;
-    if ((life.liquidityStressMonths ?? 0) > 6 && rec.pillar === 'protect_liquidity') score *= 1.15;
-    if ((life.fireYearDelayEstimate ?? 0) > 1.5 && rec.pillar === 'improve_fire_timeline') score *= 1.15;
+    if ((life.stressProbability ?? 0) > 0.35 && rec.pillar === 'protect_liquidity') {
+      apply('life_stress_prob', 'life', 1.25, `life stress probability ${(life.stressProbability! * 100).toFixed(0)}%`);
+    }
+    if ((life.liquidityStressMonths ?? 0) > 6 && rec.pillar === 'protect_liquidity') {
+      apply('life_liq_months', 'life', 1.15, `${life.liquidityStressMonths} months of liquidity stress ahead`);
+    }
+    if ((life.fireYearDelayEstimate ?? 0) > 1.5 && rec.pillar === 'improve_fire_timeline') {
+      apply('life_fire_delay', 'life', 1.15, `+${life.fireYearDelayEstimate!.toFixed(1)}y FIRE delay risk`);
+    }
   }
 
-  // Phase 6 — Tax intelligence tilt: amplify tax-pillar items proportional to dollar savings.
+  // Phase 6 — Tax intelligence tilt.
   const tax = s.taxContext;
   if (tax && rec.pillar === 'preserve_tax_efficiency') {
     const sav = tax.totalEstimatedSaving ?? 0;
-    if (sav > 1000) score *= 1 + Math.min(0.3, sav / 30_000);
+    if (sav > 1000) {
+      apply('tax_pillar_saving', 'tax', 1 + Math.min(0.3, sav / 30_000),
+        `tax pillar boost — est saving ${Math.round(sav)}/yr`);
+    }
   }
   if (tax && rec.actionType === 'increase_super' && (tax.totalEstimatedSaving ?? 0) > 0) {
-    score *= 1.15;
+    apply('tax_super_alignment', 'tax', 1.15, 'tax engine flags super contribution as efficient');
   }
 
-  // Phase 6 — Execution OS tilt: when overall readiness is low and pillar is investing discipline, mild dampen.
+  // Phase 6 — Execution OS tilt.
   const ex = s.executionContext;
   if (ex && (ex.overallReadinessPct ?? 100) < 40 && rec.pillar === 'maintain_investing_discipline') {
-    score *= 0.85;
+    apply('exec_low_readiness', 'execution', 0.85,
+      `execution readiness ${(ex.overallReadinessPct ?? 0).toFixed(0)}% dampens investing-discipline pillar`);
   }
 
   // Phase 6 — Adaptive learning multipliers (soft).
   const ad = s.adaptive;
   if (ad) {
     const mAction = ad.rankingMultiplierByActionType?.[rec.actionType];
-    if (typeof mAction === 'number') score *= mAction;
+    if (typeof mAction === 'number') {
+      apply('adaptive_action', 'adaptive', mAction, `adaptive action multiplier (${mAction.toFixed(2)})`);
+    }
     const wp = ad.pillarWeights?.[rec.pillar];
-    if (typeof wp === 'number') score *= wp;
+    if (typeof wp === 'number') {
+      apply('adaptive_pillar', 'adaptive', wp, `adaptive pillar weight (${wp.toFixed(2)})`);
+    }
   }
-  return score;
+
+  return {
+    score,
+    breakdown: {
+      baseScore,
+      finalScore: score,
+      pillarRank: PILLAR_RANK[rec.pillar],
+      modifiers,
+    },
+  };
 }
 
 function deriveRiskBeingReduced(rec?: Recommendation): string {
