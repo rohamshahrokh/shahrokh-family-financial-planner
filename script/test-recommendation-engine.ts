@@ -26,6 +26,7 @@ import {
   debtVsETF,
   cashVsInvest,
   fromMonteCarloV5,
+  fromQuickDecision,
   mergeSignals,
   fromBestMoveLedger,
   type UnifiedSignals,
@@ -531,6 +532,94 @@ section('Mixed portfolio — only the credit card flips urgent');
   // The 0% optionality candidate is allowed to coexist so users see the
   // engine has classified the promo separately from the consumer debt.
   assert('Mixed: interest-free optionality narrative present alongside urgent payoff', !!optionality);
+}
+
+// ─── Test 19: P1 — every recommendation carries a scoreBreakdown ─────────────
+section('P1 — score transparency: scoreBreakdown attached to every rec');
+{
+  resetHistory();
+  const sig: UnifiedSignals = {
+    ...HEALTHY,
+    debtPortfolio: [
+      { id: 'cc', name: 'Credit Card', balance: 15_000, ratePct: 19.5, type: 'credit_card' },
+    ],
+    mcStressFlag: 'severe',
+    mcSurvivalProbability: 0.4,
+  };
+  const out = computeUnifiedRecommendations(sig);
+  assert('every rec carries a scoreBreakdown', out.all.every(r => !!r.scoreBreakdown));
+  for (const r of out.all) {
+    const sb = r.scoreBreakdown!;
+    assert(`${r.id}: breakdown has numeric baseScore`, Number.isFinite(sb.baseScore));
+    assert(`${r.id}: breakdown has numeric finalScore`, Number.isFinite(sb.finalScore));
+    assert(`${r.id}: breakdown pillarRank in 1-8`, sb.pillarRank >= 1 && sb.pillarRank <= 8);
+    assert(`${r.id}: modifiers is an array`, Array.isArray(sb.modifiers));
+  }
+  // Under severe MC stress the safety pillar should carry at least one
+  // 'stress_boost_safety' modifier on the high-APR debt recommendation.
+  const debtRec = out.all.find(r => r.actionType === 'pay_high_interest_debt');
+  assert('debt rec emits stress boost modifier under severe MC stress',
+    !!debtRec?.scoreBreakdown?.modifiers.some(m => m.id === 'stress_boost_safety'));
+}
+
+// ─── Test 20: P1 — deprecated/dead action types surfaced on result ──────────
+section('P1 — deprecated dead-path action types surfaced for audit');
+{
+  const out = computeUnifiedRecommendations(HEALTHY);
+  assert('result exposes deprecatedActionTypes array',
+    Array.isArray(out.deprecatedActionTypes));
+  // Audit-confirmed dead/stale paths from the P1 review.
+  const expectedDead = ['crypto_dca', 'refinance_restructure', 'pause_investing', 'improve_cashflow', 'tax_optimisation'];
+  for (const t of expectedDead) {
+    assert(`deprecated list contains ${t}`,
+      (out.deprecatedActionTypes ?? []).includes(t as any));
+  }
+  // And none of the deprecated types should appear in the emitted recs.
+  for (const r of out.all) {
+    assert(`no emitted rec uses deprecated action type ${r.actionType}`,
+      !expectedDead.includes(r.actionType));
+  }
+}
+
+// ─── Test 21: P1 — scoreBreakdown modifier semantics ────────────────────────
+section('P1 — scoreBreakdown modifier semantics');
+{
+  resetHistory();
+  // Baseline: pure healthy household — no preference, no behavioural, no stress.
+  // The only modifier we expect is from the holdCashOffset / increaseSuper /
+  // etfDCA candidates with no soft tilts (so modifiers list can be empty).
+  const out = computeUnifiedRecommendations(HEALTHY);
+  for (const r of out.all) {
+    const sb = r.scoreBreakdown!;
+    // Multiplier must never be 1 (apply() drops no-op multipliers).
+    for (const m of sb.modifiers) {
+      assert(`${r.id}.${m.id}: multiplier is not 1`, m.multiplier !== 1);
+      assert(`${r.id}.${m.id}: multiplier is finite`, Number.isFinite(m.multiplier));
+      assert(`${r.id}.${m.id}: reason is a non-empty string`,
+        typeof m.reason === 'string' && m.reason.length > 0);
+    }
+  }
+}
+
+// ─── Test 22: P1 — scenarioV2 QuickDecision adapter overlays signals ────────
+section('P1 — fromQuickDecision adapter');
+{
+  // The adapter accepts a shape with ranked[0].label and ranked[0].score.score.
+  const overlay = fromQuickDecision({
+    ranked: [{ label: 'ETF 70 / Offset 30 — DCA 12mo', score: { score: 72 } }],
+  });
+  assert('adapter surfaces decisionTopAction', overlay.decisionTopAction === 'ETF 70 / Offset 30 — DCA 12mo');
+  assert('adapter normalises score 0-100 to 0-1', overlay.decisionConfidence === 0.72);
+
+  const empty = fromQuickDecision(null);
+  assert('adapter returns {} on null', Object.keys(empty).length === 0);
+
+  const empty2 = fromQuickDecision({ ranked: [] });
+  assert('adapter returns {} on empty ranked list', Object.keys(empty2).length === 0);
+
+  // Accepts 0..1 scores too.
+  const overlay2 = fromQuickDecision({ ranked: [{ label: 'x', score: { score: 0.65 } }] });
+  assert('adapter passes through 0..1 confidence', overlay2.decisionConfidence === 0.65);
 }
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

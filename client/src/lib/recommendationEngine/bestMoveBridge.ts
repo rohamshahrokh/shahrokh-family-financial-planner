@@ -16,7 +16,7 @@ import {
   fromBestMoveLedger, mergeSignals, fromRiskRadar, fromFirePath, fromMonteCarloV5,
   fromBehaviouralProfile, fromAutonomousOS, fromScenarioTree,
   fromPortfolioConstruction, fromLifePlan, fromTaxIntelligence, fromExecutionOS, fromAdaptiveLearning,
-  fromDebtPrefsDebts,
+  fromDebtPrefsDebts, fromQuickDecision,
 } from './adapters';
 import type { UnifiedRecommendationResult, UnifiedSignals, Recommendation } from './types';
 import { snapshotHistory, type RecommendationChange } from './history';
@@ -92,6 +92,14 @@ export async function computeUnifiedBestMove(args: {
    * `otherDebts × personalDebtRate` heuristic.
    */
   debtPrefsDebts?: any[];
+  /**
+   * P1 — Optional scenarioV2 Quick Decision result. When provided, its
+   * winning candidate's label + composite score are surfaced as
+   * `decisionTopAction` + `decisionConfidence` so headline recommendation
+   * surfaces consume the stronger scenarioV2 output. Scenario generation
+   * logic is untouched — this is a read-only consume.
+   */
+  quickDecision?: any;
 } = {}): Promise<UnifiedBestMoveResult> {
   const legacy = await computeBestMoveV2(args.cfg ?? {});
   const partial = ledgerFromInputs(legacy);
@@ -131,6 +139,7 @@ export async function computeUnifiedBestMove(args: {
     fromExecutionOS(args.executionOS),
     fromAdaptiveLearning(args.adaptive),
     fromDebtPrefsDebts(debtPrefsDebts),
+    fromQuickDecision(args.quickDecision),
   );
   const unified = computeUnifiedRecommendations(signals);
   const changes = snapshotHistory(unified);

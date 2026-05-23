@@ -151,6 +151,33 @@ export interface Recommendation {
   cta?: { label: string; route: string };
 
   /**
+   * P1 — Score transparency. Structured breakdown of how this recommendation
+   * was ranked, exposed so the dashboard / audit panel can render *why* a rec
+   * sits where it does instead of treating ranking as a black box. Populated
+   * by the engine for every emitted recommendation.
+   *
+   * `baseScore`     — annualDollar × confidence before any modifier.
+   * `finalScore`    — score after all soft tilts (preference, behavioural,
+   *                   stress, scenario tree, portfolio, life, tax, exec,
+   *                   adaptive). Used for intra-pillar ranking.
+   * `pillarRank`    — hard-priority pillar tier (1 = top safety).
+   * `modifiers`     — every multiplier applied, in order, with the
+   *                   originating signal and a one-line explanation.
+   *                   Pure data; no UI assumptions.
+   */
+  scoreBreakdown?: {
+    baseScore: number;
+    finalScore: number;
+    pillarRank: number;
+    modifiers: Array<{
+      id: string;
+      source: SourceSignal | 'pillar' | 'stress' | 'preference' | 'behavioural' | 'scenario' | 'portfolio' | 'life' | 'tax' | 'execution' | 'adaptive' | 'autonomous_os';
+      multiplier: number;
+      reason: string;
+    }>;
+  };
+
+  /**
    * Structured rationale rendered by the "Why this recommendation exists"
    * panel for debt actions. Only populated for debt-related recommendations
    * (pay_high_interest_debt, maintain_interest_free_debt, monitor_strategic_debt,
@@ -439,4 +466,12 @@ export interface UnifiedRecommendationResult {
   signalCoverage: SourceSignal[];
   /** When this run was produced (ISO). */
   generatedAt: string;
+  /**
+   * P1 — audit-only list of action types declared in the ActionType union but
+   * unreachable from any current candidate builder. Exposes the dead/stale
+   * paths the engine intentionally does NOT emit, so the dashboard's audit
+   * surface can show that they were considered and skipped. Pure metadata; no
+   * UI behaviour change.
+   */
+  deprecatedActionTypes?: ActionType[];
 }
