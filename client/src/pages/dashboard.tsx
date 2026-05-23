@@ -17,6 +17,7 @@ import {
   buildCashflowReconciliationTrace,
   buildPlanFeasibilityTrace,
   buildFundingResolutionTrace,
+  buildIncomeClassificationTrace,
 } from "@/lib/auditMode/engineTraces";
 import {
   computePlanFeasibility,
@@ -77,7 +78,9 @@ import {
   reconcileNetWorth,
   type DashboardInputs,
   type CanonicalNetWorth,
+  selectIncomeAggregate,
 } from "@/lib/dashboardDataContract";
+import { aggregateIncome } from "@/lib/incomeClassificationEngine";
 import { maskValue } from "@/components/PrivacyMask";
 import SaveButton, { useSaveOnEnter } from "@/components/SaveButton";
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from "react";
@@ -917,16 +920,14 @@ export default function DashboardPage() {
       safeNum(s.other_income);
     let monthlyIncome = masterIncome > 0 ? masterIncome : subIncomeMonthly;
 
-    // Fallback: derive from sf_income transactions in the last 6 months.
-    // Only used if both master + sub-fields are zero so user-entered values
-    // always take precedence.
+    // Fallback: derive from sf_income transactions, but ONLY count records
+    // classified as recurring (employment salary, rental, dividend, interest,
+    // business, recurring "other"). One-off events (asset sale, bonus, tax
+    // refund, gift / inheritance) MUST NOT be averaged into a permanent
+    // monthly income figure — they are cash events for their event month only.
     if (monthlyIncome === 0 && Array.isArray(incomeRecords) && incomeRecords.length > 0) {
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-      const cutoff = sixMonthsAgo.toISOString().split('T')[0];
-      const recent = incomeRecords.filter((r: any) => (r.date ?? '') >= cutoff);
-      const total  = recent.reduce((sum: number, r: any) => sum + safeNum(r.amount), 0);
-      if (total > 0) monthlyIncome = Math.round(total / 6);
+      const agg = aggregateIncome(incomeRecords);
+      if (agg.recurringMonthlyIncome > 0) monthlyIncome = agg.recurringMonthlyIncome;
     }
 
     // ── Expenses: master monthly_expenses may be 0; derive from sf_expenses ──
@@ -1149,6 +1150,23 @@ export default function DashboardPage() {
   // them explicitly (none below currently do).
   snap.monthly_income   = monthlyIncomeSOT;
   snap.monthly_expenses = monthlyExpensesSOT;
+
+  // ─── Income engine audit trace ───────────────────────────────────────────
+  // Surfaces the recurring vs one-off classification of every sf_income row
+  // and the engine inputs that flow downstream (Forecast, Monte Carlo,
+  // Serviceability). #FWL_Income_Engine_Refactor
+  const incomeAggregate = useMemo(
+    () => selectIncomeAggregate(_contractInputs),
+    [_contractInputs],
+  );
+  useEffect(() => {
+    registerAuditTrace(
+      buildIncomeClassificationTrace({
+        aggregate: incomeAggregate,
+        asOf: new Date().toISOString(),
+      }),
+    );
+  }, [incomeAggregate]);
 
   // ─── NG Summary ───────────────────────────────────────────────────────────
   // Reactive to the active tax-policy scenario. Under reform, quarantined

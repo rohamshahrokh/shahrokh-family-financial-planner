@@ -33,6 +33,7 @@ import {
   selectMortgageRepayment,
   selectSuperCombined,
   selectCashToday,
+  selectIncomeAggregate,
   SOURCE_OF_TRUTH,
   type DashboardInputs,
 } from "@/lib/dashboardDataContract";
@@ -394,6 +395,11 @@ export default function MyFinancialPlan() {
     incomeRecords, expenses,
   }), [snapshot, properties, incomeRecords, expenses]);
   const sotMonthlyIncome    = selectMonthlyIncome(sotInputs);
+  // Income engine refactor — recurring vs one-off breakdown surfaced as
+  // three cards (Recurring Monthly / One-Off last 12 months / Total
+  // historical), replacing the legacy single "Monthly Income (single
+  // source of truth)" row.
+  const sotIncomeAggregate  = selectIncomeAggregate(sotInputs);
   const sotMonthlyExpenses  = selectMonthlyExpensesLedger(sotInputs);
   const sotMortgageRepayment = selectMortgageRepayment(sotInputs);
   const sotSuperCombined    = selectSuperCombined(sotInputs);
@@ -677,12 +683,49 @@ export default function MyFinancialPlan() {
               when the ledger is empty.
             </span>
           </div>
-          <div className="mb-2 rounded-md bg-secondary/30 p-2 text-[11px] flex items-center justify-between">
-            <span className="text-muted-foreground flex items-center gap-1">
-              <Lock className="w-2.5 h-2.5 text-emerald-400" />
-              Monthly Income (single source of truth)
-            </span>
-            <span className="font-mono text-foreground">{formatCurrency(sotMonthlyIncome, true)} /mo</span>
+          {/* Income engine refactor — three-card breakdown replaces the
+              single "Monthly Income (single source of truth)" row. The
+              recurring figure is what feeds Forecast / Monte Carlo /
+              Deposit Power / Affordability — see
+              `incomeClassificationEngine.ts`. */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+            <div className="rounded-md bg-emerald-500/10 border border-emerald-500/30 p-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-emerald-300/80 flex items-center gap-1">
+                <Lock className="w-2.5 h-2.5" />
+                Recurring Monthly Income
+              </div>
+              <div className="text-base font-mono font-semibold text-foreground mt-1">
+                {formatCurrency(sotIncomeAggregate.recurringMonthlyIncome || sotMonthlyIncome, true)}
+                <span className="text-[10px] text-muted-foreground font-normal"> /mo</span>
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">
+                Salary + rental + dividends + interest + recurring business income.
+                Feeds Forecast, Monte Carlo, Deposit Power, Serviceability.
+              </div>
+            </div>
+            <div className="rounded-md bg-amber-500/10 border border-amber-500/30 p-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-amber-300/80">
+                One-Off Income (last 12 months)
+              </div>
+              <div className="text-base font-mono font-semibold text-foreground mt-1">
+                {formatCurrency(sotIncomeAggregate.oneOffIncomeLast12Months, true)}
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">
+                Bonuses, tax refunds, asset sales, gifts / inheritance.
+                Cash events only — never inflate recurring income.
+              </div>
+            </div>
+            <div className="rounded-md bg-sky-500/10 border border-sky-500/30 p-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-sky-300/80">
+                Total Income (historical)
+              </div>
+              <div className="text-base font-mono font-semibold text-foreground mt-1">
+                {formatCurrency(sotIncomeAggregate.totalHistoricalIncome, true)}
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">
+                Every income record on the ledger, ever.
+              </div>
+            </div>
           </div>
           <FieldRow label="Combined Monthly Income" value={draft.monthly_income} onChange={upd("monthly_income")} hint="Master fallback — only used when ledger + sub-fields are empty" />
           <FieldRow label="Roham — Monthly Net Salary" value={draft.roham_monthly_income} onChange={upd("roham_monthly_income")} hint="Roham's after-tax monthly income" />

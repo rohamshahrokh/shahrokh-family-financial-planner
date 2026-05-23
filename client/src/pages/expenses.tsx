@@ -13,6 +13,10 @@ import { SmartNumInput } from "@/components/ui/smart-num-input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import {
+  classifyIncomeRecord,
+  aggregateIncome,
+} from "@/lib/incomeClassificationEngine";
+import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line, AreaChart, Area, Legend,
 } from "recharts";
@@ -85,6 +89,35 @@ const FAMILY_MEMBERS = ['Roham', 'Fara', 'Kids', 'Family'];
 const PAYMENT_METHODS = ['Bank Transfer', 'Credit Card', 'Debit Card', 'Cash', 'Offset Account', 'BPAY'];
 
 // ─── Income constants ─────────────────────────────────────────────────────────
+// Canonical income types from the income classification engine. Display
+// labels are kept in sync with `INCOME_TYPE_LABELS` in
+// `incomeClassificationEngine.ts` — see that module for the recurring vs
+// one-off rules each type implies.
+const INCOME_TYPE_OPTIONS = [
+  { value: 'employment_salary', label: 'Employment Salary' },
+  { value: 'employment_bonus',  label: 'Employment Bonus' },
+  { value: 'rental_income',     label: 'Rental Income' },
+  { value: 'dividend_income',   label: 'Dividend Income' },
+  { value: 'interest_income',   label: 'Interest Income' },
+  { value: 'tax_refund',        label: 'Tax Refund' },
+  { value: 'business_income',   label: 'Business Income' },
+  { value: 'asset_sale',        label: 'Asset Sale' },
+  { value: 'gift_inheritance',  label: 'Gift / Inheritance' },
+  { value: 'other',             label: 'Other' },
+] as const;
+
+const INCOME_BEHAVIOUR_OPTIONS = [
+  { value: 'recurring', label: 'Recurring' },
+  { value: 'one_off',   label: 'One-Off' },
+] as const;
+
+const INCOME_TREATMENT_OPTIONS = [
+  { value: 'include', label: 'Include in recurring income calculations' },
+  { value: 'exclude', label: 'Exclude from recurring income calculations' },
+] as const;
+
+// Legacy "source" list — kept only for import compatibility with the existing
+// dropdown. The classification engine maps these onto INCOME_TYPE_OPTIONS.
 const INCOME_SOURCES = ['Salary', 'Bonus', 'Rental Income', 'Dividends', 'Interest', 'Tax Refund', 'Side Income', 'Other'];
 const INCOME_FREQUENCIES = ['Weekly', 'Fortnightly', 'Monthly', 'Quarterly', 'Annual', 'One-off'];
 
@@ -198,10 +231,18 @@ interface ExpenseFormProps {
 }
 
 // ─── Empty income record ──────────────────────────────────────────────────────
+// Income engine refactor: every record now carries a canonical income_type,
+// behaviour (recurring/one-off) and forecast_treatment. Defaults are tuned so
+// the most common case (regular salary) saves correctly without any extra
+// clicks, while sensitive types (asset_sale, tax_refund, gift_inheritance)
+// default to one-off + exclude so they cannot leak into Forecast / MC inputs.
 const EMPTY_INCOME = {
   date: new Date().toISOString().split('T')[0],
   amount: '' as any,
-  source: 'Salary',
+  source: 'Salary',                       // legacy display label (preserved)
+  income_type: 'employment_salary',       // canonical type
+  behaviour: 'recurring' as 'recurring' | 'one_off',
+  forecast_treatment: 'include' as 'include' | 'exclude',
   description: '',
   member: 'Family',
   frequency: 'Monthly',
@@ -213,6 +254,9 @@ interface IncomeFormData {
   date: string;
   amount: any;
   source: string;
+  income_type: string;
+  behaviour: 'recurring' | 'one_off';
+  forecast_treatment: 'include' | 'exclude';
   description: string;
   member: string;
   frequency: string;
@@ -337,7 +381,36 @@ interface IncomeFormProps {
   data: IncomeFormData;
   onChange: (d: IncomeFormData) => void;
 }
+// Income engine refactor: when the user picks an income type we auto-suggest
+// a safe behaviour + forecast treatment so the most common case requires zero
+// further clicks while the dangerous one-off types (asset_sale, tax_refund,
+// gift_inheritance, bonus) cannot accidentally inflate recurring income.
+const TYPE_DEFAULTS: Record<string, { behaviour: 'recurring' | 'one_off'; treatment: 'include' | 'exclude'; frequency: string; source: string }> = {
+  employment_salary: { behaviour: 'recurring', treatment: 'include', frequency: 'Monthly',  source: 'Salary' },
+  employment_bonus:  { behaviour: 'one_off',   treatment: 'exclude', frequency: 'One-off',  source: 'Bonus' },
+  rental_income:     { behaviour: 'recurring', treatment: 'include', frequency: 'Monthly',  source: 'Rental Income' },
+  dividend_income:   { behaviour: 'recurring', treatment: 'include', frequency: 'Quarterly', source: 'Dividends' },
+  interest_income:   { behaviour: 'recurring', treatment: 'include', frequency: 'Monthly',  source: 'Interest' },
+  tax_refund:        { behaviour: 'one_off',   treatment: 'exclude', frequency: 'One-off',  source: 'Tax Refund' },
+  business_income:   { behaviour: 'recurring', treatment: 'include', frequency: 'Monthly',  source: 'Side Income' },
+  asset_sale:        { behaviour: 'one_off',   treatment: 'exclude', frequency: 'One-off',  source: 'Other' },
+  gift_inheritance:  { behaviour: 'one_off',   treatment: 'exclude', frequency: 'One-off',  source: 'Other' },
+  other:             { behaviour: 'one_off',   treatment: 'exclude', frequency: 'One-off',  source: 'Other' },
+};
+
 function IncomeForm({ data, onChange }: IncomeFormProps) {
+  const applyTypeDefaults = (incomeType: string) => {
+    const def = TYPE_DEFAULTS[incomeType] ?? TYPE_DEFAULTS.other;
+    onChange({
+      ...data,
+      income_type: incomeType,
+      behaviour: def.behaviour,
+      forecast_treatment: def.treatment,
+      frequency: def.frequency,
+      source: def.source,
+      recurring: def.behaviour === 'recurring',
+    });
+  };
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
       <div>
@@ -360,13 +433,40 @@ function IncomeForm({ data, onChange }: IncomeFormProps) {
         />
       </div>
       <div>
-        <label className="text-xs text-muted-foreground">Source</label>
-        <Select value={data.source} onValueChange={v => onChange({ ...data, source: v })}>
+        <label className="text-xs text-muted-foreground">Income Type</label>
+        <Select value={data.income_type} onValueChange={applyTypeDefaults}>
           <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>
-            {INCOME_SOURCES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            {INCOME_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
           </SelectContent>
         </Select>
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">Behaviour</label>
+        <Select
+          value={data.behaviour}
+          onValueChange={v => onChange({ ...data, behaviour: v as 'recurring' | 'one_off', recurring: v === 'recurring' })}
+        >
+          <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {INCOME_BEHAVIOUR_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">Forecast Treatment</label>
+        <Select
+          value={data.forecast_treatment}
+          onValueChange={v => onChange({ ...data, forecast_treatment: v as 'include' | 'exclude' })}
+        >
+          <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {INCOME_TREATMENT_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground mt-1">
+          Only “Include” counts toward Recurring Monthly Income, Forecast, Monte Carlo and serviceability.
+        </p>
       </div>
       <div>
         <label className="text-xs text-muted-foreground">Frequency</label>
@@ -402,17 +502,6 @@ function IncomeForm({ data, onChange }: IncomeFormProps) {
           onChange={e => onChange({ ...data, notes: e.target.value })}
           className="h-8 text-sm"
         />
-      </div>
-      <div className="flex items-end gap-2">
-        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-          <input
-            type="checkbox"
-            checked={data.recurring}
-            onChange={e => onChange({ ...data, recurring: e.target.checked })}
-            className="rounded"
-          />
-          Recurring
-        </label>
       </div>
     </div>
   );
@@ -2339,7 +2428,25 @@ export default function ExpensesPage() {
                         <td className="px-3 py-2 text-xs text-muted-foreground max-w-[100px] truncate">{r.notes}</td>
                         <td className="px-3 py-2">
                           <div className="flex gap-1">
-                            <Button size="icon" variant="ghost" className="w-6 h-6" onClick={() => { setEditingIncomeId(r.id); setEditIncomeDraft({ date: r.date || '', amount: r.amount || '', source: r.source || 'Salary', description: r.description || '', member: r.member || 'Family', frequency: r.frequency || 'Monthly', recurring: !!r.recurring, notes: r.notes || '' }); }}>
+                            <Button size="icon" variant="ghost" className="w-6 h-6" onClick={() => {
+                              // Back-fill canonical income_type/behaviour/treatment for legacy
+                              // records that pre-date the income engine refactor.
+                              const classified = classifyIncomeRecord(r);
+                              setEditingIncomeId(r.id);
+                              setEditIncomeDraft({
+                                date: r.date || '',
+                                amount: r.amount || '',
+                                source: r.source || classified.sourceLabel,
+                                income_type: classified.incomeType,
+                                behaviour: classified.behaviour,
+                                forecast_treatment: classified.forecastTreatment,
+                                description: r.description || '',
+                                member: r.member || 'Family',
+                                frequency: r.frequency || classified.frequency,
+                                recurring: classified.behaviour === 'recurring',
+                                notes: r.notes || ''
+                              });
+                            }}>
                               <Edit2 className="w-3 h-3" />
                             </Button>
                             <Button size="icon" variant="ghost" className="w-6 h-6 text-red-400" onClick={() => deleteIncomeMut.mutate(r.id)}>

@@ -646,6 +646,23 @@ const { registerUserDefaultsTraces: __registerUserDefaults } =
   await import('../client/src/lib/auditMode/engineTraces');
 __registerUserDefaults();
 
+// Income Engine audit trace — mirror the dashboard registration so the
+// coverage guard sees `dashboard:income-engine`.
+// #FWL_Income_Engine_Refactor
+const { buildIncomeClassificationTrace: __buildIncomeTrace } =
+  await import('../client/src/lib/auditMode/engineTraces');
+const { aggregateIncome: __aggIncome } =
+  await import('../client/src/lib/incomeClassificationEngine');
+registerTrace(__buildIncomeTrace({
+  aggregate: __aggIncome(
+    [
+      { date: '2026-05-01', amount: 15000, income_type: 'employment_salary', frequency: 'Monthly' },
+      { date: '2026-02-15', amount: 80000, income_type: 'asset_sale',         frequency: 'One-off' },
+    ],
+    '2026-05-23',
+  ),
+}));
+
 const missing = REQUIRED_TRACE_IDS.filter(id => !hasTrace(id));
 assert(`All required trace ids are registerable (missing: ${missing.join(', ') || 'none'})`, missing.length === 0);
 for (const id of REQUIRED_TRACE_IDS) {

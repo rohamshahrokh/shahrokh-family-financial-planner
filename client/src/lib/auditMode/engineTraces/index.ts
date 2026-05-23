@@ -153,3 +153,9 @@ export {
   buildUserDefaultTrace,
   registerUserDefaultsTraces,
 } from './userDefaultsTraces';
+
+export {
+  buildIncomeClassificationTrace,
+  INCOME_ENGINE_TRACE_ID,
+  type IncomeEngineTraceArgs,
+} from './incomeClassificationTraces';

@@ -35,6 +35,7 @@
     "test:plan-feasibility": "tsx script/test-plan-feasibility.ts",
     "test:funding-resolution": "tsx script/test-funding-resolution.ts",
     "test:plan-execution-dual-status": "tsx script/test-plan-execution-dual-status.ts",
+    "test:income-classification": "tsx script/test-income-classification.ts",
     "test:persistent-user-defaults": "tsx script/test-persistent-user-defaults.ts",
     "test:persistent-user-defaults-backend": "tsx script/test-persistent-user-defaults-backend.ts",
     "test:user-defaults-audit-affordance": "tsx script/test-user-defaults-audit-affordance.ts",

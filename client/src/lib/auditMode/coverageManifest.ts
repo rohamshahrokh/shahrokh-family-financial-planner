@@ -28,6 +28,7 @@ import {
   CASHFLOW_RECONCILIATION_YEAR_RANGE,
   PLAN_FEASIBILITY_TRACE_ID,
   FUNDING_RESOLUTION_TRACE_ID,
+  INCOME_ENGINE_TRACE_ID,
 } from './engineTraces';
 
 export type EngineSourceKey =
@@ -371,6 +372,19 @@ export const COVERAGE_MANIFEST: CoverageEntry[] = [
     engine: 'dashboard',
     surface: 'ExecutiveDashboard → Plan Execution Capacity (Plan Feasibility card → Funding Gap Resolution)',
     description: 'Funding Gap Resolution — Candidate solutions, ranking logic, selected recommendation',
+    required: true,
+  },
+  // ── Income Engine — classification + recurring vs one-off split ──
+  // #FWL_Income_Engine_Refactor — every sf_income record is classified by
+  // type / behaviour / forecast treatment. Trace exposes Recurring Monthly
+  // Income, One-Off Income (last 12 months), Total Historical Income, the
+  // included recurring records, the excluded one-off events, and the income
+  // figure consumed by Forecast, Monte Carlo, and serviceability engines.
+  {
+    id: INCOME_ENGINE_TRACE_ID,
+    engine: 'dashboard',
+    surface: 'Financial Plan → Income section (Recurring / One-Off / Total cards)',
+    description: 'Income Engine — Recurring vs One-Off classification, engine inputs, audit trail',
     required: true,
   },
   // ── Persistent User Defaults (modelling preferences) ──
