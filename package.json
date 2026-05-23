@@ -32,6 +32,7 @@
     "test:monte-carlo-expected-returns": "tsx script/test-monte-carlo-expected-returns.ts",
     "test:funding-source-tax-regime": "tsx script/test-funding-source-tax-regime.ts",
     "test:cashflow-chart-funding-source": "tsx script/test-cashflow-chart-funding-source.ts",
+    "test:bills-inclusion-paths": "tsx script/test-bills-inclusion-paths.ts",
     "test:plan-feasibility": "tsx script/test-plan-feasibility.ts",
     "test:funding-resolution": "tsx script/test-funding-resolution.ts",
     "test:plan-execution-dual-status": "tsx script/test-plan-execution-dual-status.ts",

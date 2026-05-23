@@ -10,6 +10,7 @@ import {
   buildAdapterContext,
   FUNDING_PLAN_FIELD,
 } from "@/lib/propertyFundingAdapter";
+import { decideBillsInclusion } from "@/lib/billsInclusion";
 
 /**
  * safeNum — converts any value to a finite number.
@@ -1194,6 +1195,21 @@ export function buildCashFlowSeries(params: {
   const snap_expenses = safeNum(s.monthly_expenses);
   const snap_mortgage = safeNum(s.mortgage);
 
+  // ── Bills-inclusion decision (audit fix: cashflow double-count) ────────────
+  // When `snap.monthly_expenses` already absorbs the recurring-bill categories
+  // (the common case for users who type an all-in monthly number derived from
+  // their actual ledger), we MUST NOT also add a separate billsOutflow in
+  // forecast months — that produced a ~$5k/mo phantom outgoing in 2026+ for
+  // the live household. The decision below is data-driven (see
+  // `billsInclusion.ts`); when no evidence of overlap is present we preserve
+  // the legacy behaviour and bills are added on top.
+  const billsInclusionDecision = decideBillsInclusion({
+    snapshot: s as any,
+    expenses: params.expenses,
+    bills: params.bills as any,
+  });
+  const billsAlreadyInExpenses = billsInclusionDecision.includesBills;
+
   // Pre-compute PPOR monthly mortgage repayment (fixed amount)
   const pporMonthlyRepayment = calcMonthlyRepayment(snap_mortgage, 6.5, 30);
 
@@ -1449,8 +1465,13 @@ export function buildCashFlowSeries(params: {
       // CRITICAL FIX: use billActualOutflow() which respects the bill's next_due_date and
       // frequency so that Quarterly/Semi-Annual/Annual bills only appear in the months
       // they are actually due, not spread as a monthly equivalent every month.
+      //
+      // Bills-inclusion guard (audit fix): when the snapshot's monthly_expenses
+      // already absorbs the bill categories, billsAlreadyInExpenses=true and we
+      // suppress this outflow entirely to avoid double-counting in every
+      // forecast month. See billsInclusion.ts for the data-driven decision.
       let billsOutflow = 0;
-      if (!isActual) {
+      if (!isActual && !billsAlreadyInExpenses) {
         for (const bill of (params.bills ?? [])) {
           if (bill.is_active === false || bill.active === false) continue;
           billsOutflow += billActualOutflow(bill, year, month);
