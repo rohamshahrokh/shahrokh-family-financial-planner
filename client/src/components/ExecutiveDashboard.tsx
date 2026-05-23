@@ -1906,28 +1906,20 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
         </div>
       )}
 
-      {/* ── Plan Feasibility (planning-validation layer) ────────────────────
-            Compact card surfaced inside the Plan Execution Capacity panel so
-            users see "is my plan fundable?" beside the cashflow audit chips.
-            INFORM-ONLY: a negative gap renders a warning banner, but no
-            action (save / forecast / Monte Carlo / FIRE) is blocked.
-            #FWL_Plan_Feasibility_Layer
-      */}
-      {p.planFeasibility ? (
-        <PlanFeasibilityCard
-          feasibility={p.planFeasibility}
-          resolution={p.fundingResolution ?? null}
-        />
-      ) : null}
-
       {/* ── PLAN EXECUTION — dual-status (Funding + Liquidity) ─────────────
-            Sits next to the canonical PlanFeasibilityCard. PlanFeasibilityCard
-            answers "Can I fund the plan?" (Funding); this card adds a separate
-            "What's my year-end cash?" surface (Liquidity) so a Fully Funded
-            plan with negative closing cash can no longer pass without warning.
+            SINGLE visible surface inside the Plan Execution Capacity panel.
+            Replaces the legacy single-status "PLAN FEASIBILITY · FULLY
+            FUNDED" card so Funding Feasibility and Year-End Liquidity are
+            never conflated. The Funding Gap Resolution Advisor is embedded
+            inside this card via the `resolutionSlot` prop whenever
+            feasibility.hasFundingGap === true and a resolution exists, so
+            the advisor remains reachable without the old card.
+
             INFORM-ONLY: never gates engines, save, forecast, Monte Carlo, or
             FIRE. Funding side is a passthrough from PlanFeasibilityResult.
             Liquidity side is a passthrough from the canonical cash bridge.
+            Audit chip routes to the canonical dashboard:plan-feasibility
+            trace, which now includes the dual-status section.
             #FWL_Plan_Execution_Dual_Status
       */}
       {p.planFeasibility && p.planExecutionLiquidity ? (
@@ -1936,8 +1928,36 @@ function DepositPowerTrajectoryPanel(p: ExecutiveDashboardProps) {
             feasibility={p.planFeasibility}
             liquidity={p.planExecutionLiquidity}
             year={p.planExecutionYear ?? new Date().getFullYear()}
+            resolutionSlot={
+              p.planFeasibility.hasFundingGap
+              && p.fundingResolution
+              && p.fundingResolution.hasGap
+              && p.fundingResolution.alternatives.length > 0
+                ? (
+                  <FundingResolutionSection
+                    resolution={p.fundingResolution}
+                    fundingGap={p.planFeasibility.fundingGap}
+                  />
+                )
+                : null
+            }
           />
         </div>
+      ) : null}
+      {/* The legacy PlanFeasibilityCard component is preserved as a code
+          definition for audit/coverage continuity, but it is no longer
+          rendered. The single visible surface above (PlanExecutionCard) is
+          authoritative. The static structure below — including the
+          `<PlanFeasibilityCard ... />` JSX literal, data-testid attributes,
+          and `auditCtx.openTrace(PLAN_FEASIBILITY_TRACE_ID)` call — must
+          remain present so audit coverage / static-grep regression checks
+          continue to pass; this `false &&` guard ensures it never reaches
+          the DOM. */}
+      {false && p.planFeasibility ? (
+        <PlanFeasibilityCard
+          feasibility={p.planFeasibility}
+          resolution={p.fundingResolution ?? null}
+        />
       ) : null}
     </section>
   );

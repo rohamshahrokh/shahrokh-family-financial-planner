@@ -15,6 +15,11 @@
 
 import type { PlanFeasibilityResult } from "@/lib/planFeasibility";
 import {
+  PLAN_FEASIBILITY_WARNING_HEADLINE,
+  PLAN_FEASIBILITY_WARNING_ASSUMPTION,
+  planFeasibilityWarningDetail,
+} from "@/lib/planFeasibility";
+import {
   derivePlanExecutionStatus,
   type LiquidityInputs,
   type FundingStatusSurface,
@@ -23,6 +28,8 @@ import {
 import { formatCurrency } from "@/lib/finance";
 import { maskValue } from "@/components/PrivacyMask";
 import { useAppStore } from "@/lib/store";
+import { useAuditMode } from "@/lib/auditMode";
+import { PLAN_FEASIBILITY_TRACE_ID } from "@/lib/auditMode/engineTraces";
 
 export interface PlanExecutionCardProps {
   /** Canonical Funding side — never re-derived inside this component. */
@@ -31,6 +38,14 @@ export interface PlanExecutionCardProps {
   liquidity:   LiquidityInputs;
   /** Year label (defaults to current year). */
   year?: number | string;
+  /**
+   * Optional Funding Gap Resolution Advisor render slot. The dashboard
+   * supplies the existing <FundingResolutionSection /> component here when
+   * `feasibility.hasFundingGap === true` and a resolution exists, so the
+   * advisor remains reachable without the legacy PlanFeasibilityCard.
+   * #FWL_Funding_Gap_Resolution_Advisor
+   */
+  resolutionSlot?: React.ReactNode;
   /** Optional className passthrough for layout. */
   className?: string;
 }
@@ -39,9 +54,11 @@ export default function PlanExecutionCard({
   feasibility,
   liquidity,
   year,
+  resolutionSlot,
   className,
 }: PlanExecutionCardProps) {
   const { privacyMode } = useAppStore();
+  const auditCtx = useAuditMode();
   const fmt = (n: number) => maskValue(formatCurrency(n, false), privacyMode);
   const result = derivePlanExecutionStatus(feasibility, liquidity);
 
@@ -52,14 +69,52 @@ export default function PlanExecutionCard({
       data-funding-status={result.funding.status}
       data-liquidity-status={result.liquidity.status}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xs font-bold uppercase tracking-widest text-foreground">
-          PLAN EXECUTION
-        </h2>
-        {year !== undefined && year !== null && (
-          <span className="text-[11px] text-muted-foreground tabular-nums">
-            {String(year)}
+      {/* Header — title + year + canonical audit chip (Plan Feasibility trace).
+          The trace id is intentionally PLAN_FEASIBILITY_TRACE_ID — the trace
+          itself now carries the PLAN EXECUTION dual-status section (via
+          buildPlanFeasibilityTrace's `liquidity` arg), so the same audit
+          target answers both Q1 (Funding) and Q2 (Liquidity). */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <h2 className="text-xs font-bold uppercase tracking-widest text-foreground">
+            PLAN EXECUTION
+          </h2>
+          {year !== undefined && year !== null && (
+            <span className="text-[11px] text-muted-foreground tabular-nums">
+              {String(year)}
+            </span>
+          )}
+        </div>
+        {auditCtx.auditMode ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); auditCtx.openTrace(PLAN_FEASIBILITY_TRACE_ID); }}
+            aria-label="Open Plan Execution audit trace"
+            title="Click to see the Funding Feasibility + Year-End Liquidity breakdown"
+            className="px-2 py-0.5 rounded-md border text-[10px] font-bold tabular-nums fwl-audit-metric"
+            style={{
+              borderColor: "hsl(var(--border))",
+              color: "hsl(var(--muted-foreground))",
+              cursor: "pointer",
+              touchAction: "manipulation",
+              WebkitTapHighlightColor: "transparent",
+              userSelect: "none",
+            }}
+            data-audit-trace-id={PLAN_FEASIBILITY_TRACE_ID}
+            data-audit-mode="on"
+            data-testid="audit-metric-plan-execution"
+          >
+            🧾 Trace
+          </button>
+        ) : (
+          <span
+            className="px-2 py-0.5 rounded-md border text-[10px] font-bold tabular-nums"
+            style={{ borderColor: "hsl(var(--border))", color: "hsl(var(--muted-foreground))" }}
+            data-audit-trace-id={PLAN_FEASIBILITY_TRACE_ID}
+            data-audit-mode="off"
+            data-testid="audit-metric-plan-execution"
+          >
+            🧾
           </span>
         )}
       </div>
@@ -101,6 +156,40 @@ export default function PlanExecutionCard({
           testId="pec-funding-surplus"
         />
         <StatusPill funding={result.funding} />
+
+        {/* Canonical Plan Feasibility warning banner (preserved verbatim from
+            the legacy PlanFeasibilityCard — same copy, same testids, so the
+            warning experience and audit-coverage greps remain intact even
+            though the legacy card is no longer rendered). */}
+        {result.funding.hasFundingGap && (
+          <div
+            className="mt-2 rounded-md border px-2.5 py-2 text-[11px] leading-snug"
+            style={{
+              borderColor: "hsl(0,72%,60% / 0.55)",
+              background: "hsl(0,72%,10%)",
+              color: "hsl(0,72%,72%)",
+            }}
+            role="status"
+            aria-live="polite"
+            data-testid="plan-feasibility-warning-banner"
+          >
+            <div className="font-bold mb-0.5" data-testid="plan-feasibility-warning-headline">
+              ⚠ {PLAN_FEASIBILITY_WARNING_HEADLINE}
+            </div>
+            <div data-testid="plan-feasibility-warning-detail">
+              {planFeasibilityWarningDetail(result.funding.fundingGap)}
+            </div>
+            <div className="text-muted-foreground mt-0.5" data-testid="plan-feasibility-warning-assumption">
+              {PLAN_FEASIBILITY_WARNING_ASSUMPTION}
+            </div>
+            <div
+              className="mt-1 font-semibold"
+              data-testid="plan-feasibility-additional-funding"
+            >
+              Additional Funding Required: {fmt(Math.max(0, -result.funding.fundingGap))}
+            </div>
+          </div>
+        )}
       </Section>
 
       {/* Section 2 — Year-End Liquidity */}
@@ -137,6 +226,17 @@ export default function PlanExecutionCard({
           {result.contextualExplanation}
         </div>
       )}
+
+      {/* Funding Gap Resolution Advisor — rendered only when feasibility
+          reports a funding gap AND the parent supplied a resolution slot.
+          Liquidity stress alone never triggers the advisor; the parent
+          gates this on `feasibility.hasFundingGap`.
+          #FWL_Funding_Gap_Resolution_Advisor */}
+      {result.funding.hasFundingGap && resolutionSlot ? (
+        <div data-testid="plan-execution-resolution-slot">
+          {resolutionSlot}
+        </div>
+      ) : null}
     </div>
   );
 }
