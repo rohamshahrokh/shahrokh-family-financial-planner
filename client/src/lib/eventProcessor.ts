@@ -10,6 +10,7 @@
  */
 
 import { safeNum, dcaMonthlyEquiv, calcMonthlyRepayment } from './mathUtils';
+import { decideBillsInclusion } from './billsInclusion';
 
 // ─── Event Types ──────────────────────────────────────────────────────────────
 
@@ -249,6 +250,16 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
 
   const investmentProps = params.properties.filter(p => p.type !== 'ppor');
 
+  // ── Bills-inclusion decision (audit fix: cashflow double-count) ──────────
+  // When the snapshot's monthly_expenses already absorbs the recurring-bill
+  // categories, suppress per-bill expense events in forecast months. See
+  // billsInclusion.ts for the data-driven decision.
+  const billsAlreadyInExpenses = decideBillsInclusion({
+    snapshot: s as any,
+    expenses: params.expenses,
+    bills: params.bills as any,
+  }).includesBills;
+
   // Iterate every month from ENGINE_START → ENGINE_END
   const allKeys = rangeKeys(ENGINE_START, ENGINE_END);
   let monthIndex = 0;
@@ -320,7 +331,11 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
     }
 
     // ── 3. RECURRING BILLS (forecast months only — not in actuals) ─────────
-    if (!isActual) {
+    // Bills-inclusion guard (audit fix): when snap.monthly_expenses already
+    // absorbs the bill categories we MUST NOT also push per-bill expense
+    // events; that double-counted ~$5k/mo in every forecast month for the
+    // live household. See billsInclusion.ts for the data-driven decision.
+    if (!isActual && !billsAlreadyInExpenses) {
       for (const bill of params.bills) {
         if (bill.is_active === false) continue;
         const billMonthly = dcaMonthlyEquiv(safeNum(bill.amount), bill.frequency || 'monthly');
