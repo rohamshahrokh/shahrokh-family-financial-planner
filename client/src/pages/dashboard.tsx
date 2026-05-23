@@ -2009,6 +2009,35 @@ export default function DashboardPage() {
       const y = (p as any)?.year;
       if (typeof y === 'number') projByYear.set(y, p);
     }
+    // ── Friendly per-IP labels for the Cashflow Reconciliation trace ──
+    // Map Supabase sf_properties.id → "IP N: <name>" where N is a 1-based
+    // index over investment properties sorted ascending by their earliest
+    // available date (purchase / contract / settlement). Name preference:
+    // `name` → `address` → "Investment Property N". The trace builder
+    // keeps the internal id as the technical key in `source` and only
+    // swaps the user-facing label. No forecast math is touched.
+    const propertyLabels: Record<string, string> = (() => {
+      const ips = ((properties ?? []) as any[]).filter(
+        (p) => p?.type !== 'ppor' && p?.type !== 'owner_occupied',
+      );
+      const dateKey = (p: any): string => {
+        const raw = p?.purchase_date ?? p?.contract_date ?? p?.settlement_date;
+        return raw ? String(raw) : '9999-12-31';
+      };
+      const sorted = [...ips].sort((p1, p2) => {
+        const d = dateKey(p1).localeCompare(dateKey(p2));
+        if (d !== 0) return d;
+        return String(p1?.id ?? '').localeCompare(String(p2?.id ?? ''));
+      });
+      const out: Record<string, string> = {};
+      sorted.forEach((p, idx) => {
+        const n = idx + 1;
+        const raw = (p?.name ?? p?.address ?? '').toString().trim();
+        const display = raw.length > 0 ? raw : `Investment Property ${n}`;
+        out[String(p?.id)] = `IP ${n}: ${display}`;
+      });
+      return out;
+    })();
     for (const a of cashFlowAnnual) {
       const cashUsed   = (a as any).propertyPurchaseCashUsed ?? 0;
       const equityRel  = (a as any).propertyEquityReleased   ?? 0;
@@ -2054,6 +2083,7 @@ export default function DashboardPage() {
           // ── INCOME (cash bridge) ──
           salaryIncome: (a as any).income ?? 0,
           rentalIncomeByProperty: (a as any).rentalIncomeByProperty ?? {},
+          propertyLabels,
           rentalIncomeTotal: (a as any).rentalIncome ?? 0,
           taxRefund: (a as any).ngTaxBenefit ?? 0,
           plannedStockSell: (a as any).plannedStockSell ?? 0,
@@ -2094,7 +2124,7 @@ export default function DashboardPage() {
 
       openingCash = a.endingBalance ?? openingCash;
     }
-  }, [cashFlowAnnual, totalLiquidCash, projection]);
+  }, [cashFlowAnnual, totalLiquidCash, projection, properties]);
 
   // ─── Best Move V2 useMemo — MUST be before loading guard (Rules of Hooks) ──────────
   const inlineBestMove_hook = useMemo(() => {
