@@ -23,6 +23,8 @@
     "test:sprint-4c-reconciliation": "tsx script/test-sprint4c-reconciliation.ts",
     "test:sprint-4c-integrity": "tsx script/test-sprint4c-financial-integrity.ts",
     "test:sprint-4d": "tsx script/test-sprint4d-ui-reconciliation.ts",
+    "test:sprint-5-goalsolver": "tsx script/test-sprint5-goalsolver.ts",
+    "test:sprint-5": "tsx script/test-sprint5-goalsolver.ts",
     "test:dashboard-contract": "tsx script/test-dashboard-contract.ts",
     "test:audit-mode": "tsx script/test-audit-mode.ts",
     "test:scenario-v2": "tsx script/test-scenario-v2.ts",
