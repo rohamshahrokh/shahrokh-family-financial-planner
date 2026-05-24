@@ -371,8 +371,11 @@ export function runScenarioForecast(params: {
 
   // Starting values from snapshot (or scenario snap_overrides)
   const ov = scenario.snap_overrides ?? {};
-  const monthlyIncome = safeNum(ov.monthly_income ?? snap?.monthly_income ?? 22000);
-  const monthlyExpenses = safeNum(ov.monthly_expenses ?? snap?.monthly_expenses ?? 8000);
+  // Sprint 4A: no hardcoded $22k/$8k household defaults. Missing snapshot
+  // data flows through as 0 so the scenario reports an explicit incomplete
+  // state rather than fabricating a Shahrokh-shaped household.
+  const monthlyIncome = safeNum(ov.monthly_income ?? snap?.monthly_income);
+  const monthlyExpenses = safeNum(ov.monthly_expenses ?? snap?.monthly_expenses);
   const startCash = safeNum(ov.cash ?? snap?.cash ?? 0) + safeNum(ov.offset_balance ?? snap?.offset_balance ?? 0) +
     safeNum(ov.savings_cash ?? snap?.savings_cash ?? 0) + safeNum(ov.emergency_cash ?? snap?.emergency_cash ?? 0);
   const pporValue0 = safeNum(ov.ppor ?? snap?.ppor ?? 0);
@@ -941,8 +944,9 @@ export function runWiMonteCarlo(params: {
     let ipLoan = 0;
     let pporV = safeNum(snap?.ppor ?? 0);
     let pporLoan = safeNum(snap?.mortgage ?? 0);
-    let inc = safeNum(snap?.monthly_income ?? 22000) * 12;
-    let exp = safeNum(snap?.monthly_expenses ?? 8000) * 12;
+    // Sprint 4A: no hardcoded household income/expense defaults.
+    let inc = safeNum(snap?.monthly_income) * 12;
+    let exp = safeNum(snap?.monthly_expenses) * 12;
     let cashNegThisSim = false;
     let fireYearSim: number | null = null;
 
