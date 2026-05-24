@@ -102,7 +102,11 @@ function ledgerFromInputs(b: BestMoveResult): Partial<BestMoveLedger> {
     etfExpectedReturn: 0.095,
     cryptoExpectedReturn: 0.20,
     mortgageRate: 0.0582, // live current PPOR rate — NOT a forecast/blended rate.
-    ppor: 0,
+    // PPOR is now carried through LedgerInputs so the unified recommendation
+    // engine can compute a real LVR. Previously hard-coded to 0, which caused
+    // the "Reduce leverage" recommendation to report "LVR currently 0%" on
+    // Risk Radar even when the household had a genuine mortgage.
+    ppor: li.ppor ?? 0,
     depositPowerResult: {
       totalDepositPower: li.depositPower,
       readinessPct: li.depositReadinessPct,

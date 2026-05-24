@@ -461,7 +461,17 @@ export default function MarketNewsPage() {
   // ── Status helpers ─────────────────────────────────────────────────────────
   const isStale = marketData?.stale === true;
   const staleAge = marketData?.staleAgeMin ?? 0;
-  const dataStatus = marketData?.dataStatus ?? (isStale ? "cached" : "live");
+  // Treat "API returned 200 but every price is missing" as a feed-unavailable
+  // state rather than silently rendering blank dashes everywhere. This catches
+  // environmental failures (e.g. upstream provider blocked) where the response
+  // is structurally valid but carries no usable price points.
+  const hasAnyPrice =
+    Object.values(prices).some((p) => p && (p as PriceEntry).price > 0) ||
+    Object.values(indices).some((p) => p && (p as PriceEntry).price > 0);
+  const feedUnavailable = !!marketData && !hasAnyPrice;
+  const dataStatus = feedUnavailable
+    ? "failed"
+    : (marketData?.dataStatus ?? (isStale ? "cached" : "live"));
   const failedSymbols = marketData?.failedSymbols ?? [];
 
   const statusBadge = (() => {
@@ -548,6 +558,22 @@ export default function MarketNewsPage() {
           <div className="max-w-7xl mx-auto flex items-center gap-2 text-amber-500 text-xs">
             <AlertTriangle size={12} />
             Partial data — some symbols unavailable: <span className="font-mono">{failedSymbols.join(", ")}</span>
+          </div>
+        </div>
+      )}
+      {feedUnavailable && !isStale && (
+        <div className="bg-red-900/20 border-b border-red-900/40 px-4 py-2">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-red-400 text-xs font-semibold">
+              <AlertTriangle size={13} />
+              Live price feed is temporarily unavailable. Prices will reappear once the upstream provider responds.
+            </div>
+            <button
+              onClick={handleRefresh}
+              className="flex items-center gap-1 text-xs bg-red-800/40 hover:bg-red-700/60 border border-red-700 text-red-200 px-2.5 py-1 rounded transition-colors font-semibold"
+            >
+              <RefreshCw size={11} /> Retry
+            </button>
           </div>
         </div>
       )}

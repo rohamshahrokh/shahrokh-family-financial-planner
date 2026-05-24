@@ -86,6 +86,11 @@ export interface LedgerInputs {
   surplus:                  number;
   depositPower:             number;
   depositReadinessPct:      number;
+  // PPOR market value — required downstream so the unified recommendation
+  // engine can compute a real LVR. Without this, lvr falls through to 0 and
+  // the "Reduce leverage" recommendation says "LVR currently 0%" even when
+  // the household has a real mortgage. See bestMoveBridge.ledgerFromInputs.
+  ppor:                     number;
 }
 
 export interface BestMoveResult {
@@ -698,7 +703,7 @@ export function getBestMoveRecommendation(ledger: BestMoveLedger): BestMoveResul
       emergencyBuffer, upcomingBills12mo, plannedInvestmentsTotal,
       propertyDepositReserve, taxReserve, forecastShortfallReserve,
       freeCashForOffset, monthlyIncome, monthlyExpenses, surplus,
-      depositPower, depositReadyPct
+      depositPower, depositReadyPct, ppor,
     );
     return {
       best: fallbackFull, alternatives: [],
@@ -717,7 +722,7 @@ export function getBestMoveRecommendation(ledger: BestMoveLedger): BestMoveResul
     emergencyBuffer, upcomingBills12mo, plannedInvestmentsTotal,
     propertyDepositReserve, taxReserve, forecastShortfallReserve,
     freeCashForOffset, monthlyIncome, monthlyExpenses, surplus,
-    depositPower, depositReadyPct
+    depositPower, depositReadyPct, ppor,
   );
 
   return { best, alternatives, generated_at: new Date().toISOString(), summary, ledgerInputs };
@@ -742,6 +747,7 @@ function buildLedgerInputs(
   surplus: number,
   depositPower: number,
   depositReadinessPct: number,
+  ppor: number,
 ): LedgerInputs {
   return {
     cashOutsideOffset,
@@ -760,6 +766,7 @@ function buildLedgerInputs(
     surplus,
     depositPower,
     depositReadinessPct,
+    ppor,
   };
 }
 

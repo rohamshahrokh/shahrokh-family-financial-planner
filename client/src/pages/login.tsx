@@ -131,8 +131,8 @@ export default function LoginPage() {
                 Family Office
               </span>
             </div>
-            <p className="text-white/90 text-sm">Roham · Fara · Kids</p>
-            <p className="text-white/60 text-xs mt-1">Brisbane, Queensland · Australia</p>
+            <p className="text-white/90 text-sm">Your Family · Your Wealth</p>
+            <p className="text-white/60 text-xs mt-1">Private Wealth Platform</p>
           </div>
         </div>
 
@@ -201,7 +201,7 @@ export default function LoginPage() {
                 data-testid="input-username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Roham or Fara"
+                placeholder="Username"
                 className="h-12 text-sm"
                 style={{
                   background: "rgba(255,255,255,0.05)",
