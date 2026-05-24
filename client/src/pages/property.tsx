@@ -107,7 +107,12 @@ const EMPTY_PROPERTY = {
   selling_costs: 2.5,
   projection_years: 10,
   notes: "",
-  lifecycle_status: "settled",
+  // Newly created properties default to 'planned'. A property only becomes
+  // 'settled' when the user explicitly selects it in the Lifecycle Status
+  // dropdown (or via Mark-as-Settled). Legacy rows in the DB without a value
+  // are still treated as 'settled' on read so the existing forecast pipeline
+  // keeps including them unchanged — see shared/schema.ts column default.
+  lifecycle_status: "planned",
 };
 
 // ─── Normalise numeric fields ────────────────────────────────────────────────
