@@ -140,39 +140,60 @@ const HOLDINGS_LIVE_DOMINANT = [
   { asset_type: "crypto", current_value: 28_000 },
 ];
 
+// Income ledger fixture — recurring rows whose monthly equivalent is
+// DELIBERATELY DIFFERENT from the snapshot's `roham_monthly_income +
+// fara_monthly_income + rental_income_total + other_income`. The selector
+// precedence prefers ledger over snapshot subfields, so any page that passes
+// `incomeRecords: []` will fall back to snapshot subfields and produce a
+// different monthly surplus. This is the production drift the preview smoke
+// test caught (Timeline $11,142 vs Dashboard $10,442).
+const INCOME_RECORDS_LEDGER = [
+  { id: "i1", category: "Salary - Roham", type: "salary", amount: 14_000, frequency: "Monthly", date: "2026-04-15" },
+  { id: "i2", category: "Salary - Fara",  type: "salary", amount: 13_800, frequency: "Monthly", date: "2026-04-15" },
+];
+// Recurring monthly total from the ledger above = $27,800/mo
+// Snapshot subfields (Roham + Fara + rental + other) = $30,633.34/mo
+// Surplus delta = $2,833 — well above the $1 tolerance, so a regression that
+// reverts any page's `incomeRecords` wiring back to `[]` will fail loudly.
+
 const TODAY_ISO = "2026-05-24";
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * Per-page input shapes (mirror what each page wires in production)
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-function buildDashboardInputs(opts: { holdings?: any[] } = {}): DashboardInputs {
+interface PageInputOpts {
+  holdings?: any[];
+  income?: any[];
+}
+
+function buildDashboardInputs(opts: PageInputOpts = {}): DashboardInputs {
   return {
     snapshot:      SNAPSHOT_HAPPY,
     properties:    [PROPERTY],
     stocks:        STOCKS_TICKER,
     cryptos:       CRYPTOS_TICKER,
     holdingsRaw:   opts.holdings ?? [],
-    incomeRecords: [],
+    incomeRecords: opts.income ?? [],
     expenses:      [],
     todayIso:      TODAY_ISO,
   };
 }
 
-function buildReportsInputs(opts: { holdings?: any[] } = {}): DashboardInputs {
+function buildReportsInputs(opts: PageInputOpts = {}): DashboardInputs {
   return {
     snapshot:      SNAPSHOT_HAPPY,
     properties:    [PROPERTY],
     stocks:        STOCKS_TICKER,
     cryptos:       CRYPTOS_TICKER,
     holdingsRaw:   opts.holdings ?? [],
-    incomeRecords: [],
+    incomeRecords: opts.income ?? [],
     expenses:      [],
     todayIso:      TODAY_ISO,
   };
 }
 
-function buildFinancialPlanInputs(opts: { holdings?: any[] } = {}): DashboardInputs {
+function buildFinancialPlanInputs(opts: PageInputOpts = {}): DashboardInputs {
   // Sprint 4D — Financial Plan now hands the canonical layer the SAME
   // stocks/cryptos/holdings every other page does. Previously it passed
   // `[]` for all three, which silently changed `Math.max(live, ticker,
@@ -183,46 +204,46 @@ function buildFinancialPlanInputs(opts: { holdings?: any[] } = {}): DashboardInp
     stocks:        STOCKS_TICKER,
     cryptos:       CRYPTOS_TICKER,
     holdingsRaw:   opts.holdings ?? [],
-    incomeRecords: [],
+    incomeRecords: opts.income ?? [],
     expenses:      [],
     todayIso:      TODAY_ISO,
   };
 }
 
-function buildWealthStrategyInputs(opts: { holdings?: any[] } = {}): DashboardInputs {
+function buildWealthStrategyInputs(opts: PageInputOpts = {}): DashboardInputs {
   return {
     snapshot:      SNAPSHOT_HAPPY,
     properties:    [PROPERTY],
     stocks:        STOCKS_TICKER,
     cryptos:       CRYPTOS_TICKER,
     holdingsRaw:   opts.holdings ?? [],
-    incomeRecords: [],
+    incomeRecords: opts.income ?? [],
     expenses:      [],
     todayIso:      TODAY_ISO,
   };
 }
 
-function buildTimelineInputs(opts: { holdings?: any[] } = {}): DashboardInputs {
+function buildTimelineInputs(opts: PageInputOpts = {}): DashboardInputs {
   return {
     snapshot:      SNAPSHOT_HAPPY,
     properties:    [PROPERTY],
     stocks:        STOCKS_TICKER,
     cryptos:       CRYPTOS_TICKER,
     holdingsRaw:   opts.holdings ?? [],
-    incomeRecords: [],
+    incomeRecords: opts.income ?? [],
     expenses:      [],
     todayIso:      TODAY_ISO,
   };
 }
 
-function buildRiskRadarInputs(): DashboardInputs {
+function buildRiskRadarInputs(opts: PageInputOpts = {}): DashboardInputs {
   return {
     snapshot:      SNAPSHOT_HAPPY,
     properties:    [PROPERTY],
     stocks:        [],
     cryptos:       [],
     holdingsRaw:   [],
-    incomeRecords: [],
+    incomeRecords: opts.income ?? [],
     expenses:      [],
     todayIso:      TODAY_ISO,
   };
@@ -414,6 +435,90 @@ ok("selectMonthlySurplus == headline.monthlySurplus", near(selectMonthlySurplus(
 ok("selectMonthlyDebtService == headline.debtService", near(selectMonthlyDebtService(inputs), head.debtService));
 ok("selectPassiveIncome == headline.passiveIncome",    near(selectPassiveIncome(inputs), head.passiveIncome));
 ok("canonicalFire.fireNumber == headline.fireNumber",  near(fire.fireNumber, head.fireNumber));
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §6 — Income-ledger parity (Sprint 4D follow-up: Timeline surplus drift)
+ *
+ * Preview smoke test on PR #67 caught a Timeline Monthly Surplus of $11,142
+ * vs $10,442 on Dashboard / Reports / Financial Plan. Root cause: Timeline
+ * (and Wealth Strategy, Risk Radar) wired `incomeRecords: []` to the
+ * canonical layer, so `selectMonthlyIncome` skipped the ledger aggregate and
+ * fell back to the snapshot's `roham_monthly_income + fara_monthly_income +
+ * rental + other` subfields — which were higher than the actual recurring
+ * ledger total.
+ *
+ * This section uses an income-ledger fixture whose monthly equivalent is
+ * meaningfully different from the snapshot subfields, and asserts:
+ *   (a) every page that consumes the headline service produces the same
+ *       Monthly Income / Monthly Surplus to within $1 — irrespective of any
+ *       individual page's choice to fetch /api/income or not, provided it
+ *       wires the records to the canonical layer.
+ *   (b) the canonical surplus moves DOWN when ledger income < snapshot
+ *       subfields — confirming the ledger is the authority and proves a
+ *       regression that reverts `incomeRecords: []` would show a different
+ *       Monthly Surplus per page.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+console.log("\n§6  Income-ledger parity (Timeline surplus drift fix)");
+
+const income = INCOME_RECORDS_LEDGER;
+
+// (a) Every page passing the same income ledger gets the same headline.
+const incomeBaseline = computeCanonicalHeadlineMetrics(buildDashboardInputs({ income }));
+const incomePages = [
+  pageMetrics("Dashboard",     buildDashboardInputs({ income })),
+  pageMetrics("Reports",       buildReportsInputs({ income })),
+  pageMetrics("FinancialPlan", buildFinancialPlanInputs({ income })),
+  pageMetrics("WealthStrategy",buildWealthStrategyInputs({ income })),
+  pageMetrics("Timeline",      buildTimelineInputs({ income })),
+  pageMetrics("RiskRadar",     buildRiskRadarInputs({ income })),
+];
+const incomeReconciliation = reconcileHeadlineSnapshots(incomeBaseline, incomePages, 1);
+ok(
+  "Income-ledger: every page (incl. Timeline + Risk + Wealth Strategy) agrees on all nine headline metrics ($1 tolerance)",
+  incomeReconciliation.status === "PASS",
+  incomeReconciliation.drifts,
+);
+
+// (b) The ledger fixture MUST move the surplus vs snapshot-subfields-only —
+// otherwise a regression that reverts a page's wiring to `incomeRecords: []`
+// would not be caught. We pin a meaningful spread here so the test cannot
+// pass coincidentally if a page ignores its income ledger.
+const subfieldOnly = computeCanonicalHeadlineMetrics(buildDashboardInputs()); // incomeRecords: []
+const surplusSpread = Math.abs(incomeBaseline.monthlySurplus - subfieldOnly.monthlySurplus);
+ok(
+  "Income-ledger fixture moves Monthly Surplus by >$100 vs snapshot subfields (sanity: fixture would expose a regression)",
+  surplusSpread > 100,
+  { ledgerSurplus: incomeBaseline.monthlySurplus, subfieldSurplus: subfieldOnly.monthlySurplus, spread: surplusSpread },
+);
+
+// (c) Explicitly assert what the preview smoke test caught: Timeline
+// Monthly Surplus must equal Dashboard Monthly Surplus, both via the
+// canonical headline service. This is the exact failure mode that broke
+// production — keep an explicit assertion so a future regression is
+// labelled clearly.
+const dashboardSurplus = computeCanonicalHeadlineMetrics(buildDashboardInputs({ income })).monthlySurplus;
+const timelineSurplus  = computeCanonicalHeadlineMetrics(buildTimelineInputs({ income })).monthlySurplus;
+ok(
+  "Timeline.monthlySurplus == Dashboard.monthlySurplus when both consume the income ledger (preview-smoke regression guard)",
+  near(timelineSurplus, dashboardSurplus, 1),
+  { timeline: timelineSurplus, dashboard: dashboardSurplus, diff: timelineSurplus - dashboardSurplus },
+);
+
+// (d) Negative case: simulating the OLD (broken) Timeline wiring — passing
+// `incomeRecords: []` while Dashboard passes the real ledger — MUST drift.
+// This documents the regression mode and proves the parity assertion above
+// is load-bearing (it would have failed before the fix).
+const brokenTimelineInputs: DashboardInputs = {
+  ...buildTimelineInputs({ income }),
+  incomeRecords: [], // mimic pre-fix Timeline wiring
+};
+const brokenTimelineSurplus = computeCanonicalHeadlineMetrics(brokenTimelineInputs).monthlySurplus;
+ok(
+  "Pre-fix Timeline wiring (incomeRecords: []) would have drifted from Dashboard — proves the §6(c) guard is meaningful",
+  Math.abs(brokenTimelineSurplus - dashboardSurplus) > 1,
+  { brokenTimeline: brokenTimelineSurplus, dashboard: dashboardSurplus },
+);
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * Summary

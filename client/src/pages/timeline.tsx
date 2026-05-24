@@ -124,14 +124,25 @@ export default function TimelinePage() {
     queryKey: ['/api/holdings'],
     queryFn: () => apiRequest('GET', '/api/holdings').then(r => r.json()).catch(() => []),
   });
+  // Sprint 4D follow-up — fetch /api/income so the canonical headline metrics
+  // see the same ledger income rows Dashboard / Reports / Financial Plan see.
+  // Previously this page passed `incomeRecords: []`, which made
+  // `selectMonthlyIncome` skip the ledger aggregate and fall back to the
+  // snapshot's `monthly_income` (or its hardcoded $22k default), producing a
+  // different Monthly Surplus to every other surface — the $11,142 vs $10,442
+  // drift the preview smoke test caught.
+  const { data: incomeRecords = [] } = useQuery<any[]>({
+    queryKey: ['/api/income'],
+    queryFn: () => apiRequest('GET', '/api/income').then(r => r.json()).catch(() => []),
+  });
 
   // Sprint 4A Final Closure / Sprint 4D — canonical headline figures (net
   // worth, monthly income/expenses/surplus/debt service, liquidity).
   // Same selectors the rest of the app reads — Timeline cannot drift.
   const canonicalInputsTL = useMemo(() => ({
     snapshot, properties, stocks, cryptos,
-    holdingsRaw, incomeRecords: [], expenses,
-  }), [snapshot, properties, stocks, cryptos, holdingsRaw, expenses]);
+    holdingsRaw, incomeRecords, expenses,
+  }), [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses]);
   const canonicalHead = useMemo(
     () => computeCanonicalHeadlineFigures(canonicalInputsTL),
     [canonicalInputsTL],

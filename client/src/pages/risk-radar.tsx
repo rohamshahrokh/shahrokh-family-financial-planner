@@ -164,14 +164,19 @@ export default function RiskRadarPage() {
   const { data: snap } = useQuery<any>({ queryKey: ['/api/snapshot'] });
   const { data: properties = [] } = useQuery<any[]>({ queryKey: ['/api/properties'] });
   const { data: expenses = [] } = useQuery<any[]>({ queryKey: ['/api/expenses'] });
+  // Sprint 4D follow-up — fetch /api/income so the canonical headline service
+  // receives the same income ledger Dashboard/Reports/Financial Plan pass.
+  // Without this, `selectMonthlyIncome` falls back to the snapshot subfields
+  // and the radar's savings/debt-service ratios diverge from every other page.
+  const { data: incomeRecords = [] } = useQuery<any[]>({ queryKey: ['/api/income'] });
 
   // Sprint 4A Final Closure / Sprint 4D — canonical headline figures.
   // The radar's debt-service ratio, liquidity ratio and savings ratio all
   // derive from these numbers, guaranteeing the radar matches Dashboard etc.
   const canonicalInputsRR = useMemo(() => ({
     snapshot: snap, properties, stocks: [], cryptos: [],
-    holdingsRaw: [], incomeRecords: [], expenses,
-  }), [snap, properties, expenses]);
+    holdingsRaw: [], incomeRecords, expenses,
+  }), [snap, properties, incomeRecords, expenses]);
   const canonicalHead = useMemo(
     () => computeCanonicalHeadlineFigures(canonicalInputsRR),
     [canonicalInputsRR],

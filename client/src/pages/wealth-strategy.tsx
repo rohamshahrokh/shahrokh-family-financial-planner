@@ -2898,6 +2898,12 @@ export default function WealthStrategyPage() {
   // layer, so this page sees the identical investment totals (manual vs live
   // vs ticker) and cannot drift downstream.
   const { data: holdingsRaw } = useQuery({ queryKey: ["/api/holdings"] });
+  // Sprint 4D follow-up — fetch /api/income so the canonical headline service
+  // sees the same income ledger Dashboard / Reports / Financial Plan pass.
+  // Without this, `selectMonthlyIncome` skips the ledger aggregate and falls
+  // back to snapshot subfields, producing a different Monthly Surplus on the
+  // hub vs every other page.
+  const { data: incomeRecordsWS } = useQuery({ queryKey: ["/api/income"] });
 
   // Sprint 4A Final Closure / Sprint 4D — canonical headline figures.
   // Every narrative card on this page that quotes net worth / surplus / debt
@@ -2909,9 +2915,9 @@ export default function WealthStrategyPage() {
     stocks: (stocksRaw as any[] | undefined) ?? [],
     cryptos: (cryptoRaw as any[] | undefined) ?? [],
     holdingsRaw: (holdingsRaw as any[] | undefined) ?? [],
-    incomeRecords: [],
+    incomeRecords: (incomeRecordsWS as any[] | undefined) ?? [],
     expenses: (expensesRaw as any[] | undefined) ?? [],
-  }), [snapRaw, propertiesRaw, stocksRaw, cryptoRaw, holdingsRaw, expensesRaw]);
+  }), [snapRaw, propertiesRaw, stocksRaw, cryptoRaw, holdingsRaw, incomeRecordsWS, expensesRaw]);
   const canonicalHead = useMemo(
     () => computeCanonicalHeadlineFigures(canonicalInputsWS),
     [canonicalInputsWS],
