@@ -17,6 +17,7 @@ import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import DepositPowerCard from "@/components/DepositPowerCard";
+import PropertyLifecycleAnalysis from "@/components/PropertyLifecycleAnalysis";
 import { ModellingAssumptionsChip } from "@/components/taxRegime/ModellingAssumptionsChip";
 import { PropertyTaxImpactBlock } from "@/components/taxRegime/PropertyTaxImpactBlock";
 import { Input } from "@/components/ui/input";
@@ -46,6 +47,29 @@ import { buildAllFundingTraces } from "@/lib/auditMode/engineTraces/fundingSourc
 
 // ─── QLD Stamp Duty — delegates to australianTax.ts central function ────────
 const estimateStampDuty = estimateQldStampDuty;
+
+// ─── Lifecycle helpers ──────────────────────────────────────────────────────
+type LifecycleStatus = 'planned' | 'under_contract' | 'settled';
+const LIFECYCLE_LABEL: Record<LifecycleStatus, string> = {
+  planned: 'Planned',
+  under_contract: 'Under Contract',
+  settled: 'Settled',
+};
+function LifecycleBadge({ status }: { status?: string | null }) {
+  const s = (status as LifecycleStatus) || 'settled';
+  const tone =
+    s === 'settled' ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+    : s === 'under_contract' ? 'bg-sky-500/15 border-sky-500/40 text-sky-300'
+    : 'bg-amber-500/15 border-amber-500/40 text-amber-300';
+  return (
+    <span
+      className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${tone}`}
+      data-testid={`lifecycle-badge-${s}`}
+    >
+      {LIFECYCLE_LABEL[s]}
+    </span>
+  );
+}
 
 // ─── Empty property template ────────────────────────────────────────────────
 const EMPTY_PROPERTY = {
@@ -83,6 +107,12 @@ const EMPTY_PROPERTY = {
   selling_costs: 2.5,
   projection_years: 10,
   notes: "",
+  // Newly created properties default to 'planned'. A property only becomes
+  // 'settled' when the user explicitly selects it in the Lifecycle Status
+  // dropdown (or via Mark-as-Settled). Legacy rows in the DB without a value
+  // are still treated as 'settled' on read so the existing forecast pipeline
+  // keeps including them unchanged — see shared/schema.ts column default.
+  lifecycle_status: "planned",
 };
 
 // ─── Normalise numeric fields ────────────────────────────────────────────────
@@ -107,6 +137,7 @@ const SF_PROPERTY_COLS = new Set([
   'insurance','council_rates','water_rates','maintenance','body_corporate',
   'land_tax','renovation_costs','planned_sale_date','selling_costs',
   'projection_years','notes',
+  'lifecycle_status',
 ]);
 
 // Baseline cols that definitely exist before running the v2 migration
@@ -373,6 +404,23 @@ function PropertyForm({ data, onChange, onEnterSave }: PropertyFormProps) {
               </Select>
             </div>
           </div>
+          <div className="mt-3">
+            <label className="block text-xs text-muted-foreground mb-1">Lifecycle Status</label>
+            <Select
+              value={data.lifecycle_status || 'planned'}
+              onValueChange={v => onChange({ ...data, lifecycle_status: v })}
+            >
+              <SelectTrigger className="h-8 text-sm" data-testid="select-lifecycle-status"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="planned">Planned</SelectItem>
+                <SelectItem value="under_contract">Under Contract</SelectItem>
+                <SelectItem value="settled">Settled (Active)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Only Settled properties flow through the active Forecast Engine. Settling a Planned property automatically activates its debt, rental income and expenses.
+            </p>
+          </div>
         </div>
         <Field label="Purchase Date" value={data.purchase_date} onChange={v => str("purchase_date", v)} type="date" prefix="" />
         <Field label="Settlement Date" value={data.settlement_date} onChange={v => str("settlement_date", v)} type="date" prefix="" />
@@ -517,6 +565,19 @@ function PropertyCard({ prop, onDelete, selected, onToggleSelect, privacyMode, w
     },
   });
 
+  // Settle a planned/under-contract property — promotes it into an active
+  // settled record so the existing forecast / debt / rental / expense pipeline
+  // picks it up. Server-side dedupes by name to avoid creating a second
+  // active asset.
+  const settleMut = useMutation({
+    mutationFn: (id: number) =>
+      apiRequest("POST", `/api/properties/${id}/settle`, {}).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/properties"] });
+      qc.invalidateQueries({ queryKey: ["/api/snapshot"] });
+    },
+  });
+
   const handleEditChange = useCallback((d: any) => setEditDraft(d), []);
 
   const norm = normalisePropertyDraft(prop);
@@ -606,12 +667,31 @@ function PropertyCard({ prop, onDelete, selected, onToggleSelect, privacyMode, w
         </div>
 
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold truncate">{prop.name}</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-sm font-bold truncate">{prop.name}</p>
+            <LifecycleBadge status={prop.lifecycle_status} />
+          </div>
           <p className="text-xs text-muted-foreground">
             {typeLabel} · {prop.loan_type === "IO" ? "Interest Only" : "P&I"}{" "}
             {prop.purchase_date && `· Purchased ${new Date(prop.purchase_date).getFullYear()}`}
           </p>
         </div>
+
+        {(prop.lifecycle_status === 'planned' || prop.lifecycle_status === 'under_contract') && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-[11px] border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+            onClick={() => {
+              if (confirm("Mark this property as Settled? This will activate it in the forecast (debt, rental income, expenses) and remove it from Planned Purchases.")) {
+                settleMut.mutate(prop.id);
+              }
+            }}
+            data-testid={`button-settle-property-${prop.id}`}
+          >
+            Mark as Settled
+          </Button>
+        )}
 
         <div className="text-right hidden sm:block">
           <p className="text-xs text-muted-foreground">Value</p>
@@ -1089,7 +1169,7 @@ export default function PropertyPage() {
   const setFundingChoice = usePropertyFundingStore((s) => s.setChoice);
 
   // Tab state — detect sessionStorage signal OR #buy-vs-wait in URL hash
-  const [activeTab, setActiveTab] = useState<'portfolio' | 'buy-vs-wait' | 'impact'>(() => {
+  const [activeTab, setActiveTab] = useState<'portfolio' | 'buy-vs-wait' | 'impact' | 'lifecycle'>(() => {
     if (typeof window !== 'undefined') {
       if (sessionStorage.getItem('property_open_tab') === 'buy-vs-wait') return 'buy-vs-wait';
       if (window.location.hash.includes('buy-vs-wait')) return 'buy-vs-wait';
@@ -1438,23 +1518,42 @@ export default function PropertyPage() {
         </div>
       </div>
 
-      {/* Deposit Power — usable equity (PPOR + IPs) + deployable cash */}
-      <DepositPowerCard
-        defaultTargetPrice={ipTargetPrice || 750_000}
-        state="QLD"
-        buffer={ipSafetyBuffer || 30_000}
-      />
+      {/* ─── Acquisition Planner — Deposit Power Breakdown ────────────────────
+          Canonical liquidity + usable-equity stack (Cash + Offset, PPOR Usable
+          Equity, IP Usable Equity, Gross Total, Emergency Buffer, Total Deposit
+          Power) lives here on the Property page. The same breakdown was
+          previously rendered inside the Wealth Decision Center CASH tab — it
+          has been removed from the Executive Dashboard surface in favour of
+          this Acquisition Planner home. */}
+      <section data-testid="property-acquisition-planner" className="space-y-2">
+        <header className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-extrabold uppercase tracking-widest text-foreground">
+              Acquisition Planner — Deposit Power Breakdown
+            </h2>
+            <p className="text-[11px] text-muted-foreground">
+              Deployable cash, usable equity per property, stamp duty &amp; buffer — the canonical purchase-readiness stack.
+            </p>
+          </div>
+        </header>
+        <DepositPowerCard
+          defaultTargetPrice={ipTargetPrice || 750_000}
+          state="QLD"
+          buffer={ipSafetyBuffer || 30_000}
+        />
+      </section>
 
       {/* ─── Tab switcher ────────────────────────────────────────────────── */}
       <div className="flex gap-1 p-1 rounded-xl bg-secondary/60 border border-border w-full sm:w-auto inline-flex">
         {[
           { key: 'portfolio', label: 'Portfolio Overview' },
           { key: 'impact', label: 'Portfolio Impact' },
+          { key: 'lifecycle', label: 'Lifecycle Analysis' },
           { key: 'buy-vs-wait', label: 'Buy vs Wait Analysis' },
         ].map(({ key, label }) => (
           <button
             key={key}
-            onClick={() => setActiveTab(key as 'portfolio' | 'buy-vs-wait')}
+            onClick={() => setActiveTab(key as 'portfolio' | 'buy-vs-wait' | 'impact' | 'lifecycle')}
             className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
               activeTab === key
                 ? 'bg-card text-foreground shadow-sm'
@@ -1468,6 +1567,9 @@ export default function PropertyPage() {
 
       {/* ─── Buy vs Wait tab ────────────────────────────────────────────────── */}
       {activeTab === 'buy-vs-wait' && <PropertyBuyAnalysis />}
+      {activeTab === 'lifecycle' && (
+        <PropertyLifecycleAnalysis properties={properties} privacyMode={privacyMode} />
+      )}
       {activeTab === 'impact' && <PropertyPortfolioImpact
         snapshot={snapshot}
         properties={properties}

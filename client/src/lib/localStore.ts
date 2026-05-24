@@ -251,7 +251,62 @@ const KEYS = {
   income:     "sf_income_v1",
   stockDCA:   "sf_stock_dca_v1",
   cryptoDCA:  "sf_crypto_dca_v1",
+  // Per-property lifecycle override map { [id]: 'planned'|'under_contract'|'settled' }.
+  // Acts as a durable shadow for the lifecycle_status column so an explicit
+  // user selection survives reload/login even when the Supabase column has
+  // not been provisioned yet (see #FWL_Property_Lifecycle_Persistence_Fix).
+  propertyLifecycle: "sf_property_lifecycle_v1",
 };
+
+// ─── Property lifecycle override store ───────────────────────────────────────
+// Plain id→status map. Survives Supabase write failures and re-reads.
+type LifecycleStatus = 'planned' | 'under_contract' | 'settled';
+const VALID_LIFECYCLE = new Set<LifecycleStatus>(['planned', 'under_contract', 'settled']);
+
+function getLifecycleOverrides(): Record<string, LifecycleStatus> {
+  return lsGet<Record<string, LifecycleStatus>>(KEYS.propertyLifecycle) ?? {};
+}
+function setLifecycleOverride(id: number | string | undefined | null, status: unknown): void {
+  if (id === undefined || id === null) return;
+  if (typeof status !== 'string') return;
+  const s = status as LifecycleStatus;
+  if (!VALID_LIFECYCLE.has(s)) return;
+  const map = getLifecycleOverrides();
+  map[String(id)] = s;
+  lsSet(KEYS.propertyLifecycle, map);
+}
+function clearLifecycleOverride(id: number | string): void {
+  const map = getLifecycleOverrides();
+  if (String(id) in map) {
+    delete map[String(id)];
+    lsSet(KEYS.propertyLifecycle, map);
+  }
+}
+/**
+ * Merge per-property lifecycle overrides into a fetched row set.
+ * Override wins when the DB row's lifecycle_status is missing/null/empty.
+ * If the DB row has an explicit lifecycle_status, the DB value wins and the
+ * override is cleared (DB has caught up — keep the two stores in sync).
+ */
+function mergeLifecycleOverrides<T extends { id?: number | string; lifecycle_status?: string | null }>(rows: T[]): T[] {
+  const map = getLifecycleOverrides();
+  if (Object.keys(map).length === 0) return rows;
+  let mapChanged = false;
+  const merged = rows.map(r => {
+    const key = String(r.id ?? '');
+    const dbVal = r.lifecycle_status;
+    const override = map[key];
+    if (dbVal && VALID_LIFECYCLE.has(dbVal as LifecycleStatus)) {
+      // DB authoritative — drop stale override
+      if (override !== undefined) { delete map[key]; mapChanged = true; }
+      return r;
+    }
+    if (override) return { ...r, lifecycle_status: override };
+    return r;
+  });
+  if (mapChanged) lsSet(KEYS.propertyLifecycle, map);
+  return merged;
+}
 
 // ─── Last sync timestamp (shown in UI) ───────────────────────────────────────
 
@@ -566,18 +621,31 @@ export const localStore = {
   async getProperties(): Promise<Property[]> {
     try {
       const rows = await sbProperties.getAll();
-      lsSet(KEYS.properties, rows);
-      console.log("[SF] Loaded from Supabase: properties", rows.length, "rows");
-      return rows;
+      // Merge any pending lifecycle overrides so an explicit user selection
+      // (Planned / Under Contract / Settled) survives reload/login even when
+      // the Supabase column has not been provisioned yet.
+      const merged = mergeLifecycleOverrides<Property>(rows as any);
+      lsSet(KEYS.properties, merged);
+      console.log("[SF] Loaded from Supabase: properties", merged.length, "rows");
+      return merged;
     } catch (err) {
       console.warn("[SF] Supabase error, fallback to local cache: properties", err);
-      return lsGet<Property[]>(KEYS.properties) ?? [];
+      const cached = lsGet<Property[]>(KEYS.properties) ?? [];
+      return mergeLifecycleOverrides<Property>(cached);
     }
   },
 
   async createProperty(data: Omit<Property, "id" | "created_at">): Promise<Property> {
+    const requestedLifecycle = (data as any).lifecycle_status;
     const saved = await sbProperties.create(data);
     if (saved) {
+      // If the caller supplied an explicit lifecycle_status but the round-trip
+      // returned a row without it (column missing), shadow it locally so the
+      // UI keeps showing the user's choice instead of falling back to Settled.
+      if (requestedLifecycle && !(saved as any).lifecycle_status) {
+        setLifecycleOverride(saved.id, requestedLifecycle);
+        (saved as any).lifecycle_status = requestedLifecycle;
+      }
       const items = lsGet<Property[]>(KEYS.properties) ?? [];
       lsSet(KEYS.properties, [...items, saved]);
       console.log("[SF] Saved to Supabase: property created", saved.id);
@@ -585,14 +653,32 @@ export const localStore = {
     }
     const items = lsGet<Property[]>(KEYS.properties) ?? [];
     const item: Property = { ...data, id: nextId(items), created_at: new Date().toISOString() } as Property;
+    if (requestedLifecycle) setLifecycleOverride(item.id, requestedLifecycle);
     lsSet(KEYS.properties, [...items, item]);
     console.log("[SF] Fallback to local cache: property created locally", item.id);
     return item;
   },
 
   async updateProperty(id: number, data: Partial<Property>): Promise<Property> {
+    // Persist the lifecycle_status override BEFORE the round-trip so a
+    // Supabase PATCH failure (missing column / network) doesn't lose the
+    // user's choice. The override is cleared on the next read once the DB
+    // row carries a matching value (see mergeLifecycleOverrides).
+    if ((data as any).lifecycle_status !== undefined) {
+      setLifecycleOverride(id, (data as any).lifecycle_status);
+    }
     const saved = await sbProperties.update(id, data);
-    const items = (lsGet<Property[]>(KEYS.properties) ?? []).map((i) => (i.id === id ? { ...i, ...(saved ?? data) } : i));
+    const items = (lsGet<Property[]>(KEYS.properties) ?? []).map((i) => {
+      if (i.id !== id) return i;
+      const next = { ...i, ...(saved ?? data) } as Property;
+      // Even if the Supabase round-trip stripped lifecycle_status (because
+      // the column is missing), keep the requested value on the local row so
+      // subsequent reads from this tab don't snap back to Settled.
+      if ((data as any).lifecycle_status !== undefined) {
+        (next as any).lifecycle_status = (data as any).lifecycle_status;
+      }
+      return next;
+    });
     lsSet(KEYS.properties, items);
     console.log("[SF] Saved to Supabase: property updated", id);
     return items.find((i) => i.id === id)!;
@@ -600,6 +686,7 @@ export const localStore = {
 
   async deleteProperty(id: number): Promise<void> {
     await sbProperties.delete(id);
+    clearLifecycleOverride(id);
     lsSet(KEYS.properties, (lsGet<Property[]>(KEYS.properties) ?? []).filter((i) => i.id !== id));
     console.log("[SF] Saved to Supabase: property deleted", id);
   },

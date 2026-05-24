@@ -198,15 +198,64 @@ export const sbExpenses = {
 
 // ─── Properties ───────────────────────────────────────────────────────────────
 
+// Columns that *may* not yet exist on sf_properties in some Supabase projects
+// (they were added by later migrations and a stale schema cache produces a
+// PGRST204 "column ... does not exist" error on PATCH/INSERT). When a write
+// fails because of one of these columns we strip it and retry — the rest of
+// the payload still persists, and the client-side override map (see
+// localStore.ts) keeps the stripped value visible across reloads until the
+// migration is applied.
+const SOFT_OPTIONAL_PROPERTY_COLS = new Set([
+  "lifecycle_status",
+]);
+
+function looksLikeUnknownColumnError(err: unknown): { col: string | null } {
+  const msg = err instanceof Error ? err.message : String(err);
+  // PGRST204 "Could not find the 'lifecycle_status' column of 'sf_properties' in the schema cache"
+  // 42703 "column \"lifecycle_status\" of relation \"sf_properties\" does not exist"
+  if (!/PGRST204|42703|schema cache|does not exist/i.test(msg)) return { col: null };
+  const m = msg.match(/'([a-z_][a-z0-9_]*)'/i) || msg.match(/"([a-z_][a-z0-9_]*)"/i);
+  return { col: m ? m[1] : null };
+}
+
+function stripOptionalCol(data: Record<string, any>, col: string | null): Record<string, any> {
+  const out = { ...data };
+  if (!col) {
+    SOFT_OPTIONAL_PROPERTY_COLS.forEach(k => { delete out[k]; });
+    return out;
+  }
+  delete out[col];
+  return out;
+}
+
 export const sbProperties = {
   async getAll(): Promise<any[]> {
     try { return await sbGet("sf_properties", "order=created_at.asc"); } catch { return []; }
   },
   async create(data: object): Promise<any | null> {
-    try { return await sbInsert("sf_properties", { ...data, created_at: new Date().toISOString() }); } catch { return null; }
+    const payload = { ...(data as Record<string, any>), created_at: new Date().toISOString() };
+    try {
+      return await sbInsert("sf_properties", payload);
+    } catch (err) {
+      const { col } = looksLikeUnknownColumnError(err);
+      if (col && SOFT_OPTIONAL_PROPERTY_COLS.has(col)) {
+        try { return await sbInsert("sf_properties", stripOptionalCol(payload, col)); }
+        catch { return null; }
+      }
+      return null;
+    }
   },
   async update(id: number, data: object): Promise<any | null> {
-    try { return await sbUpdate("sf_properties", id, data); } catch { return null; }
+    try {
+      return await sbUpdate("sf_properties", id, data);
+    } catch (err) {
+      const { col } = looksLikeUnknownColumnError(err);
+      if (col && SOFT_OPTIONAL_PROPERTY_COLS.has(col)) {
+        try { return await sbUpdate("sf_properties", id, stripOptionalCol(data as Record<string, any>, col)); }
+        catch { return null; }
+      }
+      return null;
+    }
   },
   async delete(id: number): Promise<void> {
     try { await sbDelete("sf_properties", id); } catch {}
