@@ -88,6 +88,12 @@ import {
   buildCanonicalAuditTrace,
   type CanonicalHeadlineFigures,
 } from "@/lib/canonicalLedger";
+// Sprint 4C — canonical FIRE / passive-income source so the dashboard, reports,
+// and fire-path all derive the same FIRE number from the same SWR & target.
+import {
+  computeCanonicalFire,
+  resolveFireTargetFromSnapshot,
+} from "@/lib/canonicalFire";
 import { aggregateIncome } from "@/lib/incomeClassificationEngine";
 import { maskValue } from "@/components/PrivacyMask";
 import SaveButton, { useSaveOnEnter } from "@/components/SaveButton";
@@ -1808,7 +1814,14 @@ export default function DashboardPage() {
   }, [ngSummary]);
 
   // ─── FIRE calc ────────────────────────────────────────────────────────────
-  const fireTargetAmt = (8000 * 12) / 0.04;
+  // Sprint 4C — derive from canonical FIRE selector. The previous hardcoded
+  // `(8000 * 12) / 0.04` target ignored both the user's saved
+  // `fire_target_monthly_income` and the SWR they set in Settings, so every
+  // page rendered a different FIRE figure for the same household.
+  const _fireCanonical = computeCanonicalFire(_contractInputs, {
+    targetMonthlyIncome: resolveFireTargetFromSnapshot(_contractInputs, { explicitTarget: 8000 }),
+  });
+  const fireTargetAmt = _fireCanonical.fireNumber || (8000 * 12) / 0.04;
   const fireCurrentAmt = totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal;
   const fireProgressPct = Math.min(100, (fireCurrentAmt / fireTargetAmt) * 100);
   const fireGap = Math.max(0, fireTargetAmt - fireCurrentAmt);
