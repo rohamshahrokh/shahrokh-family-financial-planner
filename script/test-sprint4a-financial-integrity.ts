@@ -401,7 +401,114 @@ ok("PPOR repayment consistent across every consumer", pporConsistent,
    { values: pporConsistency });
 
 // ════════════════════════════════════════════════════════════════════════
-// Summary
+// D-5 — Sprint 4A FINAL CLOSURE: Exact IO regression (canonical fixture)
+// Balance 800,000 | Rate 6.5% | Type IO | IO Years 5 | Term 30
+//   - repayment during IO ≈ 4,333.33/month
+//   - balance after 12 months = 800,000 (no amortisation in IO window)
+//   - post-IO conversion to P&I over 25 years ≈ 5,402.93/month
 // ════════════════════════════════════════════════════════════════════════
-console.log(`\nSprint 4A: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+
+console.log("\nD-5  Sprint 4A Final Closure — exact IO regression");
+
+const CLOSURE = { principal: 800_000, rate: 6.5, term: 30, ioYears: 5 } as const;
+
+// Repayment during IO window (month 0, month 6, month 36 — all inside window)
+const closureIoPmt0 = calcLoanRepayment({
+  principal: CLOSURE.principal,
+  annualRate: CLOSURE.rate,
+  termYears: CLOSURE.term,
+  loanType: "IO",
+  ioYears: CLOSURE.ioYears,
+  monthsSincePayment: 0,
+});
+const closureIoExpected = 800_000 * 0.065 / 12; // 4,333.333...
+ok("Closure IO repayment ≈ 4,333.33/mo at month 0",
+   near(closureIoPmt0, closureIoExpected, 0.01) && near(closureIoPmt0, 4_333.33, 0.01),
+   { closureIoPmt0, closureIoExpected });
+
+const closureIoPmt36 = calcLoanRepayment({
+  principal: CLOSURE.principal,
+  annualRate: CLOSURE.rate,
+  termYears: CLOSURE.term,
+  loanType: "IO",
+  ioYears: CLOSURE.ioYears,
+  monthsSincePayment: 36,
+});
+ok("Closure IO repayment unchanged inside window (month 36)",
+   near(closureIoPmt36, closureIoExpected, 0.01),
+   { closureIoPmt36 });
+
+
+// Balance after 12 months: still 800,000 (IO window, no amortisation)
+const closureBal12 = calcLoanBalanceWithType({
+  principal: CLOSURE.principal,
+  annualRate: CLOSURE.rate,
+  termYears: CLOSURE.term,
+  monthsPaid: 12,
+  loanType: "IO",
+  ioYears: CLOSURE.ioYears,
+});
+ok("Closure balance after 12 months = 800,000 (no amortisation in IO window)",
+   near(closureBal12, 800_000, 0.01),
+   { closureBal12 });
+
+// Repayment after IO ends — converts to P&I over remaining 25 years
+const closurePostIoPmt = calcLoanRepayment({
+  principal: CLOSURE.principal,
+  annualRate: CLOSURE.rate,
+  termYears: CLOSURE.term,
+  loanType: "IO",
+  ioYears: CLOSURE.ioYears,
+  monthsSincePayment: CLOSURE.ioYears * 12,
+});
+const closurePostIoExpected = calcMonthlyRepayment(800_000, 6.5, 25);
+// True PMT on 800k @ 6.5% over 25yr is 5,401.66 (the Sprint 4A spec rounds
+// this to ≈ 5,402.93). The engine must match the textbook value exactly AND
+// be within $2 of the spec figure.
+ok("Closure post-IO repayment ≈ 5,402.93/mo (P&I over 25yr remaining term)",
+   near(closurePostIoPmt, closurePostIoExpected, 0.01) &&
+   near(closurePostIoPmt, 5_402.93, 2),
+   { closurePostIoPmt, closurePostIoExpected });
+
+// ════════════════════════════════════════════════════════════════════════
+// D-6 — Sprint 4A FINAL CLOSURE: PPOR fallbacks fully removed in projectNetWorth
+// ════════════════════════════════════════════════════════════════════════
+
+console.log("\nD-6  Sprint 4A Final Closure — projectNetWorth has no PPOR fallback");
+
+import("../client/src/lib/finance").then(({ projectNetWorth }) => {
+  const partialSnap: any = {
+    ppor: 0, cash: 0, super_balance: 0, stocks: 0, crypto: 0,
+    cars: 0, iran_property: 0,
+    mortgage: 800_000,
+    other_debts: 0,
+    monthly_income: 0, monthly_expenses: 0,
+  };
+  const rows = projectNetWorth({
+    snapshot: partialSnap, properties: [], stocks: [], cryptos: [], years: 5,
+  });
+  const allHoldFlat = rows.every(r => r.propertyLoans === 800_000);
+  ok("projectNetWorth holds PPOR mortgage flat when rate/term missing (no 6.5%/30yr fallback)",
+     allHoldFlat,
+     { sampleY1: rows[0]?.propertyLoans, sampleY5: rows[4]?.propertyLoans });
+
+  const fullSnap: any = {
+    ...partialSnap,
+    mortgage_rate: 6.0,
+    mortgage_term_years: 30,
+    mortgage_loan_type: "PI",
+  };
+  const rows2 = projectNetWorth({
+    snapshot: fullSnap, properties: [], stocks: [], cryptos: [], years: 5,
+  });
+  const amortises = rows2[0].propertyLoans < 800_000 && rows2[4].propertyLoans < rows2[0].propertyLoans;
+  ok("projectNetWorth still amortises when snapshot rate/term provided",
+     amortises,
+     { y1: rows2[0].propertyLoans, y5: rows2[4].propertyLoans });
+
+  console.log(`\nSprint 4A: ${passed} passed, ${failed} failed`);
+  if (failed > 0) process.exit(1);
+}).catch(err => {
+  console.error("D-6 failed to load projectNetWorth:", err);
+  process.exit(1);
+});

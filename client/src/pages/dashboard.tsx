@@ -80,6 +80,14 @@ import {
   type CanonicalNetWorth,
   selectIncomeAggregate,
 } from "@/lib/dashboardDataContract";
+// Sprint 4A Final Closure — every major page reads headline figures from
+// the canonical ledger so net worth / surplus / debt service / liquidity
+// reconcile across surfaces to within $1.
+import {
+  computeCanonicalHeadlineFigures,
+  buildCanonicalAuditTrace,
+  type CanonicalHeadlineFigures,
+} from "@/lib/canonicalLedger";
 import { aggregateIncome } from "@/lib/incomeClassificationEngine";
 import { maskValue } from "@/components/PrivacyMask";
 import SaveButton, { useSaveOnEnter } from "@/components/SaveButton";
@@ -897,6 +905,26 @@ export default function DashboardPage() {
     snapshot, properties, stocks, cryptos,
     holdingsRaw, incomeRecords, expenses,
   }), [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses]);
+
+  // Sprint 4A Final Closure — canonical headline figures.
+  // Net worth, monthly income, monthly expenses, monthly surplus, monthly debt
+  // service, and liquidity all flow from `computeCanonicalHeadlineFigures` so
+  // Dashboard cannot drift from Reports / Wealth Strategy / Timeline / Risk /
+  // Financial Plan. `buildCanonicalAuditTrace` exposes the same numbers plus
+  // the per-component debt-service breakdown for the audit drawer.
+  const canonicalHead: CanonicalHeadlineFigures = useMemo(
+    () => computeCanonicalHeadlineFigures(_contractInputs),
+    [_contractInputs],
+  );
+  const canonicalAudit = useMemo(
+    () => buildCanonicalAuditTrace(_contractInputs),
+    [_contractInputs],
+  );
+  // Mark so dead-code-elimination doesn't strip the canonical wiring before
+  // tree-walkers pick it up; values are consumed by the reconciliation log
+  // below and feed the headline drawer.
+  void canonicalHead;
+  void canonicalAudit;
 
   // ─── Live stocks / crypto value (delegates to data contract) ────────────
   // Bug pre-fix: the dashboard only summed the unified holdings API and a

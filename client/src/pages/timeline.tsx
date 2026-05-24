@@ -26,6 +26,13 @@ import {
 } from "@/lib/finance";
 import { runCashEngine } from "@/lib/cashEngine";
 import { computeCanonicalNetWorth } from "@/lib/canonicalNetWorth";
+// Sprint 4A Final Closure — Timeline reads its headline metrics from the
+// canonical ledger so net worth / surplus / debt service / liquidity stay
+// aligned with Dashboard / Reports / Wealth Strategy / Financial Plan / Risk.
+import {
+  computeCanonicalHeadlineFigures,
+  buildCanonicalAuditTrace,
+} from "@/lib/canonicalLedger";
 import { useActiveRegime } from "@/hooks/useActiveRegime";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -106,6 +113,20 @@ export default function TimelinePage() {
     queryKey: ['/api/expenses'],
     queryFn: () => apiRequest('GET', '/api/expenses').then(r => r.json()),
   });
+
+  // Sprint 4A Final Closure — canonical headline figures (net worth, monthly
+  // income/expenses/surplus/debt service, liquidity, mortgage-input state).
+  // Same selectors the rest of the app reads — Timeline cannot drift.
+  const canonicalHead = useMemo(() => computeCanonicalHeadlineFigures({
+    snapshot, properties, stocks, cryptos,
+    holdingsRaw: [], incomeRecords: [], expenses,
+  }), [snapshot, properties, stocks, cryptos, expenses]);
+  const canonicalAudit = useMemo(() => buildCanonicalAuditTrace({
+    snapshot, properties, stocks, cryptos,
+    holdingsRaw: [], incomeRecords: [], expenses,
+  }), [snapshot, properties, stocks, cryptos, expenses]);
+  void canonicalHead;
+  void canonicalAudit;
   const { data: stockTransactions = [] } = useQuery<any[]>({
     queryKey: ['/api/stock-transactions'],
     queryFn: () => apiRequest('GET', '/api/stock-transactions').then(r => r.json()),

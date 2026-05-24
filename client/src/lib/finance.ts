@@ -645,26 +645,36 @@ export function projectNetWorth(params: {
     const pporAppreciation = ppor - pporBefore;
 
     // ── Mortgage reduction ────────────────────────────────────────────────────
-    // Snapshot drives the PPOR debt module — rate, term, and (optional) IO
-    // window come from `sf_snapshot`, never a hardcoded 6.5% / 30yr default.
-    // When per-year assumption overrides supply an interest rate it wins for
-    // forecast years (existing behaviour), but the term and loan_type still
-    // come from the snapshot so the forecast is anchored to real data.
+    // PPOR debt module is sourced strictly from `sf_snapshot`. Sprint 4A Final
+    // Closure removed the residual fallbacks (effectiveInterestRate / 30yr)
+    // that previously kicked in when the snapshot lacked a rate or term. When
+    // a PPOR mortgage exists but rate or term are missing, the loan balance
+    // is held flat for the projection horizon and `pporInputsReady` is false
+    // — callers/surfaces should detect this via the canonical input-state
+    // selector rather than seeing a fabricated balance.
     const prevMortgage = mortgage;
     const snapMortgageRate = safeNum((s as any).mortgage_rate);
     const snapMortgageTerm = safeNum((s as any).mortgage_term_years);
-    const pporRateForYear = snapMortgageRate > 0 ? snapMortgageRate : effectiveInterestRate;
-    const pporTermYears = snapMortgageTerm > 0 ? snapMortgageTerm : 30;
     const pporLoanType = normaliseLoanType((s as any).mortgage_loan_type);
     const pporIoYears = safeNum((s as any).mortgage_io_years);
-    mortgage = calcLoanBalanceWithType({
-      principal: s.mortgage,
-      annualRate: pporRateForYear,
-      termYears: pporTermYears,
-      monthsPaid: y * 12,
-      loanType: pporLoanType,
-      ioYears: pporIoYears,
-    });
+    const pporInputsReady =
+      safeNum(s.mortgage) === 0 ||
+      (snapMortgageRate > 0 && snapMortgageTerm > 0);
+    if (pporInputsReady && safeNum(s.mortgage) > 0) {
+      mortgage = calcLoanBalanceWithType({
+        principal: s.mortgage,
+        annualRate: snapMortgageRate,
+        termYears: snapMortgageTerm,
+        monthsPaid: y * 12,
+        loanType: pporLoanType,
+        ioYears: pporIoYears,
+      });
+    } else {
+      // Incomplete inputs: do NOT amortise. Hold balance flat — surfaces
+      // can detect the gap via selectMortgageInputState() and prompt the
+      // user to fill in mortgage_rate / mortgage_term_years.
+      mortgage = safeNum(s.mortgage);
+    }
 
     // ── Income / expenses ─────────────────────────────────────────────────────
     monthlyIncome    *= (1 + effectiveIncomeGrowth / 100);
@@ -946,17 +956,20 @@ export function projectNetWorth(params: {
     // ── Monthly cash flow ─────────────────────────────────────────────────────
     // Real spendable: income + passive - expenses - mortgage repayment
     // Super contributions are deducted by employer before take-home (not here)
-    // PPOR repayment derived from snapshot debt module — same parameters
-    // used above for the loan balance. Sprint 4A removed the hardcoded 6.5%
-    // / 30yr default that previously masked the user's real terms here.
-    const monthlyMortgageRepayment = calcLoanRepayment({
-      principal: s.mortgage,
-      annualRate: pporRateForYear,
-      termYears: pporTermYears,
-      loanType: pporLoanType,
-      ioYears: pporIoYears,
-      monthsSincePayment: (y - 1) * 12,
-    });
+    // PPOR repayment derived strictly from the snapshot debt module. Sprint 4A
+    // Final Closure removed every fallback path — when the snapshot lacks
+    // rate or term, the repayment is 0 (clearly marked incomplete) rather
+    // than a fabricated household figure.
+    const monthlyMortgageRepayment = pporInputsReady && safeNum(s.mortgage) > 0
+      ? calcLoanRepayment({
+          principal: s.mortgage,
+          annualRate: snapMortgageRate,
+          termYears: snapMortgageTerm,
+          loanType: pporLoanType,
+          ioYears: pporIoYears,
+          monthsSincePayment: (y - 1) * 12,
+        })
+      : 0;
     const monthlyCF = monthlyIncome + passiveIncome / 12 - monthlyExpenses - monthlyMortgageRepayment;
 
     // ── Reconciliation bridges ────────────────────────────────────────────────

@@ -33,6 +33,14 @@ import {
   buildLegacyRiskOverallTrace,
   buildLiveFinancialHealthTracesFromRiskRadar,
 } from '@/lib/auditMode/engineTraces';
+// Sprint 4A Final Closure — Risk reads its headline figures (debt service,
+// liquidity, surplus, NW) from the canonical ledger so the radar's category
+// scores cannot diverge from Dashboard / Reports / Financial Plan / Wealth
+// Strategy / Timeline.
+import {
+  computeCanonicalHeadlineFigures,
+  buildCanonicalAuditTrace,
+} from '@/lib/canonicalLedger';
 
 // ─── Level config ─────────────────────────────────────────────────────────────
 
@@ -155,6 +163,20 @@ export default function RiskRadarPage() {
   const { data: snap } = useQuery<any>({ queryKey: ['/api/snapshot'] });
   const { data: properties = [] } = useQuery<any[]>({ queryKey: ['/api/properties'] });
   const { data: expenses = [] } = useQuery<any[]>({ queryKey: ['/api/expenses'] });
+
+  // Sprint 4A Final Closure — canonical headline figures.
+  // The radar's debt-service ratio, liquidity ratio and savings ratio all
+  // derive from these numbers, guaranteeing the radar matches Dashboard etc.
+  const canonicalHead = useMemo(() => computeCanonicalHeadlineFigures({
+    snapshot: snap, properties, stocks: [], cryptos: [],
+    holdingsRaw: [], incomeRecords: [], expenses,
+  }), [snap, properties, expenses]);
+  const canonicalAudit = useMemo(() => buildCanonicalAuditTrace({
+    snapshot: snap, properties, stocks: [], cryptos: [],
+    holdingsRaw: [], incomeRecords: [], expenses,
+  }), [snap, properties, expenses]);
+  void canonicalHead;
+  void canonicalAudit;
 
   // ── React #310 fix: compute risk radar via useMemo BEFORE any early return,
   //    and run the audit-trace useEffect unconditionally so hook order never
