@@ -35,6 +35,7 @@ import {
   INCOME_ENGINE_TRACE_ID,
 } from "@/lib/auditMode/engineTraces";
 import { Search } from "lucide-react";
+import { useAppStore } from "@/lib/store";
 // Single-source-of-truth selectors. Financial Plan now DISPLAYS derived values
 // (income from ledger, expenses from budget, mortgage repayment from debt
 // module, combined super) and only allows manual entry when the user
@@ -313,6 +314,11 @@ export default function MyFinancialPlan() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const { openTrace } = useAuditMode();
+  // Demo persona masking — labels and hints that show real owner names in
+  // production are swapped for the Alex/Sara demo persona in demo mode.
+  const isDemo = useAppStore((s: any) => s.isDemo);
+  const ownerAName = isDemo ? "Alex" : "Roham";
+  const ownerBName = isDemo ? "Sara" : "Fara";
 
   // ── Data queries ────────────────────────────────────────────────────────────
   const { data: snapshot, isLoading: loadingSnap } = useQuery<any>({
@@ -660,12 +666,12 @@ export default function MyFinancialPlan() {
           <div className="mb-2 rounded-md bg-secondary/30 p-2 text-[11px] flex items-center justify-between">
             <span className="text-muted-foreground flex items-center gap-1">
               <Lock className="w-2.5 h-2.5 text-emerald-400" />
-              Super (combined) — auto-calculated from Roham + Fara
+              Super (combined) — auto-calculated from {ownerAName} + {ownerBName}
             </span>
             <span className="font-mono text-foreground">{formatCurrency(sotSuperCombined, true)}</span>
           </div>
-          <FieldRow label="Roham — Super Balance" value={draft.roham_super_balance} onChange={upd("roham_super_balance")} hint="Roham's super fund balance (single source of truth)" />
-          <FieldRow label="Fara — Super Balance" value={draft.fara_super_balance} onChange={upd("fara_super_balance")} hint="Fara's super fund balance (single source of truth)" />
+          <FieldRow label={`${ownerAName} — Super Balance`} value={draft.roham_super_balance} onChange={upd("roham_super_balance")} hint={`${ownerAName}'s super fund balance (single source of truth)`} />
+          <FieldRow label={`${ownerBName} — Super Balance`} value={draft.fara_super_balance} onChange={upd("fara_super_balance")} hint={`${ownerBName}'s super fund balance (single source of truth)`} />
 
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2 mt-4">Other</p>
           <FieldRow label="Vehicles (estimated value)" value={draft.cars} onChange={upd("cars")} hint="Car fleet current market value" />
@@ -804,8 +810,8 @@ export default function MyFinancialPlan() {
             </div>
           </div>
           <FieldRow label="Combined Monthly Income" value={draft.monthly_income} onChange={upd("monthly_income")} hint="Master fallback — only used when ledger + sub-fields are empty" />
-          <FieldRow label="Roham — Monthly Net Salary" value={draft.roham_monthly_income} onChange={upd("roham_monthly_income")} hint="Roham's after-tax monthly income" />
-          <FieldRow label="Fara — Monthly Net Salary" value={draft.fara_monthly_income} onChange={upd("fara_monthly_income")} hint="Fara's after-tax monthly income" />
+          <FieldRow label={`${ownerAName} — Monthly Net Salary`} value={draft.roham_monthly_income} onChange={upd("roham_monthly_income")} hint={`${ownerAName}'s after-tax monthly income`} />
+          <FieldRow label={`${ownerBName} — Monthly Net Salary`} value={draft.fara_monthly_income} onChange={upd("fara_monthly_income")} hint={`${ownerBName}'s after-tax monthly income`} />
           <FieldRow label="Rental Income (total monthly)" value={draft.rental_income_total} onChange={upd("rental_income_total")} hint="All IPs combined gross rental" />
           <FieldRow label="Other Income (monthly)" value={draft.other_income} onChange={upd("other_income")} hint="Dividends, side income, etc." />
 

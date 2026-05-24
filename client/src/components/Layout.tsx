@@ -86,7 +86,13 @@ const NAV_STEPS = [
     sublabel: "Forecast · Where am I heading",
     badgeClass: "step-3",
     items: [
-      { href: "/ai-forecast-engine", label: "Forecast Engine",      icon: Sigma,         adminOnly: true  },
+      // Forecast Engine, Risk Radar are the flagship FUTURE surfaces.
+      // Previously the Forecast Engine was admin-only and the Risk Radar
+      // had no sidebar entry, so neither appeared in non-admin demos and
+      // /risk-radar deep links landed with a broken breadcrumb. Restoring
+      // both here keeps the breadcrumb resolver in sync (it walks NAV_STEPS).
+      { href: "/ai-forecast-engine", label: "Forecast Engine",      icon: Sigma,         adminOnly: false },
+      { href: "/risk-radar",         label: "Risk Radar",             icon: Activity,      adminOnly: false },
       // Hidden from sidebar (V1) — routes retained:
       //   /what-if-scenarios       (legacy What-If)
       //   /scenario-compare        (legacy Scenario Lab)
@@ -331,8 +337,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           border: "1px solid hsl(var(--gold-dim) / 0.3)",
         }}
       >
-        <p className="text-xs font-semibold text-gold">Roham &amp; Fara</p>
-        <p className="text-[10px] text-muted-foreground">Kids · Brisbane</p>
+        <p className="text-xs font-semibold text-gold">
+          {isDemo ? "Alex & Sara" : "Roham & Fara"}
+        </p>
+        <p className="text-[10px] text-muted-foreground">
+          {isDemo ? "Demo Family · Sample Data" : "Kids · Brisbane"}
+        </p>
       </div>
 
       {/* ACCORDION NAV — ref attached here for scroll preservation */}

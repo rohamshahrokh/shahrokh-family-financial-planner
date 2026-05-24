@@ -743,7 +743,7 @@ function PropertyCard({ prop, onDelete, selected, onToggleSelect, privacyMode, w
       <div className="grid grid-cols-4 gap-px bg-border">
         {[
           { label: "Value", value: mv(formatCurrency(norm.current_value, true)), color: "" },
-          { label: "Loan", value: mv(formatCurrency(norm.loan_amount, true)), color: "text-red-400" },
+          { label: "Original Loan", value: mv(formatCurrency(norm.loan_amount, true)), color: "text-red-400" },
           { label: "Equity", value: mv(formatCurrency(calcs.equity, true)), color: "text-emerald-400" },
           { label: "Monthly Pmt", value: mv(formatCurrency(calcs.monthly, true)), color: "text-primary" },
         ].map(s => (

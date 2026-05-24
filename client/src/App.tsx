@@ -264,16 +264,46 @@ function AppRouter() {
         <Route path="/risk">
           <ProtectedRoute component={RiskRadarPage} title="Risk Radar" />
         </Route>
-        {/* Tax Strategy — Tax Alpha breakdown surfaced from Deep Analysis cards */}
+        {/* Tax Strategy — Tax Alpha breakdown is rendered as a tab inside /tax.
+            /tax-alpha and /tax-strategy are kept as aliases that redirect to
+            the canonical /tax surface to eliminate the duplicate-route /
+            inconsistent-title defect. */}
         <Route path="/tax-alpha">
-          <ProtectedRoute component={TaxAlphaPage} title="Tax Strategy" />
+          <Redirect to="/tax" />
         </Route>
         <Route path="/tax-strategy">
-          <ProtectedRoute component={TaxAlphaPage} title="Tax Strategy" />
+          <Redirect to="/tax" />
         </Route>
         {/* Audit Coverage — developer transparency surface for Audit Mode */}
         <Route path="/audit-coverage">
           <ProtectedRoute component={AuditCoveragePage} title="Audit Coverage" />
+        </Route>
+        {/* ─── Legacy / direct-typed URL redirects ─────────────────────────────
+            Each historical path maps to the canonical surface that now hosts
+            that functionality. Keeps deep links and bookmarks alive. */}
+        <Route path="/monte-carlo">
+          <Redirect to="/ai-forecast-engine" />
+        </Route>
+        <Route path="/goal-solver">
+          <Redirect to="/wealth-strategy" />
+        </Route>
+        <Route path="/risk-engine">
+          <Redirect to="/risk-radar" />
+        </Route>
+        <Route path="/net-worth-timeline">
+          <Redirect to="/timeline" />
+        </Route>
+        <Route path="/snapshot">
+          <Redirect to="/dashboard" />
+        </Route>
+        <Route path="/snapshots">
+          <Redirect to="/dashboard" />
+        </Route>
+        <Route path="/property-timeline">
+          <Redirect to="/property" />
+        </Route>
+        <Route path="/property-lifecycle">
+          <Redirect to="/property" />
         </Route>
         {/* 404 */}
         <Route component={NotFound} />

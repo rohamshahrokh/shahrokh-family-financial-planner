@@ -564,7 +564,7 @@ export default function DashboardPage() {
   const qc = useQueryClient();
   const { selector: activeRegimeSelector } = useActiveRegime();
   const activeScenario = selectorToScenario(activeRegimeSelector);
-  const { chartView, setChartView, privacyMode, togglePrivacy, currentUser } = useAppStore();
+  const { chartView, setChartView, privacyMode, togglePrivacy, currentUser, isDemo } = useAppStore();
   const { forecastMode, profile, monteCarloResult } = useForecastStore();
   const loadForecastFromSupabase = useForecastStore(s => s.loadFromSupabase);
   // Auto-run setters/state for the canonical Monte Carlo preview the
@@ -2542,7 +2542,7 @@ export default function DashboardPage() {
           <div className="shrink-0 w-14 h-14 rounded-xl overflow-hidden border-2 border-amber-500/30 ring-1 ring-amber-500/10">
             <img
               src={familyImg}
-              alt="Fara & Roham family"
+              alt={isDemo ? "Demo family" : "Fara & Roham family"}
               className="w-full h-full object-cover"
               loading="lazy"
             />
@@ -2553,13 +2553,13 @@ export default function DashboardPage() {
               className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-400/90"
               data-testid="family-welcome-eyebrow"
             >
-              Welcome Back
+              {isDemo ? "Demo Mode" : "Welcome Back"}
             </div>
             <div
               className="text-lg sm:text-xl font-extrabold tracking-tight text-foreground leading-tight"
               data-testid="family-identity-name"
             >
-              Fara &amp; Roham
+              {isDemo ? "Alex & Sara" : "Fara & Roham"}
             </div>
             <div
               className="text-[12px] sm:text-sm font-semibold text-muted-foreground mt-0.5"
@@ -2568,7 +2568,9 @@ export default function DashboardPage() {
               Family Net Worth Command Center
             </div>
             <div className="text-[11px] text-muted-foreground/70 mt-0.5">
-              Building wealth for the kids · Brisbane, QLD
+              {isDemo
+                ? "Sample data only · nothing is real"
+                : "Building wealth for the kids · Brisbane, QLD"}
             </div>
           </div>
         </div>
