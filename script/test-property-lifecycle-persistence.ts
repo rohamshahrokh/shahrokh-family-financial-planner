@@ -315,6 +315,125 @@ for (const status of ["planned", "under_contract", "settled"] as const) {
   eq(`${status} survives reload`, rows.find(r => r.id === 50)?.lifecycle_status, status);
 }
 
+console.log("\n=== #11: New property without explicit lifecycle gets 'planned' via createProperty ===");
+{
+  // Mirrors what happens when a caller (or fallback path) inserts a row
+  // and forgets to set lifecycle_status — the override map alone does NOT
+  // inject 'planned' (it only stores user-provided values), but the
+  // user-facing client path (EMPTY_PROPERTY) and the server-side
+  // createProperty BOTH inject 'planned' as the default. This assertion
+  // covers the override-store side and the read-path side: a fresh
+  // createProperty call with no lifecycle_status returns a row that does
+  // NOT carry 'settled', proving we never silently promote to active.
+  resetBackend({ hasLifecycleColumn: true });
+  localStorageShim.removeItem("sf_property_lifecycle_v1");
+  localStorageShim.removeItem("sf_properties_v3");
+  const created = await localStore.createProperty({ name: "No-lifecycle IP" } as any);
+  ok("createProperty result has no 'settled' injected by the read path",
+    created.lifecycle_status !== "settled",
+    `lifecycle_status was ${JSON.stringify(created.lifecycle_status)}`);
+}
+
+console.log("\n=== #12: Read path NEVER forces 'settled' for rows with explicit other values ===");
+{
+  // Combination: a row with lifecycle_status = 'planned' must remain
+  // 'planned' on every subsequent read — even after multiple round-trips
+  // through localStore.getProperties().
+  resetBackend({
+    hasLifecycleColumn: true,
+    rows: [
+      { id: 60, name: "Already Planned", lifecycle_status: "planned" },
+      { id: 61, name: "Already Under Contract", lifecycle_status: "under_contract" },
+    ],
+  });
+  localStorageShim.removeItem("sf_property_lifecycle_v1");
+  localStorageShim.removeItem("sf_properties_v3");
+  for (let i = 0; i < 3; i++) {
+    const rows = await reload();
+    eq(`#60 stays planned (read ${i + 1})`, rows.find(r => r.id === 60)?.lifecycle_status, "planned");
+    eq(`#61 stays under_contract (read ${i + 1})`, rows.find(r => r.id === 61)?.lifecycle_status, "under_contract");
+  }
+}
+
+console.log("\n=== #13: SQLite server migration — default 'planned' for new, 'settled' backfill for legacy ===");
+{
+  // Replicates server/storage.ts's lifecycle migration on an in-memory
+  // SQLite DB to verify the policy:
+  //   * Existing rows (inserted BEFORE the column was added) get
+  //     backfilled to 'settled' so the existing forecast pipeline keeps
+  //     including them unchanged.
+  //   * Any explicit value the user already saved is preserved.
+  //   * NEW rows inserted via createProperty default to 'planned' — only
+  //     become Settled when the caller passes lifecycle_status='settled'.
+  const Database = (await import("better-sqlite3")).default;
+  const db = new Database(":memory:");
+  db.exec(`CREATE TABLE properties (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    purchase_date TEXT
+  );`);
+  // Pre-existing rows — no lifecycle_status column yet
+  db.prepare(`INSERT INTO properties (name, purchase_date) VALUES (?, ?)`).run("Legacy A", "2022-01-15");
+  db.prepare(`INSERT INTO properties (name, purchase_date) VALUES (?, ?)`).run("Legacy B", "2021-07-04");
+
+  // Mimic the migration block in server/storage.ts: ADD COLUMN with no
+  // DEFAULT, detect a fresh column, backfill NULLs to 'settled' once.
+  let justCreated = false;
+  try {
+    db.prepare(`ALTER TABLE properties ADD COLUMN lifecycle_status TEXT`).run();
+    justCreated = true;
+  } catch { /* already exists */ }
+  if (justCreated) {
+    db.prepare(`UPDATE properties SET lifecycle_status = 'settled' WHERE lifecycle_status IS NULL OR lifecycle_status = ''`).run();
+  }
+
+  const legacy = db.prepare(`SELECT lifecycle_status FROM properties ORDER BY id`).all() as Array<{ lifecycle_status: string }>;
+  eq("legacy row #1 backfilled to settled", legacy[0]?.lifecycle_status, "settled");
+  eq("legacy row #2 backfilled to settled", legacy[1]?.lifecycle_status, "settled");
+
+  // Simulate storage.createProperty: caller did not pass lifecycle_status.
+  // Storage layer injects 'planned' before INSERT.
+  function createProperty(data: Record<string, any>): any {
+    const payload = { ...data };
+    if (payload.lifecycle_status === undefined || payload.lifecycle_status === null || payload.lifecycle_status === '') {
+      payload.lifecycle_status = 'planned';
+    }
+    const cols = Object.keys(payload).join(', ');
+    const placeholders = Object.keys(payload).map(() => '?').join(', ');
+    const result = db.prepare(`INSERT INTO properties (${cols}) VALUES (${placeholders})`).run(...Object.values(payload));
+    return db.prepare(`SELECT * FROM properties WHERE id = ?`).get(result.lastInsertRowid);
+  }
+
+  const newRow = createProperty({ name: "Fresh IP", purchase_date: "2026-09-01" });
+  eq("new property default is 'planned'", newRow.lifecycle_status, "planned");
+
+  const explicit = createProperty({ name: "Explicit Under Contract", lifecycle_status: "under_contract" });
+  eq("explicit under_contract preserved", explicit.lifecycle_status, "under_contract");
+
+  const explicitSettled = createProperty({ name: "Explicit Settled", lifecycle_status: "settled" });
+  eq("explicit settled preserved", explicitSettled.lifecycle_status, "settled");
+
+  // Critical guard: backfill is not re-run on subsequent boots. If we set
+  // a row to NULL deliberately and re-run the (now no-op) migration block,
+  // existing data is untouched because justCreated is false.
+  db.prepare(`UPDATE properties SET lifecycle_status = NULL WHERE id = ?`).run(newRow.id);
+  // Simulate a second boot — ALTER fails with "duplicate column", justCreated stays false
+  try {
+    db.prepare(`ALTER TABLE properties ADD COLUMN lifecycle_status TEXT`).run();
+    failed++;
+    console.error("  ✘ second migration unexpectedly succeeded");
+  } catch {
+    passed++;
+    console.log("  ✔ second migration is a no-op (column already exists)");
+  }
+  const afterReboot = db.prepare(`SELECT lifecycle_status FROM properties WHERE id = ?`).get(newRow.id) as any;
+  // Backfill must NOT run again on reboot — the explicit NULL set above
+  // must be preserved (it represents a hypothetical bug, not a legacy row).
+  eq("null on rebooted column not re-stamped to settled", afterReboot?.lifecycle_status, null);
+
+  db.close();
+}
+
 // ─── Final report ──────────────────────────────────────────────────────────
 console.log(`\n──────────────────────────────────────────────`);
 console.log(`Property lifecycle persistence: ${passed} passed, ${failed} failed`);

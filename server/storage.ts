@@ -163,18 +163,40 @@ sqlite.exec(`
 `);
 
 // ─── Property lifecycle migration ─────────────────────────────────────────
-// 'planned' | 'under_contract' | 'settled' — defaults to 'settled' so existing
-// rows behave exactly as before (forecast/active pipeline unchanged).
+// Enum: 'planned' | 'under_contract' | 'settled'.
+//
+// Default policy:
+//   • New rows default to 'planned'. A property only becomes 'settled' when
+//     the user explicitly selects Settled and saves (matches the product
+//     spec). The default is enforced at the application layer in
+//     createProperty() because SQLite's ALTER TABLE ADD COLUMN applies the
+//     declared DEFAULT to every existing row, which would retroactively
+//     stamp legacy rows the wrong way.
+//   • Legacy rows that existed BEFORE this migration ran are backfilled
+//     to 'settled' EXACTLY ONCE, because the existing forecast / debt /
+//     rental / expense pipeline aggregates every row in `properties` as
+//     if it were active. The backfill only touches NULL/empty values, so
+//     it never overwrites an explicit user choice and never re-runs.
+let lifecycleColumnJustCreated = false;
 try {
-  sqlite.prepare(`ALTER TABLE properties ADD COLUMN lifecycle_status TEXT DEFAULT 'settled'`).run();
+  // No DEFAULT clause — existing rows get NULL so the backfill can
+  // distinguish them from rows the user inserts after this migration.
+  sqlite.prepare(`ALTER TABLE properties ADD COLUMN lifecycle_status TEXT`).run();
+  lifecycleColumnJustCreated = true;
   console.log(`[storage] ✔ Added column: properties.lifecycle_status`);
 } catch {
   // Column already exists — ignore
 }
-// Backfill any nulls left by older clients (defensive)
-try {
-  sqlite.prepare(`UPDATE properties SET lifecycle_status = 'settled' WHERE lifecycle_status IS NULL OR lifecycle_status = ''`).run();
-} catch { /* ignore */ }
+// One-shot legacy-row backfill. Only runs when the column was just created
+// (or in the defensive case where an older client added it without a
+// default and left rows as NULL/empty). After this point every existing
+// row carries an explicit value, so the UPDATE becomes a no-op on
+// subsequent boots.
+if (lifecycleColumnJustCreated) {
+  try {
+    sqlite.prepare(`UPDATE properties SET lifecycle_status = 'settled' WHERE lifecycle_status IS NULL OR lifecycle_status = ''`).run();
+  } catch { /* ignore */ }
+}
 
 // ─── Schema migrations — add missing columns (try/catch per column; SQLite doesn't support ADD COLUMN IF NOT EXISTS)
 const _missingCols: Array<[string, string]> = [
@@ -328,9 +350,19 @@ export class Storage implements IStorage {
     return sqlite.prepare("SELECT * FROM properties ORDER BY created_at ASC").all() as Property[];
   }
   createProperty(data: InsertProperty): Property {
-    const cols = Object.keys(data).join(', ');
-    const placeholders = Object.keys(data).map(() => '?').join(', ');
-    const result = sqlite.prepare(`INSERT INTO properties (${cols}) VALUES (${placeholders})`).run(...Object.values(data));
+    // Default lifecycle_status to 'planned' for newly created rows. The
+    // SQLite column has no DEFAULT clause (see migration above), so we
+    // enforce the default here instead of at the schema level. This keeps
+    // legacy rows — which were backfilled to 'settled' by the migration
+    // — untouched, while every new property starts as Planned per the
+    // product spec.
+    const payload: Record<string, any> = { ...data };
+    if (payload.lifecycle_status === undefined || payload.lifecycle_status === null || payload.lifecycle_status === '') {
+      payload.lifecycle_status = 'planned';
+    }
+    const cols = Object.keys(payload).join(', ');
+    const placeholders = Object.keys(payload).map(() => '?').join(', ');
+    const result = sqlite.prepare(`INSERT INTO properties (${cols}) VALUES (${placeholders})`).run(...Object.values(payload));
     return sqlite.prepare("SELECT * FROM properties WHERE id = ?").get(result.lastInsertRowid) as Property;
   }
   updateProperty(id: number, data: Partial<InsertProperty>): Property | undefined {

@@ -407,7 +407,7 @@ function PropertyForm({ data, onChange, onEnterSave }: PropertyFormProps) {
           <div className="mt-3">
             <label className="block text-xs text-muted-foreground mb-1">Lifecycle Status</label>
             <Select
-              value={data.lifecycle_status || 'settled'}
+              value={data.lifecycle_status || 'planned'}
               onValueChange={v => onChange({ ...data, lifecycle_status: v })}
             >
               <SelectTrigger className="h-8 text-sm" data-testid="select-lifecycle-status"><SelectValue /></SelectTrigger>
