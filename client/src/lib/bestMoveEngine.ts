@@ -34,6 +34,11 @@
 
 import { safeNum } from './finance';
 import { computeDepositPower } from './depositPower';
+import {
+  isInvestmentProperty,
+  isPropertyPlannedForFuture,
+  isPropertyHistorical,
+} from '@shared/propertyLifecycle';
 import { classifyDebtPortfolio, type DebtRecord } from './recommendationEngine/debtClassification';
 import {
   selectMonthlyIncome as contractMonthlyIncome,
@@ -430,8 +435,13 @@ export function getBestMoveRecommendation(ledger: BestMoveLedger): BestMoveResul
   // ── PRIORITY 3: Property deposit ready ───────────────────────────────────
   if ((depositReadyPct ?? 0) >= 50 && depositPower > 0) {
     const ipTarget        = (() => {
+      // Sprint 4B — "next IP" must be a planned/future-settlement row, never
+      // a sold or archived property. Use the canonical lifecycle predicate.
+      const _todayIso = new Date().toISOString().split('T')[0];
       const nextIP = (properties as any[]).find((p: any) =>
-        p.type !== 'ppor' && (!p.settlement_date || p.settlement_date > new Date().toISOString().split('T')[0])
+        isInvestmentProperty(p)
+        && !isPropertyHistorical(p)
+        && isPropertyPlannedForFuture(p, _todayIso)
       );
       return safeNum(nextIP?.purchase_price) || 900_000;
     })();

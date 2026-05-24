@@ -22,6 +22,12 @@ import { safeNum, calcMonthlyRepayment, calcLoanBalance, dcaMonthlyEquiv, billAc
 import type { YearAssumptions, MonteCarloResult, MonteCarloFanPoint, MCVolatilityParams } from './forecastStore';
 import { DEFAULT_MC_VOLATILITY } from './forecastStore';
 import { applyFundingToProperties, buildAdapterContext } from './propertyFundingAdapter';
+// Sprint 4B — canonical lifecycle predicates so sold/archived properties
+// disappear from Monte Carlo simulations after their disposal date.
+import {
+  isInvestmentProperty,
+  isPropertyHistorical,
+} from '@shared/propertyLifecycle';
 
 // ─── Box-Muller standard normal ───────────────────────────────────────────────
 //
@@ -178,7 +184,14 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
       cryptos: input.cryptos as any,
     }),
   );
-  const investProps = effectiveProperties.filter((p: any) => p.type !== 'ppor');
+  // Sprint 4B — exclude historical (sold/archived) properties from the
+  // Monte Carlo deterministic-delta and growth simulation streams. Their
+  // settlement deposits already happened in the past (and the proceeds
+  // already flowed through) so leaving them in inflates buying-month cash
+  // outflows and produces phantom appreciation.
+  const investProps = effectiveProperties.filter(
+    (p: any) => isInvestmentProperty(p) && !isPropertyHistorical(p),
+  );
 
   // ── Month index helper ──
   const miOf = (dateStr: string): number => {

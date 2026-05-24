@@ -53,6 +53,11 @@ import {
 } from "./taxPolicyEngine";
 import { calcMarginalRate } from "./australianTax";
 import { safeNum } from "./finance";
+import {
+  buildPropertyAfterTaxCashflows,
+  computePropertyIRR,
+  type PropertyEconomicsInputs,
+} from "./canonicalPropertyEconomics";
 
 // ─── Property metadata sidecar ───────────────────────────────────────────────
 //
@@ -423,67 +428,59 @@ function applyRegimeOverlay(
     ? yearly.reduce((s, r) => s + r.net_annual_cashflow, 0) / horizon / 12
     : 0;
 
-  // 3. Recompute IRR from overlaid cashflows.
-  //    Mirror legacy: -totalUpfront at t0, annual benefit = equityGain + ngBenefit - annualCashLoss,
-  //    terminal value at horizon = equity - 2% selling costs.
-  const irrCFs: number[] = [-totalUpfront];
-  for (let i = 0; i < yearly.length; i++) {
-    const row = yearly[i];
-    const prevValue = i === 0 ? legacy.purchase_price : yearly[i - 1].property_value;
-    const equityGain = row.property_value - prevValue;
-    const annualCashLoss = row.annual_repayment - row.annual_rent + row.annual_holding - row.ng_benefit;
-    irrCFs.push(equityGain + row.ng_benefit - annualCashLoss);
-  }
+  // Sprint 4B — recompute IRR / CGT via the canonical helper rather than the
+  // legacy equityGain+NG hack (double-counted NG, skipped terminal CGT, did
+  // not deduct outstanding debt at sale).
+  //
+  // Map the regime treatment string onto the canonical helper's enum.
+  const canonicalTreatment: PropertyEconomicsInputs['ng_treatment'] =
+    treatment === 'QUARANTINE_TO_PROPERTY' ? 'quarantine'
+    : treatment === 'ABOLISH'              ? 'abolish'
+                                            : 'deduct_against_wage';
+  const canonicalInputs: PropertyEconomicsInputs = {
+    purchase_price:     legacy.purchase_price,
+    deposit:            legacy.deposit,
+    stamp_duty:         legacy.stamp_duty,
+    other_upfront:      legacy.other_upfront,
+    annual_rent:        yearly.map(r => r.annual_rent),
+    annual_interest:    yearly.map(r => r.annual_interest),
+    annual_repayment:   yearly.map(r => r.annual_repayment),
+    annual_holding:     yearly.map(r => r.annual_holding),
+    annual_depreciation: yearly.map(r => r.annual_depreciation),
+    property_value_end: yearly.map(r => r.property_value),
+    loan_balance_end:   yearly.map(r => r.loan_balance),
+    marginal_rate:      marginalRate,
+    ng_treatment:       canonicalTreatment,
+    // discountPct passed in is the % off the gain (0.5 = 50% off).
+    cgt_discount_pct:   cgtDiscountPct,
+    selling_costs_pct:  0.02,
+    apply_cgt_on_sale:  true,
+  };
+  const canonical = buildPropertyAfterTaxCashflows(canonicalInputs);
+  const irr = computePropertyIRR(canonical.cashflows);
+
+  // CGT discount field reports the discounted *taxable* gain after carry-
+  // forward losses are applied — matches what is actually taxed.
+  const cgtDiscountedGain = canonical.capital_gain_taxable;
+
+  // Keep `capital_gain` aligned with the legacy semantic (last value - price,
+  // before selling costs) so cross-regime parity tests that combine current
+  // and reform headline gains keep agreeing. The canonical, post-selling-
+  // cost taxable gain still flows through cgt_discount_gain.
   const lastRow = yearly[yearly.length - 1];
-  const sellingCosts = lastRow.property_value * 0.02;
-  irrCFs[irrCFs.length - 1] += lastRow.equity - sellingCosts;
-  const irr = recomputeIrr(irrCFs);
-
-  // 4. Recompute CGT discount.
-  //    Apply quarantined losses against capital_gain first, then apply discount.
-  const grossGain = legacy.capital_gain;
-  const carryApplied = Math.min(carry.quarantinedLosses, Math.max(0, grossGain));
-  const netGain = Math.max(0, grossGain - carryApplied);
-  // discountPct represents % of gain that is *discounted away* (i.e. 0.50 means 50% off).
-  // Effective taxable portion = netGain × (1 − discountPct).
-  const cgtDiscountedGain = netGain * (1 - cgtDiscountPct);
-
-  // 5. Recompute total_return_pct from new equity + total_upfront (unchanged).
-  const totalReturn = (lastRow.equity - totalUpfront) / Math.max(1, totalUpfront);
+  const legacyGrossGain = lastRow.property_value - legacy.purchase_price;
+  // Total return on capital — uses net after-tax proceeds at disposal.
+  const totalReturn = (canonical.net_proceeds_after_tax - totalUpfront) / Math.max(1, totalUpfront);
 
   return {
     ...legacy,
     yearly,
     avg_monthly_cashflow: avgMonthlyCF,
     irr,
-    capital_gain:        grossGain, // gross unchanged
+    capital_gain:        legacyGrossGain,
     cgt_discount_gain:   Math.round(cgtDiscountedGain),
     total_return_pct:    totalReturn,
   };
-}
-
-function recomputeIrr(cashflows: number[]): number {
-  // Newton-Raphson on NPV(r) = 0, fallback to bisection.
-  // Mirror calcIRR in propertyBuyEngine but kept private to avoid coupling.
-  if (cashflows.length < 2) return 0;
-  let rate = 0.08;
-  for (let i = 0; i < 40; i++) {
-    let npv = 0;
-    let dnpv = 0;
-    for (let t = 0; t < cashflows.length; t++) {
-      const denom = Math.pow(1 + rate, t);
-      npv += cashflows[t] / denom;
-      if (t > 0) dnpv -= (t * cashflows[t]) / (denom * (1 + rate));
-    }
-    if (Math.abs(dnpv) < 1e-10) break;
-    const next = rate - npv / dnpv;
-    if (!isFinite(next)) break;
-    if (Math.abs(next - rate) < 1e-7) { rate = next; break; }
-    rate = next;
-    if (rate < -0.99) { rate = -0.99; break; }
-    if (rate > 10) { rate = 10; break; }
-  }
-  return rate;
 }
 
 // ─── Build comparison-table from overlaid scenarios ──────────────────────────

@@ -28,6 +28,11 @@
  */
 
 import { safeNum, calcMonthlyRepayment, calcLoanBalance, auMarginalRate } from './finance';
+import {
+  buildPropertyAfterTaxCashflows,
+  computePropertyIRR,
+  type PropertyEconomicsInputs,
+} from './canonicalPropertyEconomics';
 
 // ─── State stamp duty tables (AUS 2025-26) ──────────────────────────────────
 
@@ -286,8 +291,17 @@ export function computePropertyScenario(inp: PropertyScenarioInput): ScenarioRes
   let cumulativeCash = totalUpfront;
   const yearly: YearlySnapshot[] = [];
 
-  let totalCFForIRR  = -(totalUpfront);  // initial outflow
-  const irrCFs: number[] = [-(totalUpfront)];
+  // Sprint 4B — collect canonical inputs for the after-tax cashflow helper.
+  // IRR / CGT / NG-single-count are computed once after the year loop, by
+  // routing through buildPropertyAfterTaxCashflows() instead of re-deriving
+  // them here (which previously double-counted NG and skipped terminal CGT).
+  const rentSeries: number[] = [];
+  const interestSeries: number[] = [];
+  const repaymentSeries: number[] = [];
+  const holdingSeries: number[] = [];
+  const deprecSeries: number[] = [];
+  const valueSeries: number[] = [];
+  const loanBalSeries: number[] = [];
 
   for (let y = 1; y <= horizon; y++) {
     // Growth
@@ -322,15 +336,20 @@ export function computePropertyScenario(inp: PropertyScenarioInput): ScenarioRes
     const ngBenefit    = isNegGeared ? Math.abs(taxableLoss) * marginalRate : 0;
 
     // Net cash out of pocket this year
-    // = repayments - rent + holding - NG benefit
+    // = repayments - rent + holding - NG benefit (NG counted ONCE)
     const annualRepayment  = monthlyRep * 12;
     const annualCashLoss   = annualRepayment - annualRent + annualHolding - ngBenefit;
     cumulativeCash        += Math.max(0, annualCashLoss);  // only count net outflows, not income
 
-    // For IRR: annual net benefit = equity gain + NG benefit - net cash cost
-    const equityGain    = propVal - (y === 1 ? price : yearly[y - 2].property_value);
-    const annualBenefit = equityGain + ngBenefit - annualCashLoss;
-    irrCFs.push(annualBenefit);
+    // Sprint 4B — feed canonical helper rather than the old equityGain+NG hack
+    // (which double-counted NG into IRR and skipped terminal CGT).
+    rentSeries.push(annualRent);
+    interestSeries.push(annualInterest);
+    repaymentSeries.push(annualRepayment);
+    holdingSeries.push(annualHolding);
+    deprecSeries.push(annualDeprec);
+    valueSeries.push(propVal);
+    loanBalSeries.push(Math.max(0, loanBal));
 
     yearly.push({
       year: y,
@@ -351,16 +370,40 @@ export function computePropertyScenario(inp: PropertyScenarioInput): ScenarioRes
 
   const last            = yearly[yearly.length - 1];
   const capitalGain     = last.property_value - price;
-  const cgtDiscountGain = capitalGain * 0.50;  // 50% CGT discount
   const avgMonthlyCF    = yearly.reduce((s, y) => s + y.net_annual_cashflow, 0) / horizon / 12;
 
-  // IRR: add terminal value at horizon (equity proceeds - selling costs ~2%)
-  const sellingCosts    = last.property_value * 0.02;
-  irrCFs[irrCFs.length - 1] += last.equity - sellingCosts;
-  const irr             = calcIRR(irrCFs);
+  // Sprint 4B — canonical after-tax IRR + CGT. Single helper, single NG count,
+  // CGT applied EXACTLY ONCE at sale, terminal debt repaid before IRR.
+  const canonicalInputs: PropertyEconomicsInputs = {
+    purchase_price:     price,
+    deposit:            depositAmt,
+    stamp_duty:         stampDuty,
+    other_upfront:      otherUpfront,
+    annual_rent:        rentSeries,
+    annual_interest:    interestSeries,
+    annual_repayment:   repaymentSeries,
+    annual_holding:     holdingSeries,
+    annual_depreciation: deprecSeries,
+    property_value_end: valueSeries,
+    loan_balance_end:   loanBalSeries,
+    marginal_rate:      marginalRate,
+    ng_treatment:       'deduct_against_wage',
+    cgt_discount_pct:   0.5,            // AU 12mo+ hold
+    selling_costs_pct:  0.02,
+    apply_cgt_on_sale:  true,
+  };
+  const canonical = buildPropertyAfterTaxCashflows(canonicalInputs);
+  const irr = computePropertyIRR(canonical.cashflows);
 
-  // Total return on upfront capital
-  const totalReturn     = (last.equity - totalUpfront) / totalUpfront;
+  // CGT discount field for backwards compat. Now reports the *discounted
+  // taxable gain* (50% off + any carry-forward quarantined losses applied),
+  // not the pre-discount gain — matches what is actually taxed.
+  const cgtDiscountGain = canonical.capital_gain_taxable;
+
+  // Total return on upfront capital — now uses net after-tax proceeds at
+  // disposal (less initial outflow), not raw equity, so reform regimes and
+  // CGT correctly reduce the headline figure.
+  const totalReturn     = (canonical.net_proceeds_after_tax - totalUpfront) / Math.max(1, totalUpfront);
 
   // Opportunity cost of waiting (for Wait scenarios)
   // = how much the property price rose during the delay × (deposit/price ratio)

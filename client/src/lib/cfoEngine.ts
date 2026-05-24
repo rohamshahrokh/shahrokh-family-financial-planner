@@ -9,6 +9,10 @@
  */
 
 import { safeNum } from './finance';
+import {
+  isInvestmentProperty,
+  isPropertyOwnedAt,
+} from '@shared/propertyLifecycle';
 import { computeTaxAlpha, buildTaxAlphaInput, type TaxAlphaResult } from './taxAlphaEngine';
 import { computeRiskRadar, buildRiskInput } from './riskEngine';
 import { computeFirePath, buildFirePathInput, type FIREPathResult } from './firePathEngine';
@@ -505,9 +509,12 @@ export async function generateCFOReport(
   // Surplus = income - expenses (IDENTICAL to dashboard.tsx line 363)
   const monthlySurplus = monthlyIncome - monthlyExpenses;
 
-  // Current passive income estimate (dividends + rental)
+  // Current passive income estimate (dividends + rental). Sprint 4B —
+  // only currently-owned IPs contribute to rent. Sold/archived/planned drop
+  // out via the canonical lifecycle predicate.
+  const _cfoTodayIso = new Date().toISOString().split('T')[0];
   const rentalIncome = (Array.isArray(propRows) ? propRows : [])
-    .filter((p: any) => p.type !== 'ppor')
+    .filter((p: any) => isInvestmentProperty(p) && isPropertyOwnedAt(p, _cfoTodayIso))
     .reduce((s: number, p: any) => s + safeNum(p.weekly_rent) * 52 / 12, 0);
   const dividendYield      = 0.03; // assume 3% dividend yield on stocks
   const dividendIncome     = liveStocks * dividendYield / 12;

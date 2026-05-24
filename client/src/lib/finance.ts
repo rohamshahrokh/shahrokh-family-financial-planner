@@ -16,6 +16,16 @@ import {
   calcLoanBalanceWithType,
   normaliseLoanType,
 } from "@/lib/mathUtils";
+// Sprint 4B — canonical lifecycle predicates. Every property-iterating engine
+// in finance.ts must route ownership-period decisions through these helpers
+// so sold/archived rows disappear consistently across all forecast surfaces.
+import {
+  isInvestmentProperty,
+  isPropertyOwnedAt,
+  wasPropertySoldBy,
+  resolveSaleDate,
+  resolveAcquisitionDate,
+} from "@shared/propertyLifecycle";
 
 /**
  * safeNum — converts any value to a finite number.
@@ -589,8 +599,10 @@ export function projectNetWorth(params: {
   const faraInsurance         = safeNum(s.fara_super_insurance_pa)      || 0;
 
   // ── Consistent startNW baseline — includes investment property equity ──────
+  // Sprint 4B — only currently-owned IPs (excludes sold/archived/planned).
+  const _todayIso = new Date().toISOString().split('T')[0];
   const _initPropEquity = params.properties
-    .filter((p: any) => p.type !== 'ppor')
+    .filter((p: any) => isInvestmentProperty(p) && isPropertyOwnedAt(p, _todayIso))
     .reduce((sum: number, p: any) => {
       const v = safeNum(p.current_value) || safeNum(p.purchase_price);
       const l = safeNum(p.loan_amount);
@@ -612,7 +624,7 @@ export function projectNetWorth(params: {
   // BUG FIX: use gross investment property VALUE (not equity) for year-0 baseline
   // so year-1 appreciation = (ppor_y1 + propValue_y1) - (ppor_y0 + propValue_y0)
   let prevPropVal = params.properties
-    .filter((p: any) => p.type !== 'ppor')
+    .filter((p: any) => isInvestmentProperty(p) && isPropertyOwnedAt(p, _todayIso))
     .reduce((sum: number, p: any) => sum + (safeNum(p.current_value) || safeNum(p.purchase_price)), 0);
   let prevStocks   = stockVal;
   let prevCrypto   = cryptoVal;
@@ -716,12 +728,21 @@ export function projectNetWorth(params: {
     let propValue = 0; let propLoans = 0; let propRent = 0;
     const propertyDetails: PropertyYearDetail[] = [];
     const todayYear = currentYear;
+    // Sprint 4B — canonical lifecycle gate. A property must be OWNED at the
+    // year-end snapshot date to contribute to value / debt / rent. Sold and
+    // archived rows fall out immediately after their disposal date — no
+    // residual balance, no phantom rent. Planned/under-contract rows are
+    // included once their settlement date has passed (status-aware).
+    const yearEndIso = `${year}-12-31`;
     for (const prop of params.properties) {
-      if (prop.type === 'ppor') continue;
-      const settleDateStr = prop.settlement_date || prop.purchase_date;
+      if (!isInvestmentProperty(prop)) continue;
+      const settleDateStr = resolveAcquisitionDate(prop) || prop.purchase_date;
       const settleYear  = settleDateStr ? new Date(settleDateStr).getFullYear() : todayYear;
       const settleMonth = settleDateStr ? new Date(settleDateStr).getMonth() + 1 : 1; // 1-based
       if (year < settleYear) continue;
+      // Drop the property from the forecast roll-up once it is sold/archived.
+      // Sale proceeds (cash + CGT) are handled by the sale-event block below.
+      if (!isPropertyOwnedAt(prop, yearEndIso)) continue;
 
       const yearsSinceSettle = year - settleYear;
 
@@ -1018,15 +1039,18 @@ export function projectNetWorth(params: {
       };
     })();
 
-    // Property bridge: start + market growth + new purchases = end
+    // Property bridge: start + market growth + new purchases = end.
+    // Sprint 4B — only count properties that settle in this year AND are not
+    // already disposed by year-end (e.g. a buy-and-flip within the same year
+    // should not pollute the new-purchase ledger).
     let newPurchasesValue = 0;
     let newLoansThisYear  = 0;
     for (const prop of params.properties) {
-      if (prop.type === 'ppor') continue;
-      const settleDateStr = prop.settlement_date || prop.purchase_date;
+      if (!isInvestmentProperty(prop)) continue;
+      const settleDateStr = resolveAcquisitionDate(prop);
       if (!settleDateStr) continue;
       const settleYear = new Date(settleDateStr).getFullYear();
-      if (settleYear === year) {
+      if (settleYear === year && isPropertyOwnedAt(prop, `${year}-12-31`)) {
         newPurchasesValue += safeNum(prop.purchase_price) || safeNum(prop.current_value);
         newLoansThisYear  += safeNum(prop.loan_amount);
       }
@@ -1335,8 +1359,13 @@ export function buildCashFlowSeries(params: {
     buildAdapterContext({ snapshot: { cash: safeNum(s.cash), offset_balance: safeNum(s.offset_balance) } }),
   );
 
-  // Investment properties: exclude PPOR type
-  const investmentProps = fundedProperties.filter(p => p.type !== 'ppor');
+  // Sprint 4B — Investment properties: exclude PPOR + archived. The per-
+  // month loop below additionally calls wasPropertySoldBy() so that sold
+  // rows fall out the moment the disposal date is crossed (they remain in
+  // the list for the pre-sale months).
+  const investmentProps = fundedProperties.filter(
+    (p: any) => isInvestmentProperty(p),
+  );
 
   const results: CashFlowMonth[] = [];
   let cumulativeBalance = safeNum(s.cash) + safeNum(s.offset_balance);
@@ -1395,6 +1424,11 @@ export function buildCashFlowSeries(params: {
       let propertyAssetSalesUsed   = 0;
 
       for (const prop of investmentProps) {
+        // Sprint 4B — canonical lifecycle gate. Skip any property that is not
+        // owned at this month's date so sold IPs disappear from rent / loan
+        // repayment / deductibles after their sale_date.
+        const monthIso = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}-28`;
+        if (wasPropertySoldBy(prop, monthIso)) continue;
         // Prefer settlement_date over purchase_date
         const settleDateStr = prop.settlement_date || prop.purchase_date;
         let settleDate: Date;
@@ -1809,7 +1843,14 @@ export function calcNegativeGearing(params: {
     ? params.annualSalaryIncome / 2
     : params.annualSalaryIncome;
 
-  const investmentProps = params.properties.filter(p => p.type !== 'ppor');
+  // Sprint 4B — NG must only be computed for currently-owned IPs. Once a
+  // property is sold or archived it can no longer generate (or shield) a
+  // negative-gearing benefit, so it MUST drop out of this calculation
+  // entirely. Otherwise the household keeps receiving a phantom NG refund.
+  const todayIso = new Date().toISOString().split('T')[0];
+  const investmentProps = params.properties
+    .filter(p => isInvestmentProperty(p))
+    .filter(p => isPropertyOwnedAt(p as any, todayIso));
 
   const analyses: NGAnalysis[] = investmentProps.map(prop => {
     const loanAmount    = safeNum(prop.loan_amount);
