@@ -16,6 +16,7 @@ import type {
   PropertyActionPlan,
 } from './types';
 import type { Recommendation, UnifiedSignals } from '../recommendationEngine/types';
+import { computeBorrowingCapacity } from '../borrowingCapacityAdapter';
 
 function isProperty(rec: Recommendation): boolean {
   return rec.actionType === 'proceed_property_purchase' || rec.actionType === 'delay_property_purchase';
@@ -33,7 +34,20 @@ function buildProperty(rec: Recommendation, s: UnifiedSignals): PropertyActionPl
   const surplus = s.monthlySurplus ?? 0;
   const monthlyExp = s.monthlyExpenses ?? 0;
   const grossAnnual = s.rohamGrossAnnual ?? 0;
-  const borrowingPower = grossAnnual > 0 ? Math.round(grossAnnual * 5.5) : undefined;
+  // Sprint 2A D-007: route borrowing-capacity through the unified adapter so
+  // the Action Plan card and the Serviceability surface agree. When monthly
+  // expenses + mortgage rate are available, this is the NSR-derived figure;
+  // otherwise the adapter falls back to a published heuristic and flags
+  // `source` so the UI can render an "approx" caveat.
+  const monthlyIncome = s.monthlyIncome ?? (grossAnnual > 0 ? grossAnnual / 12 : undefined);
+  const capacity = computeBorrowingCapacity({
+    monthlyGrossIncome: monthlyIncome,
+    monthlyLivingExpenses: monthlyExp > 0 ? monthlyExp : undefined,
+    mortgageRate: s.mortgageRate,
+    otherDebts: s.otherDebts,
+    grossAnnualFallback: grossAnnual > 0 ? grossAnnual : undefined,
+  });
+  const borrowingPower = capacity.maxBorrowCapacity > 0 ? capacity.maxBorrowCapacity : undefined;
   const maxSafePrice = borrowingPower != null && s.depositPower != null
     ? Math.round(Math.min(borrowingPower + s.depositPower, (s.depositPower / (1 - idealLVR))))
     : undefined;

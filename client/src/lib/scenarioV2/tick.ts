@@ -35,6 +35,8 @@ import {
   annualDepreciation,
   type PropertyAnnualTaxRow,
 } from "./auTax";
+import { calcIncomeTax } from "../australianTax";
+import { partitionRentalLossesByRegime } from "./regimeFyRollup";
 
 // ─── Tick context ────────────────────────────────────────────────────────────
 
@@ -53,6 +55,29 @@ export interface TickContext {
   hasHelpDebt?: boolean;
   /** True if the household has private hospital cover (waives MLS). */
   hasPrivateHospitalCover?: boolean;
+  /**
+   * Active tax-policy regime selector (Sprint 2A D-004 wiring).
+   *
+   * When omitted or `CURRENT_RULES` the FY rollup is byte-for-byte identical
+   * to the pre-Sprint-2A behaviour. When `PROPOSED_2027_REFORM`,
+   * `CUSTOM_STRESS_TEST` or `AUTO_DETECT`, the rollup partitions per-IP
+   * rental losses via `regimeFyRollup.partitionRentalLossesByRegime` and
+   * passes the regime-adjusted `rentalLoss` into `computeWageTax`. The
+   * default (when caller does not opt in) is `CURRENT_RULES`, preserving
+   * existing fixtures and tests verbatim.
+   */
+  taxRegimeSelector?: "CURRENT_RULES" | "PROPOSED_2027_REFORM" | "AUTO_DETECT" | "CUSTOM_STRESS_TEST";
+  /**
+   * Per-property metadata used for regime resolution. Optional — when
+   * absent, the engine falls back to the legacy CURRENT_RULES path even if
+   * `taxRegimeSelector` is set, so an absent sidecar never silently changes
+   * tax numbers (defence in depth against the "exists-but-not-wired" trap).
+   */
+  propertyTaxMetadata?: Record<string, {
+    propertyType?: import("../taxPolicyEngine").PropertyType;
+    contractDate?: string;
+    purchaseDate?: string;
+  }>;
 }
 
 /** Per-month random draws (already correlated by Cholesky). */
@@ -86,8 +111,23 @@ export interface TickDraws {
 export interface InternalAccumulators {
   /** Wage gross accumulated this FY. */
   fyWageGross: number;
-  /** Total interest paid on IP loans this FY (deductible). */
+  /**
+   * Total interest paid on IP loans this FY (deductible).
+   *
+   * Retained as the FY scalar for backward compatibility; the source-of-truth
+   * for the FY tax rollup is now `fyIpInterestPaidById` (Sprint 2A D-003).
+   * Legacy callers reading the scalar see the same number they always did.
+   */
   fyIpInterestPaid: number;
+  /**
+   * Per-IP interest paid this FY (Sprint 2A D-003).
+   *
+   * Replaces the old `fyIpInterestPaid * loanShare` heuristic at FY rollup,
+   * which mis-allocated deductible interest in mixed-rate portfolios. Keyed
+   * by property id, matching the existing per-IP rent/costs/depreciation
+   * accumulators.
+   */
+  fyIpInterestPaidById: Record<string, number>;
   /** Total interest paid on PPOR (NOT deductible — tracked for clarity). */
   fyPporInterestPaid: number;
   /** Per-IP rent received this FY. */
@@ -100,6 +140,14 @@ export interface InternalAccumulators {
   ipMeta: Record<string, { purchasePrice: number; monthsHeld: number }>;
   /** Pending CGT events to apply at FY end. */
   pendingCgt: number;
+  /**
+   * Per-property pending CGT context (Sprint 2A D-002).
+   *
+   * Keyed by property id, captures the discounted gain so the FY rollup can
+   * run a bracket-incremental CGT calc (tax(wage + gain) − tax(wage)) instead
+   * of the flat-marginal `pendingCgt * marginalRate` shortcut.
+   */
+  pendingCgtById: Record<string, { discountedGain: number }>;
   /** Last applied FY (4-digit year of the fiscal year ending June). */
   lastFyApplied: number;
 }
@@ -113,15 +161,19 @@ function ensureAcc(state: ExtendedPortfolioState): InternalAccumulators {
     state.__acc = {
       fyWageGross: 0,
       fyIpInterestPaid: 0,
+      fyIpInterestPaidById: {},
       fyPporInterestPaid: 0,
       fyIpRentReceived: {},
       fyIpHoldingCosts: {},
       fyIpDepreciation: {},
       ipMeta: {},
       pendingCgt: 0,
+      pendingCgtById: {},
       lastFyApplied: 0,
     };
   }
+  if (!state.__acc.fyIpInterestPaidById) state.__acc.fyIpInterestPaidById = {};
+  if (!state.__acc.pendingCgtById) state.__acc.pendingCgtById = {};
   return state.__acc;
 }
 
@@ -144,6 +196,8 @@ export function tick(
           fyIpRentReceived: { ...state.__acc.fyIpRentReceived },
           fyIpHoldingCosts: { ...state.__acc.fyIpHoldingCosts },
           fyIpDepreciation: { ...state.__acc.fyIpDepreciation },
+          fyIpInterestPaidById: { ...(state.__acc.fyIpInterestPaidById ?? {}) },
+          pendingCgtById: { ...(state.__acc.pendingCgtById ?? {}) },
           ipMeta: { ...state.__acc.ipMeta },
         }
       : undefined,
@@ -230,9 +284,13 @@ export function tick(
       const interest = netLoanForInterest * monthlyRate;
       let principal = Math.max(0, p.monthlyRepayment - interest);
       if (principal > p.loanBalance) principal = p.loanBalance;
-      // Track interest by property type (always — needed for tax)
+      // Track interest by property type (always — needed for tax).
+      // Sprint 2A D-003: also accumulate per-IP so the FY rollup can deduct
+      // the correct deductible interest for each property without resorting
+      // to the loan-balance-share heuristic.
       if (isInvestment) {
         acc.fyIpInterestPaid += interest;
+        acc.fyIpInterestPaidById[p.id] = (acc.fyIpInterestPaidById[p.id] ?? 0) + interest;
       } else {
         acc.fyPporInterestPaid += interest;
       }
@@ -479,8 +537,13 @@ function applyEvent(
       const rawGain = salePrice - costBase - sellingCosts;
       if (rawGain > 0) {
         const discounted = heldGt12 ? rawGain * 0.5 : rawGain;
-        // Stash discounted gain — applied at FY end via marginal rate
+        // Stash discounted gain — applied at FY end. The scalar
+        // `pendingCgt` is kept for back-compat; per-property is tracked in
+        // `pendingCgtById` so FY rollup can do a bracket-incremental tax
+        // calc rather than (gain × marginal). Sprint 2A D-002.
         acc.pendingCgt += discounted;
+        const prev = acc.pendingCgtById[prop.id]?.discountedGain ?? 0;
+        acc.pendingCgtById[prop.id] = { discountedGain: prev + discounted };
       }
       // Remove property
       state.properties = state.properties.filter((_, i) => i !== idx);
@@ -488,6 +551,7 @@ function applyEvent(
       delete acc.fyIpRentReceived[prop.id];
       delete acc.fyIpHoldingCosts[prop.id];
       delete acc.fyIpDepreciation[prop.id];
+      delete acc.fyIpInterestPaidById[prop.id];
       return;
     }
     case "macro.rate_spike": {
@@ -558,35 +622,94 @@ function applyFyTax(
   _rails: BasePlanAssumptions,
   ctx: TickContext,
 ): void {
-  // Sum IP-level annual tax rows
+  // Sum IP-level annual tax rows.
+  //
+  // Sprint 2A D-003: deductible interest is now read PER-PROPERTY from
+  // `fyIpInterestPaidById` instead of split from the scalar `fyIpInterestPaid`
+  // by current loan-balance share. When the per-IP record is empty (legacy
+  // state or no IP loans), the old loan-share heuristic is used as a safety
+  // fallback.
   let totalRentalProfit = 0;
   let totalRentalLoss = 0;
+  const perPropertyTaxable: Array<{ id: string; taxable: number }> = [];
   for (const p of state.properties) {
     if (p.monthlyRent === 0) continue;
     const rent = acc.fyIpRentReceived[p.id] ?? 0;
     const costs = acc.fyIpHoldingCosts[p.id] ?? 0;
     const depn = acc.fyIpDepreciation[p.id] ?? 0;
-    // Interest pro-rated — approximate by sharing fyIpInterestPaid by loan share
-    // (caller's simplification; precise per-loan tracking can be added later).
-    const totalLoan = state.properties.reduce((s, pp) => s + (pp.monthlyRent > 0 ? pp.loanBalance : 0), 0);
-    const loanShare = totalLoan > 0 ? p.loanBalance / totalLoan : 0;
-    const interest = acc.fyIpInterestPaid * loanShare;
+    let interest = acc.fyIpInterestPaidById?.[p.id];
+    if (interest == null) {
+      // Fallback (only triggers when per-IP record wasn't populated, e.g.
+      // legacy persisted state). Keeps numerical parity with pre-D-003 behaviour.
+      const totalLoan = state.properties.reduce((s, pp) => s + (pp.monthlyRent > 0 ? pp.loanBalance : 0), 0);
+      const loanShare = totalLoan > 0 ? p.loanBalance / totalLoan : 0;
+      interest = acc.fyIpInterestPaid * loanShare;
+    }
     const taxable = rent - costs - interest - depn;
+    perPropertyTaxable.push({ id: p.id, taxable });
     if (taxable >= 0) totalRentalProfit += taxable;
     else totalRentalLoss += -taxable;
+  }
+
+  // Sprint 2A D-004: regime-aware rental loss partitioning.
+  //
+  // When the caller opts into a non-CURRENT_RULES regime AND provides per-
+  // property metadata, route the per-IP taxable rows through
+  // `regimeFyRollup.partitionRentalLossesByRegime` and use its returned
+  // `deductibleAgainstWage` value as the rental loss going into the
+  // counter-factual NG calc. Quarantined / abolished losses are dropped from
+  // the deduction (and could be ledger-persisted in a future patch). When
+  // the caller doesn't opt in or metadata is absent, the legacy total is
+  // used — no behavioural change for existing fixtures / tests.
+  let effectiveRentalLoss = totalRentalLoss;
+  const wantsRegime = ctx.taxRegimeSelector && ctx.taxRegimeSelector !== "CURRENT_RULES";
+  if (wantsRegime && ctx.propertyTaxMetadata) {
+    const rows = perPropertyTaxable.map((r) => {
+      const meta = ctx.propertyTaxMetadata?.[r.id];
+      return {
+        propertyId: r.id,
+        taxableNetIncome: r.taxable,
+        propertyType: meta?.propertyType,
+        contractDate: meta?.contractDate,
+        purchaseDate: meta?.purchaseDate,
+      };
+    });
+    const fyEndMonth = `${1970 + acc.lastFyApplied}-06`;
+    const result = partitionRentalLossesByRegime({
+      rows,
+      fyEndMonth,
+      regimeSelector: ctx.taxRegimeSelector,
+    });
+    effectiveRentalLoss = result.deductibleAgainstWage;
   }
 
   // Compute wage tax with NG offset
   const wage = computeWageTax({
     annualGross: acc.fyWageGross,
-    rentalLoss: totalRentalLoss,
+    rentalLoss: effectiveRentalLoss,
     rentalProfit: totalRentalProfit,
     hasHelpDebt: ctx.hasHelpDebt,
     hasPrivateHospitalCover: ctx.hasPrivateHospitalCover,
   });
 
-  // CGT on pending discounted gains, at marginal rate
-  const cgt = acc.pendingCgt * wage.marginalRate;
+  // Sprint 2A D-002: bracket-incremental CGT.
+  //
+  // The pre-Sprint-2A path was `pendingCgt * marginalRate`, which overstates
+  // CGT when the gain pushes the household out of one bracket into a higher
+  // one (the marginal rate at the post-NG taxable income is higher than the
+  // average rate across the bracket span the gain straddles). The
+  // bracket-incremental approach matches `auTax.computeCgt`'s legacy path
+  // (taxWithGain − taxOnWage). We compute it on the post-NG wage base — the
+  // counterfactual reflects the actual tax position the household sits in
+  // when the gain lands.
+  let cgt = 0;
+  if (acc.pendingCgt > 0.005) {
+    // taxableIncome already accounts for negative gearing offset
+    const baseTaxable = wage.taxableIncome;
+    const taxWithGain = calcIncomeTax(baseTaxable + acc.pendingCgt);
+    const taxOnBase = calcIncomeTax(baseTaxable);
+    cgt = Math.max(0, taxWithGain - taxOnBase);
+  }
 
   // Apply: deduct total tax from cash
   const totalTaxDue = wage.totalAnnualTax + cgt;
@@ -596,11 +719,13 @@ function applyFyTax(
   // Reset FY accumulators
   acc.fyWageGross = 0;
   acc.fyIpInterestPaid = 0;
+  acc.fyIpInterestPaidById = {};
   acc.fyPporInterestPaid = 0;
   acc.fyIpRentReceived = {};
   acc.fyIpHoldingCosts = {};
   acc.fyIpDepreciation = {};
   acc.pendingCgt = 0;
+  acc.pendingCgtById = {};
   acc.lastFyApplied += 1;
 }
 

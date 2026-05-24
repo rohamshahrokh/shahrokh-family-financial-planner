@@ -258,8 +258,29 @@ const todayIsoFor = (i: DashboardInputs) =>
 const isInvestmentProp = (p: any) =>
   p && p.type !== "ppor" && p.type !== "owner_occupied";
 
-const isSettled = (p: any, today: string) =>
-  !p?.settlement_date || (p.settlement_date as string) <= today;
+// Sprint 2A D-016 — lifecycle_status reconciliation.
+//
+// Pre-Sprint-2A, "settled vs planned" was decided purely on
+// `settlement_date <= today`. This let a row the user had explicitly marked
+// `lifecycle_status = 'planned'` slip into current NW if the date had been
+// left in the past (or unset → treated as settled). The Property Lifecycle
+// Audit surfaced these mismatches as warnings, but engines didn't honour
+// the explicit status. We now use this precedence:
+//
+//   1. If `lifecycle_status` is the explicit value 'settled', the row is
+//      settled (even if settlement_date is in the future).
+//   2. If `lifecycle_status` is 'planned' or 'under_contract', the row is
+//      NOT settled (regardless of date).
+//   3. If `lifecycle_status` is missing/null/unknown, fall back to the
+//      legacy date-driven rule for backward compatibility with legacy
+//      rows that pre-date the lifecycle migration.
+const isSettled = (p: any, today: string): boolean => {
+  const status = (p?.lifecycle_status as string | undefined)?.toLowerCase();
+  if (status === "settled") return true;
+  if (status === "planned" || status === "under_contract") return false;
+  // Legacy fallback (status missing or unknown): date-driven.
+  return !p?.settlement_date || (p.settlement_date as string) <= today;
+};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Selectors
