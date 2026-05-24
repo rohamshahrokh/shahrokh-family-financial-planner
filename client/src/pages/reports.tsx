@@ -28,6 +28,10 @@ import {
   computeCanonicalFire,
   resolveFireTargetFromSnapshot,
 } from "@/lib/canonicalFire";
+// Sprint 4D Visible UI Reconciliation — the headline KPI strip on Reports
+// renders the canonical headline metrics so it matches Dashboard / Financial
+// Plan / Wealth Strategy / Timeline / Risk to within $1.
+import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics";
 import { Button } from "@/components/ui/button";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { useToast } from "@/hooks/use-toast";
@@ -164,6 +168,10 @@ export default function ReportsPage() {
   const { data: expenses = [] }       = useQuery<any[]>({ queryKey: ['/api/expenses'],      queryFn: () => apiRequest('GET', '/api/expenses').then(r => r.json()) });
   const { data: bills = [] }          = useQuery<any[]>({ queryKey: ['/api/bills'],         queryFn: () => apiRequest('GET', '/api/bills').then(r => r.json()).catch(() => []) });
   const { data: incomeRecords = [] }  = useQuery<any[]>({ queryKey: ['/api/income'],        queryFn: () => apiRequest('GET', '/api/income').then(r => r.json()).catch(() => []) });
+  // Sprint 4D — Reports must see the same live holdings the Dashboard sees,
+  // otherwise the canonical layer falls back to manual snapshot stocks/crypto
+  // and the report's headline values diverge from the dashboard's.
+  const { data: holdingsRaw = [] }    = useQuery<any[]>({ queryKey: ['/api/holdings'],      queryFn: () => apiRequest('GET', '/api/holdings').then(r => r.json()).catch(() => []) });
   const { data: scenarios = [] }      = useQuery<any[]>({ queryKey: ['/api/scenarios'],     queryFn: () => apiRequest('GET', '/api/scenarios').then(r => r.json()).catch(() => []) });
   const { data: stockDCASchedules = [] }   = useQuery<any[]>({ queryKey: ['/api/stock-dca'],   queryFn: () => apiRequest('GET', '/api/stock-dca').then(r => r.json()).catch(() => []) });
   const { data: cryptoDCASchedules = [] }  = useQuery<any[]>({ queryKey: ['/api/crypto-dca'],  queryFn: () => apiRequest('GET', '/api/crypto-dca').then(r => r.json()).catch(() => []) });
@@ -184,30 +192,31 @@ export default function ReportsPage() {
   // $856K) because it missed the savings_cash/emergency/other_cash buckets.
   const canonicalNw = computeCanonicalNetWorth({
     snapshot, properties, stocks, cryptos,
-    holdingsRaw: [], incomeRecords, expenses,
+    holdingsRaw, incomeRecords, expenses,
   });
-  // Sprint 4A Final Closure — pull every headline metric from the canonical
-  // ledger. Same inputs the Dashboard / Timeline / Risk / Wealth Strategy
-  // pages use, so the report header reconciles to within $1.
-  const canonicalHead = computeCanonicalHeadlineFigures({
+  // Sprint 4A Final Closure / Sprint 4D — pull every headline metric from
+  // the canonical visible-truth service. Same inputs the Dashboard /
+  // Timeline / Risk / Financial Plan / Wealth Strategy pages use, so the
+  // report header reconciles to within $1.
+  const canonicalInputsRP = {
     snapshot, properties, stocks, cryptos,
-    holdingsRaw: [], incomeRecords, expenses,
-  });
-  const canonicalAudit = buildCanonicalAuditTrace({
-    snapshot, properties, stocks, cryptos,
-    holdingsRaw: [], incomeRecords, expenses,
-  });
+    holdingsRaw, incomeRecords, expenses,
+  };
+  const canonicalHead = computeCanonicalHeadlineFigures(canonicalInputsRP);
+  const canonicalAudit = buildCanonicalAuditTrace(canonicalInputsRP);
+  const headline = computeCanonicalHeadlineMetrics(canonicalInputsRP);
   void canonicalAudit;
+  void canonicalHead;
   const cash          = canonicalNw.components.cashTotal;
-  const totalAssets   = canonicalNw.raw.totalAssets;
-  const totalLiab     = canonicalNw.raw.totalLiabilities;
-  const netWorth      = canonicalHead.netWorth;
+  const totalAssets   = headline.assets;
+  const totalLiab     = headline.liabilities;
+  const netWorth      = headline.netWorth;
   // SOURCE-OF-TRUTH: canonicalCashflow — surplus identity is asserted to
   // hold (income - expenses == surplus) and savingsRate is `null` when
   // income is 0, so we never render 100.0% / 0.0% / NaN%.
   const canonicalCf = computeCanonicalCashflow({
     snapshot, properties, stocks, cryptos,
-    holdingsRaw: [], incomeRecords, expenses,
+    holdingsRaw, incomeRecords, expenses,
   });
   const monthlyInc    = canonicalCf.monthlyIncome;
   const monthlyExp    = canonicalCf.monthlyExpenses;
@@ -304,26 +313,18 @@ export default function ReportsPage() {
   }, 0);
   const ngRefund     = propNgLoss * (taxRate / 100);
 
-  // ── FIRE estimate (Sprint 4C canonical) ──────────────────────────────
-  // Reports used to compute fireNumber as (monthlyExp * 12) / swr inline,
-  // disagreeing with Dashboard's hardcoded `(8000 * 12) / 0.04` and FIRE
-  // Path's settings-driven target. Sprint 4C routes both through
-  // computeCanonicalFire so the same SWR + target produce the same number.
+  // ── FIRE estimate (Sprint 4C canonical / Sprint 4D headline service) ───
+  // Reports used to compute fireNumber as (monthlyExp * 12) / swr inline.
+  // Sprint 4D routes the visible FIRE Number through the same headline
+  // service every other page renders, while still allowing this page to
+  // override the SWR via `fa.flat.safe_withdrawal_rate` for the audit trail.
   const yearsToFire  = safeNum(snap.years_to_fire);
   const _fireCanonical = computeCanonicalFire(
-    {
-      snapshot: snap,
-      properties: undefined,
-      stocks: undefined,
-      cryptos: undefined,
-      holdingsRaw: undefined,
-      incomeRecords: undefined,
-      expenses: undefined,
-    },
+    canonicalInputsRP,
     {
       swrPct: safeNum((fa?.flat as any)?.safe_withdrawal_rate ?? 4),
       targetMonthlyIncome: resolveFireTargetFromSnapshot(
-        { snapshot: snap, properties: undefined, stocks: undefined, cryptos: undefined, holdingsRaw: undefined, incomeRecords: undefined, expenses: undefined },
+        canonicalInputsRP,
         { explicitTarget: monthlyExp },
       ),
     },

@@ -42,6 +42,12 @@ import {
   computeCanonicalHeadlineFigures,
   buildCanonicalAuditTrace,
 } from "@/lib/canonicalLedger";
+// Sprint 4D — single visible-truth headline metrics service. Every KPI
+// rendered on the Wealth Strategy hub binds to this object so net worth /
+// assets / liabilities / income / expenses / surplus / debt service /
+// passive income / FIRE number match Dashboard / Reports / Financial Plan /
+// Timeline / Risk to within $1.
+import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics";
 import {
   calcIncomeTax,
   calcLITO,
@@ -2281,35 +2287,30 @@ function AICoach({
   properties,
   stocks,
   crypto,
+  headline,
 }: {
   snap: Record<string, number>;
   expenses: any[];
   properties: any[];
   stocks: any[];
   crypto: any[];
+  /**
+   * Sprint 4D — canonical headline metrics passed in from the hub. Replaces
+   * the local NW / surplus / FIRE math this card used to do, which silently
+   * disagreed with Dashboard ($758k vs $746k) because it summed snap fields
+   * directly and used a snapshot-monthly_income-based FIRE target.
+   */
+  headline: import("@/lib/canonicalHeadlineMetrics").CanonicalHeadlineMetrics;
 }) {
   const [reportType, setReportType] = useState<"weekly" | "monthly">("weekly");
 
   const stocksVal = stocks.reduce((s: number, st: any) => s + safeNum(st.current_holding) * safeNum(st.current_price), 0);
   const cryptoVal = crypto.reduce((s: number, c: any) => s + safeNum(c.current_holding) * safeNum(c.current_price), 0);
 
-  const netWorth =
-    safeNum(snap.ppor) +
-    safeNum(snap.cash) +
-    safeNum(snap.offset_balance) +
-    safeNum(snap.super_balance) +
-    safeNum(snap.stocks) +
-    safeNum(snap.crypto) +
-    stocksVal +
-    cryptoVal +
-    safeNum(snap.cars) +
-    safeNum(snap.iran_property) -
-    safeNum(snap.mortgage) -
-    safeNum(snap.other_debts);
-
-  const monthlySurplus = safeNum(snap.monthly_income) - safeNum(snap.monthly_expenses);
-  const savingsRate = safeNum(snap.monthly_income) > 0
-    ? (monthlySurplus / safeNum(snap.monthly_income)) * 100
+  const netWorth       = headline.netWorth;
+  const monthlySurplus = headline.monthlySurplus;
+  const savingsRate    = headline.monthlyIncome > 0
+    ? (monthlySurplus / headline.monthlyIncome) * 100
     : 0;
 
   // Top 8 categories
@@ -2332,22 +2333,14 @@ function AICoach({
     stocksVal +
     cryptoVal;
 
-  const fireTargetCapital = Math.max(1, (safeNum(snap.monthly_income) * 12) / 0.04);
+  // Sprint 4D — FIRE target / total assets / total debts come from the
+  // canonical headline service so the AI Coach data summary matches the
+  // headline KPIs and the Dashboard / Reports / Timeline / Risk pages.
+  const fireTargetCapital = Math.max(1, headline.fireNumber);
   const fireProgress = Math.min(100, (investableAssets / fireTargetCapital) * 100);
 
-  // Audit Mode — register Wealth Strategy Hub Data Summary KPIs.
-  const totalAssetsWS =
-    safeNum(snap.ppor) +
-    safeNum(snap.cash) +
-    safeNum(snap.offset_balance) +
-    safeNum(snap.super_balance) +
-    safeNum(snap.stocks) +
-    safeNum(snap.crypto) +
-    stocksVal +
-    cryptoVal +
-    safeNum(snap.cars) +
-    safeNum(snap.iran_property);
-  const totalDebtWS = safeNum(snap.mortgage) + safeNum(snap.other_debts);
+  const totalAssetsWS = headline.assets;
+  const totalDebtWS = headline.liabilities;
 
   useEffect(() => {
     buildWealthStrategyTraces({
@@ -2901,30 +2894,42 @@ export default function WealthStrategyPage() {
   const { data: stocksRaw } = useQuery({ queryKey: ["/api/stocks"] });
   const { data: cryptoRaw } = useQuery({ queryKey: ["/api/crypto"] });
 
-  // Sprint 4A Final Closure — canonical headline figures.
+  // Sprint 4D — fetch the same live holdings Dashboard hands the canonical
+  // layer, so this page sees the identical investment totals (manual vs live
+  // vs ticker) and cannot drift downstream.
+  const { data: holdingsRaw } = useQuery({ queryKey: ["/api/holdings"] });
+
+  // Sprint 4A Final Closure / Sprint 4D — canonical headline figures.
   // Every narrative card on this page that quotes net worth / surplus / debt
   // service / liquidity binds to the canonical figures so a single change
   // in the underlying ledger flows here without per-page recalculation drift.
-  const canonicalHead = useMemo(() => computeCanonicalHeadlineFigures({
+  const canonicalInputsWS = useMemo(() => ({
     snapshot: snapRaw,
     properties: (propertiesRaw as any[] | undefined) ?? [],
     stocks: (stocksRaw as any[] | undefined) ?? [],
     cryptos: (cryptoRaw as any[] | undefined) ?? [],
-    holdingsRaw: [],
+    holdingsRaw: (holdingsRaw as any[] | undefined) ?? [],
     incomeRecords: [],
     expenses: (expensesRaw as any[] | undefined) ?? [],
-  }), [snapRaw, propertiesRaw, stocksRaw, cryptoRaw, expensesRaw]);
-  const canonicalAudit = useMemo(() => buildCanonicalAuditTrace({
-    snapshot: snapRaw,
-    properties: (propertiesRaw as any[] | undefined) ?? [],
-    stocks: (stocksRaw as any[] | undefined) ?? [],
-    cryptos: (cryptoRaw as any[] | undefined) ?? [],
-    holdingsRaw: [],
-    incomeRecords: [],
-    expenses: (expensesRaw as any[] | undefined) ?? [],
-  }), [snapRaw, propertiesRaw, stocksRaw, cryptoRaw, expensesRaw]);
-  void canonicalHead;
+  }), [snapRaw, propertiesRaw, stocksRaw, cryptoRaw, holdingsRaw, expensesRaw]);
+  const canonicalHead = useMemo(
+    () => computeCanonicalHeadlineFigures(canonicalInputsWS),
+    [canonicalInputsWS],
+  );
+  const canonicalAudit = useMemo(
+    () => buildCanonicalAuditTrace(canonicalInputsWS),
+    [canonicalInputsWS],
+  );
   void canonicalAudit;
+  // Sprint 4D Visible UI Reconciliation — single visible-truth headline
+  // metrics. All KPI cards on the Wealth Strategy hub bind to this object so
+  // they render the same values as Dashboard / Reports / Financial Plan /
+  // Timeline / Risk to within $1.
+  const headline = useMemo(
+    () => computeCanonicalHeadlineMetrics(canonicalInputsWS),
+    [canonicalInputsWS],
+  );
+  void canonicalHead;
 
   const snap: Record<string, number> = useMemo(() => {
     const s: any = snapRaw || {};
@@ -2951,13 +2956,21 @@ export default function WealthStrategyPage() {
 
   const handleExportPDF = useCallback(async () => {
     const s = snapRaw as any || {};
+    // Sprint 4D — every headline number in this PDF flows from the canonical
+    // headline metrics service so the exported report renders the same NW /
+    // surplus / FIRE figures the Dashboard, Reports and Wealth Strategy hub
+    // show on screen. The investable-asset helper for the FIRE progress bar
+    // stays computed from the snapshot because it is a hub-specific
+    // projection, not a headline metric.
     const inv = safeNum(s.cash) + safeNum(s.super_balance) + safeNum(s.stocks) + safeNum(s.crypto);
-    const requiredFIRE = (10000 * 12) / 0.04;
+    const requiredFIRE = Math.max(1, headline.fireNumber);
     const fireProgress = Math.min(100, Math.round((inv / requiredFIRE) * 100));
-    const totalDebt = safeNum(s.mortgage) + safeNum(s.other_debts);
-    const netWorth = (safeNum(s.ppor) + safeNum(s.cash) + safeNum(s.super_balance) + safeNum(s.stocks) + safeNum(s.crypto) + safeNum(s.cars) + safeNum(s.iran_property)) - totalDebt;
-    const surplus = safeNum(s.monthly_income) - safeNum(s.monthly_expenses);
-    const savingsRate = safeNum(s.monthly_income) > 0 ? Math.round((surplus / safeNum(s.monthly_income)) * 100) : 0;
+    const totalDebt = headline.liabilities;
+    const netWorth = headline.netWorth;
+    const surplus = headline.monthlySurplus;
+    const savingsRate = headline.monthlyIncome > 0
+      ? Math.round((surplus / headline.monthlyIncome) * 100)
+      : 0;
 
     const fmt = (v: number) => new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(v);
 
@@ -3049,28 +3062,33 @@ export default function WealthStrategyPage() {
       win.document.close();
       setTimeout(() => win.print(), 500);
     }
-  }, [snapRaw]);
+  }, [snapRaw, headline]);
 
-  // ─── Derived household signals (read-only — no new formulas) ───────────────
+  // ─── Derived household signals ─────────────────────────────────────────────
+  // Sprint 4D — every headline value (netWorth / totalAssets / totalDebt /
+  // monthlyIncome / monthlyExpenses / monthlySurplus / requiredFIRE) is
+  // sourced from `headline` (the canonical visible-truth service). The
+  // remaining values (liquidity, monthsBuffer, debtToAsset, savingsRate,
+  // monthsToFire forecast) are pure derivations on top of those canonical
+  // values and so remain in this hub, but cannot drift from Dashboard etc.
   const derived = useMemo(() => {
-    const totalAssets =
-      snap.ppor + snap.cash + snap.offset_balance + snap.super_balance +
-      snap.stocks + snap.crypto + snap.cars + snap.iran_property;
-    const totalDebt = snap.mortgage + snap.other_debts;
-    const netWorth = totalAssets - totalDebt;
+    const totalAssets = headline.assets;
+    const totalDebt   = headline.liabilities;
+    const netWorth    = headline.netWorth;
 
-    const monthlyIncome   = snap.monthly_income;
-    const monthlyExpenses = snap.monthly_expenses;
-    const monthlySurplus  = monthlyIncome - monthlyExpenses;
+    const monthlyIncome   = headline.monthlyIncome;
+    const monthlyExpenses = headline.monthlyExpenses;
+    const monthlySurplus  = headline.monthlySurplus;
     const savingsRate     = monthlyIncome > 0 ? (monthlySurplus / monthlyIncome) * 100 : 0;
 
     const liquidity        = snap.cash + snap.offset_balance;
     const monthsBuffer     = monthlyExpenses > 0 ? liquidity / monthlyExpenses : 0;
     const bufferTargetMo   = 6;
 
-    // FIRE target — 4% rule on current monthly expenses (advisor heuristic).
-    const annualExpenses   = monthlyExpenses * 12;
-    const requiredFIRE     = annualExpenses > 0 ? annualExpenses / 0.04 : 0;
+    // FIRE target — canonical FIRE number from the same engine every page
+    // uses. Investable-asset projection below stays here as it is a
+    // hub-specific projection, not a headline metric.
+    const requiredFIRE     = headline.fireNumber;
     const investable       = snap.cash + snap.offset_balance + snap.super_balance + snap.stocks + snap.crypto;
     const fireProgressPct  = requiredFIRE > 0 ? Math.min(100, (investable / requiredFIRE) * 100) : 0;
     const fireGap          = Math.max(0, requiredFIRE - investable);
@@ -3127,7 +3145,7 @@ export default function WealthStrategyPage() {
       expensiveDebt, hasHighInterestDebt, debtToAsset,
       propertyValue, investmentValue,
     };
-  }, [snap, properties, stocks, crypto]);
+  }, [snap, properties, stocks, crypto, headline]);
 
   // ── Audit Mode: register the Wealth Strategy Hub *hub-level* live traces.
   //    The QA matrix calls out that the visible hero metrics (Household Net
@@ -3980,7 +3998,7 @@ export default function WealthStrategyPage() {
                   description="Personalised narrative coaching from your live financial data."
                   defaultOpen={initialOpen === "advanced-coach"}
                 >
-                  <AICoach snap={snap} expenses={expenses} properties={properties} stocks={stocks} crypto={crypto} />
+                  <AICoach snap={snap} expenses={expenses} properties={properties} stocks={stocks} crypto={crypto} headline={headline} />
                 </Disclosure>
               </div>
             </>

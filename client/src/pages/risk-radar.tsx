@@ -41,6 +41,7 @@ import {
   computeCanonicalHeadlineFigures,
   buildCanonicalAuditTrace,
 } from '@/lib/canonicalLedger';
+import { computeCanonicalHeadlineMetrics } from '@/lib/canonicalHeadlineMetrics';
 
 // ─── Level config ─────────────────────────────────────────────────────────────
 
@@ -164,19 +165,31 @@ export default function RiskRadarPage() {
   const { data: properties = [] } = useQuery<any[]>({ queryKey: ['/api/properties'] });
   const { data: expenses = [] } = useQuery<any[]>({ queryKey: ['/api/expenses'] });
 
-  // Sprint 4A Final Closure — canonical headline figures.
+  // Sprint 4A Final Closure / Sprint 4D — canonical headline figures.
   // The radar's debt-service ratio, liquidity ratio and savings ratio all
   // derive from these numbers, guaranteeing the radar matches Dashboard etc.
-  const canonicalHead = useMemo(() => computeCanonicalHeadlineFigures({
+  const canonicalInputsRR = useMemo(() => ({
     snapshot: snap, properties, stocks: [], cryptos: [],
     holdingsRaw: [], incomeRecords: [], expenses,
   }), [snap, properties, expenses]);
-  const canonicalAudit = useMemo(() => buildCanonicalAuditTrace({
-    snapshot: snap, properties, stocks: [], cryptos: [],
-    holdingsRaw: [], incomeRecords: [], expenses,
-  }), [snap, properties, expenses]);
-  void canonicalHead;
+  const canonicalHead = useMemo(
+    () => computeCanonicalHeadlineFigures(canonicalInputsRR),
+    [canonicalInputsRR],
+  );
+  const canonicalAudit = useMemo(
+    () => buildCanonicalAuditTrace(canonicalInputsRR),
+    [canonicalInputsRR],
+  );
   void canonicalAudit;
+  // Sprint 4D — risk-radar headline reconciliation. Rendered only inside the
+  // regression test today; published here so the radar can read the same
+  // visible-truth metrics other pages render.
+  const headline = useMemo(
+    () => computeCanonicalHeadlineMetrics(canonicalInputsRR),
+    [canonicalInputsRR],
+  );
+  void canonicalHead;
+  void headline;
 
   // ── React #310 fix: compute risk radar via useMemo BEFORE any early return,
   //    and run the audit-trace useEffect unconditionally so hook order never
