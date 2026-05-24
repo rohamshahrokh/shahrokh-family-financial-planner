@@ -88,6 +88,10 @@ import {
   buildCanonicalAuditTrace,
   type CanonicalHeadlineFigures,
 } from "@/lib/canonicalLedger";
+// Sprint 4D Visible UI Reconciliation — the visible KPI strip on this page
+// reads from the canonical headline metrics service so it matches Reports /
+// Financial Plan / Wealth Strategy / Timeline / Risk to within $1.
+import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics";
 // Sprint 4C — canonical FIRE / passive-income source so the dashboard, reports,
 // and fire-path all derive the same FIRE number from the same SWR & target.
 import {
@@ -931,6 +935,14 @@ export default function DashboardPage() {
   // below and feed the headline drawer.
   void canonicalHead;
   void canonicalAudit;
+  // Sprint 4D — the single visible-truth headline object every page reads.
+  // The KPI strip below binds to this object so Dashboard cannot drift on
+  // net worth, assets, liabilities, monthly surplus, debt service, passive
+  // income or FIRE number.
+  const headline = useMemo(
+    () => computeCanonicalHeadlineMetrics(_contractInputs),
+    [_contractInputs],
+  );
 
   // ─── Live stocks / crypto value (delegates to data contract) ────────────
   // Bug pre-fix: the dashboard only summed the unified holdings API and a
@@ -966,14 +978,18 @@ export default function DashboardPage() {
   // PPOR equity from snapshot (separate from IP equity)
   const _ppoEquity = snap.ppor - snap.mortgage;
 
-  // Audit fix P1.1: NW now flows through the canonical selector so the
-  // dashboard, engine, and PDF all read from the same single source of truth.
-  // Previously the inline math here silently diverged from the decision engine
-  // (which excluded cars/iran_property/other_debts).
+  // Audit fix P1.1 / Sprint 4D: NW flows through the canonical headline
+  // service so Dashboard, Reports, Financial Plan, Wealth Strategy,
+  // Timeline and Risk all render the same nine headline metrics from one
+  // place. `canonicalNw` is retained for tooltip breakdowns that need the
+  // per-component composition (cash / super / ppor / IPs / stocks / crypto)
+  // — its `totalAssets/totalLiabilities/netWorth` MUST equal `headline.*`
+  // for identical inputs and are asserted to within $1 by the Sprint 4D
+  // regression test (`script/test-sprint4d-ui-reconciliation.ts`).
   const canonicalNw: CanonicalNetWorth = selectCanonicalNetWorth(_contractInputs);
-  const totalAssets   = canonicalNw.totalAssets;
-  const totalLiab     = canonicalNw.totalLiabilities;
-  const netWorth      = canonicalNw.netWorth;
+  const totalAssets   = headline.assets;
+  const totalLiab     = headline.liabilities;
+  const netWorth      = headline.netWorth;
   // Combined property equity = PPOR equity + settled-IP equity (matches Total Assets / Liab)
   const propertyEquity = selectPropertyEquity(_contractInputs);
 
@@ -1814,14 +1830,15 @@ export default function DashboardPage() {
   }, [ngSummary]);
 
   // ─── FIRE calc ────────────────────────────────────────────────────────────
-  // Sprint 4C — derive from canonical FIRE selector. The previous hardcoded
-  // `(8000 * 12) / 0.04` target ignored both the user's saved
-  // `fire_target_monthly_income` and the SWR they set in Settings, so every
-  // page rendered a different FIRE figure for the same household.
+  // Sprint 4C / Sprint 4D — derive from the canonical headline service so
+  // Dashboard, Reports, Financial Plan, Wealth Strategy and the FIRE Path
+  // page all render the same FIRE Number for the same household. The
+  // previous `explicitTarget: 8000` override silently disagreed with every
+  // other page (which uses the snapshot-saved target or monthly expenses).
   const _fireCanonical = computeCanonicalFire(_contractInputs, {
-    targetMonthlyIncome: resolveFireTargetFromSnapshot(_contractInputs, { explicitTarget: 8000 }),
+    targetMonthlyIncome: resolveFireTargetFromSnapshot(_contractInputs),
   });
-  const fireTargetAmt = _fireCanonical.fireNumber || (8000 * 12) / 0.04;
+  const fireTargetAmt = headline.fireNumber || _fireCanonical.fireNumber;
   const fireCurrentAmt = totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal;
   const fireProgressPct = Math.min(100, (fireCurrentAmt / fireTargetAmt) * 100);
   const fireGap = Math.max(0, fireTargetAmt - fireCurrentAmt);

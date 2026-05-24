@@ -25,7 +25,10 @@ import {
   type YearlyProjection, type PropertyYearDetail, type NGSummary, type GrowthBreakdown,
 } from "@/lib/finance";
 import { runCashEngine } from "@/lib/cashEngine";
-import { computeCanonicalNetWorth } from "@/lib/canonicalNetWorth";
+// Sprint 4D — visible headline metrics consumed from the canonical service so
+// Timeline cannot drift from Dashboard / Reports / Financial Plan / Wealth
+// Strategy / Risk on any KPI.
+import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics";
 // Sprint 4A Final Closure — Timeline reads its headline metrics from the
 // canonical ledger so net worth / surplus / debt service / liquidity stay
 // aligned with Dashboard / Reports / Wealth Strategy / Financial Plan / Risk.
@@ -113,20 +116,50 @@ export default function TimelinePage() {
     queryKey: ['/api/expenses'],
     queryFn: () => apiRequest('GET', '/api/expenses').then(r => r.json()),
   });
+  // Sprint 4D — fetch live holdings so the canonical headline metrics this
+  // page renders see the same inputs Dashboard does. Previously this page
+  // passed `holdingsRaw: []`, which let the canonical layer fall back to the
+  // manual snapshot stocks/crypto totals while Dashboard saw the live values.
+  const { data: holdingsRaw = [] } = useQuery<any[]>({
+    queryKey: ['/api/holdings'],
+    queryFn: () => apiRequest('GET', '/api/holdings').then(r => r.json()).catch(() => []),
+  });
+  // Sprint 4D follow-up — fetch /api/income so the canonical headline metrics
+  // see the same ledger income rows Dashboard / Reports / Financial Plan see.
+  // Previously this page passed `incomeRecords: []`, which made
+  // `selectMonthlyIncome` skip the ledger aggregate and fall back to the
+  // snapshot's `monthly_income` (or its hardcoded $22k default), producing a
+  // different Monthly Surplus to every other surface — the $11,142 vs $10,442
+  // drift the preview smoke test caught.
+  const { data: incomeRecords = [] } = useQuery<any[]>({
+    queryKey: ['/api/income'],
+    queryFn: () => apiRequest('GET', '/api/income').then(r => r.json()).catch(() => []),
+  });
 
-  // Sprint 4A Final Closure — canonical headline figures (net worth, monthly
-  // income/expenses/surplus/debt service, liquidity, mortgage-input state).
+  // Sprint 4A Final Closure / Sprint 4D — canonical headline figures (net
+  // worth, monthly income/expenses/surplus/debt service, liquidity).
   // Same selectors the rest of the app reads — Timeline cannot drift.
-  const canonicalHead = useMemo(() => computeCanonicalHeadlineFigures({
+  const canonicalInputsTL = useMemo(() => ({
     snapshot, properties, stocks, cryptos,
-    holdingsRaw: [], incomeRecords: [], expenses,
-  }), [snapshot, properties, stocks, cryptos, expenses]);
-  const canonicalAudit = useMemo(() => buildCanonicalAuditTrace({
-    snapshot, properties, stocks, cryptos,
-    holdingsRaw: [], incomeRecords: [], expenses,
-  }), [snapshot, properties, stocks, cryptos, expenses]);
-  void canonicalHead;
+    holdingsRaw, incomeRecords, expenses,
+  }), [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses]);
+  const canonicalHead = useMemo(
+    () => computeCanonicalHeadlineFigures(canonicalInputsTL),
+    [canonicalInputsTL],
+  );
+  const canonicalAudit = useMemo(
+    () => buildCanonicalAuditTrace(canonicalInputsTL),
+    [canonicalInputsTL],
+  );
   void canonicalAudit;
+  // Sprint 4D Visible UI Reconciliation — the KPI row at the top of this
+  // page renders the canonical headline metrics so it matches Dashboard /
+  // Reports / Financial Plan / Wealth Strategy / Risk to within $1.
+  const headline = useMemo(
+    () => computeCanonicalHeadlineMetrics(canonicalInputsTL),
+    [canonicalInputsTL],
+  );
+  void canonicalHead;
   const { data: stockTransactions = [] } = useQuery<any[]>({
     queryKey: ['/api/stock-transactions'],
     queryFn: () => apiRequest('GET', '/api/stock-transactions').then(r => r.json()),
@@ -302,23 +335,16 @@ export default function TimelinePage() {
   );
 
   // ── Summary KPIs ───────────────────────────────────────────────────────────
-  // SOURCE-OF-TRUTH: canonical NW (matches dashboard / financial-plan / reports
-  // to the dollar). The previous local sum here missed offset_balance and
-  // savings_cash buckets and produced a slightly different NW figure.
-  const currentNW = computeCanonicalNetWorth({
-    snapshot: snapshot ?? null,
-    properties: properties as any[],
-    stocks: [],
-    cryptos: [],
-    holdingsRaw: [],
-    incomeRecords: undefined,
-    expenses: expenses as any[],
-  }).netWorth;
+  // Sprint 4D Visible UI Reconciliation — current NW + monthly surplus come
+  // from the canonical headline metrics service. This is the same single
+  // truth Dashboard / Reports / Financial Plan / Wealth Strategy / Risk
+  // render, guaranteeing the KPI row cannot drift by even a dollar.
+  const currentNW = headline.netWorth;
   const finalYear = projection[projection.length - 1];
   const nwIn10y = finalYear?.endNetWorth ?? 0;
   const nwGrowth = nwIn10y - currentNW;
   const cagr = finalYear?.cagr ?? (currentNW > 0 ? (Math.pow(nwIn10y / currentNW, 1 / 10) - 1) * 100 : 0);
-  const monthlySurplus = snap.monthly_income - snap.monthly_expenses;
+  const monthlySurplus = headline.monthlySurplus;
   const totalSuper10y = finalYear?.totalSuper ?? 0;
   const accessibleNW10y = finalYear?.accessibleNetWorth ?? 0;
   // Expansion state for growth breakdown rows

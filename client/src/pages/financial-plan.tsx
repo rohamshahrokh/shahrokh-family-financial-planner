@@ -21,7 +21,6 @@ import { apiRequest } from "@/lib/queryClient";
 import { localStore } from "@/lib/localStore";
 import { useLocation } from "wouter";
 import AssumptionsPanel from "@/components/AssumptionsPanel";
-import { computeCanonicalNetWorth } from "@/lib/canonicalNetWorth";
 import { formatCurrency, safeNum } from "@/lib/finance";
 // Income engine — Financial Plan registers the live trace on mount and wraps
 // the three income cards in <AuditableMetric> so the native UI opens the
@@ -56,6 +55,13 @@ import {
   computeCanonicalHeadlineFigures,
   buildCanonicalAuditTrace,
 } from "@/lib/canonicalLedger";
+// Sprint 4D Visible UI Reconciliation — the KPI strip on this page renders
+// the same nine headline metrics every other surface renders. All values
+// come from this single service so net worth, assets, liabilities and
+// monthly surplus cannot drift between pages.
+import {
+  computeCanonicalHeadlineMetrics,
+} from "@/lib/canonicalHeadlineMetrics";
 import SaveButton from "@/components/SaveButton";
 import {
   ClipboardList, Home, TrendingUp, Bitcoin, Calendar, CheckCircle, AlertCircle,
@@ -354,6 +360,24 @@ export default function MyFinancialPlan() {
     queryKey: ["/api/income"],
     queryFn: () => apiRequest("GET", "/api/income").then(r => r.json()),
   });
+  // Sprint 4D — fetch the same investment/holdings inputs Dashboard uses so
+  // the canonical headline metrics this page renders match the Dashboard
+  // dollar-for-dollar. Previously this page wired `stocks: [], cryptos: [],
+  // holdingsRaw: []` to the canonical layer, which silently chose the manual
+  // snapshot value via `Math.max(live, ticker, manual)` while Dashboard saw
+  // the live values — that is one of the three sources of the $12k drift.
+  const { data: stocks = [] } = useQuery<any[]>({
+    queryKey: ["/api/stocks"],
+    queryFn: () => apiRequest("GET", "/api/stocks").then(r => r.json()).catch(() => []),
+  });
+  const { data: cryptos = [] } = useQuery<any[]>({
+    queryKey: ["/api/cryptos"],
+    queryFn: () => apiRequest("GET", "/api/cryptos").then(r => r.json()).catch(() => []),
+  });
+  const { data: holdingsRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/holdings"],
+    queryFn: () => apiRequest("GET", "/api/holdings").then(r => r.json()).catch(() => []),
+  });
 
   // ── Snapshot draft state ────────────────────────────────────────────────────
   const [draft, setDraft] = useState<SnapshotDraft | null>(null);
@@ -440,9 +464,9 @@ export default function MyFinancialPlan() {
   // place — manual override toggles are provided for cases where the ledger
   // is sparse and the user wants to inject an assumption.
   const sotInputs = useMemo<DashboardInputs>(() => ({
-    snapshot, properties, stocks: [], cryptos: [], holdingsRaw: [],
+    snapshot, properties, stocks, cryptos, holdingsRaw,
     incomeRecords, expenses,
-  }), [snapshot, properties, incomeRecords, expenses]);
+  }), [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses]);
   // Sprint 4A Final Closure — canonical headline figures.
   // These are the SAME numbers every other surface reads (Dashboard / Reports
   // / Wealth Strategy / Timeline / Risk), guaranteeing the plan page can never
@@ -455,8 +479,15 @@ export default function MyFinancialPlan() {
     () => buildCanonicalAuditTrace(sotInputs),
     [sotInputs],
   );
-  void canonicalHead;
   void canonicalAudit;
+  // Sprint 4D — the single visible-truth headline metrics object this page
+  // renders in its KPI strip. The local `draftCanonical` /
+  // `totalIncome - totalExpenses` math below is retained for the live editor
+  // sub-card preview only and MUST NOT be read into the rendered KPI strip.
+  const headline = useMemo(
+    () => computeCanonicalHeadlineMetrics(sotInputs),
+    [sotInputs],
+  );
   const sotMonthlyIncome    = selectMonthlyIncome(sotInputs);
   // Income engine refactor — recurring vs one-off breakdown surfaced as
   // three cards (Recurring Monthly / One-Off last 12 months / Total
@@ -506,24 +537,17 @@ export default function MyFinancialPlan() {
   const totalExpenses = d
     ? safeNum(d.monthly_expenses) + safeNum(d.childcare_monthly) + safeNum(d.insurance_monthly) + safeNum(d.utilities_monthly) + safeNum(d.subscriptions_monthly)
     : 0;
-  // Route the live preview through the canonical selector so the editor's NW
-  // matches every other surface to the dollar.
-  const draftCanonicalInputs = d ? {
-    snapshot: d as any,
-    properties,
-    stocks: [],
-    cryptos: [],
-    holdingsRaw: [],
-    incomeRecords: undefined,
-    expenses: undefined,
-  } : null;
-  const draftCanonical = draftCanonicalInputs ? computeCanonicalNetWorth(draftCanonicalInputs) : null;
-  const totalLiabilities = draftCanonical?.raw.totalLiabilities ?? 0;
-  const totalAssets      = draftCanonical?.raw.totalAssets ?? 0;
-  const netWorth         = draftCanonical?.netWorth ?? 0;
-  const monthlySurplus = totalIncome > 0
-    ? totalIncome - totalExpenses
-    : (d ? safeNum(d.monthly_income) - totalExpenses : 0);
+  // Sprint 4D Visible UI Reconciliation — the KPI strip below renders the
+  // canonical headline metrics (`headline.*`) so it matches Dashboard /
+  // Reports / Wealth Strategy / Timeline / Risk to within $1. The legacy
+  // `draftCanonical` block below remained the source of a $12k variance
+  // between Financial Plan and Dashboard because it was computed against the
+  // editable `draft` snapshot with `stocks: []`/`cryptos: []`/`holdingsRaw: []`
+  // — different inputs than Dashboard hands the canonical layer. It is gone.
+  const totalLiabilities = headline.liabilities;
+  const totalAssets      = headline.assets;
+  const netWorth         = headline.netWorth;
+  const monthlySurplus   = headline.monthlySurplus;
 
   // DCA aggregates
   function dcaMonthlyEquiv(amount: number, frequency: string): number {
