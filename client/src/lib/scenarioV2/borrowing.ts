@@ -24,6 +24,13 @@
  */
 
 import type { PortfolioState } from "./types";
+import {
+  resolveHemExpenses,
+  type HemAudit,
+  type HemExpenseMode,
+  type HouseholdComposition,
+  type HouseholdCompositionKind,
+} from "./household";
 
 export interface ServiceabilityInput {
   state: PortfolioState;
@@ -41,6 +48,16 @@ export interface ServiceabilityInput {
   averageTaxRate?: number;
   /** Rental income shading factor (default 0.80 — banks discount rent). */
   rentalShading?: number;
+  /**
+   * Sprint 2B — household composition (optional, additive).
+   * When omitted, the engine behaves identically to Sprint 2A.
+   */
+  householdComposition?: HouseholdComposition | HouseholdCompositionKind | null;
+  /**
+   * Sprint 2B — HEM expense mode (optional). Default ACTUAL preserves
+   * legacy behaviour byte-for-byte.
+   */
+  hemMode?: HemExpenseMode;
 }
 
 export interface ServiceabilityResult {
@@ -54,6 +71,8 @@ export interface ServiceabilityResult {
   bufferedRate: number;
   band: "healthy" | "stretched" | "stressed";
   rationale: string[];
+  /** Sprint 2B — full HEM audit trail (always populated, even in ACTUAL). */
+  hemAudit: HemAudit;
 }
 
 export function computeServiceability(input: ServiceabilityInput): ServiceabilityResult {
@@ -62,6 +81,17 @@ export function computeServiceability(input: ServiceabilityInput): Serviceabilit
   const taxRate = input.averageTaxRate ?? 0.28;
   const shading = input.rentalShading ?? 0.80;
   const bufferedRate = input.mortgageRate + buffer;
+
+  // Sprint 2B — resolve HEM / household-aware living expenses up-front. The
+  // returned audit is attached to the result so reviewers can always see
+  // which floor was applied. When mode/composition aren't supplied the
+  // resolver is a no-op (appliedMonthly === input.monthlyLivingExpenses).
+  const hemAudit = resolveHemExpenses({
+    monthlyLivingExpenses: input.monthlyLivingExpenses,
+    mode: input.hemMode,
+    composition: input.householdComposition ?? null,
+  });
+  const effectiveMonthlyExpenses = hemAudit.appliedMonthly;
 
   const totalLoanBalance = input.state.properties.reduce((s, p) => s + p.loanBalance, 0);
   const totalPropertyValue = input.state.properties.reduce((s, p) => s + p.marketValue, 0);
@@ -101,7 +131,7 @@ export function computeServiceability(input: ServiceabilityInput): Serviceabilit
   const lvr = totalPropertyValue > 0 ? totalLoanBalance / totalPropertyValue : 0;
 
   // NSR: (serviceable income − expenses − buffered debt) / buffered debt
-  const nsrSurplus = serviceableMonthly - input.monthlyLivingExpenses - bufferedDebtService;
+  const nsrSurplus = serviceableMonthly - effectiveMonthlyExpenses - bufferedDebtService;
   const nsr = bufferedDebtService > 0
     ? (nsrSurplus + bufferedDebtService) / bufferedDebtService
     : Number.POSITIVE_INFINITY;
@@ -110,7 +140,7 @@ export function computeServiceability(input: ServiceabilityInput): Serviceabilit
   // PLUS existing buffered service, equals (serviceableMonthly − expenses).
   const headroomMonthly = Math.max(
     0,
-    serviceableMonthly - input.monthlyLivingExpenses - bufferedDebtService,
+    serviceableMonthly - effectiveMonthlyExpenses - bufferedDebtService,
   );
   const r = bufferedRate / 12;
   const n = term * 12;
@@ -129,6 +159,16 @@ export function computeServiceability(input: ServiceabilityInput): Serviceabilit
   rationale.push(`DTI ${dti.toFixed(2)}× — ${dti < 6 ? "below APRA scrutiny line" : dti < 8 ? "elevated" : "APRA cap territory"}`);
   rationale.push(`LVR ${(lvr * 100).toFixed(1)}% — ${lvr < 0.80 ? "no LMI" : "LMI required"}`);
   rationale.push(`NSR ${nsr === Infinity ? "∞" : nsr.toFixed(2)} @ +${(buffer * 100).toFixed(0)}% buffered — ${nsr >= 1.10 ? "passes" : nsr >= 1.0 ? "marginal" : "fails"}`);
+  if (hemAudit.mode !== "ACTUAL" || hemAudit.composition != null) {
+    rationale.push(
+      `HEM ${hemAudit.mode}` +
+        (hemAudit.composition ? ` (${hemAudit.composition.kind})` : "") +
+        ` applied=$${hemAudit.appliedMonthly.toFixed(0)}` +
+        (hemAudit.hemFloorMonthly != null
+          ? `, floor=$${hemAudit.hemFloorMonthly.toFixed(0)}`
+          : ""),
+    );
+  }
 
   return {
     dsr,
@@ -141,6 +181,7 @@ export function computeServiceability(input: ServiceabilityInput): Serviceabilit
     bufferedRate,
     band,
     rationale,
+    hemAudit,
   };
 }
 

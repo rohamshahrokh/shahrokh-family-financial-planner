@@ -38,6 +38,14 @@ import { computeServiceability } from "./borrowing";
 import { computeRiskMetrics } from "./riskMetrics";
 import { sequenceRiskMetric } from "./stochastic";
 import { stableHash } from "./determinism";
+import { computeSurvivalMetrics, type SurvivalMetrics } from "./survival";
+import { buildForcedSaleReport, type ForcedSaleReport } from "./forcedSale";
+import type { WageShockParams } from "./wageShock";
+import type {
+  HouseholdComposition,
+  HouseholdCompositionKind,
+  HemExpenseMode,
+} from "./household";
 import type {
   BasePlanAssumptions,
   MonthKey,
@@ -60,6 +68,18 @@ export interface RunScenarioInput {
   hasPrivateHospitalCover?: boolean;
   /** Toggle fat tails (default true). */
   useFatTails?: boolean;
+  /**
+   * Sprint 2B — optional household composition. Drives HEM serviceability
+   * resolution. Absent value preserves Sprint 2A behaviour exactly.
+   */
+  householdComposition?: HouseholdComposition | HouseholdCompositionKind | null;
+  /** Sprint 2B — HEM expense mode for serviceability. Default ACTUAL. */
+  hemMode?: HemExpenseMode;
+  /**
+   * Sprint 2B — wage-shock parameters. When omitted no stochastic income
+   * shock is layered onto the Monte Carlo path.
+   */
+  wageShock?: WageShockParams | null;
 }
 
 export interface ExtendedScenarioResult extends ScenarioResult {
@@ -106,6 +126,13 @@ export interface ExtendedScenarioResult extends ScenarioResult {
   netWorthReconciliation: NwReconciliation;
   /** Non-fatal warnings collected during the run (e.g. reconciliation drift). */
   warnings: string[];
+  /**
+   * Sprint 2B — Survival Engine metrics. Always populated (the engine
+   * computes survival/insolvency/recovery as a thin pass over MC outputs).
+   */
+  survival: SurvivalMetrics;
+  /** Sprint 2B — Forced sale reporting derived from MC final states. */
+  forcedSaleReport: ForcedSaleReport;
 }
 
 export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
@@ -170,6 +197,7 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     useFatTails: input.useFatTails ?? true,
     hasHelpDebt: input.hasHelpDebt,
     hasPrivateHospitalCover: input.hasPrivateHospitalCover,
+    wageShock: input.wageShock ?? null,
   });
 
   const service = computeServiceability({
@@ -177,6 +205,21 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     monthlyGrossIncome: mc.medianFinalState.ttmIncome / 12,
     monthlyLivingExpenses: mc.medianFinalState.ttmExpenses / 12,
     mortgageRate: derived.plan.assumptions.mortgageRate,
+    householdComposition: input.householdComposition ?? null,
+    hemMode: input.hemMode,
+  });
+
+  const survival = computeSurvivalMetrics({
+    simulationCount: mc.simulationCount,
+    defaultMonthBySim: mc.defaultMonthBySim,
+    liquidityFirstMonthBySim: mc.liquidityFirstMonthBySim,
+    terminalNwBySim: mc.terminalNw,
+    horizonMonths,
+  });
+
+  const forcedSaleReport = buildForcedSaleReport({
+    finalStates: mc.finalStates,
+    terminalNwBySim: mc.terminalNw,
   });
 
   const sortedTerminal = mc.terminalNwSorted;
@@ -236,6 +279,8 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     canonicalNetWorth,
     netWorthReconciliation: nwRecon,
     warnings,
+    survival,
+    forcedSaleReport,
   };
 }
 
