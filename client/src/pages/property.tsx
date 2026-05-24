@@ -51,17 +51,22 @@ import { buildAllFundingTraces } from "@/lib/auditMode/engineTraces/fundingSourc
 const estimateStampDuty = estimateQldStampDuty;
 
 // ─── Lifecycle helpers ──────────────────────────────────────────────────────
-type LifecycleStatus = 'planned' | 'under_contract' | 'settled';
+// Sprint 3B C-1: full five-status model. Mirrors shared/propertyLifecycle.ts.
+type LifecycleStatus = 'planned' | 'under_contract' | 'settled' | 'sold' | 'archived';
 const LIFECYCLE_LABEL: Record<LifecycleStatus, string> = {
   planned: 'Planned',
   under_contract: 'Under Contract',
   settled: 'Settled',
+  sold: 'Sold',
+  archived: 'Archived',
 };
 function LifecycleBadge({ status }: { status?: string | null }) {
   const s = (status as LifecycleStatus) || 'settled';
   const tone =
     s === 'settled' ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
     : s === 'under_contract' ? 'bg-sky-500/15 border-sky-500/40 text-sky-300'
+    : s === 'sold' ? 'bg-slate-500/15 border-slate-500/40 text-slate-300'
+    : s === 'archived' ? 'bg-zinc-700/15 border-zinc-500/40 text-zinc-400'
     : 'bg-amber-500/15 border-amber-500/40 text-amber-300';
   return (
     <span
@@ -417,10 +422,12 @@ function PropertyForm({ data, onChange, onEnterSave }: PropertyFormProps) {
                 <SelectItem value="planned">Planned</SelectItem>
                 <SelectItem value="under_contract">Under Contract</SelectItem>
                 <SelectItem value="settled">Settled (Active)</SelectItem>
+                <SelectItem value="sold">Sold</SelectItem>
+                <SelectItem value="archived">Archived</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-[10px] text-muted-foreground mt-1">
-              Only Settled properties flow through the active Forecast Engine. Settling a Planned property automatically activates its debt, rental income and expenses.
+              Settled = active (counts in current NW, debt, income, expenses, and forecast). Planned / Under Contract = future acquisition (forecast only). Sold / Archived = historical, excluded from both current state and forecast.
             </p>
           </div>
         </div>

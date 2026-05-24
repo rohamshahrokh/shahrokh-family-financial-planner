@@ -336,7 +336,7 @@ export default function ReportsPage() {
       ['Net Worth', fmt(netWorth), ''],
       ['Total Assets', fmt(totalAssets), ''],
       ['Total Liabilities', fmt(totalLiab), ''],
-      ['Accessible Wealth', fmt(accessibleWlt), ''],
+      ['Liquid Assets', fmt(accessibleWlt), ''],
       ['Locked Wealth', fmt(lockedWlt), ''],
       ['Monthly Income', fmt(monthlyInc), ''],
       ['Monthly Expenses', fmt(monthlyExp), ''],
@@ -518,7 +518,7 @@ export default function ReportsPage() {
         ['Net Worth',           fmt(netWorth, true),      ''],
         ['Total Assets',        fmt(totalAssets, true),   ''],
         ['Total Liabilities',   fmt(totalLiab, true),     ''],
-        ['Accessible Wealth',   fmt(accessibleWlt, true), 'Cash + Stocks + Crypto'],
+        ['Liquid Assets',       fmt(accessibleWlt, true), 'Cash + Stocks + Crypto'],
         ['Locked Wealth',       fmt(lockedWlt, true),     'PPOR + Super + Iran Prop + Cars'],
         ['Monthly Income',      fmt(monthlyInc),          ''],
         ['Monthly Expenses',    fmt(monthlyExp),          ''],
@@ -552,7 +552,7 @@ export default function ReportsPage() {
         ['TOTAL LIABILITIES',   fmt(totalLiab, true),                      ''],
         ['—', '—', '—'],
         ['NET WORTH',           fmt(netWorth, true),                       'Assets − Liabilities'],
-        ['Accessible Wealth',   fmt(accessibleWlt, true),                  'Liquid Only'],
+        ['Liquid Assets',       fmt(accessibleWlt, true),                  'Cash + Stocks + Crypto'],
         ['Locked Wealth',       fmt(lockedWlt, true),                      'Illiquid'],
         ['LVR (Liab/Assets)',   totalAssets > 0 ? pct((totalLiab / totalAssets) * 100) : '0%', ''],
       ],
@@ -730,7 +730,7 @@ export default function ReportsPage() {
           tablets get 4, desktop fans out to all 7 chips. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2.5">
         <KpiChip label="Net Worth"      value={mv(fmt(netWorth, true))}        accent up={netWorth > 0} />
-        <KpiChip label="Accessible"     value={mv(fmt(accessibleWlt, true))}   sub="Cash + Stocks + Crypto" />
+        <KpiChip label="Liquid Assets"  value={mv(fmt(accessibleWlt, true))}   sub="Cash + Stocks + Crypto" />
         <KpiChip label="Debt Balance"   value={mv(fmt(totalLiab, true))}       up={totalLiab === 0} />
         <KpiChip label="Monthly Surplus" value={mv(fmt(surplus))}              sub={surplus >= 0 ? 'Positive cashflow' : 'Deficit'} up={surplus > 0} />
         <KpiChip
@@ -751,7 +751,7 @@ export default function ReportsPage() {
               { label: 'Net Worth',         value: mv(fmt(netWorth, true)),     color: 'text-amber-500' },
               { label: 'Total Assets',      value: mv(fmt(totalAssets, true)),  color: 'text-emerald-500' },
               { label: 'Total Liabilities', value: mv(fmt(totalLiab, true)),    color: 'text-red-400' },
-              { label: 'Accessible Wealth', value: mv(fmt(accessibleWlt, true)), color: 'text-blue-400' },
+              { label: 'Liquid Assets', value: mv(fmt(accessibleWlt, true)), color: 'text-blue-400' },
               { label: 'Locked Wealth',     value: mv(fmt(lockedWlt, true)),    color: 'text-violet-400' },
               { label: 'Monthly Surplus',   value: mv(fmt(surplus)),            color: surplus >= 0 ? 'text-emerald-500' : 'text-red-400' },
             ].map(s => (
@@ -768,7 +768,7 @@ export default function ReportsPage() {
                 <div className="h-full rounded-full bg-amber-500" style={{ width: `${Math.min(100, totalAssets > 0 ? (accessibleWlt / totalAssets) * 100 : 0)}%` }} />
               </div>
               <div className="flex justify-between text-[10px] text-muted-foreground mt-1.5">
-                <span>Accessible {totalAssets > 0 ? pct((accessibleWlt / totalAssets) * 100) : '0%'}</span>
+                <span>Liquid {totalAssets > 0 ? pct((accessibleWlt / totalAssets) * 100) : '0%'}</span>
                 <span>LVR {totalAssets > 0 ? pct((totalLiab / totalAssets) * 100) : '0%'}</span>
               </div>
             </div>

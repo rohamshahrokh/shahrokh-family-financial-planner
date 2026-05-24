@@ -260,8 +260,9 @@ const KEYS = {
 
 // ─── Property lifecycle override store ───────────────────────────────────────
 // Plain id→status map. Survives Supabase write failures and re-reads.
-type LifecycleStatus = 'planned' | 'under_contract' | 'settled';
-const VALID_LIFECYCLE = new Set<LifecycleStatus>(['planned', 'under_contract', 'settled']);
+// Sprint 3B C-1: full five-status model.
+type LifecycleStatus = 'planned' | 'under_contract' | 'settled' | 'sold' | 'archived';
+const VALID_LIFECYCLE = new Set<LifecycleStatus>(['planned', 'under_contract', 'settled', 'sold', 'archived']);
 
 function getLifecycleOverrides(): Record<string, LifecycleStatus> {
   return lsGet<Record<string, LifecycleStatus>>(KEYS.propertyLifecycle) ?? {};

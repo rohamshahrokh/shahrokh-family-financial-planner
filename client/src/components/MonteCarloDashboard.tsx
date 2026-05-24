@@ -273,7 +273,16 @@ export default function MonteCarloDashboard() {
   // ── Build FireMCPlanInput from real data ──
   const planInput = useMemo<FireMCPlanInput | undefined>(() => {
     if (!planProperties && !planStockDCA && !planCryptoDCA) return undefined;
-    const investmentProps = (planProperties ?? []).filter((p: any) => p.type !== 'ppor');
+    // Sprint 3B C-1: exclude historical (sold / archived) — they never
+    // contribute to forecast. Planned / under-contract / settled all flow
+    // through because fireMonteCarlo uses the settlement-date gate to delay
+    // the contribution until the property settles.
+    const investmentProps = (planProperties ?? []).filter((p: any) => {
+      if (p.type === 'ppor') return false;
+      const status = String(p.lifecycle_status ?? '').toLowerCase();
+      if (status === 'sold' || status === 'archived') return false;
+      return true;
+    });
     if (!investmentProps.length && !(planStockDCA ?? []).length && !(planCryptoDCA ?? []).length &&
         !(planStockOrders ?? []).length && !(planCryptoOrders ?? []).length) return undefined;
     return {

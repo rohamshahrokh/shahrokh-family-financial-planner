@@ -1,7 +1,17 @@
 /**
  * risk.ts — Phase F: Advanced Risk Engine
  *
- * Computes institutional risk metrics from simulation outputs:
+ * Computes institutional risk metrics from simulation outputs.
+ *
+ * Sprint 3B H-3 disclosure — these advanced metrics are derived from the V4
+ * engine's simplified parallel stress simulation, NOT the canonical visible
+ * fan chart. They should be presented to users as **approximate** stress
+ * indicators rather than canonical numbers. A unified path (one simulation
+ * driving both the fan and the stress metrics) is deferred to a later
+ * sprint. Until then, treat metrics like `liquidityExhaustionProb`,
+ * `insolvencyProb`, and `refinanceFailureProb` as directional only.
+ *
+ * Metrics:
  *   - VaR (Value-at-Risk) at 95% and 99% on terminal NW
  *   - CVaR (Conditional VaR / Expected Shortfall) at 95%
  *   - Sequence-of-return risk (SoR) — gap between random-order vs ordered returns
@@ -14,6 +24,12 @@
  *   - First failure month, first liquidity stress month, worst drawdown year,
  *     debt spiral probability.
  */
+
+/** Sprint 3B H-3 — opaque marker on V4 risk output so the UI can render
+ *  an "approximate" affordance and never present these alongside the
+ *  canonical fan as if they were the same simulation. */
+export const V4_STRESS_METRICS_NOTE =
+  "V4 advanced stress metrics are derived from a simplified parallel simulation. They are approximate indicators, not canonical fan-chart percentiles.";
 
 export interface PathStressFlags {
   firstNegCashMonth: number | null;    // first month cash < 0

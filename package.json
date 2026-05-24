@@ -16,6 +16,7 @@
     "test:sprint-2c-dashboard-cleanup": "tsx script/test-sprint2c-dashboard-cleanup.ts",
     "test:sprint-2c-decision-ux": "tsx script/test-sprint2c-decision-ux.ts",
     "test:sprint-2c": "tsx script/run-sprint2c-tests.ts",
+    "test:sprint-3b": "tsx script/test-sprint3b-critical-defects.ts",
     "test:dashboard-contract": "tsx script/test-dashboard-contract.ts",
     "test:audit-mode": "tsx script/test-audit-mode.ts",
     "test:scenario-v2": "tsx script/test-scenario-v2.ts",

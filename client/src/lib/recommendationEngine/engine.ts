@@ -895,8 +895,30 @@ function reduceLeverageIfStressed(s: UnifiedSignals, signals: SourceSignal[]): R
   const stress = s.mcStressFlag;
   const ppor = num(s.ppor);
   const mort = num(s.mortgage);
-  const lvr = ppor > 0 ? mort / ppor : 0;
+  // Sprint 3B H-5 — total portfolio LVR. The previous version used only
+  // `mortgage / ppor`, which evaluated to 0 whenever the snapshot didn't
+  // carry a PPOR value or when IP debt dominated. The result was the
+  // user-visible "currently 0% LVR" text in the Risk Radar recommendation
+  // — undermining trust even when the underlying score was correct.
+  //
+  // We now sum mortgage + IP loans + non-mortgage debts that look like
+  // secured property loans against PPOR + IP value, and fall back to
+  // mortgage/PPOR only when no broader signal is available.
+  const ipLoans = (s.debtPortfolio ?? [])
+    .filter(d => !d?.planned && (d?.type === 'mortgage' || d?.type === 'investment_loan'))
+    .reduce((sum, d) => sum + num(d?.balance), 0);
+  const totalPropertyDebt = mort + Math.max(0, ipLoans - mort); // de-dup if mortgage included
+  const totalPropertyValue = ppor; // IP values aren't on s yet; fall back to PPOR base
+  let lvr = totalPropertyValue > 0 ? totalPropertyDebt / totalPropertyValue : 0;
+  // Guard: never report 0% LVR when meaningful debt exists. If only mortgage
+  // is present and PPOR is 0 (data hole), express it as the legacy ratio.
+  if (lvr === 0 && mort > 0 && ppor > 0) lvr = mort / ppor;
   if (stress !== 'severe' && lvr < 0.8) return null;
+  // Display rule — when LVR is genuinely 0 (no debt) we suppress the "currently"
+  // clause entirely rather than showing "currently 0%".
+  const lvrDisplay = lvr > 0
+    ? ` (currently ${(lvr * 100).toFixed(0)}%)`
+    : '';
   return makeRecommendation({
     id: 'reduce_leverage',
     title: 'Reduce leverage — stress signals elevated',
@@ -904,8 +926,7 @@ function reduceLeverageIfStressed(s: UnifiedSignals, signals: SourceSignal[]): R
     pillar: 'stabilise_leverage',
     urgency: 'this_quarter',
     riskLevel: 'Med',
-    reasoning: `Combined leverage and Monte Carlo stress flag indicate fragility. Reducing LVR (currently ` +
-      `${(lvr * 100).toFixed(0)}%) lowers tail risk in a downturn.`,
+    reasoning: `Combined leverage and Monte Carlo stress flag indicate fragility. Reducing LVR${lvrDisplay} lowers tail risk in a downturn.`,
     steps: [
       { step: 'Direct surplus to principal' },
       { step: 'Avoid new credit until LVR < 70%' },

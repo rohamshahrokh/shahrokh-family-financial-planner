@@ -181,6 +181,21 @@ export function runMonteCarloV4(
 
     const baselineMortgageRate = DEFAULT_RATE_PARAMS.startRate + 2.0;
     const emergencyBuffer = 30_000;
+    // Sprint 3B H-4 — bounded insolvency floor. The previous implementation
+    // accumulated cash deficits indefinitely, which poisoned the terminal
+    // NW distribution (and therefore VaR/CVaR) with synthetic six-figure
+    // negative balances that no household could realistically run. We cap
+    // the cumulative deficit at ~12 months of expenses + an asset-backed
+    // pad. Once breached, the simulation treats the household as insolvent
+    // (cash held at the floor) and the insolvency flag remains set.
+    const monthlyExpensesForFloor = Math.max(2_000, s.monthly_expenses);
+    const totalEquityProxy =
+      Math.max(0, s.ppor - s.mortgage) +
+      Math.max(0, totalIpValue - totalIpLoan) +
+      (s.super_balance ?? 0) +
+      (s.stocks ?? 0) +
+      (s.crypto ?? 0);
+    const CASH_FLOOR = -(monthlyExpensesForFloor * 12 + Math.min(totalEquityProxy * 0.25, 500_000));
     let prevYearStockTrailing: number[] = [];
 
     for (let mi = 0; mi < nMonths; mi++) {
@@ -217,6 +232,8 @@ export function runMonteCarloV4(
       const ng = 0; // negative gearing handled in V3 canonical path; not double-applying
       const cf = incomeThisMonth - expensesThisMonth - debtService + (eventTL.cashDeltaByMonth[mi] ?? 0) + ng;
       cash += cf;
+      // Sprint 3B H-4 — clamp negative cash to a realistic insolvency floor.
+      if (cash < CASH_FLOOR) cash = CASH_FLOOR;
       if (cf < 0) consecutiveNegCfMonths++; else consecutiveNegCfMonths = 0;
       if (consecutiveNegCfMonths >= 24 && nw < runningPeakNw * 0.8) debtSpiral = true;
 
