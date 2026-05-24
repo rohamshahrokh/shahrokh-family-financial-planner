@@ -22,6 +22,12 @@ import {
   computeCanonicalHeadlineFigures,
   buildCanonicalAuditTrace,
 } from "@/lib/canonicalLedger";
+// Sprint 4C — canonical FIRE so the Reports FIRE number reconciles with
+// Dashboard / Financial Plan / Wealth Strategy on the same SWR & target.
+import {
+  computeCanonicalFire,
+  resolveFireTargetFromSnapshot,
+} from "@/lib/canonicalFire";
 import { Button } from "@/components/ui/button";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { useToast } from "@/hooks/use-toast";
@@ -298,9 +304,31 @@ export default function ReportsPage() {
   }, 0);
   const ngRefund     = propNgLoss * (taxRate / 100);
 
-  // ── FIRE estimate (from snapshot) ─────────────────────────────────────
+  // ── FIRE estimate (Sprint 4C canonical) ──────────────────────────────
+  // Reports used to compute fireNumber as (monthlyExp * 12) / swr inline,
+  // disagreeing with Dashboard's hardcoded `(8000 * 12) / 0.04` and FIRE
+  // Path's settings-driven target. Sprint 4C routes both through
+  // computeCanonicalFire so the same SWR + target produce the same number.
   const yearsToFire  = safeNum(snap.years_to_fire);
-  const fireNumber   = monthlyExp > 0 ? (monthlyExp * 12) / (safeNum(fa?.flat?.safe_withdrawal_rate ?? 4) / 100) : 0;
+  const _fireCanonical = computeCanonicalFire(
+    {
+      snapshot: snap,
+      properties: undefined,
+      stocks: undefined,
+      cryptos: undefined,
+      holdingsRaw: undefined,
+      incomeRecords: undefined,
+      expenses: undefined,
+    },
+    {
+      swrPct: safeNum((fa?.flat as any)?.safe_withdrawal_rate ?? 4),
+      targetMonthlyIncome: resolveFireTargetFromSnapshot(
+        { snapshot: snap, properties: undefined, stocks: undefined, cryptos: undefined, holdingsRaw: undefined, incomeRecords: undefined, expenses: undefined },
+        { explicitTarget: monthlyExp },
+      ),
+    },
+  );
+  const fireNumber = _fireCanonical.fireNumber;
 
   // ── Risk score ────────────────────────────────────────────────────────
   let riskScore = 5;

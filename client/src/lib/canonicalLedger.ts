@@ -31,10 +31,13 @@ import {
   selectSettledIpDebtService,
   selectOtherDebtRepayment,
   selectMortgageInputState,
+  selectPassiveIncome,
   type DashboardInputs,
 } from "./dashboardDataContract";
 import { computeCanonicalNetWorth } from "./canonicalNetWorth";
 import { computeCanonicalCashflow } from "./canonicalCashflow";
+import { computeCanonicalFire, resolveFireTargetFromSnapshot } from "./canonicalFire";
+import { computeCanonicalDebtService } from "./canonicalDebtService";
 
 /**
  * Authoritative headline values every consuming surface MUST display
@@ -55,6 +58,10 @@ export interface CanonicalHeadlineFigures {
   monthlyDebtService: number;
   /** Liquid cash + offset (excludes locked super). */
   liquidity: number;
+  /** Annual passive income (settled IP rent + manual passive + dividend yield). */
+  passiveIncome: number;
+  /** FIRE number at canonical SWR (default 4%) and monthly expenses target. */
+  fireNumber: number;
   /**
    * Whether the snapshot has the inputs needed to compute mortgage figures.
    * When this is false, callers should surface an incomplete-data state
@@ -77,6 +84,10 @@ export function computeCanonicalHeadlineFigures(
   const monthlySurplus = selectMonthlySurplus(ledger);
   const monthlyDebtService = selectMonthlyDebtService(ledger);
   const mortgageState = selectMortgageInputState(ledger);
+  const passiveIncome = selectPassiveIncome(ledger);
+  const fire = computeCanonicalFire(ledger, {
+    targetMonthlyIncome: resolveFireTargetFromSnapshot(ledger),
+  });
 
   return {
     netWorth: nw.netWorth,
@@ -87,6 +98,8 @@ export function computeCanonicalHeadlineFigures(
     monthlySurplus,
     monthlyDebtService,
     liquidity: nw.assets.cashOffset,
+    passiveIncome,
+    fireNumber: fire.fireNumber,
     inputState: {
       mortgageReady: mortgageState.ready,
       hasIncome: monthlyIncome > 0,
@@ -160,10 +173,16 @@ export function buildCanonicalAuditTrace(ledger: DashboardInputs) {
   const head = computeCanonicalHeadlineFigures(ledger);
   const nw = computeCanonicalNetWorth(ledger);
   const cashflow = computeCanonicalCashflow(ledger);
+  const debtService = computeCanonicalDebtService(ledger);
+  const fire = computeCanonicalFire(ledger, {
+    targetMonthlyIncome: resolveFireTargetFromSnapshot(ledger),
+  });
   return {
     head,
     nw,
     cashflow,
+    fire,
+    debtService,
     debtServiceBreakdown: {
       pporMortgage: selectMortgageRepayment(ledger),
       settledIps: selectSettledIpDebtService(ledger),
