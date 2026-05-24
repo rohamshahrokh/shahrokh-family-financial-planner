@@ -397,14 +397,15 @@ check("selectMortgageRepayment($1.2M, 6.5%, 30y) ≈ $7,584/mo",
   approx(selectMortgageRepayment(fxMortgage), 7_584, 2),
   `got ${selectMortgageRepayment(fxMortgage).toFixed(2)}`);
 
-// Defaults: when rate/term missing, fall back to 6.5% / 30y
-const fxMortgageDefaults: DashboardInputs = {
+// Sprint 4A: when rate/term missing, return 0 (incomplete-data state) —
+// NEVER fabricate a 6.5% / 30y default that masks missing onboarding data.
+const fxMortgageMissingTerm: DashboardInputs = {
   ...fxBaseline,
   snapshot: { ...fxBaseline.snapshot, mortgage: 500_000, mortgage_rate: 0, mortgage_term_years: 0 },
 };
-check("selectMortgageRepayment defaults to 6.5%/30y when fields missing ($500k ≈ $3,160)",
-  approx(selectMortgageRepayment(fxMortgageDefaults), 3_160, 5),
-  `got ${selectMortgageRepayment(fxMortgageDefaults).toFixed(2)}`);
+check("selectMortgageRepayment returns 0 when rate/term missing (Sprint 4A: no hardcoded defaults)",
+  selectMortgageRepayment(fxMortgageMissingTerm) === 0,
+  `got ${selectMortgageRepayment(fxMortgageMissingTerm).toFixed(2)}`);
 
 // Zero principal => zero repayment
 const fxNoMortgage: DashboardInputs = {

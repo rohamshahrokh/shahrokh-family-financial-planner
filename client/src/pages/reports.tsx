@@ -15,6 +15,13 @@ import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import { useAppStore } from "@/lib/store";
 import { computeCanonicalNetWorth } from "@/lib/canonicalNetWorth";
 import { computeCanonicalCashflow } from "@/lib/canonicalCashflow";
+// Sprint 4A Final Closure — Reports reads headline figures from the canonical
+// ledger so its net worth / surplus / debt-service totals reconcile with
+// Dashboard / Financial Plan / Wealth Strategy / Timeline / Risk to ±$1.
+import {
+  computeCanonicalHeadlineFigures,
+  buildCanonicalAuditTrace,
+} from "@/lib/canonicalLedger";
 import { Button } from "@/components/ui/button";
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import { useToast } from "@/hooks/use-toast";
@@ -173,10 +180,22 @@ export default function ReportsPage() {
     snapshot, properties, stocks, cryptos,
     holdingsRaw: [], incomeRecords, expenses,
   });
+  // Sprint 4A Final Closure — pull every headline metric from the canonical
+  // ledger. Same inputs the Dashboard / Timeline / Risk / Wealth Strategy
+  // pages use, so the report header reconciles to within $1.
+  const canonicalHead = computeCanonicalHeadlineFigures({
+    snapshot, properties, stocks, cryptos,
+    holdingsRaw: [], incomeRecords, expenses,
+  });
+  const canonicalAudit = buildCanonicalAuditTrace({
+    snapshot, properties, stocks, cryptos,
+    holdingsRaw: [], incomeRecords, expenses,
+  });
+  void canonicalAudit;
   const cash          = canonicalNw.components.cashTotal;
   const totalAssets   = canonicalNw.raw.totalAssets;
   const totalLiab     = canonicalNw.raw.totalLiabilities;
-  const netWorth      = canonicalNw.netWorth;
+  const netWorth      = canonicalHead.netWorth;
   // SOURCE-OF-TRUTH: canonicalCashflow — surplus identity is asserted to
   // hold (income - expenses == surplus) and savingsRate is `null` when
   // income is 0, so we never render 100.0% / 0.0% / NaN%.

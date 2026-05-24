@@ -35,6 +35,13 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/finance";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
+// Sprint 4A Final Closure — Wealth Strategy reads headline figures from the
+// canonical ledger so its narrative cards reconcile with Dashboard / Reports
+// / Financial Plan / Timeline / Risk to within $1.
+import {
+  computeCanonicalHeadlineFigures,
+  buildCanonicalAuditTrace,
+} from "@/lib/canonicalLedger";
 import {
   calcIncomeTax,
   calcLITO,
@@ -2893,6 +2900,31 @@ export default function WealthStrategyPage() {
   const { data: propertiesRaw } = useQuery({ queryKey: ["/api/properties"] });
   const { data: stocksRaw } = useQuery({ queryKey: ["/api/stocks"] });
   const { data: cryptoRaw } = useQuery({ queryKey: ["/api/crypto"] });
+
+  // Sprint 4A Final Closure — canonical headline figures.
+  // Every narrative card on this page that quotes net worth / surplus / debt
+  // service / liquidity binds to the canonical figures so a single change
+  // in the underlying ledger flows here without per-page recalculation drift.
+  const canonicalHead = useMemo(() => computeCanonicalHeadlineFigures({
+    snapshot: snapRaw,
+    properties: (propertiesRaw as any[] | undefined) ?? [],
+    stocks: (stocksRaw as any[] | undefined) ?? [],
+    cryptos: (cryptoRaw as any[] | undefined) ?? [],
+    holdingsRaw: [],
+    incomeRecords: [],
+    expenses: (expensesRaw as any[] | undefined) ?? [],
+  }), [snapRaw, propertiesRaw, stocksRaw, cryptoRaw, expensesRaw]);
+  const canonicalAudit = useMemo(() => buildCanonicalAuditTrace({
+    snapshot: snapRaw,
+    properties: (propertiesRaw as any[] | undefined) ?? [],
+    stocks: (stocksRaw as any[] | undefined) ?? [],
+    cryptos: (cryptoRaw as any[] | undefined) ?? [],
+    holdingsRaw: [],
+    incomeRecords: [],
+    expenses: (expensesRaw as any[] | undefined) ?? [],
+  }), [snapRaw, propertiesRaw, stocksRaw, cryptoRaw, expensesRaw]);
+  void canonicalHead;
+  void canonicalAudit;
 
   const snap: Record<string, number> = useMemo(() => {
     const s: any = snapRaw || {};

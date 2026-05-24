@@ -11,6 +11,11 @@ import {
   FUNDING_PLAN_FIELD,
 } from "@/lib/propertyFundingAdapter";
 import { decideBillsInclusion } from "@/lib/billsInclusion";
+import {
+  calcLoanRepayment,
+  calcLoanBalanceWithType,
+  normaliseLoanType,
+} from "@/lib/mathUtils";
 
 /**
  * safeNum — converts any value to a finite number.
@@ -191,6 +196,8 @@ export function projectProperty(prop: {
   interest_rate: number;
   loan_type: string;
   loan_term: number;
+  /** Remaining IO period (years). Defaults to 0 (= no IO window). */
+  interest_only_years?: number;
   weekly_rent: number;
   rental_growth: number;
   vacancy_rate: number;
@@ -208,14 +215,34 @@ export function projectProperty(prop: {
   let rent = prop.weekly_rent * 52;
   let cumulativeRent = 0;
 
-  const monthlyPayment = calcMonthlyRepayment(prop.loan_amount, prop.interest_rate, prop.loan_term);
+  const loanType = normaliseLoanType(prop.loan_type);
+  const ioYears = safeNum(prop.interest_only_years);
 
   for (let y = 1; y <= years; y++) {
     // Property value growth
     value *= (1 + prop.capital_growth / 100);
 
-    // Loan balance
-    loan = Math.max(0, calcLoanBalance(prop.loan_amount, prop.interest_rate, prop.loan_term, y * 12));
+    // Loan balance — IO loans hold at principal until the IO window ends,
+    // then amortise over the remaining term.
+    loan = calcLoanBalanceWithType({
+      principal: prop.loan_amount,
+      annualRate: prop.interest_rate,
+      termYears: prop.loan_term,
+      monthsPaid: y * 12,
+      loanType,
+      ioYears,
+    });
+
+    // Repayment for this year — for IO loans this is interest-only while
+    // inside the IO window and switches to P&I after.
+    const monthlyPayment = calcLoanRepayment({
+      principal: prop.loan_amount,
+      annualRate: prop.interest_rate,
+      termYears: prop.loan_term,
+      loanType,
+      ioYears,
+      monthsSincePayment: (y - 1) * 12,
+    });
 
     // Rental income (adjusted for vacancy)
     const grossRent = rent * (1 - prop.vacancy_rate / 100);
@@ -618,8 +645,36 @@ export function projectNetWorth(params: {
     const pporAppreciation = ppor - pporBefore;
 
     // ── Mortgage reduction ────────────────────────────────────────────────────
+    // PPOR debt module is sourced strictly from `sf_snapshot`. Sprint 4A Final
+    // Closure removed the residual fallbacks (effectiveInterestRate / 30yr)
+    // that previously kicked in when the snapshot lacked a rate or term. When
+    // a PPOR mortgage exists but rate or term are missing, the loan balance
+    // is held flat for the projection horizon and `pporInputsReady` is false
+    // — callers/surfaces should detect this via the canonical input-state
+    // selector rather than seeing a fabricated balance.
     const prevMortgage = mortgage;
-    mortgage = Math.max(0, calcLoanBalance(s.mortgage, effectiveInterestRate, 30, y * 12));
+    const snapMortgageRate = safeNum((s as any).mortgage_rate);
+    const snapMortgageTerm = safeNum((s as any).mortgage_term_years);
+    const pporLoanType = normaliseLoanType((s as any).mortgage_loan_type);
+    const pporIoYears = safeNum((s as any).mortgage_io_years);
+    const pporInputsReady =
+      safeNum(s.mortgage) === 0 ||
+      (snapMortgageRate > 0 && snapMortgageTerm > 0);
+    if (pporInputsReady && safeNum(s.mortgage) > 0) {
+      mortgage = calcLoanBalanceWithType({
+        principal: s.mortgage,
+        annualRate: snapMortgageRate,
+        termYears: snapMortgageTerm,
+        monthsPaid: y * 12,
+        loanType: pporLoanType,
+        ioYears: pporIoYears,
+      });
+    } else {
+      // Incomplete inputs: do NOT amortise. Hold balance flat — surfaces
+      // can detect the gap via selectMortgageInputState() and prompt the
+      // user to fill in mortgage_rate / mortgage_term_years.
+      mortgage = safeNum(s.mortgage);
+    }
 
     // ── Income / expenses ─────────────────────────────────────────────────────
     monthlyIncome    *= (1 + effectiveIncomeGrowth / 100);
@@ -696,12 +751,17 @@ export function projectNetWorth(params: {
 
       // ── Loan balance: use forecast interest rate ──
       const ipInterestRate = safeNum(prop.interest_rate) || effectiveInterestRate;
-      const loanBal = Math.max(0, calcLoanBalance(
-        safeNum(prop.loan_amount),
-        ipInterestRate,
-        safeNum(prop.loan_term) || 30,
-        (yearsSinceSettle + 1) * 12
-      ));
+      const ipLoanType = normaliseLoanType(prop.loan_type);
+      const ipIoYears = safeNum((prop as any).interest_only_years);
+      const ipTermYears = safeNum(prop.loan_term) || 30;
+      const loanBal = calcLoanBalanceWithType({
+        principal: safeNum(prop.loan_amount),
+        annualRate: ipInterestRate,
+        termYears: ipTermYears,
+        monthsPaid: (yearsSinceSettle + 1) * 12,
+        loanType: ipLoanType,
+        ioYears: ipIoYears,
+      });
 
       propValue += projValue;
       propLoans += loanBal;
@@ -721,9 +781,14 @@ export function projectNetWorth(params: {
         annualRent = fullAnnualRent * (monthsActive / 12);
         propRent += annualRent;
       }
-      const annualLoanRepayment = calcMonthlyRepayment(
-        safeNum(prop.loan_amount), ipInterestRate, safeNum(prop.loan_term) || 30
-      ) * 12;
+      const annualLoanRepayment = calcLoanRepayment({
+        principal: safeNum(prop.loan_amount),
+        annualRate: ipInterestRate,
+        termYears: ipTermYears,
+        loanType: ipLoanType,
+        ioYears: ipIoYears,
+        monthsSincePayment: yearsSinceSettle * 12,
+      }) * 12;
       propertyDetails.push({
         id:   prop.id,
         name: prop.name || prop.address || `Property ${prop.id}`,
@@ -891,7 +956,20 @@ export function projectNetWorth(params: {
     // ── Monthly cash flow ─────────────────────────────────────────────────────
     // Real spendable: income + passive - expenses - mortgage repayment
     // Super contributions are deducted by employer before take-home (not here)
-    const monthlyMortgageRepayment = calcMonthlyRepayment(s.mortgage, effectiveInterestRate, 30);
+    // PPOR repayment derived strictly from the snapshot debt module. Sprint 4A
+    // Final Closure removed every fallback path — when the snapshot lacks
+    // rate or term, the repayment is 0 (clearly marked incomplete) rather
+    // than a fabricated household figure.
+    const monthlyMortgageRepayment = pporInputsReady && safeNum(s.mortgage) > 0
+      ? calcLoanRepayment({
+          principal: s.mortgage,
+          annualRate: snapMortgageRate,
+          termYears: snapMortgageTerm,
+          loanType: pporLoanType,
+          ioYears: pporIoYears,
+          monthsSincePayment: (y - 1) * 12,
+        })
+      : 0;
     const monthlyCF = monthlyIncome + passiveIncome / 12 - monthlyExpenses - monthlyMortgageRepayment;
 
     // ── Reconciliation bridges ────────────────────────────────────────────────
@@ -1210,8 +1288,24 @@ export function buildCashFlowSeries(params: {
   });
   const billsAlreadyInExpenses = billsInclusionDecision.includesBills;
 
-  // Pre-compute PPOR monthly mortgage repayment (fixed amount)
-  const pporMonthlyRepayment = calcMonthlyRepayment(snap_mortgage, 6.5, 30);
+  // Pre-compute PPOR monthly mortgage repayment from the snapshot debt
+  // module. Sprint 4A removed the hardcoded 6.5% / 30yr default — when the
+  // snapshot has no rate or term, no synthetic repayment is generated.
+  const _pporRateBase = safeNum((s as any).mortgage_rate);
+  const _pporTermBase = safeNum((s as any).mortgage_term_years);
+  const _pporLoanType = normaliseLoanType((s as any).mortgage_loan_type);
+  const _pporIoYears = safeNum((s as any).mortgage_io_years);
+  const pporCanCompute = snap_mortgage > 0 && _pporRateBase > 0 && _pporTermBase > 0;
+  const pporMonthlyRepayment = pporCanCompute
+    ? calcLoanRepayment({
+        principal: snap_mortgage,
+        annualRate: _pporRateBase,
+        termYears: _pporTermBase,
+        loanType: _pporLoanType,
+        ioYears: _pporIoYears,
+        monthsSincePayment: 0,
+      })
+    : 0;
 
   // Pre-build a lookup: "YYYY-MM" → { totalAmount, hasMortgage }
   const expenseLookup = new Map<string, { total: number; hasMortgage: boolean }>();
@@ -1359,13 +1453,21 @@ export function buildCashFlowSeries(params: {
           }
         }
 
-        // Loan repayment: starts from settlement month
+        // Loan repayment: starts from settlement month. IO loans pay
+        // interest-only until the IO window closes, then amortise over the
+        // remaining term — threaded through calcLoanRepayment.
         if (monthDate >= settleDate) {
-          const monthlyLoanPmt = calcMonthlyRepayment(
-            safeNum(prop.loan_amount),
-            safeNum(prop.interest_rate) || 6.5,
-            safeNum(prop.loan_term) || 30
-          );
+          const monthsSinceSettle =
+            (monthDate.getFullYear() - settleDate.getFullYear()) * 12 +
+            (monthDate.getMonth() - settleDate.getMonth());
+          const monthlyLoanPmt = calcLoanRepayment({
+            principal: safeNum(prop.loan_amount),
+            annualRate: safeNum(prop.interest_rate) || 6.5,
+            termYears: safeNum(prop.loan_term) || 30,
+            loanType: prop.loan_type,
+            ioYears: safeNum((prop as any).interest_only_years),
+            monthsSincePayment: monthsSinceSettle,
+          });
           investmentLoanRepayment += monthlyLoanPmt;
         }
 
@@ -1788,10 +1890,17 @@ export function calcNegativeGearing(params: {
       : 0;
     const lossBankBalance = safeNum(prop.loss_bank_balance) + lossAccumulatedThisYear;
 
-    // Actual monthly cash loss (before tax benefit) — uses full loan repayment (principal + interest)
-    const fullMonthlyLoanRepayment = isIO
-      ? loanAmount * (interestRate / 100) / 12
-      : calcMonthlyRepayment(loanAmount, interestRate, loanTerm);
+    // Actual monthly cash loss (before tax benefit) — uses the canonical
+    // IO-aware repayment dispatcher so PI and IO loans both flow through one
+    // code path.
+    const fullMonthlyLoanRepayment = calcLoanRepayment({
+      principal: loanAmount,
+      annualRate: interestRate,
+      termYears: loanTerm,
+      loanType: prop.loan_type,
+      ioYears: safeNum((prop as any).interest_only_years),
+      monthsSincePayment: 0, // NG modelling is steady-state year-1 view
+    });
     const monthlyCashLoss = annualRentalIncome / 12
       - fullMonthlyLoanRepayment * ownerShare
       - annualDeductibleExpenses / 12;

@@ -17,6 +17,7 @@
     "test:sprint-2c-decision-ux": "tsx script/test-sprint2c-decision-ux.ts",
     "test:sprint-2c": "tsx script/run-sprint2c-tests.ts",
     "test:sprint-3b": "tsx script/test-sprint3b-critical-defects.ts",
+    "test:sprint-4a": "tsx script/test-sprint4a-financial-integrity.ts",
     "test:dashboard-contract": "tsx script/test-dashboard-contract.ts",
     "test:audit-mode": "tsx script/test-audit-mode.ts",
     "test:scenario-v2": "tsx script/test-scenario-v2.ts",
@@ -142,7 +143,7 @@
     "zod": "^3.24.2",
     "typescript": "5.6.3",
     "zod-validation-error": "^3.4.0",
-    "zustand": "^5.0.12"
+    "zustand": "^4.5.5"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",

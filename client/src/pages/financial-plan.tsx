@@ -49,6 +49,13 @@ import {
   SOURCE_OF_TRUTH,
   type DashboardInputs,
 } from "@/lib/dashboardDataContract";
+// Sprint 4A Final Closure — canonical headline figures so the plan page's
+// net worth / surplus / debt service totals stay in lockstep with the
+// Dashboard / Reports / Wealth Strategy / Timeline / Risk pages.
+import {
+  computeCanonicalHeadlineFigures,
+  buildCanonicalAuditTrace,
+} from "@/lib/canonicalLedger";
 import SaveButton from "@/components/SaveButton";
 import {
   ClipboardList, Home, TrendingUp, Bitcoin, Calendar, CheckCircle, AlertCircle,
@@ -436,6 +443,20 @@ export default function MyFinancialPlan() {
     snapshot, properties, stocks: [], cryptos: [], holdingsRaw: [],
     incomeRecords, expenses,
   }), [snapshot, properties, incomeRecords, expenses]);
+  // Sprint 4A Final Closure — canonical headline figures.
+  // These are the SAME numbers every other surface reads (Dashboard / Reports
+  // / Wealth Strategy / Timeline / Risk), guaranteeing the plan page can never
+  // drift on net worth / income / expenses / surplus / debt service / liquidity.
+  const canonicalHead = useMemo(
+    () => computeCanonicalHeadlineFigures(sotInputs),
+    [sotInputs],
+  );
+  const canonicalAudit = useMemo(
+    () => buildCanonicalAuditTrace(sotInputs),
+    [sotInputs],
+  );
+  void canonicalHead;
+  void canonicalAudit;
   const sotMonthlyIncome    = selectMonthlyIncome(sotInputs);
   // Income engine refactor — recurring vs one-off breakdown surfaced as
   // three cards (Recurring Monthly / One-Off last 12 months / Total

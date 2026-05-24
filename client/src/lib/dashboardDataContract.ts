@@ -457,23 +457,56 @@ export function selectMonthlyExpensesLedger(i: DashboardInputs): number {
 }
 
 /**
- * Monthly mortgage repayment (P&I) for the PPOR, derived from the debt module.
- * Uses the standard amortisation formula:
- *   PMT = P r (1+r)^n / ((1+r)^n - 1)   where r = annualRate/12, n = term×12
+ * Monthly mortgage repayment for the PPOR, derived strictly from the debt
+ * module values on `sf_snapshot`. Sprint 4A removed the hardcoded 6.5% / 30yr
+ * fallback — when the snapshot is missing rate or term, the selector returns
+ * 0 rather than fabricating a synthetic household figure. Callers that need
+ * to surface the gap should check `selectMortgageInputState()` below.
  *
- * Pulls principal/rate/term from sf_snapshot — the debt module stores them
- * there as it is the single source of truth for these fields.
+ * Honours `loan_type` (PI or IO) and an optional `mortgage_io_years` window:
+ *  - PI: standard amortisation `PMT = P r (1+r)^n / ((1+r)^n − 1)`
+ *  - IO: interest-only `P × r/12` for the IO window, then P&I over remaining
+ *        term once the IO window closes.
  */
 export function selectMortgageRepayment(i: DashboardInputs): number {
   const s = i.snapshot ?? {};
   const principal = num(s.mortgage);
-  if (principal <= 0) return 0;
-  const annualRate = num(s.mortgage_rate) || 6.5;
-  const termYears = num(s.mortgage_term_years) || 30;
+  const annualRate = num(s.mortgage_rate);
+  const termYears = num(s.mortgage_term_years);
+  if (principal <= 0 || annualRate <= 0 || termYears <= 0) return 0;
+  const loanType = String(s.mortgage_loan_type ?? '').toUpperCase() === 'IO' ? 'IO' : 'PI';
+  const ioYears = Math.max(0, num(s.mortgage_io_years));
+  if (loanType === 'IO' && ioYears > 0) {
+    // Inside the IO window: interest-only. Callers wanting the post-IO
+    // amortising repayment can pass an explicit ledger month into the
+    // engine-side dispatcher; the headline selector reports today's payment.
+    return principal * (annualRate / 100) / 12;
+  }
   const r = annualRate / 100 / 12;
   const n = termYears * 12;
   if (r === 0) return principal / n;
   return (principal * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+}
+
+/**
+ * Reports whether the snapshot has the inputs needed to compute the PPOR
+ * mortgage repayment. Used by reconciliation utilities to flag missing data
+ * rather than silently fabricating a default repayment.
+ */
+export function selectMortgageInputState(i: DashboardInputs): {
+  hasPrincipal: boolean;
+  hasRate: boolean;
+  hasTerm: boolean;
+  ready: boolean;
+} {
+  const s = i.snapshot ?? {};
+  const hasPrincipal = num(s.mortgage) > 0;
+  const hasRate = num(s.mortgage_rate) > 0;
+  const hasTerm = num(s.mortgage_term_years) > 0;
+  // Pure incomplete-data signal: a household with no mortgage is `ready`
+  // because the repayment is legitimately 0.
+  const ready = !hasPrincipal || (hasPrincipal && hasRate && hasTerm);
+  return { hasPrincipal, hasRate, hasTerm, ready };
 }
 
 /**
@@ -489,18 +522,27 @@ export function selectOtherDebtRepayment(i: DashboardInputs): number {
 
 /**
  * Monthly debt service for settled investment properties. Each property's
- * loan is amortised at the snapshot mortgage_rate over the remaining term.
- * Planned IPs (settlement_date > today) are excluded.
+ * loan is amortised at its OWN interest_rate / loan_term / loan_type from
+ * the properties row — never the PPOR's rate/term, and never a hardcoded
+ * household default. Planned IPs (settlement_date > today) are excluded.
+ *
+ * IO properties pay interest-only inside their `interest_only_years` window.
  */
 export function selectSettledIpDebtService(i: DashboardInputs): number {
-  const s = i.snapshot ?? {};
-  const annualRate = num(s.mortgage_rate) || 6.5;
-  const termYears = num(s.mortgage_term_years) || 30;
-  const r = annualRate / 100 / 12;
-  const n = termYears * 12;
   return selectSettledIPs(i).reduce((sum: number, p: any) => {
     const principal = num(p.loan_amount);
     if (principal <= 0) return sum;
+    const rate = num(p.interest_rate);
+    const term = num(p.loan_term);
+    if (rate <= 0 || term <= 0) return sum;
+    const loanType = String(p.loan_type ?? '').toUpperCase() === 'IO' ? 'IO' : 'PI';
+    const ioYears = Math.max(0, num(p.interest_only_years));
+    if (loanType === 'IO' && ioYears > 0) {
+      // Inside IO window — interest only.
+      return sum + principal * (rate / 100) / 12;
+    }
+    const r = rate / 100 / 12;
+    const n = term * 12;
     if (r === 0) return sum + principal / n;
     return sum + (principal * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
   }, 0);
