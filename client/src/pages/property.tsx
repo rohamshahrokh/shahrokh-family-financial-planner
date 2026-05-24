@@ -19,6 +19,7 @@ import AIInsightsCard from "@/components/AIInsightsCard";
 import DepositPowerCard from "@/components/DepositPowerCard";
 import PropertyLifecycleAnalysis from "@/components/PropertyLifecycleAnalysis";
 import PropertyLifecycleAudit from "@/components/PropertyLifecycleAudit";
+import PropertyPerformanceTimeline from "@/components/PropertyPerformanceTimeline";
 import { ModellingAssumptionsChip } from "@/components/taxRegime/ModellingAssumptionsChip";
 import { PropertyTaxImpactBlock } from "@/components/taxRegime/PropertyTaxImpactBlock";
 import { Input } from "@/components/ui/input";
@@ -1170,7 +1171,7 @@ export default function PropertyPage() {
   const setFundingChoice = usePropertyFundingStore((s) => s.setChoice);
 
   // Tab state — detect sessionStorage signal OR #buy-vs-wait in URL hash
-  const [activeTab, setActiveTab] = useState<'portfolio' | 'buy-vs-wait' | 'impact' | 'lifecycle'>(() => {
+  const [activeTab, setActiveTab] = useState<'portfolio' | 'buy-vs-wait' | 'impact' | 'lifecycle' | 'performance'>(() => {
     if (typeof window !== 'undefined') {
       if (sessionStorage.getItem('property_open_tab') === 'buy-vs-wait') return 'buy-vs-wait';
       if (window.location.hash.includes('buy-vs-wait')) return 'buy-vs-wait';
@@ -1550,11 +1551,12 @@ export default function PropertyPage() {
           { key: 'portfolio', label: 'Portfolio Overview' },
           { key: 'impact', label: 'Portfolio Impact' },
           { key: 'lifecycle', label: 'Lifecycle Analysis' },
+          { key: 'performance', label: 'Performance Timeline' },
           { key: 'buy-vs-wait', label: 'Buy vs Wait Analysis' },
         ].map(({ key, label }) => (
           <button
             key={key}
-            onClick={() => setActiveTab(key as 'portfolio' | 'buy-vs-wait' | 'impact' | 'lifecycle')}
+            onClick={() => setActiveTab(key as 'portfolio' | 'buy-vs-wait' | 'impact' | 'lifecycle' | 'performance')}
             className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
               activeTab === key
                 ? 'bg-card text-foreground shadow-sm'
@@ -1573,6 +1575,14 @@ export default function PropertyPage() {
           <PropertyLifecycleAnalysis properties={properties} privacyMode={privacyMode} />
           <PropertyLifecycleAudit properties={properties} />
         </div>
+      )}
+      {activeTab === 'performance' && (
+        <PropertyPerformanceTimeline
+          properties={properties}
+          annualSalaryIncome={safeNum((snapshot as any)?.monthly_income) * 12}
+          jointOwnership={true}
+          horizonYears={30}
+        />
       )}
       {activeTab === 'impact' && <PropertyPortfolioImpact
         snapshot={snapshot}

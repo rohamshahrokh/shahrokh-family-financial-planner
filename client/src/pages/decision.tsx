@@ -126,6 +126,11 @@ import { buildStrategyIntelligence } from "@/lib/scenarioV2/decisionEngine/strat
 // can consume it via computeUnifiedBestMove. The store is in-memory only;
 // no persistence, no new generation path.
 import { writeLatestQuickDecision } from "@/lib/recommendationEngine";
+// Sprint 2C — Recommended Actions UX. Presentation-only adapter that maps
+// existing Forecast / Goal Solver / Risk / Monte Carlo / Recommendation
+// engine outputs into a single ranked action list. No new engines added.
+import RecommendedActionsPanel from "@/components/RecommendedActionsPanel";
+import type { PlannedAcquisition as RA_PlannedAcquisition } from "@/lib/recommendedActionsAdapter";
 
 // ─── Formatting helpers (mask-aware) ─────────────────────────────────────────
 
@@ -1037,6 +1042,33 @@ function QuickDecisionTab() {
             {output && (
               <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
                 <InvalidationEngine output={output} fmt={{ fmt$, fmt$k, fmt$M, pct, sentence }} />
+              </div>
+            )}
+
+            {/* Sprint 2C: Recommended Actions — derived from existing
+                Forecast / Goal Solver / Risk / Monte Carlo / Recommendation
+                outputs only (presentation-only, no new engines). */}
+            {output && (
+              <div className="rounded-lg bg-card/70 dark:bg-card/50 border border-border p-3">
+                <RecommendedActionsPanel
+                  plannedAcquisitions={
+                    (output.executionPlan ?? []).flatMap(phase =>
+                      (phase.actions ?? [])
+                        .filter(a =>
+                          /buy|acquire|purchase/i.test(a.event ?? '') ||
+                          /property|ip/i.test(a.event ?? ''),
+                        )
+                        .map<RA_PlannedAcquisition>((a, idx) => ({
+                          name: a.event || `Acquisition ${phase.index + 1}.${idx + 1}`,
+                          targetDate: phase.startMonth || undefined,
+                          confidence: typeof winner?.score === 'object'
+                            ? (winner!.score as any).score / 100
+                            : 0.6,
+                        })),
+                    )
+                  }
+                  horizonYear={new Date().getFullYear() + horizonYears}
+                />
               </div>
             )}
 

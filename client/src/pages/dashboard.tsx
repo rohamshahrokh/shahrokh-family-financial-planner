@@ -154,7 +154,9 @@ import FinancialOSCentre from "@/components/FinancialOSCentre";
 import FamilyOfficeMode from "@/components/FamilyOfficeMode";
 import FutureWorldsPanel from "@/components/FutureWorldsPanel";
 import { getBestMoveRecommendation, type BestMoveLedger } from "@/lib/bestMoveEngine";
-import DepositPowerCard from "@/components/DepositPowerCard";
+// Sprint 2C — DepositPowerCard removed from Dashboard surface. The card now
+// lives on Property → Acquisition Planner. Calculation paths (depositPower.ts)
+// are unchanged and still feed the Dashboard's Deposit Power & Cashflow panel.
 import FIREPathCard from "@/components/FIREPathCard";
 import TaxAlphaCard from "@/components/TaxAlphaCard";
 import RiskRadarCard from "@/components/RiskRadarCard";
@@ -238,47 +240,11 @@ const CashflowTooltip = ({ active, payload, label }: any) => {
           <span style={{ fontFamily: "monospace" }}>{r.value >= 0 ? "+" : ""}{formatCurrency(r.value, true)}</span>
         </div>
       ))}
-      {hasEquityData && (
-        <div className="db-cf-divider" style={{ marginTop: 10, paddingTop: 10 }}>
-          <div style={{ fontSize: 10, color: "hsl(188,60%,52%)", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700 }}>
-            Deposit Power Build-up ({label})
-          </div>
-          {/* Closing cash — always shown, can be negative (this IS the reconciled cashEngine figure) */}
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: closingCash >= 0 ? "hsl(210,80%,65%)" : "hsl(0,65%,58%)", fontSize: 11 }}>
-            <span style={{ opacity: 0.90 }}>+ Closing Cash (after all events)</span>
-            <span style={{ fontFamily: "monospace" }}>{closingCash >= 0 ? "" : ""}{formatCurrency(closingCash, true)}</span>
-          </div>
-          {[
-            pporEq > 0 ? { label: "PPOR Usable Equity (80%)", value: pporEq, color: "hsl(188,60%,52%)" } : null,
-            ipEq   > 0 ? { label: "IP Usable Equity (80%)",   value: ipEq,   color: "hsl(145,55%,42%)" } : null,
-          ].filter(Boolean).map((r: any, i: number) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: r.color, fontSize: 11 }}>
-              <span style={{ opacity: 0.90 }}>+ {r.label}</span>
-              <span style={{ fontFamily: "monospace" }}>{formatCurrency(r.value, true)}</span>
-            </div>
-          ))}
-          <div className="db-cf-divider-dashed" style={{ margin: "5px 0 4px" }} />
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: "hsl(215,15%,65%)", fontSize: 11 }}>
-            <span>= Gross total (cash + equity)</span>
-            <span style={{ fontFamily: "monospace" }}>{formatCurrency(rawTotal, true)}</span>
-          </div>
-          {eBuf > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 3, color: "hsl(0,65%,58%)", fontSize: 11 }}>
-              <span>&#8722; Emergency Buffer</span>
-              <span style={{ fontFamily: "monospace" }}>&#8722;{formatCurrency(eBuf, true)}</span>
-            </div>
-          )}
-          <div className="db-cf-dp-total" style={{ display: "flex", justifyContent: "space-between", gap: 16, marginTop: 5 }}>
-            <span style={{ color: "hsl(43,90%,62%)", fontWeight: 700, fontSize: 12 }}>= Total Deposit Power</span>
-            <span style={{ fontFamily: "monospace", color: "hsl(43,90%,62%)", fontWeight: 700, fontSize: 12 }}>{formatCurrency(finalDP, true)}</span>
-          </div>
-          {cashIsNegative && finalDP > 0 && (
-            <div className="db-cf-dp-warning" style={{ marginTop: 6, padding: "5px 8px", fontSize: 10, color: "hsl(var(--gold-light))", lineHeight: 1.5 }}>
-              &#9888; Cash is negative after events this year. Deposit Power is still positive because refinanceable equity covers the shortfall &#8212; drawing it down requires a loan top-up or refinance.
-            </div>
-          )}
-        </div>
-      )}
+      {/* Sprint 2C — Deposit Power Build-up moved off the Dashboard to the
+          Property → Acquisition Planner surface. The calculation still
+          runs and feeds the Deposit Power & Cashflow panel — only the
+          breakdown card was removed from the Dashboard per the
+          "no dashboard bloat" constraint. */}
       {milestones.length > 0 && (
         <div className="db-cf-divider" style={{ marginTop: 8, paddingTop: 8 }}>
           {milestones.map((m: any, i: number) => (
@@ -427,63 +393,10 @@ const MobileChartSheet = ({
             </div>
           )}
 
-          {/* Deposit Power waterfall */}
-          {hasEquityData && (
-            <div className="db-cf-divider" style={{ marginTop: 16, paddingTop: 14 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "hsl(188,60%,52%)", marginBottom: 8 }}>
-                Deposit Power Build-up
-              </div>
-
-              {/* Closing cash */}
-              <div className="db-cf-row" style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                padding: "6px 0",
-                color: closingCash >= 0 ? "hsl(210,80%,65%)" : "hsl(0,65%,58%)",
-              }}>
-                <span style={{ fontSize: 14, opacity: 0.9 }}>+ Closing Cash (after events)</span>
-                <span style={{ fontSize: 14, fontFamily: "monospace" }}>{formatCurrency(closingCash, true)}</span>
-              </div>
-
-              {[
-                pporEq > 0 ? { label: "PPOR Usable Equity (80%)", value: pporEq, color: "hsl(188,60%,52%)" } : null,
-                ipEq   > 0 ? { label: "IP Equity (80%)",            value: ipEq,   color: "hsl(145,55%,42%)" } : null,
-              ].filter(Boolean).map((r: any, i: number) => (
-                <div key={i} className="db-cf-row" style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  padding: "6px 0", color: r.color,
-                }}>
-                  <span style={{ fontSize: 14, opacity: 0.9 }}>+ {r.label}</span>
-                  <span style={{ fontSize: 14, fontFamily: "monospace" }}>{formatCurrency(r.value, true)}</span>
-                </div>
-              ))}
-
-              <div className="db-cf-row" style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "hsl(var(--muted-foreground))" }}>
-                <span style={{ fontSize: 13 }}>= Gross total (cash + equity)</span>
-                <span style={{ fontSize: 13, fontFamily: "monospace" }}>{formatCurrency(rawTotal, true)}</span>
-              </div>
-              {eBuf > 0 && (
-                <div className="db-cf-row" style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "hsl(0,65%,58%)" }}>
-                  <span style={{ fontSize: 13 }}>&#8722; Emergency Buffer</span>
-                  <span style={{ fontSize: 13, fontFamily: "monospace" }}>&#8722;{formatCurrency(eBuf, true)}</span>
-                </div>
-              )}
-              <div className="db-cf-dp-total" style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                marginTop: 10, padding: "10px 14px", borderRadius: 12,
-              }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--gold-light))" }}>= Total Deposit Power</span>
-                <span style={{ fontSize: 16, fontFamily: "monospace", fontWeight: 800, color: "hsl(var(--gold-light))" }}>{formatCurrency(finalDP, true)}</span>
-              </div>
-              {cashIsNegative && finalDP > 0 && (
-                <div className="db-cf-dp-warning" style={{
-                  marginTop: 8, padding: "9px 12px", borderRadius: 10,
-                  fontSize: 12, color: "hsl(var(--gold-light))", lineHeight: 1.65,
-                }}>
-                  &#9888; Cash is negative after this year&#39;s events (property/stock purchases). Deposit Power is still positive because refinanceable equity covers the gap &#8212; drawing it down requires a loan top-up or refinance.
-                </div>
-              )}
-            </div>
-          )}
+          {/* Sprint 2C — Deposit Power Build-up removed from the Dashboard
+              mobile bottom sheet per the "no dashboard bloat" constraint.
+              The full breakdown remains available on Property → Acquisition
+              Planner (DepositPowerCard) and inside Wealth Strategy. */}
 
           {/* Milestones */}
           {milestones.length > 0 && (

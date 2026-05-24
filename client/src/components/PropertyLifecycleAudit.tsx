@@ -3,69 +3,121 @@
  *
  * Property → Lifecycle Analysis → Lifecycle Audit section.
  *
- * Read-only audit table that, for every property row, shows:
+ * Sprint 2C extension — adds the full 5-column inclusion grid required by
+ * the property lifecycle model (Planned → Under Contract → Settled → Sold →
+ * Archived). For every property row the audit shows:
+ *
  *   • Friendly label / name (with internal id as provenance text)
- *   • Lifecycle status (Planned / Under Contract / Settled)
- *   • Whether the row is currently included as: a current asset,
- *     a current liability, and rent in income
- *   • A short reason explaining why each inclusion is yes / no
- *   • A warning row when the engine's actual inclusion behaviour
- *     diverges from the expected behaviour for the row's status
+ *   • Lifecycle status
+ *   • Included in Current Net Worth          (YES / NO)
+ *   • Included in Current Debt               (YES / NO)
+ *   • Included in Current Income             (YES / NO)
+ *   • Included in Current Expenses           (YES / NO)
+ *   • Included in Future Forecast            (YES / NO)
+ *   • Reason and any engine-vs-status mismatch warning
  *
- * The audit is purely explanatory — it does NOT change forecast,
- * Monte Carlo, Future Wealth Path, Events Timeline or tax-engine
- * math. Mismatches between the user-declared lifecycle status and
- * the engine's date-driven inclusion (settlement_date) are surfaced
- * as warnings so the user can fix the underlying row data.
+ * Business rules (Sprint 2C):
+ *   PLANNED:          Future Forecast only.
+ *   UNDER_CONTRACT:   Future Forecast only.
+ *   SETTLED / ACTIVE: Net Worth + Debt + Income + Expenses + Future Forecast.
+ *   SOLD:             None — historical record only.
+ *   ARCHIVED:         None — historical record only.
  *
- * Expected inclusion model:
+ * The audit is purely explanatory — it does NOT change forecast, Monte Carlo,
+ * Future Wealth Path, Events Timeline or tax-engine math. Mismatches between
+ * the user-declared lifecycle status and the engine's date-driven inclusion
+ * (settlement_date) are surfaced as warnings so the user can fix the row.
  *
- *   planned         → assets: no,  liabilities: no,  rent: no
- *   under_contract  → assets: no,  liabilities: no,  rent: no
- *   settled         → assets: yes, liabilities: yes, rent: yes
- *
- * Engines in this codebase determine "active vs planned" using
- * `settlement_date <= today` (see client/src/lib/dashboardDataContract.ts).
- * The lifecycle_status column is the user's explicit declaration. When
- * those two disagree, the audit flags it.
+ * Engines determine "active vs planned" using `settlement_date <= today`
+ * combined with the `lifecycle_status` precedence rule defined in
+ * `dashboardDataContract.ts` (selectSettledIPs).
  */
 
 import { useMemo } from 'react';
-import { ShieldCheck, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import { ShieldCheck, AlertTriangle, CheckCircle2, XCircle, Archive, History } from 'lucide-react';
 
-type LifecycleStatus = 'planned' | 'under_contract' | 'settled';
+export type LifecycleStatus =
+  | 'planned'
+  | 'under_contract'
+  | 'settled'
+  | 'sold'
+  | 'archived';
 
 const STATUS_LABEL: Record<LifecycleStatus, string> = {
   planned: 'Planned',
   under_contract: 'Under Contract',
   settled: 'Settled',
+  sold: 'Sold',
+  archived: 'Archived',
 };
 
 const STATUS_TONE: Record<LifecycleStatus, string> = {
   planned: 'bg-amber-500/15 border-amber-500/40 text-amber-300',
   under_contract: 'bg-sky-500/15 border-sky-500/40 text-sky-300',
   settled: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300',
+  sold: 'bg-slate-500/15 border-slate-500/40 text-slate-300',
+  archived: 'bg-slate-700/30 border-slate-600/40 text-slate-400',
 };
 
-interface InclusionExpectation {
+export interface InclusionExpectation {
+  /** Legacy alias for netWorth (kept for backward-compat with existing tests). */
   assets: boolean;
+  /** Legacy alias for debt (kept for backward-compat with existing tests). */
   liabilities: boolean;
+  /** Legacy alias for income (kept for backward-compat with existing tests). */
   rent: boolean;
+  /** Sprint 2C — explicit five-column expectations. */
+  netWorth: boolean;
+  debt: boolean;
+  income: boolean;
+  expenses: boolean;
+  forecast: boolean;
 }
 
+/**
+ * Canonical inclusion-by-status table. Sprint 2C extends the original
+ * three-column model (assets / liabilities / rent) to include `expenses`
+ * and `forecast` per the lifecycle business rules. The legacy aliases
+ * remain to keep the Sprint 2B audit consumers and the
+ * test-property-lifecycle-audit.ts regression suite green without rewrites.
+ */
 const EXPECTED_BY_STATUS: Record<LifecycleStatus, InclusionExpectation> = {
-  planned:        { assets: false, liabilities: false, rent: false },
-  under_contract: { assets: false, liabilities: false, rent: false },
-  settled:        { assets: true,  liabilities: true,  rent: true  },
+  planned: {
+    assets: false, liabilities: false, rent: false,
+    netWorth: false, debt: false, income: false, expenses: false, forecast: true,
+  },
+  under_contract: {
+    assets: false, liabilities: false, rent: false,
+    netWorth: false, debt: false, income: false, expenses: false, forecast: true,
+  },
+  settled: {
+    assets: true,  liabilities: true,  rent: true,
+    netWorth: true,  debt: true,  income: true,  expenses: true,  forecast: true,
+  },
+  sold: {
+    assets: false, liabilities: false, rent: false,
+    netWorth: false, debt: false, income: false, expenses: false, forecast: false,
+  },
+  archived: {
+    assets: false, liabilities: false, rent: false,
+    netWorth: false, debt: false, income: false, expenses: false, forecast: false,
+  },
 };
 
 export interface PropertyAuditRow {
   id: string | number;
   name: string;
   status: LifecycleStatus;
+  /** Legacy aliases retained — equivalent to netWorth/debt/income. */
   assets: boolean;
   liabilities: boolean;
   rent: boolean;
+  /** Sprint 2C — explicit five-column inclusion. */
+  netWorth: boolean;
+  debt: boolean;
+  income: boolean;
+  expenses: boolean;
+  forecast: boolean;
   reason: string;
   warning?: string;
 }
@@ -73,7 +125,15 @@ export interface PropertyAuditRow {
 /** Pure: normalise raw status string to a known LifecycleStatus. */
 export function normaliseStatus(raw: unknown): LifecycleStatus {
   const s = String(raw ?? '').toLowerCase();
-  if (s === 'planned' || s === 'under_contract' || s === 'settled') return s;
+  if (
+    s === 'planned' ||
+    s === 'under_contract' ||
+    s === 'settled' ||
+    s === 'sold' ||
+    s === 'archived'
+  ) {
+    return s as LifecycleStatus;
+  }
   // Engines treat a row with no explicit status as 'settled' so the existing
   // forecast pipeline keeps working. We mirror that here.
   return 'settled';
@@ -109,19 +169,28 @@ export function buildAuditRow(p: any, todayIso?: string): PropertyAuditRow {
 
   // Expected behaviour wins for the displayed inclusion columns — the
   // intent of the audit is "what should happen, per the declared status".
-  // If the engine reality diverges, that is surfaced as a warning rather
-  // than by silently changing the column values.
+  // Engine reality mismatches are surfaced as warnings instead.
   const assets      = expected.assets;
   const liabilities = expected.liabilities;
   const rent        = expected.rent;
 
   let reason: string;
-  if (status === 'planned') {
-    reason = 'Planned acquisitions are excluded from current assets, liabilities and rental income until settlement.';
-  } else if (status === 'under_contract') {
-    reason = 'Under-contract acquisitions are committed but not yet settled — excluded from current assets, liabilities and rental income.';
-  } else {
-    reason = 'Settled properties are active — included in current assets, liabilities and rental income.';
+  switch (status) {
+    case 'planned':
+      reason = 'Planned acquisitions are excluded from current net worth, debt, income and expenses. They are projected in the Future Forecast at their planned settlement date.';
+      break;
+    case 'under_contract':
+      reason = 'Under-contract properties are committed but not yet settled — excluded from current net worth, debt, income and expenses. Future Forecast includes them at settlement.';
+      break;
+    case 'settled':
+      reason = 'Settled properties are active — included in current net worth, debt, income, expenses and future forecast.';
+      break;
+    case 'sold':
+      reason = 'Sold properties are removed from active holdings. The historical record is retained for CGT and reporting; no current calculations include this row.';
+      break;
+    case 'archived':
+      reason = 'Archived properties are hidden from the active portfolio. The historical record is retained; no current or forecast calculations include this row.';
+      break;
   }
 
   // Mismatch detection between the declared status and the engine's
@@ -133,7 +202,6 @@ export function buildAuditRow(p: any, todayIso?: string): PropertyAuditRow {
     warning = `Status is ${STATUS_LABEL[status]} but settlement_date (${settleStr}) is on or before today — engine will currently treat this row as active. Move settlement_date forward or mark the row as Settled.`;
   } else if ((status === 'planned' || status === 'under_contract') && !settleStr && engineActive) {
     // No settlement_date at all → engine default treats it as already-settled.
-    // This is the most common silent mismatch.
     warning = `Status is ${STATUS_LABEL[status]} but no settlement_date is set — engine treats rows without a settlement_date as already-settled. Add a future settlement_date or mark the row as Settled.`;
   }
 
@@ -144,6 +212,11 @@ export function buildAuditRow(p: any, todayIso?: string): PropertyAuditRow {
     assets,
     liabilities,
     rent,
+    netWorth: expected.netWorth,
+    debt: expected.debt,
+    income: expected.income,
+    expenses: expected.expenses,
+    forecast: expected.forecast,
     reason,
     warning,
   };
@@ -177,6 +250,7 @@ export default function PropertyLifecycleAudit({ properties, todayIso }: Props) 
   );
 
   const warningCount = rows.filter(r => r.warning).length;
+  const historicalCount = rows.filter(r => r.status === 'sold' || r.status === 'archived').length;
 
   if (rows.length === 0) {
     return (
@@ -198,18 +272,29 @@ export default function PropertyLifecycleAudit({ properties, todayIso }: Props) 
             Lifecycle Audit
           </h3>
           <p className="text-[11px] text-muted-foreground">
-            For each property: declared lifecycle status and the resulting inclusion in current assets, current liabilities and rental income. Read-only — engine math is unchanged.
+            For each property: declared lifecycle status and the resulting inclusion in current net worth, current debt, current income, current expenses and the future forecast. Read-only — engine math is unchanged.
           </p>
         </div>
-        {warningCount > 0 && (
-          <span
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 text-[11px] font-semibold"
-            data-testid="property-lifecycle-audit-warning-count"
-          >
-            <AlertTriangle className="w-3 h-3" />
-            {warningCount} mismatch{warningCount === 1 ? '' : 'es'}
-          </span>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {historicalCount > 0 && (
+            <span
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-500/40 bg-slate-500/10 text-slate-300 text-[11px] font-semibold"
+              data-testid="property-lifecycle-audit-historical-count"
+            >
+              <History className="w-3 h-3" />
+              {historicalCount} historical
+            </span>
+          )}
+          {warningCount > 0 && (
+            <span
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 text-[11px] font-semibold"
+              data-testid="property-lifecycle-audit-warning-count"
+            >
+              <AlertTriangle className="w-3 h-3" />
+              {warningCount} mismatch{warningCount === 1 ? '' : 'es'}
+            </span>
+          )}
+        </div>
       </header>
 
       <div className="rounded-xl border border-border bg-card overflow-x-auto">
@@ -218,9 +303,11 @@ export default function PropertyLifecycleAudit({ properties, todayIso }: Props) 
             <tr>
               <th className="text-left px-3 py-2 font-semibold">Property</th>
               <th className="text-left px-3 py-2 font-semibold">Status</th>
-              <th className="text-left px-3 py-2 font-semibold">Current Assets</th>
-              <th className="text-left px-3 py-2 font-semibold">Current Liabilities</th>
-              <th className="text-left px-3 py-2 font-semibold">Rent in Income</th>
+              <th className="text-left px-3 py-2 font-semibold">In Net Worth</th>
+              <th className="text-left px-3 py-2 font-semibold">In Debt</th>
+              <th className="text-left px-3 py-2 font-semibold">In Income</th>
+              <th className="text-left px-3 py-2 font-semibold">In Expenses</th>
+              <th className="text-left px-3 py-2 font-semibold">In Forecast</th>
               <th className="text-left px-3 py-2 font-semibold">Reason</th>
             </tr>
           </thead>
@@ -228,11 +315,18 @@ export default function PropertyLifecycleAudit({ properties, todayIso }: Props) 
             {rows.map(r => (
               <tr
                 key={String(r.id) || r.name}
-                className="border-t border-border/60 align-top"
+                className={`border-t border-border/60 align-top ${
+                  r.status === 'sold' || r.status === 'archived' ? 'opacity-70' : ''
+                }`}
                 data-testid={`property-lifecycle-audit-row-${r.id}`}
               >
                 <td className="px-3 py-2">
-                  <p className="font-semibold text-foreground">{r.name}</p>
+                  <p className="font-semibold text-foreground inline-flex items-center gap-1">
+                    {(r.status === 'sold' || r.status === 'archived') && (
+                      <Archive className="w-3 h-3 text-slate-400" aria-hidden />
+                    )}
+                    {r.name}
+                  </p>
                   {r.id !== '' && (
                     <p
                       className="text-[10px] text-muted-foreground font-mono"
@@ -251,13 +345,19 @@ export default function PropertyLifecycleAudit({ properties, todayIso }: Props) 
                   </span>
                 </td>
                 <td className="px-3 py-2">
-                  <YesNoCell value={r.assets} label="Included in current assets" testid={`property-lifecycle-audit-assets-${r.id}`} />
+                  <YesNoCell value={r.netWorth} label="Included in current net worth" testid={`property-lifecycle-audit-networth-${r.id}`} />
                 </td>
                 <td className="px-3 py-2">
-                  <YesNoCell value={r.liabilities} label="Included in current liabilities" testid={`property-lifecycle-audit-liabilities-${r.id}`} />
+                  <YesNoCell value={r.debt} label="Included in current debt" testid={`property-lifecycle-audit-debt-${r.id}`} />
                 </td>
                 <td className="px-3 py-2">
-                  <YesNoCell value={r.rent} label="Rent added to income" testid={`property-lifecycle-audit-rent-${r.id}`} />
+                  <YesNoCell value={r.income} label="Included in current income" testid={`property-lifecycle-audit-income-${r.id}`} />
+                </td>
+                <td className="px-3 py-2">
+                  <YesNoCell value={r.expenses} label="Included in current expenses" testid={`property-lifecycle-audit-expenses-${r.id}`} />
+                </td>
+                <td className="px-3 py-2">
+                  <YesNoCell value={r.forecast} label="Included in future forecast" testid={`property-lifecycle-audit-forecast-${r.id}`} />
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">
                   <p>{r.reason}</p>

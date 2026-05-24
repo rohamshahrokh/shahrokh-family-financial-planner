@@ -278,8 +278,22 @@ const isSettled = (p: any, today: string): boolean => {
   const status = (p?.lifecycle_status as string | undefined)?.toLowerCase();
   if (status === "settled") return true;
   if (status === "planned" || status === "under_contract") return false;
+  // Sprint 2C — sold and archived are historical states. They must never
+  // contribute to current net worth / debt / income / expenses headlines.
+  // Forecast inclusion is handled separately (see selectPlannedIPs filter).
+  if (status === "sold" || status === "archived") return false;
   // Legacy fallback (status missing or unknown): date-driven.
   return !p?.settlement_date || (p.settlement_date as string) <= today;
+};
+
+/**
+ * Sprint 2C — historical states (sold, archived) must also be excluded from
+ * the planned/forecast selectors. They're hidden from active portfolio
+ * calculations entirely; only retained for CGT and historical reporting.
+ */
+const isHistorical = (p: any): boolean => {
+  const status = (p?.lifecycle_status as string | undefined)?.toLowerCase();
+  return status === "sold" || status === "archived";
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -296,7 +310,17 @@ export function selectSettledIPs(i: DashboardInputs) {
 
 export function selectPlannedIPs(i: DashboardInputs) {
   const today = todayIsoFor(i);
-  return (i.properties ?? []).filter(p => isInvestmentProp(p) && !isSettled(p, today));
+  // Planned/Under-Contract only — historical states (sold, archived) are
+  // excluded from this selector too so the dashboard "future acquisitions"
+  // surfaces don't pick them up.
+  return (i.properties ?? []).filter(
+    p => isInvestmentProp(p) && !isSettled(p, today) && !isHistorical(p),
+  );
+}
+
+/** Sprint 2C — sold or archived investment properties (historical only). */
+export function selectHistoricalIPs(i: DashboardInputs) {
+  return (i.properties ?? []).filter(p => isInvestmentProp(p) && isHistorical(p));
 }
 
 export function selectIpCurrentValueSettled(i: DashboardInputs): number {
