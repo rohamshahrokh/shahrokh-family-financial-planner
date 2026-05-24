@@ -10,6 +10,7 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "test:property-lifecycle-persistence": "tsx script/test-property-lifecycle-persistence.ts",
+    "test:property-lifecycle-audit": "tsx script/test-property-lifecycle-audit.ts",
     "test:dashboard-contract": "tsx script/test-dashboard-contract.ts",
     "test:audit-mode": "tsx script/test-audit-mode.ts",
     "test:scenario-v2": "tsx script/test-scenario-v2.ts",

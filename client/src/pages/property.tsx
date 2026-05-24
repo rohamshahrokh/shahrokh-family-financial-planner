@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import AIInsightsCard from "@/components/AIInsightsCard";
 import DepositPowerCard from "@/components/DepositPowerCard";
 import PropertyLifecycleAnalysis from "@/components/PropertyLifecycleAnalysis";
+import PropertyLifecycleAudit from "@/components/PropertyLifecycleAudit";
 import { ModellingAssumptionsChip } from "@/components/taxRegime/ModellingAssumptionsChip";
 import { PropertyTaxImpactBlock } from "@/components/taxRegime/PropertyTaxImpactBlock";
 import { Input } from "@/components/ui/input";
@@ -1568,7 +1569,10 @@ export default function PropertyPage() {
       {/* ─── Buy vs Wait tab ────────────────────────────────────────────────── */}
       {activeTab === 'buy-vs-wait' && <PropertyBuyAnalysis />}
       {activeTab === 'lifecycle' && (
-        <PropertyLifecycleAnalysis properties={properties} privacyMode={privacyMode} />
+        <div className="space-y-6">
+          <PropertyLifecycleAnalysis properties={properties} privacyMode={privacyMode} />
+          <PropertyLifecycleAudit properties={properties} />
+        </div>
       )}
       {activeTab === 'impact' && <PropertyPortfolioImpact
         snapshot={snapshot}
