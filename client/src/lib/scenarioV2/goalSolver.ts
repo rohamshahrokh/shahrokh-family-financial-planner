@@ -250,26 +250,61 @@ function evaluatePath(
   const monthlyMean = Math.pow(1 + strat.expectedReturnAnnual, 1 / 12) - 1;
   const monthlyVol = strat.expectedVolAnnual / Math.sqrt(12);
 
+  // Sprint 3B C-4 — leverage must NOT multiply the household's entire
+  // starting net worth. That fabricates investable equity (e.g. cash, super,
+  // PPOR equity) and structurally biases the solver toward leveraged
+  // property strategies. Leverage now applies only to the *financed
+  // property exposure*: contributions to the property bucket are amplified
+  // by the leverage multiplier, but the resulting debt drags monthly
+  // returns by an approximate mortgage-rate carry cost. The starting NW
+  // is preserved at face value.
+  //
+  // This is an MVP repair, not a full property-equity model:
+  //   - financedPrincipal = cumulative leveraged property contributions
+  //   - monthly debt service drag ≈ financedPrincipal * (mortgageRate/12)
+  //   - terminal NW = unleveraged growth + leveraged property growth net of
+  //     the cumulative debt service
+  // It removes the structural NW inflation; downstream MC (V4/V5) still
+  // models full property mechanics when the user opens those engines.
+  const leverageMultiplier = Math.max(1, strat.leverage);
+  const financedShare = Math.max(0, leverageMultiplier - 1); // 0 for un-leveraged paths
+  // Carry cost — proxy for mortgage interest on the leveraged sleeve.
+  const mortgageRateAnnual = 0.065;
+  const monthlyCarry = mortgageRateAnnual / 12;
+
   let successes = 0;
 
   for (let r = 0; r < ctx.rolloutCount; r++) {
     const rng = makeRng(deriveSeed(ctx.seed, `${strat.kind}:${r}`));
-    let nw = ctx.initial * strat.leverage; // leverage proxy on initial equity
+    let nw = ctx.initial; // starting equity is NOT inflated
+    let financedPrincipal = 0; // cumulative leveraged property debt
     let achievedFireMonth: number | null = null;
     for (let i = 0; i < ctx.horizon; i++) {
       const shock = rng.normal();
       const growth = monthlyMean + shock * monthlyVol;
-      // Apply growth on NW
+      // Apply growth on NW (un-leveraged base)
       nw = nw * (1 + growth);
-      // Contribution: monthly surplus split across the four buckets — each
-      // bucket has different effective compounding behaviour, but at this
-      // optimiser fidelity we collapse them to a weighted "deployed" sum
-      // plus a cash reservoir that grows at cash APR (3.5%).
+      // Contribution: monthly surplus split across the four buckets.
       const deployed = ctx.monthlySurplus * (
         strat.etfShare + strat.propertyShare + strat.debtReductionShare
       );
       const cashContrib = ctx.monthlySurplus * strat.cashShare;
       nw += deployed * (1 + growth * 0.5) + cashContrib;
+
+      // Leveraged property sleeve — only the property-allocated portion is
+      // amplified, the corresponding debt is tracked and incurs a monthly
+      // carry cost that drags NW.
+      if (financedShare > 0 && strat.propertyShare > 0) {
+        const newFinancedThisMonth =
+          ctx.monthlySurplus * strat.propertyShare * financedShare;
+        financedPrincipal += newFinancedThisMonth;
+        // Property capital gain on the leveraged exposure (uses the
+        // shared property growth assumption, not the path's blended mean).
+        const monthlyPropGrowth = ctx.propertyGrowth / 12;
+        nw += newFinancedThisMonth * monthlyPropGrowth +
+              financedPrincipal * monthlyPropGrowth -
+              financedPrincipal * monthlyCarry;
+      }
 
       // Detect first FIRE month: 4% of NW sustains the target passive income
       if (

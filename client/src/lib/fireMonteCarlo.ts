@@ -18,13 +18,37 @@
  */
 
 // ─── Box-Muller Standard Normal ──────────────────────────────────────────────
+// Sprint 3B C-5 — accept a seeded RNG so callers can reproduce identical
+// outputs from identical inputs. Defaults to Math.random when no RNG is
+// supplied (preserves caller signatures for tests and other modules that
+// still expect non-seeded behaviour).
 
-function randNormal(mean: number, stdDev: number): number {
+type RngFn = () => number;
+
+function randNormal(mean: number, stdDev: number, rng?: RngFn): number {
+  const rand = rng ?? Math.random;
   let u = 0, v = 0;
-  while (u === 0) u = Math.random();
-  while (v === 0) v = Math.random();
+  while (u === 0) u = rand();
+  while (v === 0) v = rand();
   return mean + stdDev * Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
 }
+
+// ─── Sprint 3B C-5 — Seeded RNG (Mulberry32) ─────────────────────────────────
+// Mirrors scenarioV2/determinism.ts but kept local so this module stays
+// self-contained and doesn't pull the whole V2 stack.
+function makeSeededRng(seed: number): RngFn {
+  let a = (seed | 0) >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Default seed for reproducible Monte Carlo runs. Stable across releases. */
+export const DEFAULT_FIRE_MC_SEED = 0x46_57_4c_4d; // 'FWLM'
 
 // ─── Cholesky decomposition for 4×4 correlation matrix ──────────────────────
 // Returns lower-triangular L such that L·Lᵀ = Σ (correlation matrix).
@@ -59,12 +83,12 @@ function buildCholesky(rho_sc: number, rho_ir: number, rho_rp: number, rho_sp: n
 }
 
 // Produce 4 correlated standard normals using Cholesky L
-function correlatedNormals(L: number[][]): [number, number, number, number] {
+function correlatedNormals(L: number[][], rng?: RngFn): [number, number, number, number] {
   const z = [
-    randNormal(0, 1),
-    randNormal(0, 1),
-    randNormal(0, 1),
-    randNormal(0, 1),
+    randNormal(0, 1, rng),
+    randNormal(0, 1, rng),
+    randNormal(0, 1, rng),
+    randNormal(0, 1, rng),
   ];
   const x: number[] = new Array(4).fill(0);
   for (let i = 0; i < 4; i++) {
@@ -449,10 +473,24 @@ function dateToMonthIndex(dateStr: string, currentYear: number): number {
 
 // ─── MAIN ENGINE ─────────────────────────────────────────────────────────────
 
-export function runFireMonteCarlo(settings: FireMCSettings, planInput?: FireMCPlanInput): FireMCResult {
+/**
+ * Sprint 3B C-5 — `seed` makes runs reproducible. Identical seed + settings
+ * + planInput → byte-identical FireMCResult. Defaults to
+ * `DEFAULT_FIRE_MC_SEED` so the user-facing dashboard returns stable
+ * outputs across reloads. Passing `null` opts back into Math.random for
+ * exploratory non-reproducible runs.
+ */
+export function runFireMonteCarlo(
+  settings: FireMCSettings,
+  planInput?: FireMCPlanInput,
+  seed: number | null = DEFAULT_FIRE_MC_SEED,
+): FireMCResult {
   const startTime = Date.now();
   const s = settings;
   const N_SIM = Math.max(100, Math.min(10000, safeNum(s.simulationCount) || 5000));
+
+  // Seeded RNG (or fall through to Math.random when seed === null)
+  const rng: RngFn | undefined = seed == null ? undefined : makeSeededRng(seed >>> 0);
 
   // Calendar years
   const currentYear  = new Date().getFullYear();
@@ -703,17 +741,19 @@ export function runFireMonteCarlo(settings: FireMCSettings, planInput?: FireMCPl
     const cryptoCrash   = new Array(N_YEARS).fill(false);
     const cryptoBull    = new Array(N_YEARS).fill(false);
 
+    // Sprint 3B C-5 — seeded RNG (falls through to Math.random when seed===null)
+    const rand: RngFn = rng ?? Math.random;
     for (let yi = 0; yi < N_YEARS; yi++) {
-      if (Math.random() < s.evJobLossProb     / 100) evJobLoss[yi]      = true;
-      if (Math.random() < s.evMarketCrashProb  / 100) evMarketCrash[yi] = true;
-      if (Math.random() < s.evRateJumpProb    / 100) evRateJump[yi]     = s.evRateJumpBps / 100;
-      if (Math.random() < s.evRecessionProb   / 100) evRecession[yi]    = true;
-      if (!evMarketCrash[yi] && Math.random() < s.evBullMarketProb / 100) evBullMarket[yi] = true;
-      if (Math.random() < s.evWindfallProb    / 100) evWindfall[yi]     = true;
-      if (Math.random() < s.evLargeExpenseProb / 100) evLargeExpense[yi] = true;
-      if (Math.random() < s.stockCorrectionProb / 100) stockCorrection[yi] = true;
-      if (Math.random() < s.cryptoCrashProb  / 100) cryptoCrash[yi]    = true;
-      if (!cryptoCrash[yi] && Math.random() < s.cryptoBullProb / 100) cryptoBull[yi] = true;
+      if (rand() < s.evJobLossProb     / 100) evJobLoss[yi]      = true;
+      if (rand() < s.evMarketCrashProb  / 100) evMarketCrash[yi] = true;
+      if (rand() < s.evRateJumpProb    / 100) evRateJump[yi]     = s.evRateJumpBps / 100;
+      if (rand() < s.evRecessionProb   / 100) evRecession[yi]    = true;
+      if (!evMarketCrash[yi] && rand() < s.evBullMarketProb / 100) evBullMarket[yi] = true;
+      if (rand() < s.evWindfallProb    / 100) evWindfall[yi]     = true;
+      if (rand() < s.evLargeExpenseProb / 100) evLargeExpense[yi] = true;
+      if (rand() < s.stockCorrectionProb / 100) stockCorrection[yi] = true;
+      if (rand() < s.cryptoCrashProb  / 100) cryptoCrash[yi]    = true;
+      if (!cryptoCrash[yi] && rand() < s.cryptoBullProb / 100) cryptoBull[yi] = true;
     }
 
     // ── Parallel ETF simulation (offset cash deployed to ETFs) ───────────
@@ -733,13 +773,13 @@ export function runFireMonteCarlo(settings: FireMCSettings, planInput?: FireMCPl
       const isAug = (mi % 12) === 7;   // Australian tax refund month
 
       // ── Correlated random shocks for this month ──
-      const [zsStocks, zsCrypto, zsInflation, zsProp] = correlatedNormals(L);
+      const [zsStocks, zsCrypto, zsInflation, zsProp] = correlatedNormals(L, rng);
 
       // ── Asset returns (monthly, correlated) ──
       const stockRet  = s.meanStockReturn   / 100 / 12 + stockStdMo   * zsStocks;
       const propRet   = s.meanPropertyReturn / 100 / 12 + propStdMo    * zsProp;
       const cryptoRet = s.meanCryptoReturn  / 100 / 12 + cryptoStdMo  * zsCrypto;
-      const superRet  = s.meanSuperReturn   / 100 / 12 + superStdMo   * randNormal(0, 1);
+      const superRet  = s.meanSuperReturn   / 100 / 12 + superStdMo   * randNormal(0, 1, rng);
       const inflShock = s.meanInflation     / 100 / 12 + inflStdMo    * zsInflation;
 
       // ── Apply annual events at January of each year ──
@@ -765,13 +805,13 @@ export function runFireMonteCarlo(settings: FireMCSettings, planInput?: FireMCPl
         if (evRecession[yi]) recessionMonthsRemaining = 12;
         // Stock correction (extra shock in January)
         if (stockCorrection[yi]) {
-          extraStockShock += randNormal(-s.stockCorrectionSize / 100, s.stockCorrectionSize * 0.3 / 100);
+          extraStockShock += randNormal(-s.stockCorrectionSize / 100, s.stockCorrectionSize * 0.3 / 100, rng);
         }
         // Crypto crash / bull
         if (cryptoCrash[yi]) {
-          extraCryptoShock += randNormal(-s.cryptoCrashSize / 100, s.cryptoCrashSize * 0.2 / 100);
+          extraCryptoShock += randNormal(-s.cryptoCrashSize / 100, s.cryptoCrashSize * 0.2 / 100, rng);
         } else if (cryptoBull[yi]) {
-          extraCryptoShock += randNormal(s.cryptoBullUpside / 100, s.cryptoBullUpside * 0.3 / 100);
+          extraCryptoShock += randNormal(s.cryptoBullUpside / 100, s.cryptoBullUpside * 0.3 / 100, rng);
         }
       }
 

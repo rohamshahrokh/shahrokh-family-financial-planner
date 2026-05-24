@@ -105,7 +105,21 @@ export interface FIREScenarioConfig {
 /** Year-by-year override row — all rate fields nullable (null = use global) */
 export interface FIREYearAssumption {
   assumption_year:    number;
+  /**
+   * DEPRECATED — Sprint 3B C-2. This field is the *allocation* split for
+   * property (% of surplus to property), not the property growth CAGR.
+   * Use `property_growth_pct` (new) for year-by-year property growth
+   * overrides. Kept on the type to maintain backward compatibility with
+   * legacy rows that may still surface this column. The engine now never
+   * reads it as a growth rate.
+   */
   property_pct:       number | null;
+  /**
+   * Sprint 3B C-2 — year-by-year property growth CAGR override. Falls back
+   * to `settings.property_cagr` when null/undefined. Always a growth rate,
+   * never an allocation.
+   */
+  property_growth_pct?: number | null;
   stocks_pct:         number | null;
   crypto_pct:         number | null;
   super_pct:          number | null;
@@ -396,6 +410,16 @@ export function buildFirePathInput(
   const yearAssumptions: FIREYearAssumption[] = (rawYearAssumptions ?? []).map((r: any) => ({
     assumption_year:    parseInt(r.assumption_year),
     property_pct:       r.property_pct != null ? parseFloat(r.property_pct) : null,
+    // Sprint 3B C-2 — accept either `property_growth_pct` or the
+    // historical `property_cagr` column name for year-by-year growth
+    // overrides. Never falls back to `property_pct` (which is allocation,
+    // not growth).
+    property_growth_pct:
+      r.property_growth_pct != null
+        ? parseFloat(r.property_growth_pct)
+        : r.property_cagr != null
+          ? parseFloat(r.property_cagr)
+          : null,
     stocks_pct:         r.stocks_pct   != null ? parseFloat(r.stocks_pct)   : null,
     crypto_pct:         r.crypto_pct   != null ? parseFloat(r.crypto_pct)   : null,
     super_pct:          r.super_pct    != null ? parseFloat(r.super_pct)    : null,
@@ -564,7 +588,10 @@ function buildTimeline(
     // Growth rates (year-by-year override or global)
     const incomeGrowth  = getYearRate(yr, 'income_growth_pct',  settings.income_growth_pct,  yearAssumptions) / 100;
     const expenseGrowth = getYearRate(yr, 'expense_growth_pct', settings.expense_inflation_pct, yearAssumptions) / 100;
-    const propCagr      = getYearRate(yr, 'property_pct',       settings.property_cagr,       yearAssumptions) / 100;
+    // Sprint 3B C-2 — read the dedicated property growth field, NOT
+    // `property_pct` (which is the allocation %, not a CAGR). Falls back to
+    // `settings.property_cagr` when no per-year override is supplied.
+    const propCagr      = getYearRate(yr, 'property_growth_pct', settings.property_cagr,     yearAssumptions) / 100;
     const yrMortRate    = getYearRate(yr, 'interest_rate_pct',  settings.mortgage_rate,       yearAssumptions);
     const yrMortMonthly = yrMortRate / 100 / 12;
     const invRate       = annualRate / 12;
@@ -605,7 +632,16 @@ function buildTimeline(
             mortgage / 12 + 500
           )
         : 0;
-      propertyEquity = propertyEquity * (1 + propCagr / 12 * 12) + (mortRepayment - mortgage * mortRateMonthly) * 12;
+      // Sprint 3B C-3 — monthly compounding loop, matching the rest of the
+      // FIRE engine (investable + super both compound monthly). The previous
+      // `propCagr / 12 * 12` formulation collapsed to a single annual
+      // multiplier and ignored intra-year compounding entirely; this
+      // produced a noticeable understatement vs the V2 / risk surfaces.
+      const propMonthlyRate = propCagr / 12;
+      const monthlyEquityAccrual = mortRepayment - mortgage * mortRateMonthly;
+      for (let m = 0; m < 12; m++) {
+        propertyEquity = propertyEquity * (1 + propMonthlyRate) + monthlyEquityAccrual;
+      }
       if (mortgage > 0) {
         mortgage = Math.max(0, mortgage - mortRepayment * 12);
       }

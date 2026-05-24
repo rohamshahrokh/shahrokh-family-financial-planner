@@ -13,10 +13,13 @@ export {
   canonicalJson,
   stableHash,
   snapshotHash,
+  derivedInputsHash,
+  materialInputsHash,
   SNAPSHOT_HASH_KEYS,
   makeRng,
   deriveSeed,
   type SeededRng,
+  type DerivedHashInputs,
 } from "./determinism";
 
 // Types

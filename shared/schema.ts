@@ -72,13 +72,12 @@ export const properties = sqliteTable("properties", {
   selling_costs: real("selling_costs").default(2.5),
   projection_years: integer("projection_years").default(10),
   notes: text("notes").default(""),
-  // Lifecycle: 'planned' | 'under_contract' | 'settled'.
-  // New rows default to 'planned' — a property only becomes 'settled'
-  // when the user explicitly selects Settled and saves. Legacy rows that
-  // existed before the lifecycle migration are backfilled to 'settled'
-  // one-shot at migration time (see server/storage.ts and
-  // sql/migration_property_lifecycle.sql) so the existing forecast /
-  // debt / rental / expense pipeline keeps including them unchanged.
+  // Lifecycle: 'planned' | 'under_contract' | 'settled' | 'sold' | 'archived'.
+  // See shared/propertyLifecycle.ts for the canonical predicates every engine
+  // must use. New rows default to 'planned'; a property only becomes
+  // 'settled' on explicit user action. Legacy rows are backfilled to
+  // 'settled' one-shot at migration time. 'sold' and 'archived' are
+  // historical states excluded from both current state and forecast.
   lifecycle_status: text("lifecycle_status").default("planned"),
   created_at: text("created_at").default(new Date().toISOString()),
 });

@@ -41,6 +41,7 @@ import { stableHash } from "./determinism";
 import { computeSurvivalMetrics, type SurvivalMetrics } from "./survival";
 import { buildForcedSaleReport, type ForcedSaleReport } from "./forcedSale";
 import type { WageShockParams } from "./wageShock";
+import { DEFAULT_WAGE_SHOCK } from "./wageShock";
 import type {
   HouseholdComposition,
   HouseholdCompositionKind,
@@ -197,7 +198,15 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     useFatTails: input.useFatTails ?? true,
     hasHelpDebt: input.hasHelpDebt,
     hasPrivateHospitalCover: input.hasPrivateHospitalCover,
-    wageShock: input.wageShock ?? null,
+    // Sprint 3B H-2 — default wage shock is now ON unless the caller
+    // explicitly passes `null` to opt out. Survival, VaR/CVaR, and Risk
+    // Radar all expect employment risk to be in the canonical fan; the
+    // previous default of `null` produced shock-free survival metrics that
+    // looked artificially benign. Callers that already pass an explicit
+    // `wageShock` (decision engine, scenario-compare-v2) are unaffected.
+    wageShock: input.wageShock === undefined
+      ? DEFAULT_WAGE_SHOCK
+      : input.wageShock,
   });
 
   const service = computeServiceability({

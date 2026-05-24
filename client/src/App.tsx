@@ -275,6 +275,18 @@ function AppRouter() {
         <Route path="/audit-coverage">
           <ProtectedRoute component={AuditCoveragePage} title="Audit Coverage" />
         </Route>
+        {/* Sprint 3B H-6 — direct-route redirects for named engines so external
+            links and docs do not land on a 404. Each redirects to the canonical
+            host page that owns that feature today. */}
+        <Route path="/monte-carlo"><Redirect to="/ai-forecast-engine" /></Route>
+        <Route path="/goal-solver"><Redirect to="/wealth-strategy" /></Route>
+        <Route path="/risk-engine"><Redirect to="/risk-radar" /></Route>
+        <Route path="/net-worth-timeline"><Redirect to="/timeline" /></Route>
+        <Route path="/snapshot"><Redirect to="/dashboard" /></Route>
+        <Route path="/snapshots"><Redirect to="/dashboard" /></Route>
+        <Route path="/property-timeline"><Redirect to="/property" /></Route>
+        <Route path="/property-lifecycle"><Redirect to="/property" /></Route>
+        <Route path="/scenario"><Redirect to="/scenario-compare" /></Route>
         {/* 404 */}
         <Route component={NotFound} />
       </Switch>
