@@ -2466,6 +2466,9 @@ export default function DashboardPage() {
     plannedAcquisitions: (properties ?? [])
       .filter((p: any) => {
         if (p.type === 'ppor' || p.type === 'owner_occupied') return false;
+        // Settled properties are active assets — never include them in the
+        // planned-acquisitions roadmap, even if their dates are in the future.
+        if (p.lifecycle_status === 'settled') return false;
         const raw = p.contract_date ?? p.settlement_date ?? p.purchase_date;
         if (!raw) return false;
         return String(raw) > todayStr;

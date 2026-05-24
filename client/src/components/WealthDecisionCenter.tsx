@@ -516,10 +516,8 @@ export default function WealthDecisionCenter({
       <div className="p-4 space-y-4">
         {tab === 'CASH' && (
           <div className="space-y-4" data-testid="wdc-panel-cash" role="tabpanel">
-            <DepositPowerBreakdownTable
-              summary={executiveProps.depositPowerSummary}
-              privacyMode={privacyMode}
-            />
+            {/* Deposit Power Breakdown moved to Property → Acquisition Planner.
+                The trajectory chart remains here. */}
             <div>{renderDepositPowerChart()}</div>
           </div>
         )}

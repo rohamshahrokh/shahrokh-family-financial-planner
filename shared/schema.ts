@@ -72,6 +72,10 @@ export const properties = sqliteTable("properties", {
   selling_costs: real("selling_costs").default(2.5),
   projection_years: integer("projection_years").default(10),
   notes: text("notes").default(""),
+  // Lifecycle: 'planned' | 'under_contract' | 'settled'.
+  // Legacy rows (without this column) are treated as 'settled' so the
+  // existing forecast pipeline keeps including them unchanged.
+  lifecycle_status: text("lifecycle_status").default("settled"),
   created_at: text("created_at").default(new Date().toISOString()),
 });
 

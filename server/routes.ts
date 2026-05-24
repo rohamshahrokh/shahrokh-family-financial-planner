@@ -169,6 +169,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ success: true });
   });
 
+  // ─── Property lifecycle: settle a planned property ─────────────────────
+  // Converts a 'planned' / 'under_contract' row into 'settled', merging any
+  // caller-supplied overrides (purchase_date, loan_amount, weekly_rent, etc.).
+  // De-dupes by name to avoid creating a second active row for the same asset.
+  app.post("/api/properties/:id/settle", (req, res) => {
+    const settled = storage.settleProperty(parseInt(req.params.id), req.body || {});
+    if (!settled) return res.status(404).json({ error: "Property not found" });
+    res.json(settled);
+  });
+
   // ─── Stocks ────────────────────────────────────────────────────────
   app.get("/api/stocks", (req, res) => {
     res.json(storage.getStocks());
