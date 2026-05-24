@@ -217,12 +217,21 @@ export function buildCanonicalMonteCarloInput(
     expensesIncludesDebt: expensesIncludeDebt,
   };
 
-  // Properties — feed every property row through to MC; the engine filters
-  // by `type !== 'ppor'` itself. We DO NOT pass planned IPs as already-owned;
-  // the engine handles them via `settlement_date >= startYear`.
-  const properties = (ledger.properties ?? []).map(p => ({
+  // Properties — feed every property row through to MC. The engine itself
+  // now applies the Sprint 4B canonical lifecycle filter (isInvestmentProperty
+  // && !isPropertyHistorical), so we just need to PRESERVE the lifecycle and
+  // disposal fields on the row. Previously these were dropped during the
+  // map() and the MC engine saw every sold IP as a still-active asset.
+  const properties = (ledger.properties ?? []).map((p: any) => ({
     id: safe(p.id),
     type: String(p.type ?? "investment"),
+    // Lifecycle / disposal fields preserved verbatim so downstream predicates
+    // (isPropertyOwnedAt / wasPropertySoldBy / isPropertyHistorical) can see
+    // the canonical values.
+    lifecycle_status: p.lifecycle_status,
+    sale_date: p.sale_date,
+    sold_date: p.sold_date,
+    disposal_date: p.disposal_date,
     purchase_date: p.purchase_date,
     settlement_date: p.settlement_date,
     rental_start_date: p.rental_start_date,

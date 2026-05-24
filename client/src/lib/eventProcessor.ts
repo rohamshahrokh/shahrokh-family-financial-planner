@@ -17,6 +17,14 @@ import {
   normaliseLoanType,
 } from './mathUtils';
 import { decideBillsInclusion } from './billsInclusion';
+// Sprint 4B — canonical lifecycle predicate; eventProcessor must stop emitting
+// rent / loan-repayment / purchase events for properties that are sold or
+// archived once their disposal date passes.
+import {
+  isInvestmentProperty,
+  wasPropertySoldBy,
+  isPropertyHistorical,
+} from '@shared/propertyLifecycle';
 
 // ─── Event Types ──────────────────────────────────────────────────────────────
 
@@ -284,7 +292,17 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
       })
     : 0;
 
-  const investmentProps = params.properties.filter(p => p.type !== 'ppor');
+  // Sprint 4B — drop archived properties (never emit any events for them).
+  // Sold properties stay in the list because pre-disposal months still need
+  // rent / repayment / purchase events; the per-month loop gates further
+  // events via wasPropertySoldBy(monthIso) once the sale date has passed.
+  const isArchived = (p: any): boolean => {
+    const s = String(p?.lifecycle_status ?? '').trim().toLowerCase();
+    return s === 'archived' || s === 'hidden';
+  };
+  const investmentProps = params.properties.filter(
+    (p: any) => isInvestmentProperty(p) && !isArchived(p),
+  );
 
   // ── Bills-inclusion decision (audit fix: cashflow double-count) ──────────
   // When the snapshot's monthly_expenses already absorbs the recurring-bill
@@ -399,6 +417,12 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
     const monthDate = new Date(year, month - 1, 1);
 
     for (const prop of investmentProps) {
+      // Sprint 4B — sold-property gate. Once a property is sold, suppress all
+      // further event emissions (purchase / rent / repayment / costs). The
+      // sale itself is handled as a one-off cash event by the dedicated
+      // forecast surfaces; event-stream emission stops here.
+      const monthIso = `${year}-${String(month).padStart(2, '0')}-28`;
+      if (wasPropertySoldBy(prop as any, monthIso)) continue;
       const settleDateStr = prop.settlement_date || prop.purchase_date;
       let settleDate: Date;
       if (settleDateStr) {

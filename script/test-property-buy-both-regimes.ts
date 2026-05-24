@@ -193,17 +193,19 @@ test("Post-cutoff ESTABLISHED → reform NG zeroed + losses quarantined", () => 
   exactEq(result.scenario_deltas.buy_now.effective_regime_kind, "PROPOSED_2027_REFORM", "effective regime");
 
   // Under default reform regime, effective CGT discount for ESTABLISHED is 0% (no discount).
-  // So reform taxable gain = (grossGain − quarantinedLosses) × 1.0
-  // Current taxable gain  = grossGain × 0.5
-  // Verify the formula holds within rounding tolerance.
+  // Sprint 4B — the canonical CGT formula now deducts selling costs from the
+  // gain before applying the discount, matching ATO cost-base rules.
+  // So reform taxable gain ≈ (grossGain − sellingCosts − quarantinedLosses) × 1.0
+  // The 2% selling cost is netted off in the canonical helper.
   const grossGain = result.current.buy_now.capital_gain;
   const losses = result.scenario_deltas.buy_now.quarantined_losses;
-  const expectedReformTaxable = Math.max(0, grossGain - losses); // discount = 0% under reform
+  const sellingCosts = result.current.buy_now.property_value_end * 0.02;
+  const expectedReformTaxable = Math.max(0, grossGain - sellingCosts - losses);
   approxEq(
     result.scenario_deltas.buy_now.reform_cgt_taxable_gain,
     expectedReformTaxable,
     Math.max(50, expectedReformTaxable * 0.01),
-    `buy_now reform CGT taxable = (gross − losses) × (1 − 0%): got ${result.scenario_deltas.buy_now.reform_cgt_taxable_gain}, expected ${expectedReformTaxable}`,
+    `buy_now reform CGT taxable = (gross − selling costs − losses) × (1 − 0%): got ${result.scenario_deltas.buy_now.reform_cgt_taxable_gain}, expected ${expectedReformTaxable}`,
   );
   // Sanity: reform after-tax CGT must differ from current (regimes change CGT rules).
   if (result.scenario_deltas.buy_now.delta_cgt_after_tax === 0) {
