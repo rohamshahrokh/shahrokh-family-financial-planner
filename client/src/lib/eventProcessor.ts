@@ -9,7 +9,13 @@
  * no % heuristics — every dollar hits the exact calendar month it belongs to.
  */
 
-import { safeNum, dcaMonthlyEquiv, calcMonthlyRepayment } from './mathUtils';
+import {
+  safeNum,
+  dcaMonthlyEquiv,
+  calcMonthlyRepayment,
+  calcLoanRepayment,
+  normaliseLoanType,
+} from './mathUtils';
 import { decideBillsInclusion } from './billsInclusion';
 
 // ─── Event Types ──────────────────────────────────────────────────────────────
@@ -73,6 +79,14 @@ export interface SnapshotForEngine {
   monthly_expenses: number;
   mortgage: number;
   other_debts: number;
+  /** Annual mortgage rate (%). When missing, PPOR repayment events are skipped. */
+  mortgage_rate?: number;
+  /** Remaining mortgage term in years. When missing, PPOR repayment events are skipped. */
+  mortgage_term_years?: number;
+  /** PPOR loan type: 'PI' | 'IO'. Defaults to PI. */
+  mortgage_loan_type?: string;
+  /** Remaining IO period for the PPOR loan (years). */
+  mortgage_io_years?: number;
 }
 
 export interface PropertyForEngine {
@@ -86,7 +100,11 @@ export interface PropertyForEngine {
   loan_amount: number;
   interest_rate: number;
   loan_term: number;
-  loan_type: string;             // 'principal_interest' | 'interest_only'
+  loan_type: string;             // 'PI' | 'IO' (legacy: 'principal_interest' | 'interest_only')
+  /** Optional IO-period length in years (only meaningful when loan_type = IO). */
+  interest_only_years?: number;
+  /** Optional repayment frequency override (informational only — engine works in months). */
+  repayment_type?: string;
   weekly_rent: number;
   rental_growth: number;
   vacancy_rate: number;
@@ -245,8 +263,26 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
     expenseLookup.set(key, existing);
   }
 
-  const snapMortgage = safeNum(s.mortgage) || 1_200_000;
-  const pporMonthlyPmt = calcMonthlyRepayment(snapMortgage, safeNum(s.mortgage_rate) || 6.5, safeNum(s.mortgage_term_years) || 30);
+  // PPOR mortgage repayment is driven exclusively by the snapshot debt
+  // module. NO hardcoded $1.2M / 6.5% / 30yr fallbacks — when the snapshot is
+  // missing rate / term we cannot generate a synthetic repayment event without
+  // fabricating household data, so the event is suppressed (the upstream
+  // canonical selectors already handle this case explicitly).
+  const snapMortgage = safeNum(s.mortgage);
+  const snapMortgageRate = safeNum((s as any).mortgage_rate);
+  const snapMortgageTerm = safeNum((s as any).mortgage_term_years);
+  const pporCanCompute =
+    snapMortgage > 0 && snapMortgageRate > 0 && snapMortgageTerm > 0;
+  const pporMonthlyPmt = pporCanCompute
+    ? calcLoanRepayment({
+        principal: snapMortgage,
+        annualRate: snapMortgageRate,
+        termYears: snapMortgageTerm,
+        loanType: normaliseLoanType((s as any).mortgage_loan_type),
+        ioYears: safeNum((s as any).mortgage_io_years),
+        monthsSincePayment: 0,
+      })
+    : 0;
 
   const investmentProps = params.properties.filter(p => p.type !== 'ppor');
 
@@ -270,7 +306,11 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
     const isActual = expenseLookup.has(key);
 
     // ── 1. INCOME ──────────────────────────────────────────────────────────
-    const monthlyIncome = safeNum(s.monthly_income) * Math.pow(1 + incGr, yearsFromStart) || 22_000;
+    // No demo fallback: when the snapshot has no income data, the income event
+    // is zero (the household's actual data drives every value). This prevents
+    // the engine from fabricating a $22k/mo synthetic income for empty
+    // snapshots, which previously masked missing onboarding state.
+    const monthlyIncome = safeNum(s.monthly_income) * Math.pow(1 + incGr, yearsFromStart);
 
     if (!isActual) {
       // Forecast month: income is salary (post-tax is already the take-home; employer withholds)
@@ -295,8 +335,12 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
         label: 'Tracked expenses',
       });
 
-      // If actuals don't include mortgage, still deduct PPOR repayment
-      if (!rec.hasMortgage) {
+      // If actuals don't include mortgage, still deduct PPOR repayment.
+      // Only when we can derive the repayment from the snapshot — no
+      // hardcoded household assumptions. When pporCanCompute === false we
+      // intentionally emit no event; the canonical layer reports the missing
+      // input instead.
+      if (!rec.hasMortgage && pporMonthlyPmt > 0) {
         events.push({
           monthKey: key, year, month,
           type: 'mortgage_ppor',
@@ -319,7 +363,9 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
       // CRITICAL: monthly_expenses already INCLUDES the PPOR mortgage repayment
       // (user confirmed: "I included my mortgage in my expenses").
       // Do NOT add a separate mortgage_ppor event — that would double-count ~$7,590/mo.
-      const forecastExpenses = safeNum(s.monthly_expenses) * Math.pow(1 + infl, yearsFromStart) || 14_540;
+      // No demo fallback: missing snapshot expenses → 0 forecast expenses
+      // (callers must surface the "expenses missing" state explicitly).
+      const forecastExpenses = safeNum(s.monthly_expenses) * Math.pow(1 + infl, yearsFromStart);
       events.push({
         monthKey: key, year, month,
         type: 'expense',
@@ -412,18 +458,31 @@ export function processEvents(params: ProcessEventsParams): CashEvent[] {
 
       // Ongoing: loan repayments (from settlement)
       if (monthDate >= settleDate) {
-        const monthlyLoanPmt = calcMonthlyRepayment(
-          safeNum(prop.loan_amount),
-          safeNum(prop.interest_rate) || 6.5,
-          safeNum(prop.loan_term)     || 30,
-        );
-        events.push({
-          monthKey: key, year, month,
-          type: 'mortgage_ip',
-          amount: -monthlyLoanPmt,
-          label: `${propName} — loan repayment`,
-          assetName: propName,
+        // Months elapsed since settlement — drives the IO → P&I crossover.
+        const monthsSinceSettle =
+          (monthDate.getFullYear() - settleDate.getFullYear()) * 12 +
+          (monthDate.getMonth() - settleDate.getMonth());
+        const monthlyLoanPmt = calcLoanRepayment({
+          principal: safeNum(prop.loan_amount),
+          annualRate: safeNum(prop.interest_rate) || 6.5,
+          termYears: safeNum(prop.loan_term) || 30,
+          loanType: prop.loan_type,
+          ioYears: safeNum((prop as any).interest_only_years),
+          monthsSincePayment: monthsSinceSettle,
         });
+        if (monthlyLoanPmt > 0) {
+          const ioLabel = normaliseLoanType(prop.loan_type) === 'IO'
+            && monthsSinceSettle < safeNum((prop as any).interest_only_years) * 12
+            ? ' (IO)'
+            : '';
+          events.push({
+            monthKey: key, year, month,
+            type: 'mortgage_ip',
+            amount: -monthlyLoanPmt,
+            label: `${propName} — loan repayment${ioLabel}`,
+            assetName: propName,
+          });
+        }
       }
 
       // Rental income (from rental start date)
