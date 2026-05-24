@@ -24,12 +24,31 @@ import { DEFAULT_MC_VOLATILITY } from './forecastStore';
 import { applyFundingToProperties, buildAdapterContext } from './propertyFundingAdapter';
 
 // ─── Box-Muller standard normal ───────────────────────────────────────────────
+//
+// Sprint 2A D-006: introduced an injectable RNG so the engine can run
+// deterministically when a seed is provided. Default is `Math.random` so
+// legacy callers (no seed) are byte-for-byte unchanged.
+
+type RandFn = () => number;
+let _activeRng: RandFn = Math.random;
 
 function randNormal(mean: number, stdDev: number): number {
   let u = 0, v = 0;
-  while (u === 0) u = Math.random();
-  while (v === 0) v = Math.random();
+  while (u === 0) u = _activeRng();
+  while (v === 0) v = _activeRng();
   return mean + stdDev * Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+}
+
+/** Mulberry32 — same impl as monteCarloV4/rng.ts, inlined to avoid a circular import. */
+function _mulberry32(seed: number): RandFn {
+  let a = seed >>> 0;
+  return function rng(): number {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 // ─── Input type ───────────────────────────────────────────────────────────────
@@ -95,11 +114,34 @@ export interface MCInput {
   startYear?: number;
   /** Override end year (default: startYear + 9, i.e. 10-year window) */
   endYear?: number;
+  /**
+   * Sprint 2A D-006 — deterministic seed.
+   *
+   * When provided, the engine uses a seeded mulberry32 PRNG instead of
+   * `Math.random()`, making outputs byte-for-byte reproducible for identical
+   * inputs. When omitted (legacy callers), behaviour is unchanged —
+   * `Math.random()` is used so existing pages that rely on per-call variance
+   * keep working. V4/V5 always pass a seed via `runMonteCarloV4`, so the
+   * canonical FIRE fan / Decision Engine pathways are now reproducible.
+   */
+  seed?: number;
 }
 
 // ─── Main engine ──────────────────────────────────────────────────────────────
 
 export function runMonteCarlo(input: MCInput): MonteCarloResult {
+  // Sprint 2A D-006: install seeded RNG when caller requested determinism.
+  // The module-level `_activeRng` lives for the duration of this call so all
+  // helpers (randNormal, the inline Math.random sites below) flow through it.
+  // We restore the previous value on exit so concurrent callers without a
+  // seed are unaffected.
+  const _previousRng = _activeRng;
+  if (typeof input.seed === "number") {
+    _activeRng = _mulberry32(input.seed >>> 0);
+  } else {
+    _activeRng = Math.random;
+  }
+  try {
   const N_SIM     = input.simulations ?? 1000;
   // START_YR / END_YR: use override from forecastStore assumptions if provided, else derive from today
   const _currentYear = new Date().getFullYear();
@@ -139,10 +181,10 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
   const investProps = effectiveProperties.filter((p: any) => p.type !== 'ppor');
 
   // ── Month index helper ──
-  function miOf(dateStr: string): number {
+  const miOf = (dateStr: string): number => {
     const d = new Date(dateStr);
     return (d.getFullYear() - START_YR) * 12 + d.getMonth();
-  }
+  };
 
   // ── Deterministic cash deltas per month (same across all sims) ──
   const deterministicDeltas = new Float64Array(N_MONTHS).fill(0);
@@ -205,21 +247,21 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
   // activeBills is memoised once; per-month cost is computed inside the sim loop.
   const activeBills = input.bills.filter(b => b.is_active !== false && (b as any).active !== false);
 
-  function billsForMonth(mi: number): number {
+  const billsForMonth = (mi: number): number => {
     const yr  = START_YR + Math.floor(mi / 12);
     const mo  = (mi % 12) + 1; // 1-based
     return activeBills.reduce((sum, b) => sum + billActualOutflow(b, yr, mo), 0);
-  }
+  };
 
   // ── Assumptions lookup ──
-  function getAss(mi: number): YearAssumptions {
+  const getAss = (mi: number): YearAssumptions => {
     const yr = START_YR + Math.floor(mi / 12);
     return input.yearlyAssumptions.find(a => a.year === yr)
       ?? input.yearlyAssumptions[input.yearlyAssumptions.length - 1]
       ?? { year: yr, property_growth: 6, stocks_return: 10, crypto_return: 20,
            super_return: 10, cash_return: 4.5, inflation: 3, income_growth: 3.5,
-           expense_growth: 3, interest_rate: 6.5, rent_growth: 3 };
-  }
+           expense_growth: 3, interest_rate: 6.5, rent_growth: 3 } as any;
+  };
 
   // ── Convert annual volatility to monthly std dev ──
   const propStd   = vp.prop_volatility    / 100 / Math.sqrt(12);
@@ -285,11 +327,11 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
     const annualRateShockYear        = new Array(N_YEARS).fill(0); // extra rate delta
 
     for (let yi = 0; yi < N_YEARS; yi++) {
-      if (Math.random() < vp.stock_correction_prob / 100) annualStockCorrectionYear[yi] = true;
-      if (Math.random() < vp.crypto_crash_prob  / 100) annualCryptoCrashYear[yi]  = true;
+      if (_activeRng() < vp.stock_correction_prob / 100) annualStockCorrectionYear[yi] = true;
+      if (_activeRng() < vp.crypto_crash_prob  / 100) annualCryptoCrashYear[yi]  = true;
       // Bull run and crash are mutually exclusive in the same year
-      if (!annualCryptoCrashYear[yi] && Math.random() < vp.crypto_bull_prob / 100) annualCryptoBullYear[yi] = true;
-      if (Math.random() < vp.rate_shock_prob / 100) annualRateShockYear[yi] = vp.rate_shock_size;
+      if (!annualCryptoCrashYear[yi] && _activeRng() < vp.crypto_bull_prob / 100) annualCryptoBullYear[yi] = true;
+      if (_activeRng() < vp.rate_shock_prob / 100) annualRateShockYear[yi] = vp.rate_shock_size;
     }
 
     // ── Monthly loop ──
@@ -380,7 +422,7 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
         if (mi >= rentalStartMi) {
           const mths = mi - rentalStartMi;
           // Vacancy: draw stochastic — ~(vacancy_rate/12) months vacant per year
-          const isVacant = Math.random() < (vp.prop_vacancy_rate / 100 / 12);
+          const isVacant = _activeRng() < (vp.prop_vacancy_rate / 100 / 12);
           const annualRent = safeNum(investProps[pi].weekly_rent) * 52
             * (1 - safeNum(investProps[pi].management_fee) / 100)
             * Math.pow(1 + ass.rent_growth / 100, mths / 12);
@@ -469,11 +511,11 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
   }
 
   // ── Percentile helper ──
-  function pct(arr: number[], p: number): number {
+  const pct = (arr: number[], p: number): number => {
     const sorted = [...arr].sort((a, b) => a - b);
     const idx = Math.floor((p / 100) * sorted.length);
     return sorted[Math.min(idx, sorted.length - 1)];
-  }
+  };
 
   // ── Fan chart ──
   const fan_data: MonteCarloFanPoint[] = yearSnapshots.map((sims, yi) => ({
@@ -565,4 +607,8 @@ export function runMonteCarlo(input: MCInput): MonteCarloResult {
     ran_at: new Date().toISOString(),
     simulations: N_SIM,
   };
+  } finally {
+    // Sprint 2A D-006 — restore prior RNG so module-level state is hermetic.
+    _activeRng = _previousRng;
+  }
 }

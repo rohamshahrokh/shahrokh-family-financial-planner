@@ -102,9 +102,9 @@ export function runMonteCarloV4(
   config: MonteCarloV4Config = {},
 ): MonteCarloV4Result {
   // ── Step 1: V3 canonical run (drives the headline fan / FIRE / etc.) ─
-  const base = runMonteCarlo(input);
-
-  // ── Step 2: seeded regime + stress pass ────────────────────────────────
+  // Sprint 2A D-006 — propagate the V4 seed into V3 so the V3 fan, FIRE prob,
+  // and risk surface that V4 inherits are reproducible. The seed is derived
+  // here so both V3 and the V4 stress pass share the same root key.
   const startYear = input.startYear ?? new Date().getFullYear();
   const endYear = input.endYear ?? startYear + 9;
   const nYears = endYear - startYear + 1;
@@ -114,6 +114,10 @@ export function runMonteCarloV4(
   const seed = typeof config.seed === "number"
     ? config.seed
     : hashSeed(config.seed ?? `${startYear}-${endYear}-${nSim}`);
+
+  // Forward the seed into V3 (don't mutate input — V3's MCInput exposes seed
+  // since Sprint 2A and falls back to Math.random when undefined).
+  const base = runMonteCarlo({ ...input, seed });
   const rootRng = mulberry32(seed);
 
   const flagsBySim: PathStressFlags[] = [];

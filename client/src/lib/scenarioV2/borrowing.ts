@@ -144,9 +144,19 @@ export function computeServiceability(input: ServiceabilityInput): Serviceabilit
   };
 }
 
-// We don't currently thread "other debts" into PortfolioState (it'd need a
-// dedicated bucket). Vertical slice approximation: 0 since PPOR and IP
-// loans are already on `properties`. Phase 9 will fix this properly.
-function getOtherDebts(_input: ServiceabilityInput): number {
-  return 0;
+// Sprint 2A — D-001 fix.
+//
+// `state.otherDebts` already aggregates non-property debt (credit cards,
+// personal/car loans, HELP/HECS and any other liabilities the snapshot
+// captures under `other_debts`). It is seeded in basePlan.ts:216 from
+// `snapshot.other_debts` and amortised in tick.ts:327-335. Returning it here
+// closes the long-standing serviceability gap where DTI structurally
+// understated the household's true debt-to-income ratio.
+//
+// We clamp at zero (defensive — the snapshot column has a non-negative
+// invariant but the field is nullable in legacy rows). The change is purely
+// additive in the DTI numerator and has no effect on DSR (which is service-
+// based, not balance-based) or LVR (property-only).
+function getOtherDebts(input: ServiceabilityInput): number {
+  return Math.max(0, input.state.otherDebts ?? 0);
 }
