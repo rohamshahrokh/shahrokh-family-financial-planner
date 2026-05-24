@@ -50,6 +50,7 @@
     "test:decision-engine-cumulative": "tsx script/test-decision-engine-cumulative.ts",
     "test:audit-p1": "tsx script/run-audit-p1-tests.ts",
     "test:sprint-2a": "tsx script/run-sprint2a-tests.ts",
+    "test:sprint-2b": "tsx script/run-sprint2b-tests.ts",
     "test:recommendation-engine": "tsx script/test-recommendation-engine.ts",
     "test:dashboard-reconciliation": "tsx script/test-dashboard-reconciliation.ts",
     "test:phase5": "tsx script/test-phase5-behavioural-os-scenario.ts",

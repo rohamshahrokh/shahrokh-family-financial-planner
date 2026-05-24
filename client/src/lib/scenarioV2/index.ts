@@ -113,6 +113,57 @@ export {
   type ServiceabilityResult,
 } from "./borrowing";
 
+// Sprint 2B — Household composition + HEM
+export {
+  HEM_TABLE_MONTHLY,
+  HEM_PROVENANCE,
+  deriveHousehold,
+  resolveHemExpenses,
+  summariseHemAudit,
+  type HouseholdComposition,
+  type HouseholdCompositionKind,
+  type HemAudit,
+  type HemExpenseMode,
+  type HemResolveInput,
+} from "./household";
+
+// Sprint 2B — Wage shock
+export {
+  DEFAULT_WAGE_SHOCK,
+  makeWageShockState,
+  stepWageShock,
+  snapshotWageShock,
+  type WageShockParams,
+  type WageShockState,
+  type WageShockAuditRow,
+} from "./wageShock";
+
+// Sprint 2B — Survival engine
+export {
+  computeSurvivalMetrics,
+  type SurvivalInput,
+  type SurvivalMetrics,
+} from "./survival";
+
+// Sprint 2B — Forced sale reporting
+export {
+  buildForcedSaleReport,
+  type ForcedSaleInput,
+  type ForcedSaleReport,
+  type ForcedSaleSimSummary,
+} from "./forcedSale";
+
+// Sprint 2B — Goal solver v1
+export {
+  runGoalSolver,
+  STRATEGY_REGISTRY,
+  type StrategyKind,
+  type StrategyDescriptor,
+  type GoalSolverInput,
+  type GoalSolverPathResult,
+  type GoalSolverResult,
+} from "./goalSolver";
+
 // Monte Carlo
 export {
   runMonteCarlo,

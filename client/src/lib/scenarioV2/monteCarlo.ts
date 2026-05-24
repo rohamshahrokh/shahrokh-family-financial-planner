@@ -42,6 +42,14 @@ import {
   type JumpDiffusionParams,
   type InflationRegimeParams,
 } from "./stochastic";
+import {
+  DEFAULT_WAGE_SHOCK,
+  makeWageShockState,
+  stepWageShock,
+  snapshotWageShock,
+  type WageShockParams,
+  type WageShockAuditRow,
+} from "./wageShock";
 
 export interface MonteCarloInput {
   plan: BasePlan;
@@ -68,6 +76,13 @@ export interface MonteCarloInput {
   monthlyVacancyProb?: number;
   hasHelpDebt?: boolean;
   hasPrivateHospitalCover?: boolean;
+  /**
+   * Sprint 2B — optional stochastic wage-shock parameters. When omitted no
+   * shock is applied (legacy behaviour). When supplied the shock is sampled
+   * deterministically per (parentSeed, simIndex) so seeded repeatability is
+   * preserved exactly.
+   */
+  wageShock?: WageShockParams | null;
 }
 
 export interface CashFanPoint {
@@ -124,6 +139,18 @@ export interface MonteCarloOutput {
    * (riskMetrics, VaR/CVaR) can avoid re-sorting and stay deterministic.
    */
   terminalNwSorted: number[];
+  /**
+   * Sprint 2B — per-sim wage-shock audit (empty when wage shock is disabled).
+   * Always length === simulationCount when enabled, in the same order as
+   * `terminalNw` / `finalStates`.
+   */
+  wageShockAudit: WageShockAuditRow[];
+  /** Final portfolio state for every simulation (for forced-sale reporting). */
+  finalStates: PortfolioState[];
+  /** Per-sim default-month index (for survival metrics). */
+  defaultMonthBySim: number[];
+  /** Per-sim liquidity first-hit month (for survival metrics). */
+  liquidityFirstMonthBySim: number[];
 }
 
 export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
@@ -144,6 +171,7 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
   const inflationRegime = input.inflationRegime ?? DEFAULT_INFLATION_REGIMES;
   const useFatTails = input.useFatTails ?? true;
   const monthlyVacancyProb = input.monthlyVacancyProb ?? 0.04;
+  const wageShockParams = input.wageShock ?? null;
 
   // Pre-allocate path matrix
   const paths: number[][] = new Array(N);
@@ -164,6 +192,7 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
   const defaultEvents: number[] = []; // per-sim default month index (-1 if solvent)
   const liquidityFirstMonth: number[] = []; // first month liquidity stress fired (-1 if none)
   const negativeEquityFirstMonth: number[] = [];
+  const wageShockAudit: WageShockAuditRow[] = [];
 
   // Liquidity-stress threshold: 3 months expenses OR ≤ 0, whichever is
   // STRICTER. We also REQUIRE the stress to PERSIST for ≥ 2 consecutive
@@ -171,6 +200,13 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
   // produces a differentiated, calibrated probability across scenarios.
   for (let s = 0; s < N; s++) {
     const rng = makeRng(deriveSeed(input.parentSeed, `sim:${s}`));
+    // Sprint 2B — wage-shock uses an independent seeded RNG branch so adding
+    // it cannot change ANY existing draw stream. Determinism for the rest of
+    // the engine is therefore byte-for-byte preserved when wageShock is null.
+    const wageShockRng = wageShockParams
+      ? makeRng(deriveSeed(input.parentSeed, `wage-shock:${s}`))
+      : null;
+    const wageShockState = makeWageShockState();
     let state = cloneState(input.initialState) as ExtendedPortfolioState;
     let shortRate = rateProcess.r0;
     let regime: InflationRegime = "low";
@@ -240,8 +276,15 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
         vacancyFactor,
       };
 
+      // Sprint 2B — apply wage shock to this month's base income (deterministic).
+      let monthlyIncomeForTick = input.baseMonthlyIncome;
+      if (wageShockParams && wageShockRng) {
+        const mul = stepWageShock(wageShockRng, wageShockState, i, wageShockParams);
+        monthlyIncomeForTick = input.baseMonthlyIncome * mul;
+      }
+
       const ctx: TickContext = {
-        baseMonthlyIncome: input.baseMonthlyIncome,
+        baseMonthlyIncome: monthlyIncomeForTick,
         baseMonthlyExpenses: input.baseMonthlyExpenses,
         expensesIncludeDebt: input.expensesIncludeDebt,
         monthsElapsed: i,
@@ -322,6 +365,9 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
     defaultEvents.push(defaultMonthIdx);
     liquidityFirstMonth.push(liquidityFirstHit);
     negativeEquityFirstMonth.push(negEqFirstHit);
+    if (wageShockParams) {
+      wageShockAudit.push(snapshotWageShock(wageShockState, wageShockParams));
+    }
   }
 
   // Build P10/P50/P90 fan
@@ -397,6 +443,10 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloOutput {
     medianNegEquityFirstMonth: medianOrNull(negativeEquityFirstMonth.filter((x) => x >= 0)),
     maxDrawdownSamples,
     terminalNwSorted,
+    wageShockAudit,
+    finalStates,
+    defaultMonthBySim: defaultEvents,
+    liquidityFirstMonthBySim: liquidityFirstMonth,
   };
 }
 
