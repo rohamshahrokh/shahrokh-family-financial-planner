@@ -35,6 +35,8 @@ import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
+import { GclSixOutputGrid } from "@/components/goal-closure/GclSixOutputGrid";
 
 export interface GoalClosureLabProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -521,13 +523,44 @@ export function GoalClosureLab(props: GoalClosureLabProps) {
       className={`flex flex-col gap-4 sm:gap-6 ${props.className ?? ""}`}
       data-testid="closure-lab-root"
     >
-      <GoalStatusCard       section={result.goalStatus} />
-      <GapAnalysisCard      section={result.gapAnalysis} />
-      <PathComparisonSection rows={result.pathComparison} />
-      <BestPathCard         section={result.bestPath} />
-      <ActionPlanCard       section={result.actionPlan} />
-      <AuditTrailCard       section={result.auditTrail} />
-      <StrategicIdeasCard   section={result.strategicIdeas} />
+      {/* Sprint 12 — 6-output advisor grid (Progress %, Current Gap, Required Change,
+          Fastest / Safest / Highest-Probability paths). Sits above the engine
+          surfaces so users see the decision-shaped answer first. */}
+      <GclSixOutputGrid
+        goalStatus={{
+          target: result.goalStatus.target,
+          gap: result.goalStatus.gap,
+          currentProjection: result.goalStatus.currentProjection,
+        }}
+        pathComparison={result.pathComparison}
+        bestPath={{
+          recommendedLabel: result.bestPath.recommendedLabel,
+          whyItWins: result.bestPath.whyItWins,
+        }}
+      />
+
+      <div id="path-comparison">
+        <PathComparisonSection rows={result.pathComparison} />
+      </div>
+
+      {/* Sprint 12 — demote narrative-heavy sections into AdvancedDisclosure so
+          the 6-output grid + path comparison stay above the fold as the primary
+          decision-shaped view. Nothing is deleted; engineering and power-users
+          still reach the rationale and audit trail in one click. */}
+      <AdvancedDisclosure
+        title="Goal Closure rationale"
+        subtitle="Goal status, gap analysis, best-path narrative, action plan, audit trail, strategic ideas"
+        data-testid="closure-lab-rationale-disclosure"
+      >
+        <div className="flex flex-col gap-4 sm:gap-6">
+          <GoalStatusCard       section={result.goalStatus} />
+          <GapAnalysisCard      section={result.gapAnalysis} />
+          <BestPathCard         section={result.bestPath} />
+          <ActionPlanCard       section={result.actionPlan} />
+          <AuditTrailCard       section={result.auditTrail} />
+          <StrategicIdeasCard   section={result.strategicIdeas} />
+        </div>
+      </AdvancedDisclosure>
     </div>
   );
 }

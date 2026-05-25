@@ -41,6 +41,15 @@ import { buildProbabilisticWealthEngine } from "@/lib/probabilisticWealthEngine"
 import { buildPathSimulationEngine } from "@/lib/pathSimulationEngine";
 import { computeCanonicalFire } from "@/lib/canonicalFire";
 import { formatCurrency } from "@/lib/finance";
+import {
+  selectTop3Actions,
+  selectPathRecommendations,
+  selectRankedBlockers,
+  selectDoNothingComparison,
+} from "@/lib/goalSolverView";
+import { DecisionCard } from "@/components/decision/DecisionCard";
+import { BlockerAnalysisBlock } from "@/components/decision/BlockerAnalysisBlock";
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 
 /* ─── Helpers ───────────────────────────────────────────────────────── */
 
@@ -84,7 +93,7 @@ function BarRow({ label, current, required, unit, testid }: BarRowProps) {
   const pct = ratio * 50; // map 0..2 to 0..100% (1.0 ratio = 50% bar width = "meeting target")
   const metTarget = current != null && required != null && current >= required;
   const fmt = (n: number | null): string => {
-    if (n == null) return "—";
+    if (n == null) return "Not set";
     if (unit === "$") return formatCurrency(Math.round(n));
     if (unit === "%") return `${(n * 100).toFixed(1)}%`;
     if (unit === "count") return String(Math.round(n));
@@ -269,8 +278,99 @@ export function GoalSolverProTab() {
     ];
   }, [canonicalLedger, canonicalFire, required, properties]);
 
+  // Sprint 12 — advisor views over Sprint 10 canonical output.
+  const top3 = useMemo(() => selectTop3Actions(goalSolverResult), [goalSolverResult]);
+  const pathRecommendations = useMemo(() => selectPathRecommendations(goalSolverResult), [goalSolverResult]);
+  const rankedBlockers = useMemo(() => selectRankedBlockers(goalSolverResult), [goalSolverResult]);
+  const doNothing = useMemo(() => selectDoNothingComparison(goalSolverResult), [goalSolverResult]);
+
+  const topAction = top3[0];
+  const altPath = pathRecommendations.find((p) => p.kind === "highest-prob") ?? pathRecommendations[1] ?? pathRecommendations[0];
+
+  function fmt$M(v: number | null): string | null {
+    if (v == null || !Number.isFinite(v)) return null;
+    return formatCurrency(v, true);
+  }
+  function fmtPctSigned(v: number | null): string | null {
+    if (v == null || !Number.isFinite(v)) return null;
+    return `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.round(Math.abs(v) * 100)}%`;
+  }
+
   return (
     <div className="flex flex-col gap-4" data-testid="decision-goal-solver-tab">
+      {/* Sprint 12 — 5-card decision system. Action / Impact / Risk / Alternative / Do-Nothing. */}
+      <section data-testid="decision-five-card-system">
+        <header className="mb-3">
+          <h2 className="text-lg sm:text-xl font-semibold text-foreground">Your decision, in five cards</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Every card answers one question. Click each for details — every value traces to a Sprint 10 canonical engine field.
+          </p>
+        </header>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+          <DecisionCard
+            variant="action"
+            title={topAction?.label ?? ""}
+            subtitle={topAction?.dueYear ? `Due year: ${topAction.dueYear}` : undefined}
+            facts={[
+              { label: "Source", value: topAction?.sourceStrategyId ? topAction.sourceStrategyId.slice(0, 18) : null },
+            ]}
+            ctaHref={topAction ? "/portfolio-lab" : undefined}
+            ctaLabel={topAction ? "View in Portfolio Lab" : undefined}
+          />
+          <DecisionCard
+            variant="impact"
+            title="Expected impact"
+            facts={[
+              { label: "Net worth", value: topAction?.netWorthDelta != null && topAction.netWorthDelta !== 0 ? `+ ${fmt$M(Math.abs(topAction.netWorthDelta))}` : null },
+              { label: "Passive income", value: topAction?.passiveIncomeDelta != null && topAction.passiveIncomeDelta !== 0 ? `+ ${fmt$M(Math.abs(topAction.passiveIncomeDelta))}` : null },
+              { label: "Probability of FIRE", value: fmtPctSigned(topAction?.probabilityDelta ?? null) },
+            ]}
+          />
+          <DecisionCard
+            variant="risk"
+            title={rankedBlockers[0]?.label ?? "Top risks"}
+            subtitle={rankedBlockers[0]?.requiredChange ?? undefined}
+            facts={[
+              ...(rankedBlockers[1]
+                ? [{ label: rankedBlockers[1].label, value: rankedBlockers[1].requiredChange ?? "—" }]
+                : []),
+              ...(rankedBlockers[2]
+                ? [{ label: rankedBlockers[2].label, value: rankedBlockers[2].requiredChange ?? "—" }]
+                : []),
+            ]}
+          />
+          <DecisionCard
+            variant="alternative"
+            title={altPath?.label ?? ""}
+            subtitle={altPath?.strategyLabel ?? undefined}
+            facts={[
+              { label: "FIRE year", value: altPath?.expectedFireYear ?? null },
+              { label: "Net worth", value: fmt$M(altPath?.expectedNetWorth ?? null) },
+              { label: "Probability", value: altPath?.probability != null ? `${Math.round(altPath.probability * 100)}%` : null },
+            ]}
+          />
+          <DecisionCard
+            variant="do-nothing"
+            title="If you take no action"
+            facts={[
+              { label: "FIRE year (baseline)", value: doNothing.baselineFireYear ?? null },
+              { label: "Net worth (baseline)", value: fmt$M(doNothing.baselineNetWorth) },
+              { label: "Probability", value: doNothing.baselineProbability != null ? `${Math.round(doNothing.baselineProbability * 100)}%` : null },
+            ]}
+          />
+        </div>
+      </section>
+
+      {/* Sprint 12 — Ranked blockers (hides entirely when none). */}
+      <BlockerAnalysisBlock blockers={rankedBlockers} />
+
+      {/* Sprint 11 #13 — Feasibility Hero (demoted into AdvancedDisclosure to keep
+          the Sprint 12 5-card system as the primary view above the fold). */}
+      <AdvancedDisclosure
+        title="Feasibility detail (Sprint 11 hero)"
+        subtitle="Status, probability bar, median / best / worst FIRE-year tiles"
+        data-testid="decision-feasibility-hero-disclosure"
+      >
       {/* Sprint 11 #13 — Feasibility Hero */}
       <section
         className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-card to-card p-4 sm:p-6 shadow-sm"
@@ -332,6 +432,7 @@ export function GoalSolverProTab() {
           </div>
         </div>
       </section>
+      </AdvancedDisclosure>
 
       {/* Sprint 11 #16 — Primary action CTA */}
       {primaryAction ? (
