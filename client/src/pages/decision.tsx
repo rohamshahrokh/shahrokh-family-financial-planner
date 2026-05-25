@@ -1377,7 +1377,7 @@ function MultiWinnerPanel({ output }: { output: QuickDecisionOutput }) {
   const w = output.multiWinner;
   const allRanked = [...output.ranked, ...output.highRiskPaths];
   const findLabel = (id: string | undefined): string => {
-    if (!id) return "—";
+    if (!id) return "No candidate";
     return allRanked.find((c) => c.id === id)?.shortLabel ?? id;
   };
   // Plain-English lens definitions sourced from the central labels module.
@@ -1425,12 +1425,16 @@ function MultiWinnerPanel({ output }: { output: QuickDecisionOutput }) {
                 </div>
                 <div className="text-sm font-semibold mt-0.5 truncate text-foreground">{findLabel(v?.id)}</div>
                 <div className="flex items-baseline gap-1.5">
-                  <span className="text-base font-bold tabular-nums">
-                    {v
-                      ? <AuditableMetric traceId={`decision:lens:${lens.key}`}>{v.score.toFixed(0)}</AuditableMetric>
-                      : "—"}
-                  </span>
-                  <span className="text-[10px] opacity-70">{v ? "/100" : "no candidate"}</span>
+                  {v ? (
+                    <>
+                      <span className="text-base font-bold tabular-nums">
+                        <AuditableMetric traceId={`decision:lens:${lens.key}`}>{v.score.toFixed(0)}</AuditableMetric>
+                      </span>
+                      <span className="text-[10px] opacity-70">/100</span>
+                    </>
+                  ) : (
+                    <span className="text-[10px] opacity-70">no candidate</span>
+                  )}
                 </div>
                 <div className="text-[10px] leading-snug opacity-80">{lens.def.subtitle}</div>
                 <div className="text-[10px] italic opacity-70 leading-snug pt-1 border-t border-current/10">
