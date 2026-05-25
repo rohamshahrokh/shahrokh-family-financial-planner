@@ -46,6 +46,18 @@ import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
+// Sprint 13 — universal 4-section primary view
+import { FireCommandCenter } from "@/components/sprint13/FireCommandCenter";
+import { Top3ActionsRow } from "@/components/sprint13/Top3ActionsRow";
+import { BiggestBlockersRow } from "@/components/sprint13/BiggestBlockersRow";
+import { DoNothingOutcome } from "@/components/sprint13/DoNothingOutcome";
+import { RecommendedVsDoNothingChart } from "@/components/sprint13/RecommendedVsDoNothingChart";
+import {
+  selectFireGapSummary,
+  selectTop3UserFacingActions,
+  selectRankedBlockers,
+  selectDoNothingComparison,
+} from "@/lib/goalSolverView";
 import {
   LineChart,
   Line,
@@ -989,11 +1001,51 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
   // is null (e.g. user has not picked a target yet).
   const heroFan = pathSim.bestStrategy?.netWorthFan ?? pathSim.strategies[0]?.netWorthFan ?? [];
 
+  // Sprint 13 — derive the 4-section selector data from existing engines.
+  const canonicalForS13 = props.canonicalLedger ? computeCanonicalFire(props.canonicalLedger) : null;
+  const fireGap = selectFireGapSummary(goalSolverResult, canonicalForS13);
+  const top3 = selectTop3UserFacingActions(goalSolverResult);
+  const blockers = selectRankedBlockers(goalSolverResult);
+  const doNothing = selectDoNothingComparison(goalSolverResult, canonicalForS13);
+  const recVsBaselineData = (heroFan as Array<{ year: number; p50: number }>).map((b) => ({
+    year: b.year,
+    recommended: b.p50,
+    doNothing: canonicalForS13?.netWorthNow ?? null,
+  }));
+
   return (
     <div
-      className={`flex flex-col gap-4 sm:gap-5 ${props.className ?? ""}`}
+      className={`flex flex-col gap-3 sm:gap-4 ${props.className ?? ""}`}
       data-testid="true-portfolio-optimizer"
     >
+      {/* Sprint 13 — universal 4-section primary view. Single viewport at
+          1440×900. Everything S11/S12 added is preserved in the "View
+          Supporting Analysis" disclosure below. */}
+      <FireCommandCenter
+        currentNetWorth={fireGap.currentNetWorth}
+        targetNetWorth={fireGap.targetNetWorth}
+        gap={fireGap.gap}
+        yearsRemaining={fireGap.yearsRemaining}
+        probability={fireGap.probability}
+      />
+      <RecommendedVsDoNothingChart data={recVsBaselineData} />
+      <Top3ActionsRow actions={top3} />
+      <BiggestBlockersRow blockers={blockers} />
+      <DoNothingOutcome
+        netWorth={doNothing.netWorth}
+        passiveIncome={doNothing.passiveIncome}
+        probability={doNothing.probability}
+        fireDate={doNothing.fireYear}
+      />
+
+      {/* Sprint 13 — everything below is the previously-primary view,
+          demoted into a single collapsible. Demote, don't delete. */}
+      <AdvancedDisclosure
+        title="View Supporting Analysis"
+        subtitle="Sprint 11 hero · whyThisWins · executive summary · constraints · S8/S9 deep dives · audit trail"
+        data-testid="portfolio-lab-supporting-analysis"
+      >
+      <div className="flex flex-col gap-4 sm:gap-5">
       {/* Sprint 11 #1, #2 — Hero region (5 slots, baseline-vs-recommendation chart). */}
       <PortfolioLabHero
         canonicalLedger={props.canonicalLedger}
@@ -1094,6 +1146,8 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
             />
           </div>
         </div>
+      </AdvancedDisclosure>
+      </div>
       </AdvancedDisclosure>
     </div>
   );
