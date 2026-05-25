@@ -228,6 +228,58 @@ for (const [col, def] of _missingCols) {
   }
 }
 
+// ─── Sprint 6 Phase 3 — Scenario Persistence tables ─────────────────────────
+// Additive only. Existing `scenarios` table is untouched. These three tables
+// back the Scenario Builder workspace (records, immutable version history,
+// snapshots of engine output at save time).
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS sf_scenario_records (
+    record_id        TEXT PRIMARY KEY,
+    scenario_id      TEXT NOT NULL,
+    label            TEXT NOT NULL,
+    description      TEXT DEFAULT '',
+    seed_scenario_id TEXT,
+    is_seed          INTEGER DEFAULT 0,
+    is_baseline      INTEGER DEFAULT 0,
+    tags             TEXT DEFAULT '[]',
+    notes            TEXT DEFAULT '',
+    current_version  INTEGER DEFAULT 0,
+    archived_at      TEXT,
+    archived_reason  TEXT,
+    created_at       TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS sf_scenario_records_scenario_id_idx ON sf_scenario_records (scenario_id);
+  CREATE INDEX IF NOT EXISTS sf_scenario_records_archived_idx ON sf_scenario_records (archived_at);
+
+  CREATE TABLE IF NOT EXISTS sf_scenario_record_versions (
+    version_id         TEXT PRIMARY KEY,
+    scenario_record_id TEXT NOT NULL,
+    version_number     INTEGER NOT NULL,
+    payload            TEXT NOT NULL,
+    comment            TEXT,
+    created_at         TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (scenario_record_id, version_number),
+    FOREIGN KEY (scenario_record_id) REFERENCES sf_scenario_records(record_id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS sf_scenario_record_versions_record_idx ON sf_scenario_record_versions (scenario_record_id);
+
+  CREATE TABLE IF NOT EXISTS sf_scenario_snapshots (
+    snapshot_id        TEXT PRIMARY KEY,
+    scenario_record_id TEXT NOT NULL,
+    version_number     INTEGER,
+    label              TEXT NOT NULL,
+    comment            TEXT,
+    payload            TEXT NOT NULL,
+    metrics            TEXT NOT NULL,
+    assumptions        TEXT DEFAULT '[]',
+    engine_limited     INTEGER DEFAULT 0,
+    created_at         TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (scenario_record_id) REFERENCES sf_scenario_records(record_id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS sf_scenario_snapshots_record_idx ON sf_scenario_snapshots (scenario_record_id);
+`);
+
 // Seed default snapshot if empty
 const snapshotCount = sqlite.prepare("SELECT COUNT(*) as c FROM financial_snapshot").get() as { c: number };
 if (snapshotCount.c === 0) {
@@ -508,6 +560,203 @@ export class Storage implements IStorage {
   deleteScenario(id: number): void {
     sqlite.prepare("DELETE FROM scenarios WHERE id = ?").run(id);
   }
+
+  // ─── Sprint 6 Phase 3 — Scenario Records / Versions / Snapshots ─────
+  // All payloads are stored as JSON-encoded TEXT. The server treats them
+  // as opaque blobs; validation lives in the client (scenarioPersistence.ts).
+
+  listScenarioRecords(includeArchived = false): any[] {
+    const rows = (includeArchived
+      ? sqlite.prepare(`SELECT * FROM sf_scenario_records ORDER BY updated_at DESC`).all()
+      : sqlite.prepare(`SELECT * FROM sf_scenario_records WHERE archived_at IS NULL ORDER BY updated_at DESC`).all()
+    ) as any[];
+    return rows.map(r => this._inflateScenarioRecord(r));
+  }
+
+  getScenarioRecord(recordId: string): any | null {
+    const row = sqlite.prepare(`SELECT * FROM sf_scenario_records WHERE record_id = ?`).get(recordId) as any | undefined;
+    if (!row) return null;
+    return this._inflateScenarioRecord(row);
+  }
+
+  upsertScenarioRecord(record: any): any {
+    if (!record || typeof record.recordId !== "string") {
+      throw new Error("upsertScenarioRecord requires recordId");
+    }
+    const now = new Date().toISOString();
+    const existing = sqlite.prepare(`SELECT record_id FROM sf_scenario_records WHERE record_id = ?`).get(record.recordId);
+    const tagsJson = JSON.stringify(Array.isArray(record.tags) ? record.tags : []);
+    if (existing) {
+      sqlite.prepare(`
+        UPDATE sf_scenario_records SET
+          scenario_id = ?, label = ?, description = ?, seed_scenario_id = ?,
+          is_seed = ?, is_baseline = ?, tags = ?, notes = ?,
+          current_version = ?, archived_at = ?, archived_reason = ?,
+          updated_at = ?
+        WHERE record_id = ?
+      `).run(
+        record.scenarioId,
+        record.label,
+        record.description ?? "",
+        record.seedScenarioId ?? null,
+        record.isSeed ? 1 : 0,
+        record.isBaseline ? 1 : 0,
+        tagsJson,
+        record.notes ?? "",
+        record.currentVersion ?? 0,
+        record.archivedAt ?? null,
+        record.archivedReason ?? null,
+        now,
+        record.recordId,
+      );
+    } else {
+      sqlite.prepare(`
+        INSERT INTO sf_scenario_records (
+          record_id, scenario_id, label, description, seed_scenario_id,
+          is_seed, is_baseline, tags, notes, current_version,
+          archived_at, archived_reason, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        record.recordId,
+        record.scenarioId,
+        record.label,
+        record.description ?? "",
+        record.seedScenarioId ?? null,
+        record.isSeed ? 1 : 0,
+        record.isBaseline ? 1 : 0,
+        tagsJson,
+        record.notes ?? "",
+        record.currentVersion ?? 0,
+        record.archivedAt ?? null,
+        record.archivedReason ?? null,
+        record.createdAt ?? now,
+        record.updatedAt ?? now,
+      );
+    }
+
+    // Versions — only insert ones we haven't seen.
+    if (Array.isArray(record.versions)) {
+      const haveVersion = sqlite.prepare(`SELECT 1 FROM sf_scenario_record_versions WHERE version_id = ?`);
+      const insertVersion = sqlite.prepare(`
+        INSERT INTO sf_scenario_record_versions
+          (version_id, scenario_record_id, version_number, payload, comment, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      for (const v of record.versions) {
+        if (!v || !v.versionId) continue;
+        if (haveVersion.get(v.versionId)) continue;
+        insertVersion.run(
+          v.versionId,
+          record.recordId,
+          v.versionNumber,
+          JSON.stringify(v.payload ?? {}),
+          v.comment ?? null,
+          v.createdAt ?? now,
+        );
+      }
+    }
+
+    // Snapshots — only insert new ones.
+    if (Array.isArray(record.snapshots)) {
+      const haveSnap = sqlite.prepare(`SELECT 1 FROM sf_scenario_snapshots WHERE snapshot_id = ?`);
+      const insertSnap = sqlite.prepare(`
+        INSERT INTO sf_scenario_snapshots
+          (snapshot_id, scenario_record_id, version_number, label, comment, payload, metrics, assumptions, engine_limited, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const snap of record.snapshots) {
+        if (!snap || !snap.snapshotId) continue;
+        if (haveSnap.get(snap.snapshotId)) continue;
+        insertSnap.run(
+          snap.snapshotId,
+          record.recordId,
+          snap.versionNumber ?? null,
+          snap.label ?? "Snapshot",
+          snap.comment ?? null,
+          JSON.stringify(snap.payload ?? {}),
+          JSON.stringify(snap.metrics ?? []),
+          JSON.stringify(snap.assumptions ?? []),
+          snap.engineLimited ? 1 : 0,
+          snap.createdAt ?? now,
+        );
+      }
+    }
+
+    return this.getScenarioRecord(record.recordId);
+  }
+
+  archiveScenarioRecord(recordId: string, reason: string | null = null): any | null {
+    const now = new Date().toISOString();
+    sqlite.prepare(`
+      UPDATE sf_scenario_records SET archived_at = ?, archived_reason = ?, updated_at = ?
+      WHERE record_id = ?
+    `).run(now, reason, now, recordId);
+    return this.getScenarioRecord(recordId);
+  }
+
+  restoreScenarioRecord(recordId: string): any | null {
+    const now = new Date().toISOString();
+    sqlite.prepare(`
+      UPDATE sf_scenario_records SET archived_at = NULL, archived_reason = NULL, updated_at = ?
+      WHERE record_id = ?
+    `).run(now, recordId);
+    return this.getScenarioRecord(recordId);
+  }
+
+  private _inflateScenarioRecord(row: any): any {
+    const versions = (sqlite.prepare(`
+      SELECT * FROM sf_scenario_record_versions
+      WHERE scenario_record_id = ?
+      ORDER BY version_number ASC
+    `).all(row.record_id) as any[]).map(v => ({
+      versionId: v.version_id,
+      scenarioRecordId: v.scenario_record_id,
+      versionNumber: v.version_number,
+      payload: safeParseJSON(v.payload, {}),
+      comment: v.comment ?? null,
+      createdAt: v.created_at,
+    }));
+    const snapshots = (sqlite.prepare(`
+      SELECT * FROM sf_scenario_snapshots
+      WHERE scenario_record_id = ?
+      ORDER BY created_at ASC
+    `).all(row.record_id) as any[]).map(s => ({
+      snapshotId: s.snapshot_id,
+      scenarioRecordId: s.scenario_record_id,
+      versionNumber: s.version_number ?? null,
+      label: s.label,
+      comment: s.comment ?? null,
+      createdAt: s.created_at,
+      payload: safeParseJSON(s.payload, {}),
+      metrics: safeParseJSON(s.metrics, []),
+      assumptions: safeParseJSON(s.assumptions, []),
+      engineLimited: !!s.engine_limited,
+    }));
+    return {
+      recordId: row.record_id,
+      scenarioId: row.scenario_id,
+      label: row.label,
+      description: row.description ?? "",
+      seedScenarioId: row.seed_scenario_id ?? null,
+      isSeed: !!row.is_seed,
+      isBaseline: !!row.is_baseline,
+      tags: safeParseJSON(row.tags, []),
+      notes: row.notes ?? "",
+      currentVersion: row.current_version ?? 0,
+      versions,
+      snapshots,
+      archivedAt: row.archived_at ?? null,
+      archivedReason: row.archived_reason ?? null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+}
+
+function safeParseJSON<T>(value: any, fallback: T): T {
+  if (value == null) return fallback;
+  if (typeof value !== "string") return value as T;
+  try { return JSON.parse(value) as T; } catch { return fallback; }
 }
 
 export const storage = new Storage();

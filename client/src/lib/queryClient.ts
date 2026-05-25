@@ -255,6 +255,60 @@ async function handleDemoRequest(method: string, path: string, body?: unknown): 
     if (m === "POST") { const item = { ...(body as any), id: Date.now(), created_at: new Date().toISOString() }; ds.scenarios.push(item); return item; }
   }
 
+  // ── Scenario records (Sprint 6 Phase 3) — demo mode: in-memory only.
+  if (path === "/api/scenario-records" || path.startsWith("/api/scenario-records?")) {
+    const dsAny = ds as any;
+    if (!Array.isArray(dsAny.scenarioRecords)) dsAny.scenarioRecords = [];
+    if (m === "GET")  return dsAny.scenarioRecords.filter((r: any) => !r.archivedAt);
+    if (m === "POST") {
+      const rec = body as any;
+      const existing = dsAny.scenarioRecords.findIndex((r: any) => r.recordId === rec.recordId);
+      if (existing >= 0) dsAny.scenarioRecords[existing] = rec;
+      else dsAny.scenarioRecords.push(rec);
+      return rec;
+    }
+  }
+  const recMatch = path.match(/^\/api\/scenario-records\/([^/]+)$/);
+  if (recMatch) {
+    const id = decodeURIComponent(recMatch[1]);
+    const dsAny = ds as any;
+    if (!Array.isArray(dsAny.scenarioRecords)) dsAny.scenarioRecords = [];
+    if (m === "GET")  return dsAny.scenarioRecords.find((r: any) => r.recordId === id) ?? null;
+    if (m === "PUT")  {
+      const rec = { ...(body as any), recordId: id };
+      const existing = dsAny.scenarioRecords.findIndex((r: any) => r.recordId === id);
+      if (existing >= 0) dsAny.scenarioRecords[existing] = rec;
+      else dsAny.scenarioRecords.push(rec);
+      return rec;
+    }
+  }
+  const recArchiveMatch = path.match(/^\/api\/scenario-records\/([^/]+)\/archive$/);
+  if (recArchiveMatch) {
+    const id = decodeURIComponent(recArchiveMatch[1]);
+    const dsAny = ds as any;
+    if (m === "POST") {
+      const rec = (dsAny.scenarioRecords ?? []).find((r: any) => r.recordId === id);
+      if (rec) {
+        rec.archivedAt = new Date().toISOString();
+        rec.archivedReason = (body as any)?.reason ?? null;
+      }
+      return rec ?? null;
+    }
+  }
+  const recRestoreMatch = path.match(/^\/api\/scenario-records\/([^/]+)\/restore$/);
+  if (recRestoreMatch) {
+    const id = decodeURIComponent(recRestoreMatch[1]);
+    const dsAny = ds as any;
+    if (m === "POST") {
+      const rec = (dsAny.scenarioRecords ?? []).find((r: any) => r.recordId === id);
+      if (rec) {
+        rec.archivedAt = null;
+        rec.archivedReason = null;
+      }
+      return rec ?? null;
+    }
+  }
+
   // ── Settings
   const settingsMatch2 = path.match(/^\/api\/settings\/(.+)$/);
   if (settingsMatch2) {
@@ -445,6 +499,31 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
   if (scenarioMatch) {
     const id = parseInt(scenarioMatch[1]);
     if (m === "DELETE") { await localStore.deleteScenario(id); return { success: true }; }
+  }
+
+  // ── Scenario Records (Sprint 6 Phase 3) ───────────────────────────────────
+  if (path === "/api/scenario-records" || path.startsWith("/api/scenario-records?")) {
+    if (m === "GET") {
+      const includeArchived = path.includes("includeArchived=true");
+      return await localStore.getScenarioRecords(includeArchived);
+    }
+    if (m === "POST") return await localStore.upsertScenarioRecord(body as any);
+  }
+  const recordMatch = path.match(/^\/api\/scenario-records\/([^/]+)$/);
+  if (recordMatch) {
+    const id = decodeURIComponent(recordMatch[1]);
+    if (m === "GET")  return await localStore.getScenarioRecord(id);
+    if (m === "PUT")  return await localStore.upsertScenarioRecord({ ...(body as any), recordId: id });
+  }
+  const recordArchiveMatch = path.match(/^\/api\/scenario-records\/([^/]+)\/archive$/);
+  if (recordArchiveMatch) {
+    const id = decodeURIComponent(recordArchiveMatch[1]);
+    if (m === "POST") return await localStore.archiveScenarioRecord(id, (body as any)?.reason ?? null);
+  }
+  const recordRestoreMatch = path.match(/^\/api\/scenario-records\/([^/]+)\/restore$/);
+  if (recordRestoreMatch) {
+    const id = decodeURIComponent(recordRestoreMatch[1]);
+    if (m === "POST") return await localStore.restoreScenarioRecord(id);
   }
 
   // ── Stock transactions ─────────────────────────────────────────────────────

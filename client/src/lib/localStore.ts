@@ -23,7 +23,7 @@
 
 import {
   sbSnapshot, sbExpenses, sbProperties, sbStocks, sbCrypto, sbTimeline, sbScenarios,
-  sbStockTx, sbCryptoTx, sbIncome, sbStockDCA, sbCryptoDCA,
+  sbStockTx, sbCryptoTx, sbIncome, sbStockDCA, sbCryptoDCA, sbScenarioRecords,
 } from "./supabaseClient";
 
 // ─── Safe number helper ───────────────────────────────────────────────────────
@@ -251,6 +251,8 @@ const KEYS = {
   income:     "sf_income_v1",
   stockDCA:   "sf_stock_dca_v1",
   cryptoDCA:  "sf_crypto_dca_v1",
+  // Sprint 6 Phase 3 — Scenario Persistence (records / versions / snapshots).
+  scenarioRecords: "sf_scenario_records_v1",
   // Per-property lifecycle override map { [id]: 'planned'|'under_contract'|'settled' }.
   // Acts as a durable shadow for the lifecycle_status column so an explicit
   // user selection survives reload/login even when the Supabase column has
@@ -1081,5 +1083,100 @@ export const localStore = {
       return saved;
     }
     return Promise.all(rows.map((r) => this.createIncomeRecord(r)));
+  },
+
+  // ─── Scenario Records (Sprint 6 Phase 3) ───────────────────────────────────
+  // Supabase-first reads/writes (sf_scenario_records + versions + snapshots),
+  // with localStorage cache fallback when Supabase is unreachable. The shape
+  // is the same as the server route — see scenarioPersistence.ts for the
+  // canonical type definitions.
+
+  async getScenarioRecords(includeArchived = false): Promise<any[]> {
+    try {
+      const rows = await sbScenarioRecords.listRecords(includeArchived);
+      if (rows.length > 0) {
+        lsSet(KEYS.scenarioRecords, rows);
+        console.log("[SF] Loaded from Supabase: scenario records", rows.length);
+        return rows;
+      }
+      const cached = lsGet<any[]>(KEYS.scenarioRecords) ?? [];
+      return includeArchived ? cached : cached.filter(r => !r.archivedAt);
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: scenario records", err);
+      const cached = lsGet<any[]>(KEYS.scenarioRecords) ?? [];
+      return includeArchived ? cached : cached.filter(r => !r.archivedAt);
+    }
+  },
+
+  async getScenarioRecord(recordId: string): Promise<any | null> {
+    try {
+      const row = await sbScenarioRecords.getRecord(recordId);
+      if (row) return row;
+    } catch (err) {
+      console.warn("[SF] Supabase error, fallback to local cache: scenario record", err);
+    }
+    const cached = lsGet<any[]>(KEYS.scenarioRecords) ?? [];
+    return cached.find(r => r.recordId === recordId) ?? null;
+  },
+
+  async upsertScenarioRecord(record: any): Promise<any> {
+    if (!record || typeof record.recordId !== "string") {
+      throw new Error("upsertScenarioRecord requires recordId");
+    }
+    let saved: any = null;
+    try {
+      saved = await sbScenarioRecords.upsertRecord(record);
+    } catch (err) {
+      console.warn("[SF] Supabase error during scenario record upsert", err);
+    }
+    const final = saved ?? record;
+    const cached = lsGet<any[]>(KEYS.scenarioRecords) ?? [];
+    const idx = cached.findIndex(r => r.recordId === final.recordId);
+    if (idx >= 0) cached[idx] = final;
+    else cached.push(final);
+    lsSet(KEYS.scenarioRecords, cached);
+    return final;
+  },
+
+  async archiveScenarioRecord(recordId: string, reason: string | null = null): Promise<any | null> {
+    let saved: any = null;
+    try {
+      saved = await sbScenarioRecords.archiveRecord(recordId, reason);
+    } catch (err) {
+      console.warn("[SF] Supabase error during scenario record archive", err);
+    }
+    const cached = lsGet<any[]>(KEYS.scenarioRecords) ?? [];
+    const idx = cached.findIndex(r => r.recordId === recordId);
+    if (idx >= 0) {
+      cached[idx] = saved ?? {
+        ...cached[idx],
+        archivedAt: new Date().toISOString(),
+        archivedReason: reason,
+      };
+      lsSet(KEYS.scenarioRecords, cached);
+      return cached[idx];
+    }
+    return saved;
+  },
+
+  async restoreScenarioRecord(recordId: string): Promise<any | null> {
+    let saved: any = null;
+    try {
+      saved = await sbScenarioRecords.restoreRecord(recordId);
+    } catch (err) {
+      console.warn("[SF] Supabase error during scenario record restore", err);
+    }
+    const cached = lsGet<any[]>(KEYS.scenarioRecords) ?? [];
+    const idx = cached.findIndex(r => r.recordId === recordId);
+    if (idx >= 0) {
+      cached[idx] = saved ?? {
+        ...cached[idx],
+        archivedAt: null,
+        archivedReason: null,
+      };
+      lsSet(KEYS.scenarioRecords, cached);
+      return cached[idx];
+    }
+    return saved;
   },
 };

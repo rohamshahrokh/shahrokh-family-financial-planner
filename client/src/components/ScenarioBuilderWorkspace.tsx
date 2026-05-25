@@ -39,6 +39,11 @@ import {
   type CompareMode,
   type ScenarioMetricKey,
 } from "@/lib/scenarioBuilderWorkspace";
+import {
+  useScenarioPersistence,
+  type UseScenarioPersistenceResult,
+} from "@/hooks/useScenarioPersistence";
+import { ScenarioPersistencePanel } from "@/components/ScenarioPersistencePanel";
 
 /* ─── Props ────────────────────────────────────────────────────────────── */
 
@@ -48,6 +53,10 @@ export interface ScenarioBuilderWorkspaceProps {
   monteCarloOutputs?: MonteCarloResult | null;
   /** Optional initial state injection — used by tests/server rendering. */
   initialState?: BuilderState;
+  /** Optional persistence hook result injection — used by tests. */
+  persistenceOverride?: UseScenarioPersistenceResult;
+  /** Skip auto-load of saved scenarios on mount (tests / SSR). */
+  skipPersistenceAutoLoad?: boolean;
   className?: string;
 }
 
@@ -390,6 +399,22 @@ function ScenarioRowCard({ result, scenarioId, mode }: ScenarioRowCardProps) {
 export function ScenarioBuilderWorkspace(props: ScenarioBuilderWorkspaceProps) {
   const [state, setState] = useState<BuilderState>(() => props.initialState ?? makeInitialBuilderState());
 
+  // Sprint 6 Phase 3 — persistence. The hook auto-loads saved records on mount
+  // (unless skipped). When a record set is returned, hydrate the local state
+  // once so newly persisted scenarios appear in the workspace.
+  const internalPersistence = useScenarioPersistence({
+    skipAutoLoad: !!props.skipPersistenceAutoLoad || !!props.persistenceOverride,
+  });
+  const persistence = props.persistenceOverride ?? internalPersistence;
+  const hydratedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (hydratedRef.current) return;
+    if (persistence.status === "saved" && persistence.records.length > 0) {
+      setState(prev => persistence.hydrateState(prev));
+      hydratedRef.current = true;
+    }
+  }, [persistence.status, persistence.records, persistence.hydrateState]);
+
   const result = useMemo(
     () =>
       buildBuilderCompareResult(state, props.canonicalLedger, {
@@ -477,23 +502,67 @@ export function ScenarioBuilderWorkspace(props: ScenarioBuilderWorkspaceProps) {
         </div>
       ) : null}
 
+      {/* Persistence status badge — top-level */}
+      <div
+        className="flex items-center justify-between gap-2 rounded border border-border bg-card px-3 py-1.5"
+        data-testid="scenario-builder-persistence-bar"
+        data-status={persistence.status}
+        data-fallback={persistence.fallback ? "true" : "false"}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Persistence</span>
+          <span
+            className={`text-[10px] px-1.5 py-0.5 rounded border ${persistence.fallback
+              ? "bg-amber-500/10 border-amber-500/40 text-amber-600 dark:text-amber-400"
+              : "bg-emerald-500/10 border-emerald-500/40 text-emerald-600 dark:text-emerald-400"}`}
+            data-testid="scenario-builder-persistence-bar-status"
+          >
+            {persistence.fallback ? "Local fallback" : "Supabase synced"}
+          </span>
+          <span
+            className="text-[10px] text-muted-foreground tabular-nums"
+            data-testid="scenario-builder-persistence-bar-count"
+          >
+            {persistence.records.length} saved
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => { void persistence.refresh(); }}
+          className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-muted"
+          data-testid="scenario-builder-persistence-bar-refresh"
+        >
+          Refresh
+        </button>
+      </div>
+
       {/* Editors — left/top column */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3" data-testid="scenario-builder-editors">
-        {state.scenarios.map(s => (
-          <ScenarioEditor
-            key={s.id}
-            scenario={s}
-            isBaseline={state.baselineScenarioId === s.id}
-            onRename={(label) => onRename(s.id, label)}
-            onClone={() => onClone(s.id)}
-            onDelete={() => onDelete(s.id)}
-            onSetBaseline={() => onSetBaseline(s.id)}
-            onPatchProperty={(patch) => setState(prev => updatePropertyInputs(prev, s.id, patch))}
-            onPatchInvestments={(patch) => setState(prev => updateInvestmentInputs(prev, s.id, patch))}
-            onPatchCashflow={(patch) => setState(prev => updateCashflowInputs(prev, s.id, patch))}
-            onPatchGoals={(patch) => setState(prev => updateGoalInputs(prev, s.id, patch))}
-          />
-        ))}
+        {state.scenarios.map(s => {
+          const entry = result.scenarios.find(r => r.scenario.id === s.id) ?? null;
+          return (
+            <div key={s.id} className="flex flex-col gap-2">
+              <ScenarioEditor
+                scenario={s}
+                isBaseline={state.baselineScenarioId === s.id}
+                onRename={(label) => onRename(s.id, label)}
+                onClone={() => onClone(s.id)}
+                onDelete={() => onDelete(s.id)}
+                onSetBaseline={() => onSetBaseline(s.id)}
+                onPatchProperty={(patch) => setState(prev => updatePropertyInputs(prev, s.id, patch))}
+                onPatchInvestments={(patch) => setState(prev => updateInvestmentInputs(prev, s.id, patch))}
+                onPatchCashflow={(patch) => setState(prev => updateCashflowInputs(prev, s.id, patch))}
+                onPatchGoals={(patch) => setState(prev => updateGoalInputs(prev, s.id, patch))}
+              />
+              <ScenarioPersistencePanel
+                scenario={s}
+                entry={entry}
+                persistence={persistence}
+                isBaseline={state.baselineScenarioId === s.id}
+              />
+            </div>
+          );
+        })}
       </div>
 
       {/* Compare table — desktop */}
