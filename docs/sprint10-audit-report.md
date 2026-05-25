@@ -80,6 +80,8 @@ Pipeline (in order):
 | `gap[monthlyContribution].actual` | `sprint7.scenarios[best].metrics.requiredMonthlyContribution.value` |
 | `gap[risk].actual` | `sprint7.scenarios[best].metrics.riskScore.value` |
 | `gap[liquidity].actual` | `sprint7.scenarios[best].metrics.liquidityPosition.value` |
+| `gap[portfolioValue].actual` | Canonical investable-assets aggregate (PPOR excluded): `canonicalLedger.snapshot.cash + canonicalLedger.snapshot.offset_balance + dashboardDataContract.selectSuperCombined + dashboardDataContract.selectStocksTotal + dashboardDataContract.selectCryptoTotal + (dashboardDataContract.selectIpCurrentValueSettled − dashboardDataContract.selectIpLoanBalanceSettled)` |
+| `gap[retirementYear].actual` | `sprint9.bestStrategy.fireYearBand.p50` |
 | `requiredInputs.requiredMonthlyDCA` | `sprint7.scenarios[source].metrics.requiredMonthlyContribution.value` |
 | `requiredInputs.requiredAdditionalCapital` | `max(0, sprint7.scenarios[source].metrics.requiredAssetBase.value − canonicalFire.netWorthNow)` |
 | `requiredInputs.requiredAdditionalProperties` | `max(0, target − sprint7.scenarios[source].dimensions.property)` |
@@ -126,7 +128,7 @@ introduce a new forecast.
 
 ## Test Results
 
-`script/test-sprint10-goal-solver-pro.ts` — 20 sections, 830 assertions, 100% pass.
+`script/test-sprint10-goal-solver-pro.ts` — 22 sections, 846 assertions, 100% pass.
 
 | Section | Description |
 |---|---|
@@ -150,6 +152,8 @@ introduce a new forecast.
 | §18 | React SSR — all required `goal-solver-*` testids present |
 | §19 | Optimization search returns coherent (and distinct where possible) objectives |
 | §20 | `howCalculated` strings non-empty + reference an engine name |
+| §21 | Q3 regression: `gap[portfolioValue].actual` is identical across two fixtures with identical investable assets but different PPOR equity — PPOR equity does not leak in |
+| §22 | Q3 regression: `gap[portfolioValue].actual` is no longer pointer-equivalent to `sprint9.bestStrategy.netWorthBand.p50` (the prior proxy) |
 
 ## Screenshot Inventory
 
@@ -177,3 +181,65 @@ introduce a new forecast.
 * **Required Savings Rate** is the **ratio** `requiredMonthlyDCA / household
   monthly income`. This is a derived ratio, not a new forecast; both
   components are direct reads.
+
+## Q3 Fix — `targetPortfolioValue` Now Routes Through Canonical Investable-Assets Aggregate
+
+The independent verification audit (v1) raised a finding against the prior
+`targetPortfolioValue` implementation, which proxied
+`sprint9.bestStrategy.netWorthBand.p50`. That proxy included PPOR equity, so a
+household whose PPOR appreciation pushed net worth past a portfolio target
+could be reported as having satisfied the target even though their liquid
+investable assets fell short.
+
+The replacement (this commit) computes `gap[portfolioValue].actual` as the
+**canonical investable-assets aggregate**:
+
+```
+cash
++ offset_balance
++ selectSuperCombined(canonicalLedger)
++ selectStocksTotal(canonicalLedger)
++ selectCryptoTotal(canonicalLedger)
++ (selectIpCurrentValueSettled(canonicalLedger) − selectIpLoanBalanceSettled(canonicalLedger))
+```
+
+Properties of the new implementation:
+
+* **PPOR equity is excluded.** No path through the aggregate sums
+  `snapshot.ppor − snapshot.mortgage`.
+* **Investment-property equity is included** through the canonical
+  `selectIpCurrentValueSettled` / `selectIpLoanBalanceSettled` selector pair —
+  i.e. settled investment properties' equity counts toward portfolio value.
+* **No new growth formula.** Every component is either a snapshot scalar or a
+  canonical `dashboardDataContract` selector that already exists in the
+  codebase. No `(1+r)^n` compounding, no new tax math, no synthesized
+  projection. Canonical-engine discipline is preserved.
+* **Point-in-time, not projected.** Sprint 9 does not currently expose an
+  investable-only band (only `netWorthBand` / `netWorthFan`). Surfacing
+  today's canonical investable-assets value rather than inventing a
+  projection is consistent with the "no new math" rule. If a future Sprint
+  adds a projected investable-only band, this site can be migrated trivially
+  (the audit string explicitly names the source).
+* **Audit string names the exact source path.** `gap[portfolioValue].audit.howCalculated`
+  reads: *"Canonical investable-assets aggregate = snapshot.cash +
+  snapshot.offset_balance + selectSuperCombined + selectStocksTotal +
+  selectCryptoTotal + (selectIpCurrentValueSettled − selectIpLoanBalanceSettled).
+  PPOR equity excluded."* and `audit.inputsUsed` enumerates each canonical
+  field.
+* **Regression test guard.** `script/test-sprint10-goal-solver-pro.ts` §21
+  builds two fixtures with identical investable assets but different PPOR
+  equity (\$800k vs \$5m PPOR) and asserts that the resulting
+  `gap[portfolioValue].actual` values are identical — i.e. PPOR magnitude
+  has zero effect on `targetPortfolioValue`. §22 asserts the value is no
+  longer pointer-equivalent to `sprint9.bestStrategy.netWorthBand.p50`.
+
+Co-changes:
+
+* A small `snapshotNumber(snap, key)` helper was added to `goalSolverPro.ts`
+  and every untyped `Number(snap["key"] ?? 0)` read was replaced. This
+  eliminates the typed-index risk flagged as Q2 in the v1 audit.
+* The previously-unused `sprint8Result` field on `GoalSolverProInputs` is
+  now consumed in the feasibility audit string: when a Sprint 8 robust score
+  is present, it is surfaced as a cross-check via
+  `feasibility.audit.confidenceSource`. Sprint 8 is otherwise still a
+  passive cross-validator.

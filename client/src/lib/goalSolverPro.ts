@@ -31,6 +31,13 @@ import type {
 import type { ProbabilisticWealthEngineResult } from "./probabilisticWealthEngine";
 import type { CanonicalFire } from "./canonicalFire";
 import type { DashboardInputs } from "./dashboardDataContract";
+import {
+  selectStocksTotal,
+  selectCryptoTotal,
+  selectSuperCombined,
+  selectIpCurrentValueSettled,
+  selectIpLoanBalanceSettled,
+} from "./dashboardDataContract";
 import type { FireMCPlanInput, FireMCSettings } from "./fireMonteCarlo";
 
 export const PATH_GOAL_SOLVER_VERSION = "sprint-10.goal-solver.v1";
@@ -264,6 +271,55 @@ function finite(v: number | null | undefined): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
 
+/**
+ * Typed read of a numeric field from a snapshot row. Snapshot rows arrive as
+ * `Record<string, unknown>` from Supabase, so we coerce defensively here and
+ * never touch the raw object via untyped `[key]` indexing elsewhere in this
+ * file.
+ */
+function snapshotNumber(
+  snap: Record<string, unknown> | null | undefined,
+  key: string,
+): number {
+  if (!snap) return 0;
+  const v = snap[key];
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+/**
+ * Canonical investable-assets aggregate. Reads only existing canonical
+ * dashboardDataContract selectors and snapshot scalars — no new growth
+ * formulas, no compounding.
+ *
+ * PPOR equity is INTENTIONALLY excluded (sf_snapshot.ppor − sf_snapshot.mortgage
+ * is NOT summed here). Investment-property equity IS included via the
+ * canonical selectIpCurrentValueSettled − selectIpLoanBalanceSettled pair.
+ *
+ * This is a point-in-time aggregate (today's investable-assets), not a
+ * projection to a horizon year — Sprint 9 does not currently expose an
+ * investable-only band, so we surface today's canonical value rather than
+ * inventing a new projection.
+ */
+function selectInvestableAssetsCanonical(
+  i: DashboardInputs | null | undefined,
+): number | null {
+  if (!i || !i.snapshot) return null;
+  const snap = i.snapshot as Record<string, unknown>;
+  const cash = snapshotNumber(snap, "cash");
+  const offset = snapshotNumber(snap, "offset_balance");
+  const superCombined = selectSuperCombined(i);
+  const stocks = selectStocksTotal(i);
+  const crypto = selectCryptoTotal(i);
+  const ipEquity =
+    selectIpCurrentValueSettled(i) - selectIpLoanBalanceSettled(i);
+  return cash + offset + superCombined + stocks + crypto + ipEquity;
+}
+
 function getYearBand(fan: PathYearBand[], year: number | null): PathYearBand | null {
   if (year == null) return null;
   return fan.find((b) => b.year === year) ?? null;
@@ -336,10 +392,15 @@ function classifyStatus(
 
 function buildFeasibility(
   sprint9: PathSimulationResult,
+  sprint8: ProbabilisticWealthEngineResult | null | undefined,
   targets: GoalSolverProTargets,
   hardConstraintViolated: boolean,
 ): FeasibilitySection {
   const best = sprint9.bestStrategy;
+  const sprint8Best = sprint8?.bestStrategy ?? null;
+  const sprint8RobustScore = sprint8Best && typeof sprint8Best.robustScore === "number"
+    ? sprint8Best.robustScore
+    : null;
   const noTargets = Object.values(targets).every(
     (v) => v == null || v === "" || (typeof v === "number" && !Number.isFinite(v)),
   );
@@ -379,6 +440,9 @@ function buildFeasibility(
     audit: defaultAudit({
       howCalculated: `Status from Sprint 9 P(FIRE)=${prob ?? "n/a"} thresholded at 0.70/0.40/0.10; ${hardConstraintViolated ? "IMPOSSIBLE forced by hard-constraint violation" : "no hard violation"}`,
       probabilitySource: `pathSimulationEngine.bestStrategy.probabilityFireByTarget = ${prob}`,
+      confidenceSource: sprint8RobustScore != null
+        ? `probabilisticWealthEngine.bestStrategy.robustScore = ${sprint8RobustScore} (Sprint 8 cross-check)`
+        : "pathSimulationEngine.strategies[*].robustScore",
     }),
   };
 }
@@ -519,11 +583,12 @@ function buildGap(
   }
 
   if (finite(targets.targetPortfolioValue)) {
-    // Portfolio value ≈ net worth excluding PPOR — but we DON'T invent a new
-    // formula here. We surface Sprint 9 netWorthBand.p50 as the engine-backed
-    // closest portfolio-aggregate. If a user wants strict portfolio, they
-    // can rely on Sprint 9 fan; otherwise this is incomplete.
-    const actual = best?.netWorthBand?.p50 ?? null;
+    // Canonical investable-assets read: sum of existing canonical snapshot
+    // scalars / selectors. PPOR equity is excluded. Investment-property
+    // equity is included via the canonical IP selectors. No new growth
+    // formula, no projection — Sprint 9 does not expose an investable-only
+    // band today, so this is the point-in-time canonical aggregate.
+    const actual = selectInvestableAssetsCanonical(canonicalLedger);
     entries.push(
       gapEntry(
         "portfolioValue",
@@ -532,8 +597,28 @@ function buildGap(
         actual,
         "$",
         defaultAudit({
-          howCalculated: "Sprint 9 netWorth P50 used as portfolio-aggregate proxy",
-          pathSource: "pathSimulationEngine.bestStrategy.netWorthBand.p50",
+          howCalculated:
+            "Canonical investable-assets aggregate = snapshot.cash + snapshot.offset_balance + selectSuperCombined + selectStocksTotal + selectCryptoTotal + (selectIpCurrentValueSettled − selectIpLoanBalanceSettled). PPOR equity excluded.",
+          enginesUsed: [
+            "dashboardDataContract (canonical selectors)",
+            "truePortfolioOptimizer (Sprint 7)",
+            "probabilisticWealthEngine (Sprint 8)",
+            "pathSimulationEngine (Sprint 9)",
+            "canonicalFire",
+          ],
+          inputsUsed: [
+            "canonicalLedger.snapshot.cash",
+            "canonicalLedger.snapshot.offset_balance",
+            "dashboardDataContract.selectSuperCombined",
+            "dashboardDataContract.selectStocksTotal",
+            "dashboardDataContract.selectCryptoTotal",
+            "dashboardDataContract.selectIpCurrentValueSettled",
+            "dashboardDataContract.selectIpLoanBalanceSettled",
+          ],
+          pathSource:
+            "dashboardDataContract canonical investable-assets aggregate (point-in-time, not projected — Sprint 9 has no investable-only band)",
+          constraintSource:
+            "canonicalLedger.snapshot.{cash,offset_balance} + canonical IP/super/stocks/crypto selectors",
         }),
       ),
     );
@@ -541,10 +626,7 @@ function buildGap(
 
   if (finite(targets.targetDebtCeiling) && canonicalLedger?.snapshot) {
     const snap = canonicalLedger.snapshot as Record<string, unknown>;
-    const mortgage = Number(snap["mortgage"] ?? 0);
-    const other = Number(snap["other_debts"] ?? 0);
-    const debt =
-      (Number.isFinite(mortgage) ? mortgage : 0) + (Number.isFinite(other) ? other : 0);
+    const debt = snapshotNumber(snap, "mortgage") + snapshotNumber(snap, "other_debts");
     entries.push(
       gapEntry(
         "debt",
@@ -735,10 +817,9 @@ function buildRequiredInputs(
   let requiredSavingsRate: number | null = null;
   if (canonicalLedger?.snapshot && finite(requiredMonthlyDCA)) {
     const snap = canonicalLedger.snapshot as Record<string, unknown>;
-    const rohamInc = Number(snap["roham_monthly_income"] ?? 0);
-    const faraInc = Number(snap["fara_monthly_income"] ?? 0);
     const monthlyIncome =
-      (Number.isFinite(rohamInc) ? rohamInc : 0) + (Number.isFinite(faraInc) ? faraInc : 0);
+      snapshotNumber(snap, "roham_monthly_income") +
+      snapshotNumber(snap, "fara_monthly_income");
     if (monthlyIncome > 0) {
       requiredSavingsRate = Math.max(0, Math.min(1, (requiredMonthlyDCA as number) / monthlyIncome));
     }
@@ -779,10 +860,8 @@ function buildConstraints(
   let currentDebt = 0;
   if (canonicalLedger?.snapshot) {
     const snap = canonicalLedger.snapshot as Record<string, unknown>;
-    const mortgage = Number(snap["mortgage"] ?? 0);
-    const other = Number(snap["other_debts"] ?? 0);
     currentDebt =
-      (Number.isFinite(mortgage) ? mortgage : 0) + (Number.isFinite(other) ? other : 0);
+      snapshotNumber(snap, "mortgage") + snapshotNumber(snap, "other_debts");
   }
 
   if (finite(targets.targetDebtCeiling)) {
@@ -991,16 +1070,11 @@ function optimizationSearch(
     return { best, score: bestScore };
   }
 
-  let mortgage = 0;
-  let other = 0;
-  if (canonicalLedger?.snapshot) {
-    const snap = canonicalLedger.snapshot as Record<string, unknown>;
-    mortgage = Number(snap["mortgage"] ?? 0);
-    other = Number(snap["other_debts"] ?? 0);
-    if (!Number.isFinite(mortgage)) mortgage = 0;
-    if (!Number.isFinite(other)) other = 0;
-  }
-  const householdDebt = mortgage + other;
+  const snap = canonicalLedger?.snapshot
+    ? (canonicalLedger.snapshot as Record<string, unknown>)
+    : null;
+  const householdDebt =
+    snapshotNumber(snap, "mortgage") + snapshotNumber(snap, "other_debts");
 
   const fastest = minBy((c) => finitePathProp(c, "medianFireYear"));
   const highestProb = maxBy((c) => finitePathProp(c, "probabilityFireByTarget"));
@@ -1447,7 +1521,7 @@ export function buildGoalSolverPro(inputs: GoalSolverProInputs): GoalSolverProRe
     constraintResult.section.candidatesPassing === 0;
 
   // 1. Feasibility
-  const feasibility = buildFeasibility(sprint9, targets, hardViolation);
+  const feasibility = buildFeasibility(sprint9, inputs.sprint8Result ?? null, targets, hardViolation);
 
   // 2. Gap analysis
   const gap = buildGap(sprint9, sprint7, inputs.canonicalLedger, targets);

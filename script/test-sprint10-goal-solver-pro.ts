@@ -24,6 +24,8 @@
  *   §18  React SSR — GoalSolverProSection renders with all required testids
  *   §19  Optimization search: fastest / highestProb / lowestRisk / hybrid coherent
  *   §20  howCalculated strings non-empty + reference at least one engine name
+ *   §21  Q3 regression: targetPortfolioValue excludes PPOR equity (canonical investable-assets)
+ *   §22  Q3 regression: portfolioValue no longer pointer-equivalent to Sprint 9 netWorthBand.p50
  *
  * Target: ≥ 300 assertions.
  *
@@ -690,6 +692,147 @@ console.log("\n§20  howCalculated strings reference engines");
     // Constraints
     ok(`constraints.audit.howCalculated non-empty`, r.constraints.audit.howCalculated.length > 0);
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §21 — targetPortfolioValue excludes PPOR equity (Q3 fix regression guard)
+ *
+ *      Two fixtures with IDENTICAL investable assets but DIFFERENT PPOR
+ *      equity must yield IDENTICAL gap[portfolioValue].actual.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+console.log("\n§21  targetPortfolioValue excludes PPOR (Q3 regression)");
+{
+  // Fixture A — modest PPOR
+  const SNAP_PPOR_LOW = {
+    ...FIXTURE_SNAPSHOT_RICH,
+    ppor: 800_000,
+    mortgage: 400_000, // PPOR equity = 400k
+  };
+  const FIXTURE_PPOR_LOW: DashboardInputs = {
+    ...FIXTURE_RICH,
+    snapshot: SNAP_PPOR_LOW,
+  };
+
+  // Fixture B — much larger PPOR but every investable scalar is identical
+  const SNAP_PPOR_HIGH = {
+    ...FIXTURE_SNAPSHOT_RICH,
+    ppor: 5_000_000,
+    mortgage: 400_000, // PPOR equity = 4.6m
+  };
+  const FIXTURE_PPOR_HIGH: DashboardInputs = {
+    ...FIXTURE_RICH,
+    snapshot: SNAP_PPOR_HIGH,
+  };
+
+  const stackLow = buildStack(FIXTURE_PPOR_LOW);
+  const stackHigh = buildStack(FIXTURE_PPOR_HIGH);
+
+  const targets: GoalSolverProTargets = { targetPortfolioValue: 1_000_000 };
+
+  const rLow = buildGoalSolverPro({
+    canonicalLedger: FIXTURE_PPOR_LOW,
+    canonicalFire: stackLow.canonicalFire,
+    sprint7Result: stackLow.sprint7,
+    sprint8Result: stackLow.sprint8,
+    sprint9Result: stackLow.sprint9,
+    targets,
+    seed: DEFAULT_GOAL_SOLVER_SEED,
+  });
+  const rHigh = buildGoalSolverPro({
+    canonicalLedger: FIXTURE_PPOR_HIGH,
+    canonicalFire: stackHigh.canonicalFire,
+    sprint7Result: stackHigh.sprint7,
+    sprint8Result: stackHigh.sprint8,
+    sprint9Result: stackHigh.sprint9,
+    targets,
+    seed: DEFAULT_GOAL_SOLVER_SEED,
+  });
+
+  const gLow = rLow.gap.entries.find((e) => e.field === "portfolioValue");
+  const gHigh = rHigh.gap.entries.find((e) => e.field === "portfolioValue");
+  ok("§21: portfolioValue gap entry present (low PPOR)", !!gLow);
+  ok("§21: portfolioValue gap entry present (high PPOR)", !!gHigh);
+  ok(
+    `§21: gap[portfolioValue].actual IDENTICAL across PPOR variants (low=${gLow?.actual}, high=${gHigh?.actual})`,
+    gLow?.actual === gHigh?.actual,
+  );
+  ok(
+    "§21: gap[portfolioValue].actual is a finite number (not null)",
+    typeof gLow?.actual === "number" && Number.isFinite(gLow.actual),
+  );
+
+  // Manual canonical investable-assets ground truth (cash+offset+super+stocks+crypto+IP-equity).
+  // FIXTURE_SNAPSHOT_RICH has no properties[], so IP equity = 0.
+  const expected =
+    SNAP_PPOR_LOW.cash +
+    SNAP_PPOR_LOW.offset_balance +
+    SNAP_PPOR_LOW.super_balance +
+    (SNAP_PPOR_LOW.stocks ?? 0) +
+    (SNAP_PPOR_LOW.crypto ?? 0);
+  ok(
+    `§21: actual == cash+offset+super+stocks+crypto+IP-equity (=${expected})`,
+    gLow?.actual === expected,
+  );
+
+  // Audit string must name the canonical source explicitly.
+  const how = gLow?.audit.howCalculated ?? "";
+  ok("§21: audit names canonical investable aggregate", how.includes("investable-assets"));
+  ok("§21: audit explicitly excludes PPOR", how.includes("PPOR"));
+  ok(
+    "§21: audit.inputsUsed lists selectStocksTotal",
+    (gLow?.audit.inputsUsed ?? []).some((s) => s.includes("selectStocksTotal")),
+  );
+  ok(
+    "§21: audit.inputsUsed lists selectIpCurrentValueSettled",
+    (gLow?.audit.inputsUsed ?? []).some((s) => s.includes("selectIpCurrentValueSettled")),
+  );
+  ok(
+    "§21: audit.inputsUsed lists selectSuperCombined",
+    (gLow?.audit.inputsUsed ?? []).some((s) => s.includes("selectSuperCombined")),
+  );
+  ok(
+    "§21: audit.inputsUsed lists snapshot.cash",
+    (gLow?.audit.inputsUsed ?? []).some((s) => s.includes("snapshot.cash")),
+  );
+  ok(
+    "§21: audit.inputsUsed does NOT mention ppor",
+    !(gLow?.audit.inputsUsed ?? []).some((s) => /ppor/i.test(s)),
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * §22 — targetPortfolioValue is no longer pointer-equivalent to Sprint 9
+ *      netWorthBand.p50 (Q3 fix: replaces the prior proxy).
+ * ═══════════════════════════════════════════════════════════════════════════ */
+console.log("\n§22  portfolioValue no longer proxies netWorthBand.p50");
+{
+  const { sprint7, sprint8, sprint9, canonicalFire } = buildStack(FIXTURE_RICH);
+  const r = buildGoalSolverPro({
+    canonicalLedger: FIXTURE_RICH,
+    canonicalFire,
+    sprint7Result: sprint7,
+    sprint8Result: sprint8,
+    sprint9Result: sprint9,
+    targets: { targetPortfolioValue: 1_000_000, targetNetWorth: 1_000_000 },
+    seed: DEFAULT_GOAL_SOLVER_SEED,
+  });
+  const portfolio = r.gap.entries.find((e) => e.field === "portfolioValue");
+  const netWorth = r.gap.entries.find((e) => e.field === "netWorth");
+  ok("§22: portfolioValue entry present", !!portfolio);
+  ok("§22: netWorth entry present", !!netWorth);
+  // FIXTURE_RICH has a PPOR worth 1.51m and large mortgage — the two values
+  // should differ once PPOR equity is excluded from portfolioValue.
+  ok(
+    `§22: gap[portfolioValue].actual !== gap[netWorth].actual (portfolio=${portfolio?.actual}, netWorth=${netWorth?.actual})`,
+    portfolio?.actual !== netWorth?.actual,
+  );
+  // The portfolio actual must NOT be a pointer-equal read of Sprint 9
+  // netWorthBand.p50 (the prior proxy).
+  const sprint9P50 = sprint9.bestStrategy?.netWorthBand?.p50 ?? null;
+  ok(
+    `§22: portfolio actual !== sprint9.bestStrategy.netWorthBand.p50 (p50=${sprint9P50})`,
+    portfolio?.actual !== sprint9P50,
+  );
 }
 
 /* ─── Summary ──────────────────────────────────────────────────────── */

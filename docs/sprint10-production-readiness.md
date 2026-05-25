@@ -19,8 +19,8 @@ distributions, `canonicalFire`, or `canonicalLedger`.
 | Check | Result |
 |---|---|
 | Type check (Sprint 10 files only) | ✅ 0 errors |
-| Client build (`npm run build:client`) | ✅ Build succeeds, 18.85s |
-| Regression test (`npm run test:sprint-10`) | ✅ 830/830 (20 sections) |
+| Client build (`npm run build:client`) | ✅ Build succeeds |
+| Regression test (`npm run test:sprint-10`) | ✅ 846/846 (22 sections, incl. Q3 regression §21–§22) |
 | Sprint 7 mutation check | ✅ Untouched |
 | Sprint 8 mutation check | ✅ Untouched |
 | Sprint 9 mutation check | ✅ Untouched |
@@ -67,12 +67,16 @@ Sprint 10 inherits. Goal Solver itself adds < 5 ms to a fresh page load.
    a per-year breakdown.** Years are read directly from `dimensions.propertyYear`
    and `netWorthFan[year]`. If a strategy expresses a phased plan that
    neither Sprint 7 nor Sprint 9 exposes, that phasing is not surfaced.
-3. **`targetPortfolioValue` uses Sprint 9 `netWorthBand.p50` as its proxy**
-   — there is no separate "portfolio value excluding PPOR" engine output,
-   and Sprint 10 deliberately refuses to invent one.
-4. **`requiredSavingsRate` is a derived ratio**, not an engine-native field.
+3. **`requiredSavingsRate` is a derived ratio**, not an engine-native field.
    It surfaces `requiredMonthlyDCA / monthly household income` for UI clarity.
    Documented in the audit report under "Honest Framing".
+4. **`targetPortfolioValue` is a point-in-time canonical investable-assets
+   read, not a projection.** Sprint 9 exposes only a full-net-worth band
+   today; there is no investable-only fan. Sprint 10 surfaces the canonical
+   present-day investable-assets aggregate (cash + offset + super + stocks +
+   crypto + IP equity; PPOR equity excluded) rather than inventing a new
+   projection. The audit string and `inputsUsed` array name every source
+   field. See `docs/sprint10-audit-report.md` § "Q3 Fix" for details.
 
 ## Rollback Plan
 
@@ -96,8 +100,8 @@ existing positions.
 - [x] Default seed = 10
 - [x] `client/src/components/GoalSolverProSection.tsx` exists with required testids
 - [x] Mounted in `TruePortfolioOptimizer.tsx` between Sprint 8 and Sprint 9 (above `PathSimulationSection`)
-- [x] `script/test-sprint10-goal-solver-pro.ts` runs and passes ≥ 300 assertions (actual: 830)
-- [x] All 20 test sections present and passing
+- [x] `script/test-sprint10-goal-solver-pro.ts` runs and passes ≥ 300 assertions (actual: 846)
+- [x] All 22 test sections present and passing (incl. Q3 regression §21–§22)
 - [x] `npm run test:sprint-10` script wired in `package.json`
 - [x] Type-check passes (Sprint 10 files only) — no new errors
 - [x] `npm run build:client` succeeds
@@ -110,6 +114,10 @@ existing positions.
 
 ## Merge Recommendation
 
-**READY** — Sprint 10 is purely additive, fully covered by 830 assertions across
-20 sections, and does not mutate any upstream engine. It builds successfully
-and renders cleanly in both rich and empty states.
+**HOLD — DRAFT only.** Sprint 10 is purely additive, fully covered by 846
+assertions across 22 sections, builds successfully and renders cleanly in
+both rich and empty states. The Q3 finding (PPOR equity leaking into
+`targetPortfolioValue`) is fixed and guarded by §21–§22 regression
+assertions. Per the engagement instructions, PR #81 stays **DRAFT** pending
+the independent verification audit v2 outcome — only after the audit
+re-runs and Q3 reports PASS is the PR cleared for merge.
