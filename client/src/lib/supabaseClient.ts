@@ -329,6 +329,204 @@ export const sbScenarios = {
   },
 };
 
+// ─── Scenario Records (Sprint 6 Phase 3 — persistence) ────────────────────────
+// Reads/writes the three Supabase tables added in
+// sql/migration_scenario_persistence.sql:
+//   - sf_scenario_records
+//   - sf_scenario_record_versions
+//   - sf_scenario_snapshots
+// Server-side mirror lives in server/storage.ts (SQLite); the schemas match.
+
+async function sbScenarioRecordsListRecords(includeArchived: boolean): Promise<any[]> {
+  const q = includeArchived ? "order=updated_at.desc" : "archived_at=is.null&order=updated_at.desc";
+  return sbGet("sf_scenario_records", q);
+}
+
+async function sbScenarioRecordsListVersions(recordId: string): Promise<any[]> {
+  return sbGet(
+    "sf_scenario_record_versions",
+    `scenario_record_id=eq.${encodeURIComponent(recordId)}&order=version_number.asc`,
+  );
+}
+
+async function sbScenarioRecordsListSnapshots(recordId: string): Promise<any[]> {
+  return sbGet(
+    "sf_scenario_snapshots",
+    `scenario_record_id=eq.${encodeURIComponent(recordId)}&order=created_at.asc`,
+  );
+}
+
+function rowToRecord(row: any, versions: any[], snapshots: any[]): any {
+  const safe = (raw: any, fallback: any) => {
+    if (raw == null) return fallback;
+    if (typeof raw !== "string") return raw;
+    try { return JSON.parse(raw); } catch { return fallback; }
+  };
+  return {
+    recordId: row.record_id,
+    scenarioId: row.scenario_id,
+    label: row.label,
+    description: row.description ?? "",
+    seedScenarioId: row.seed_scenario_id ?? null,
+    isSeed: !!row.is_seed,
+    isBaseline: !!row.is_baseline,
+    tags: Array.isArray(row.tags) ? row.tags : safe(row.tags, []),
+    notes: row.notes ?? "",
+    currentVersion: row.current_version ?? 0,
+    versions: versions.map(v => ({
+      versionId: v.version_id,
+      scenarioRecordId: v.scenario_record_id,
+      versionNumber: v.version_number,
+      payload: typeof v.payload === "object" ? v.payload : safe(v.payload, {}),
+      comment: v.comment ?? null,
+      createdAt: v.created_at,
+    })),
+    snapshots: snapshots.map(s => ({
+      snapshotId: s.snapshot_id,
+      scenarioRecordId: s.scenario_record_id,
+      versionNumber: s.version_number ?? null,
+      label: s.label,
+      comment: s.comment ?? null,
+      createdAt: s.created_at,
+      payload: typeof s.payload === "object" ? s.payload : safe(s.payload, {}),
+      metrics: Array.isArray(s.metrics) ? s.metrics : safe(s.metrics, []),
+      assumptions: Array.isArray(s.assumptions) ? s.assumptions : safe(s.assumptions, []),
+      engineLimited: !!s.engine_limited,
+    })),
+    archivedAt: row.archived_at ?? null,
+    archivedReason: row.archived_reason ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export const sbScenarioRecords = {
+  async listRecords(includeArchived = false): Promise<any[]> {
+    try {
+      const rows = await sbScenarioRecordsListRecords(includeArchived);
+      const out: any[] = [];
+      for (const row of rows) {
+        const [versions, snapshots] = await Promise.all([
+          sbScenarioRecordsListVersions(row.record_id),
+          sbScenarioRecordsListSnapshots(row.record_id),
+        ]);
+        out.push(rowToRecord(row, versions, snapshots));
+      }
+      return out;
+    } catch { return []; }
+  },
+
+  async getRecord(recordId: string): Promise<any | null> {
+    try {
+      const rows = await sbGet(
+        "sf_scenario_records",
+        `record_id=eq.${encodeURIComponent(recordId)}&limit=1`,
+      );
+      if (!rows.length) return null;
+      const [versions, snapshots] = await Promise.all([
+        sbScenarioRecordsListVersions(recordId),
+        sbScenarioRecordsListSnapshots(recordId),
+      ]);
+      return rowToRecord(rows[0], versions, snapshots);
+    } catch { return null; }
+  },
+
+  async upsertRecord(record: any): Promise<any | null> {
+    if (!record || typeof record.recordId !== "string") return null;
+    try {
+      const recordRow = {
+        record_id: record.recordId,
+        scenario_id: record.scenarioId,
+        label: record.label,
+        description: record.description ?? "",
+        seed_scenario_id: record.seedScenarioId ?? null,
+        is_seed: !!record.isSeed,
+        is_baseline: !!record.isBaseline,
+        tags: Array.isArray(record.tags) ? record.tags : [],
+        notes: record.notes ?? "",
+        current_version: record.currentVersion ?? 0,
+        archived_at: record.archivedAt ?? null,
+        archived_reason: record.archivedReason ?? null,
+        created_at: record.createdAt ?? new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      await fetch(`${BASE}/sf_scenario_records?on_conflict=record_id`, {
+        method: "POST",
+        headers: { ...HEADERS, "Prefer": "resolution=merge-duplicates,return=representation" },
+        body: JSON.stringify(recordRow),
+      });
+
+      if (Array.isArray(record.versions) && record.versions.length) {
+        const versions = record.versions.map((v: any) => ({
+          version_id: v.versionId,
+          scenario_record_id: record.recordId,
+          version_number: v.versionNumber,
+          payload: v.payload ?? {},
+          comment: v.comment ?? null,
+          created_at: v.createdAt ?? new Date().toISOString(),
+        }));
+        await fetch(`${BASE}/sf_scenario_record_versions?on_conflict=version_id`, {
+          method: "POST",
+          headers: { ...HEADERS, "Prefer": "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify(versions),
+        });
+      }
+
+      if (Array.isArray(record.snapshots) && record.snapshots.length) {
+        const snapshots = record.snapshots.map((s: any) => ({
+          snapshot_id: s.snapshotId,
+          scenario_record_id: record.recordId,
+          version_number: s.versionNumber ?? null,
+          label: s.label,
+          comment: s.comment ?? null,
+          payload: s.payload ?? {},
+          metrics: s.metrics ?? [],
+          assumptions: s.assumptions ?? [],
+          engine_limited: !!s.engineLimited,
+          created_at: s.createdAt ?? new Date().toISOString(),
+        }));
+        await fetch(`${BASE}/sf_scenario_snapshots?on_conflict=snapshot_id`, {
+          method: "POST",
+          headers: { ...HEADERS, "Prefer": "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify(snapshots),
+        });
+      }
+
+      return await sbScenarioRecords.getRecord(record.recordId);
+    } catch { return null; }
+  },
+
+  async archiveRecord(recordId: string, reason: string | null = null): Promise<any | null> {
+    try {
+      await fetch(`${BASE}/sf_scenario_records?record_id=eq.${encodeURIComponent(recordId)}`, {
+        method: "PATCH",
+        headers: HEADERS,
+        body: JSON.stringify({
+          archived_at: new Date().toISOString(),
+          archived_reason: reason,
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      return await sbScenarioRecords.getRecord(recordId);
+    } catch { return null; }
+  },
+
+  async restoreRecord(recordId: string): Promise<any | null> {
+    try {
+      await fetch(`${BASE}/sf_scenario_records?record_id=eq.${encodeURIComponent(recordId)}`, {
+        method: "PATCH",
+        headers: HEADERS,
+        body: JSON.stringify({
+          archived_at: null,
+          archived_reason: null,
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      return await sbScenarioRecords.getRecord(recordId);
+    } catch { return null; }
+  },
+};
+
 // ─── Stock Transactions ───────────────────────────────────────────────────────
 
 export const sbStockTx = {

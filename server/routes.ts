@@ -265,5 +265,58 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ success: true });
   });
 
+  // ─── Sprint 6 Phase 3 — Scenario Records / Versions / Snapshots ────
+  app.get("/api/scenario-records", (req, res) => {
+    const includeArchived = req.query.includeArchived === "true";
+    res.json(storage.listScenarioRecords(includeArchived));
+  });
+
+  app.get("/api/scenario-records/:id", (req, res) => {
+    const record = storage.getScenarioRecord(req.params.id);
+    if (!record) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    res.json(record);
+  });
+
+  app.post("/api/scenario-records", (req, res) => {
+    try {
+      const record = storage.upsertScenarioRecord(req.body);
+      res.json(record);
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message ?? "bad_request" });
+    }
+  });
+
+  app.put("/api/scenario-records/:id", (req, res) => {
+    try {
+      const body = { ...(req.body ?? {}), recordId: req.params.id };
+      const record = storage.upsertScenarioRecord(body);
+      res.json(record);
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message ?? "bad_request" });
+    }
+  });
+
+  app.post("/api/scenario-records/:id/archive", (req, res) => {
+    const reason = (req.body && typeof req.body === "object" ? (req.body as any).reason : null) ?? null;
+    const record = storage.archiveScenarioRecord(req.params.id, reason);
+    if (!record) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    res.json(record);
+  });
+
+  app.post("/api/scenario-records/:id/restore", (req, res) => {
+    const record = storage.restoreScenarioRecord(req.params.id);
+    if (!record) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    res.json(record);
+  });
+
   return httpServer;
 }
