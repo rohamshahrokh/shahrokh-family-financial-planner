@@ -66,6 +66,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import AIInsightsCard from "@/components/AIInsightsCard";
+// Sprint 5 Phase 5 — Decision UI Integration. Pure presentation surface that
+// consumes the Sprint 5 engine outputs (goal solver, candidates, ranking,
+// best move, CFO advisor) via the canonical ledger. No new financial math.
+import { Sprint5DecisionPanel } from "@/components/decisionEngine/Sprint5DecisionPanel";
 import {
   Flame,
   Sword,
@@ -3829,6 +3833,21 @@ export default function WealthStrategyPage() {
               defaultOpen={initialOpen === "wealth-property"}
             >
               <PropertyExpansion snap={snap} />
+            </Disclosure>
+          </div>
+
+          {/* Sprint 5 Phase 5 — Decision UI Integration. Consumes the
+              Sprint 5 goal solver / candidate / ranking / best move / CFO
+              advisor engines via the same canonical ledger the rest of the
+              hub uses. No new financial math. */}
+          <div id="anchor-wealth-sprint5-decision" className="mt-3">
+            <Disclosure
+              id="wealth-sprint5-decision"
+              title="Decision intelligence"
+              description="Goal-gap solver, candidate-set ranking, best move and CFO-style insights, sharing the canonical ledger."
+              defaultOpen={initialOpen === "wealth-sprint5-decision"}
+            >
+              <Sprint5DecisionPanel canonicalLedger={canonicalInputsWS} />
             </Disclosure>
           </div>
         </section>
