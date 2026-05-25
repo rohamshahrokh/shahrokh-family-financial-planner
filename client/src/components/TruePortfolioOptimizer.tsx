@@ -35,6 +35,8 @@ import {
   type TrueOptimizerAuditEntry,
 } from "@/lib/truePortfolioOptimizer";
 import { PortfolioLab } from "@/components/PortfolioLab";
+import { buildProbabilisticWealthEngine } from "@/lib/probabilisticWealthEngine";
+import { ProbabilisticWealthSection } from "@/components/ProbabilisticWealthSection";
 
 export interface TruePortfolioOptimizerProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -675,6 +677,13 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
     [props.canonicalLedger, props.goalSolverInputs, props.riskOutputs, props.monteCarloOutputs, constraints],
   );
 
+  // Sprint 8 — Assumption Uncertainty Engine. Pure read of the Sprint 7
+  // result. Default seed = 8 (Sprint 8) so results are reproducible.
+  const probabilistic = useMemo(
+    () => buildProbabilisticWealthEngine({ sprint7Result: result }),
+    [result],
+  );
+
   return (
     <div
       className={`flex flex-col gap-4 sm:gap-5 ${props.className ?? ""}`}
@@ -698,6 +707,15 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
         frontier={result.frontier}
       />
       <AuditTrailCard audit={result.auditTrail} />
+
+      {/* Sprint 8 — Assumption Uncertainty Engine. Sits on top of the Sprint 7
+          deterministic outputs, never replaces them. */}
+      <div className="pt-2" data-testid="true-portfolio-optimizer-sprint8-shell">
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          Assumption Uncertainty (Sprint 8)
+        </h2>
+        <ProbabilisticWealthSection result={probabilistic} />
+      </div>
 
       {/* Sprint 6 Phase 5 deep-dive sections remain visible below Sprint 7. */}
       <div className="pt-2" data-testid="true-portfolio-optimizer-phase5-shell">
