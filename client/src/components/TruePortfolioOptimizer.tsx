@@ -39,6 +39,9 @@ import { buildProbabilisticWealthEngine } from "@/lib/probabilisticWealthEngine"
 import { ProbabilisticWealthSection } from "@/components/ProbabilisticWealthSection";
 import { buildPathSimulationEngine } from "@/lib/pathSimulationEngine";
 import { PathSimulationSection } from "@/components/PathSimulationSection";
+import { buildGoalSolverPro, EMPTY_GOAL_TARGETS, type GoalSolverProTargets } from "@/lib/goalSolverPro";
+import { GoalSolverProSection } from "@/components/GoalSolverProSection";
+import { computeCanonicalFire } from "@/lib/canonicalFire";
 
 export interface TruePortfolioOptimizerProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -697,6 +700,36 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
     [result, props.canonicalLedger],
   );
 
+  // Sprint 10 — Goal Solver Pro. Pure orchestration over Sprint 7/8/9
+  // outputs. User-supplied targets drive feasibility / gap / reverse-engineering.
+  const [goalTargets, setGoalTargets] = useState<GoalSolverProTargets>(EMPTY_GOAL_TARGETS);
+  const goalSolverResult = useMemo(() => {
+    const canonicalFire = props.canonicalLedger
+      ? computeCanonicalFire(props.canonicalLedger)
+      : {
+          swrPct: 4,
+          targetAnnualIncome: 0,
+          targetMonthlyIncome: 0,
+          fireNumber: 0,
+          netWorthNow: 0,
+          progressFraction: 0,
+          annualPassiveIncome: 0,
+          monthlyPassiveIncome: 0,
+          monthlyExpenses: 0,
+          passiveCoverage: null,
+          gap: 0,
+          source: "empty" as const,
+        };
+    return buildGoalSolverPro({
+      canonicalLedger: props.canonicalLedger ?? null,
+      canonicalFire,
+      sprint7Result: result,
+      sprint8Result: probabilistic,
+      sprint9Result: pathSim,
+      targets: goalTargets,
+    });
+  }, [props.canonicalLedger, result, probabilistic, pathSim, goalTargets]);
+
   return (
     <div
       className={`flex flex-col gap-4 sm:gap-5 ${props.className ?? ""}`}
@@ -728,6 +761,19 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
           Assumption Uncertainty (Sprint 8)
         </h2>
         <ProbabilisticWealthSection result={probabilistic} />
+      </div>
+
+      {/* Sprint 10 — Goal Solver Pro / Reverse Wealth Engineering. Mounted
+          ABOVE Sprint 9. Pure orchestration over Sprint 7/8/9 outputs. */}
+      <div className="pt-2" data-testid="true-portfolio-optimizer-sprint10-shell">
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          Goal Solver Pro (Sprint 10)
+        </h2>
+        <GoalSolverProSection
+          result={goalSolverResult}
+          targets={goalTargets}
+          onTargetsChange={setGoalTargets}
+        />
       </div>
 
       {/* Sprint 9 — Path-Based Wealth Simulation. Builds ≥1000 full life-paths
