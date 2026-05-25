@@ -37,6 +37,7 @@
     "test:sprint-6": "npm run test:sprint-6-phase1 && npm run test:sprint-6-phase2 && npm run test:sprint-6-phase3 && npm run test:sprint-6-phase4 && npm run test:sprint-6-phase5",
     "test:sprint-7": "tsx script/test-sprint7-true-portfolio-optimizer.ts",
     "test:sprint-8": "tsx script/test-sprint8-probabilistic-wealth-engine.ts",
+    "test:sprint-9": "tsx script/test-sprint-9-path-simulation.ts",
     "test:dashboard-contract": "tsx script/test-dashboard-contract.ts",
     "test:audit-mode": "tsx script/test-audit-mode.ts",
     "test:scenario-v2": "tsx script/test-scenario-v2.ts",

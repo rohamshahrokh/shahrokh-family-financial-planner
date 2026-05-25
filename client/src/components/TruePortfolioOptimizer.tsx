@@ -37,6 +37,8 @@ import {
 import { PortfolioLab } from "@/components/PortfolioLab";
 import { buildProbabilisticWealthEngine } from "@/lib/probabilisticWealthEngine";
 import { ProbabilisticWealthSection } from "@/components/ProbabilisticWealthSection";
+import { buildPathSimulationEngine } from "@/lib/pathSimulationEngine";
+import { PathSimulationSection } from "@/components/PathSimulationSection";
 
 export interface TruePortfolioOptimizerProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -684,6 +686,17 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
     [result],
   );
 
+  // Sprint 9 — Path-Based Wealth Simulation. Orchestrates ≥1000 full-life
+  // path simulations per top Sprint 7 strategy. Pure read of Sprint 7 +
+  // canonical ledger. Default seed = 9 (Sprint 9) for reproducibility.
+  const pathSim = useMemo(
+    () => buildPathSimulationEngine({
+      sprint7Result: result,
+      canonicalLedger: props.canonicalLedger ?? null,
+    }),
+    [result, props.canonicalLedger],
+  );
+
   return (
     <div
       className={`flex flex-col gap-4 sm:gap-5 ${props.className ?? ""}`}
@@ -715,6 +728,16 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
           Assumption Uncertainty (Sprint 8)
         </h2>
         <ProbabilisticWealthSection result={probabilistic} />
+      </div>
+
+      {/* Sprint 9 — Path-Based Wealth Simulation. Builds ≥1000 full life-paths
+          per top Sprint 7 strategy and reports probability curves, fan chart,
+          heatmap, representative paths, and driver sensitivity. */}
+      <div className="pt-2" data-testid="true-portfolio-optimizer-sprint9-shell">
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          Path-Based Wealth Simulation (Sprint 9)
+        </h2>
+        <PathSimulationSection result={pathSim} />
       </div>
 
       {/* Sprint 6 Phase 5 deep-dive sections remain visible below Sprint 7. */}
