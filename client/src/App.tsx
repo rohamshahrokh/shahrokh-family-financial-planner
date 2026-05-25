@@ -72,6 +72,7 @@ import CGTSimulatorPage        from "./pages/cgt-simulator";
 import ScenarioComparePage     from "./pages/scenario-compare";
 import ScenarioCompareV2Page   from "./pages/scenario-compare-v2";
 import WhatIfScenariosPage     from "./pages/what-if-scenarios";
+import ScenarioCompareWorkspacePage from "./pages/scenario-compare-workspace";
 import DecisionPage            from "./pages/decision";
 import RiskRadarPage           from "./pages/risk-radar";
 import TaxAlphaPage            from "./pages/tax-alpha";
@@ -254,6 +255,11 @@ function AppRouter() {
         </Route>
         <Route path="/what-if-scenarios">
           <ProtectedRoute component={WhatIfScenariosPage} title="What-If Scenarios" />
+        </Route>
+        {/* Sprint 6 Phase 1 — Dedicated What-If Scenario Compare workspace.
+            Orchestrates Sprint 5 engines into six side-by-side scenarios. */}
+        <Route path="/scenario-compare-workspace">
+          <ProtectedRoute component={ScenarioCompareWorkspacePage} title="Scenario Compare Workspace" />
         </Route>
         {/* Risk Radar — surfaced from Deep Analysis cards & sidebar nav */}
         <Route path="/risk-radar">

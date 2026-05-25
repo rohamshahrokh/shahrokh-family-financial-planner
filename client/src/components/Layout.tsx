@@ -87,6 +87,8 @@ const NAV_STEPS = [
     badgeClass: "step-3",
     items: [
       { href: "/ai-forecast-engine", label: "Forecast Engine",      icon: Sigma,         adminOnly: true  },
+      // Sprint 6 Phase 1 — dedicated What-If Scenario Compare workspace.
+      { href: "/scenario-compare-workspace", label: "Scenario Compare", icon: FlaskConical, adminOnly: false },
       // Hidden from sidebar (V1) — routes retained:
       //   /what-if-scenarios       (legacy What-If)
       //   /scenario-compare        (legacy Scenario Lab)
