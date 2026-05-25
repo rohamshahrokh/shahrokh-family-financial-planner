@@ -45,6 +45,7 @@ import {
 import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 
 export interface PortfolioLabProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -106,6 +107,7 @@ interface MetricBlockProps {
 }
 
 function MetricBlock({ metric, testidPrefix, compact }: MetricBlockProps) {
+  const { auditMode } = useAuditMode();
   const text = formatOptimizerMetric(metric);
   return (
     <div
@@ -121,7 +123,7 @@ function MetricBlock({ metric, testidPrefix, compact }: MetricBlockProps) {
       <span
         className="text-sm font-semibold text-foreground tabular-nums"
         data-testid={`${testidPrefix}-value`}
-        title={metric.source}
+        {...(auditMode ? { title: metric.source } : {})}
       >
         {text}
       </span>
@@ -568,6 +570,7 @@ function PortfolioStressTestCard({
 }
 
 function StressTestRowItem({ row }: { row: StressTestRow }) {
+  const { auditMode } = useAuditMode();
   const tid = `portfolio-lab-stress-row-${row.id}`;
   return (
     <div
@@ -577,7 +580,7 @@ function StressTestRowItem({ row }: { row: StressTestRow }) {
     >
       <div className="flex flex-col">
         <span className="text-xs text-foreground" data-testid={`${tid}-label`}>{row.label}</span>
-        <span className="text-sm font-semibold text-foreground tabular-nums" data-testid={`${tid}-value`} title={row.metric.source}>
+        <span className="text-sm font-semibold text-foreground tabular-nums" data-testid={`${tid}-value`} {...(auditMode ? { title: row.metric.source } : {})}>
           {formatOptimizerMetric(row.metric)}
         </span>
       </div>
@@ -678,6 +681,7 @@ function WhatCouldFailCard({
 }
 
 function FailureModeItem({ mode }: { mode: FailureMode }) {
+  const { auditMode } = useAuditMode();
   const tid = `portfolio-lab-failure-${mode.id}`;
   return (
     <li
@@ -685,7 +689,7 @@ function FailureModeItem({ mode }: { mode: FailureMode }) {
       data-testid={tid}
       data-severity={mode.severity}
     >
-      <p className="text-xs text-foreground leading-relaxed" title={mode.source} data-testid={`${tid}-description`}>
+      <p className="text-xs text-foreground leading-relaxed" {...(auditMode ? { title: mode.source } : {})} data-testid={`${tid}-description`}>
         {mode.description}
       </p>
       <span

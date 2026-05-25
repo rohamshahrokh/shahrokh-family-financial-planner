@@ -31,6 +31,7 @@ import {
   type ProbabilisticAuditEntry,
   type ConfidenceBand,
 } from "@/lib/probabilisticWealthEngine";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 
 export interface ProbabilisticWealthSectionProps {
   result: ProbabilisticWealthEngineResult;
@@ -87,11 +88,12 @@ function BandCell({
   fmt: "currency" | "currency-per-year" | "currency-per-month" | "year";
   testid: string;
 }) {
+  const { auditMode } = useAuditMode();
   return (
     <span
       className="text-xs tabular-nums text-foreground"
       data-testid={testid}
-      title={band.source}
+      {...(auditMode ? { title: band.source } : {})}
     >
       {formatConfidenceBand(band, fmt)}
       {band.notEngineModelled ? (

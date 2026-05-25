@@ -35,13 +35,28 @@ import {
   type TrueOptimizerAuditEntry,
 } from "@/lib/truePortfolioOptimizer";
 import { PortfolioLab } from "@/components/PortfolioLab";
+import { buildPortfolioLabOptimizer } from "@/lib/portfolioLabOptimizer";
 import { buildProbabilisticWealthEngine } from "@/lib/probabilisticWealthEngine";
 import { ProbabilisticWealthSection } from "@/components/ProbabilisticWealthSection";
 import { buildPathSimulationEngine } from "@/lib/pathSimulationEngine";
 import { PathSimulationSection } from "@/components/PathSimulationSection";
-import { buildGoalSolverPro, EMPTY_GOAL_TARGETS, type GoalSolverProTargets } from "@/lib/goalSolverPro";
-import { GoalSolverProSection } from "@/components/GoalSolverProSection";
+import { buildGoalSolverPro, EMPTY_GOAL_TARGETS } from "@/lib/goalSolverPro";
 import { computeCanonicalFire } from "@/lib/canonicalFire";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
+import { Button } from "@/components/ui/button";
+import { Link } from "wouter";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RTooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
+import { formatCurrency } from "@/lib/finance";
 
 export interface TruePortfolioOptimizerProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -73,6 +88,7 @@ function ScenarioMetricBlock({
   metric: ScenarioMetric;
   testidPrefix: string;
 }) {
+  const { auditMode } = useAuditMode();
   const text = formatScenarioMetric(metric);
   const incomplete = metric.incomplete;
   return (
@@ -89,7 +105,7 @@ function ScenarioMetricBlock({
       <span
         className="text-sm font-semibold text-foreground tabular-nums"
         data-testid={`${testidPrefix}-value`}
-        title={metric.source}
+        {...(auditMode ? { title: metric.source } : {})}
       >
         {text}
       </span>
@@ -667,6 +683,231 @@ function Detail({ label, value, testid }: { label: string; value: string; testid
   );
 }
 
+/* ─── Sprint 11 Hero ─────────────────────────────────────────────────────
+ *
+ * 5-slot Hero (Sprint 11 #1, #2) — every slot is an existing canonical engine
+ * output; no new calculations are performed here.
+ *
+ *   1. Where am I now?      — canonicalFire + canonicalLedger
+ *   2. Am I on track?       — feasibility.status + probabilityOfFire
+ *   3. What should I do next? — recommendation[0].actionability.what
+ *   4. Why?                 — whyThisWins.narrative
+ *   5. What if I do nothing? — baseline (current snapshot) vs recommended
+ *                              path-sim p50 trajectory on a recharts line.
+ */
+
+interface HeroProps {
+  canonicalLedger: DashboardInputs | null | undefined;
+  recommendations: Recommendation[];
+  feasibility: ReturnType<typeof buildGoalSolverPro>["feasibility"];
+  whyWinsNarrative: string | null;
+  whyWinsLabel: string | null;
+  netWorthFan: ReturnType<typeof buildPathSimulationEngine>["bestStrategy"] extends infer S
+    ? S extends { netWorthFan: infer NF }
+      ? NF
+      : never
+    : never;
+}
+
+function PortfolioLabHero({
+  canonicalLedger,
+  recommendations,
+  feasibility,
+  whyWinsNarrative,
+  whyWinsLabel,
+  netWorthFan,
+}: HeroProps) {
+  const canonical = canonicalLedger ? computeCanonicalFire(canonicalLedger) : null;
+  const featured = recommendations.find(r => r.category === "hybrid") ?? recommendations[0] ?? null;
+
+  // Slot 2 — feasibility status / probability bar
+  const status = feasibility?.status ?? "UNLIKELY";
+  const probability = feasibility?.probabilityOfSuccess;
+  const probabilityPct = probability != null ? Math.round(probability * 100) : null;
+  const statusTone: Record<string, string> =
+    status === "ACHIEVABLE"
+      ? { chip: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40", bar: "bg-emerald-500" }
+      : status === "STRETCH"
+      ? { chip: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40", bar: "bg-amber-500" }
+      : { chip: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/40", bar: "bg-rose-500" };
+
+  // Slot 5 — baseline vs recommendation
+  // Baseline = today's snapshot held flat (no-action). Engine source:
+  // canonicalFire.netWorthNow (current state) — and we plot a flat line at
+  // that value across the horizon shown by netWorthFan. This is the "what
+  // happens if I do nothing" baseline cited in the Sprint 11 brief.
+  // Recommendation = path-sim p50 net-worth trajectory (existing engine output).
+  const baselineNW = canonical?.netWorthNow ?? null;
+  const chartData = (netWorthFan as Array<{ year: number; p50: number }> | null | undefined)?.map(b => ({
+    year: b.year,
+    "Recommended p50": b.p50,
+    "Do nothing": baselineNW,
+  })) ?? [];
+
+  return (
+    <section
+      className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-card to-card p-4 sm:p-6 shadow-sm"
+      data-testid="portfolio-lab-hero"
+    >
+      <header className="mb-4 flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2">
+        <div>
+          <h2 className="text-lg sm:text-xl font-semibold text-foreground" data-testid="portfolio-lab-hero-title">
+            Your fastest path to FIRE
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5 max-w-2xl">
+            Five things to know in 30 seconds — every number pulled from the canonical engines.
+          </p>
+        </div>
+      </header>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {/* Slot 1: Where am I now? */}
+        <div className="rounded-lg border border-border bg-card/70 p-3" data-testid="hero-where-now">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Where am I now?</div>
+          <div className="text-xl font-semibold tabular-nums text-foreground">
+            {canonical ? formatCurrency(canonical.netWorthNow) : "—"}
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-1">
+            Net worth · {canonical && canonical.fireNumber > 0
+              ? `${Math.round(canonical.progressFraction * 100)}% of FIRE target`
+              : "FIRE target not set"}
+          </div>
+        </div>
+
+        {/* Slot 2: Am I on track? */}
+        <div className="rounded-lg border border-border bg-card/70 p-3" data-testid="hero-on-track">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Am I on track?</div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${statusTone.chip}`}
+              data-testid="hero-on-track-status"
+            >
+              {status.replace(/_/g, " ")}
+            </span>
+            {probabilityPct != null ? (
+              <span className="text-sm font-semibold tabular-nums text-foreground" data-testid="hero-on-track-probability">
+                {probabilityPct}%
+              </span>
+            ) : null}
+          </div>
+          {probabilityPct != null ? (
+            <div className="mt-2 h-1.5 w-full rounded-full bg-muted overflow-hidden" aria-label="Probability of FIRE">
+              <div className={`h-full ${statusTone.bar}`} style={{ width: `${Math.min(100, probabilityPct)}%` }} />
+            </div>
+          ) : (
+            <div className="text-[11px] text-muted-foreground mt-2">Set a target to score</div>
+          )}
+        </div>
+
+        {/* Slot 3: What should I do next? */}
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3" data-testid="hero-next-action">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">What should I do next?</div>
+          <div className="text-sm font-medium text-foreground leading-snug" data-testid="hero-next-action-text">
+            {featured?.actionability?.what ?? "Complete your ledger to receive a recommendation."}
+          </div>
+          {featured?.actionability?.when ? (
+            <div className="text-[11px] text-muted-foreground mt-1">When: {featured.actionability.when}</div>
+          ) : null}
+        </div>
+
+        {/* Slot 4: Why? */}
+        <div className="rounded-lg border border-border bg-card/70 p-3" data-testid="hero-why">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Why?</div>
+          <div className="text-xs text-foreground leading-relaxed" data-testid="hero-why-text">
+            {whyWinsNarrative ?? featured?.actionability?.why ?? "—"}
+          </div>
+          {whyWinsLabel ? (
+            <div className="text-[11px] text-muted-foreground mt-1 italic">{whyWinsLabel}</div>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Slot 5: What if I do nothing? — baseline vs recommended */}
+      <div
+        className="rounded-lg border border-border bg-card/70 p-3"
+        data-testid="hero-baseline-chart"
+      >
+        <div className="flex items-baseline justify-between mb-2">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">What if I do nothing?</div>
+            <div className="text-xs text-muted-foreground">
+              Dashed = current snapshot held flat. Solid = engine recommended (p50 net worth).
+            </div>
+          </div>
+        </div>
+        {chartData.length > 0 ? (
+          <div className="h-56 sm:h-64" data-testid="hero-baseline-chart-canvas">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
+                <XAxis dataKey="year" tick={{ fontSize: 10 }} />
+                <YAxis
+                  tick={{ fontSize: 10 }}
+                  tickFormatter={(v: number) => `$${Math.round(v / 1000).toLocaleString()}k`}
+                />
+                <RTooltip
+                  formatter={(v: number) => formatCurrency(v)}
+                  labelFormatter={(label) => `Year ${label}`}
+                />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Line
+                  type="monotone"
+                  dataKey="Do nothing"
+                  stroke="#9ca3af"
+                  strokeDasharray="5 5"
+                  dot={false}
+                  isAnimationActive={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="Recommended p50"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  dot={false}
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground italic py-6 text-center" data-testid="hero-baseline-chart-empty">
+            Net-worth trajectory unavailable — complete your ledger to populate the engine.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* ─── Sprint 11 Goal Solver Pro deep-link card ───────────────────────────
+ *
+ * Sprint 11 #6: GoalSolverProSection is being moved out of /portfolio-lab and
+ * promoted to its own /decision route. To preserve discoverability for users
+ * who land on /portfolio-lab (and for bookmarks), keep a card-style deep-link
+ * pointing to /decision rather than re-mounting the section here.
+ */
+function GoalSolverProDeepLink() {
+  return (
+    <section
+      className="rounded-lg border border-border bg-card p-4 sm:p-5 shadow-sm"
+      data-testid="portfolio-lab-goal-solver-pro-deeplink"
+    >
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-foreground">Goal Solver Pro now lives on /decision</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Reverse-engineer your wealth goal — feasibility, gap, required inputs, and the action plan are all on the
+            Decision Engine page.
+          </p>
+        </div>
+        <Link href="/decision" data-testid="portfolio-lab-goal-solver-pro-deeplink-cta">
+          <Button variant="default">Open Decision Engine</Button>
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 /* ─── Main entry ───────────────────────────────────────────────────────── */
 
 export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
@@ -701,8 +942,8 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
   );
 
   // Sprint 10 — Goal Solver Pro. Pure orchestration over Sprint 7/8/9
-  // outputs. User-supplied targets drive feasibility / gap / reverse-engineering.
-  const [goalTargets, setGoalTargets] = useState<GoalSolverProTargets>(EMPTY_GOAL_TARGETS);
+  // outputs. Used here (Sprint 11) only to feed the Hero's feasibility slot;
+  // user-driven target editing now lives on /decision (Sprint 11 #6).
   const goalSolverResult = useMemo(() => {
     const canonicalFire = props.canonicalLedger
       ? computeCanonicalFire(props.canonicalLedger)
@@ -726,15 +967,68 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
       sprint7Result: result,
       sprint8Result: probabilistic,
       sprint9Result: pathSim,
-      targets: goalTargets,
+      targets: EMPTY_GOAL_TARGETS,
     });
-  }, [props.canonicalLedger, result, probabilistic, pathSim, goalTargets]);
+  }, [props.canonicalLedger, result, probabilistic, pathSim]);
+
+  // Sprint 11: pull `whyThisWins` from the Sprint 6 Phase 5 PortfolioLab
+  // engine so the Hero can render the narrative without re-deriving it.
+  const portfolioLabResult = useMemo(
+    () =>
+      buildPortfolioLabOptimizer({
+        canonicalLedger: props.canonicalLedger ?? null,
+        goalSolverInputs: props.goalSolverInputs,
+        riskOutputs: props.riskOutputs ?? null,
+        monteCarloOutputs: props.monteCarloOutputs ?? null,
+      }),
+    [props.canonicalLedger, props.goalSolverInputs, props.riskOutputs, props.monteCarloOutputs],
+  );
+
+  // Sprint 11 Hero — pull the recommended p50 net-worth fan from the Sprint 9
+  // best strategy. Falls back to the first ranked strategy when bestStrategy
+  // is null (e.g. user has not picked a target yet).
+  const heroFan = pathSim.bestStrategy?.netWorthFan ?? pathSim.strategies[0]?.netWorthFan ?? [];
 
   return (
     <div
       className={`flex flex-col gap-4 sm:gap-5 ${props.className ?? ""}`}
       data-testid="true-portfolio-optimizer"
     >
+      {/* Sprint 11 #1, #2 — Hero region (5 slots, baseline-vs-recommendation chart). */}
+      <PortfolioLabHero
+        canonicalLedger={props.canonicalLedger}
+        recommendations={result.recommendations}
+        feasibility={goalSolverResult.feasibility}
+        whyWinsNarrative={portfolioLabResult.whyThisWins?.narrative ?? null}
+        whyWinsLabel={portfolioLabResult.whyThisWins?.strategyLabel ?? null}
+        netWorthFan={heroFan as any}
+      />
+
+      {/* Sprint 11 #5 — promote whyThisWins narrative just below the Hero. */}
+      <section
+        className="rounded-lg border border-emerald-500/20 bg-card p-4 sm:p-5 shadow-sm"
+        data-testid="portfolio-lab-why-this-wins-promoted"
+      >
+        <header className="mb-2 flex items-baseline justify-between gap-3 flex-wrap">
+          <h3 className="text-base font-semibold text-foreground">Why this strategy wins</h3>
+          {portfolioLabResult.whyThisWins?.strategyLabel ? (
+            <span
+              className="text-[10px] sm:text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
+              data-testid="portfolio-lab-why-this-wins-promoted-strategy"
+            >
+              {portfolioLabResult.whyThisWins.strategyLabel}
+            </span>
+          ) : null}
+        </header>
+        <p
+          className="text-sm text-foreground leading-relaxed"
+          data-testid="portfolio-lab-why-this-wins-promoted-narrative"
+        >
+          {portfolioLabResult.whyThisWins?.narrative ??
+            "Complete your canonical ledger to see why the engine picks a winning strategy."}
+        </p>
+      </section>
+
       <ExecutiveSummary
         recommendations={result.recommendations}
         goal={result.goalReverseEngineering}
@@ -743,7 +1037,6 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
       />
       <GoalReverseEngineeringCard section={result.goalReverseEngineering} />
       <ConstraintsPanel constraints={constraints} onChange={setConstraints} />
-      <SearchMetricsCard metrics={result.searchMetrics} />
       <RecommendationsGrid recommendations={result.recommendations} />
       <GapSolverCard gap={result.gapSolver} />
       <FrontierCard frontier={result.frontier} />
@@ -752,7 +1045,6 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
         recommendations={result.recommendations}
         frontier={result.frontier}
       />
-      <AuditTrailCard audit={result.auditTrail} />
 
       {/* Sprint 8 — Assumption Uncertainty Engine. Sits on top of the Sprint 7
           deterministic outputs, never replaces them. */}
@@ -763,18 +1055,10 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
         <ProbabilisticWealthSection result={probabilistic} />
       </div>
 
-      {/* Sprint 10 — Goal Solver Pro / Reverse Wealth Engineering. Mounted
-          ABOVE Sprint 9. Pure orchestration over Sprint 7/8/9 outputs. */}
-      <div className="pt-2" data-testid="true-portfolio-optimizer-sprint10-shell">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-          Goal Solver Pro (Sprint 10)
-        </h2>
-        <GoalSolverProSection
-          result={goalSolverResult}
-          targets={goalTargets}
-          onTargetsChange={setGoalTargets}
-        />
-      </div>
+      {/* Sprint 11 #6 — Goal Solver Pro moved out of /portfolio-lab and
+          promoted to its own /decision route. Keep a deep-link card here so
+          users with bookmarks aren't lost. */}
+      <GoalSolverProDeepLink />
 
       {/* Sprint 9 — Path-Based Wealth Simulation. Builds ≥1000 full life-paths
           per top Sprint 7 strategy and reports probability curves, fan chart,
@@ -786,18 +1070,31 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
         <PathSimulationSection result={pathSim} />
       </div>
 
-      {/* Sprint 6 Phase 5 deep-dive sections remain visible below Sprint 7. */}
-      <div className="pt-2" data-testid="true-portfolio-optimizer-phase5-shell">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-          Deep-Dive Diagnostics
-        </h2>
-        <PortfolioLab
-          canonicalLedger={props.canonicalLedger}
-          goalSolverInputs={props.goalSolverInputs}
-          riskOutputs={props.riskOutputs}
-          monteCarloOutputs={props.monteCarloOutputs}
-        />
-      </div>
+      {/* Sprint 11 #3, #4 — demote audit trail, portfolio-lab audit trail, and
+          search metrics into a single AdvancedDisclosure at the bottom of the
+          page. Nothing is deleted; engineering can still reach the surfaces in
+          one click. Audit mode auto-opens this disclosure. */}
+      <AdvancedDisclosure
+        title="Where did these numbers come from?"
+        subtitle="Sprint 7 audit trail · Sprint 6 Phase 5 deep-dives · Scenario search metrics"
+        data-testid="portfolio-lab-advanced-disclosure"
+      >
+        <div className="flex flex-col gap-4">
+          <SearchMetricsCard metrics={result.searchMetrics} />
+          <AuditTrailCard audit={result.auditTrail} />
+          <div data-testid="true-portfolio-optimizer-phase5-shell">
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+              Deep-Dive Diagnostics
+            </h3>
+            <PortfolioLab
+              canonicalLedger={props.canonicalLedger}
+              goalSolverInputs={props.goalSolverInputs}
+              riskOutputs={props.riskOutputs}
+              monteCarloOutputs={props.monteCarloOutputs}
+            />
+          </div>
+        </div>
+      </AdvancedDisclosure>
     </div>
   );
 }

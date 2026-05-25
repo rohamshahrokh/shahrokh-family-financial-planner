@@ -30,6 +30,7 @@ import {
 import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 
 /* ─── Props ────────────────────────────────────────────────────────────── */
 
@@ -54,6 +55,7 @@ interface MetricCellProps {
 }
 
 function MetricCell({ metric, testidPrefix }: MetricCellProps) {
+  const { auditMode } = useAuditMode();
   const text = formatScenarioMetric(metric);
   const incompleteClass = metric.incomplete ? " opacity-70 italic" : "";
   return (
@@ -70,7 +72,7 @@ function MetricCell({ metric, testidPrefix }: MetricCellProps) {
       <span
         className="text-sm font-semibold text-foreground tabular-nums"
         data-testid={`${testidPrefix}-value`}
-        title={metric.source}
+        {...(auditMode ? { title: metric.source } : {})}
       >
         {text}
       </span>
@@ -171,6 +173,7 @@ interface CompareTableProps {
 }
 
 function CompareTable({ result }: CompareTableProps) {
+  const { auditMode } = useAuditMode();
   const metricKeys: Array<{
     key: keyof ScenarioRow["metrics"];
     label: string;
@@ -242,7 +245,7 @@ function CompareTable({ result }: CompareTableProps) {
                     key={row.id}
                     className={`p-3 text-sm tabular-nums ${incompleteClass}`}
                     data-testid={`scenario-compare-table-cell-${row.id}-${String(key)}`}
-                    title={m.source}
+                    {...(auditMode ? { title: m.source } : {})}
                   >
                     {formatScenarioMetric(m)}
                   </td>
@@ -281,17 +284,21 @@ export function ScenarioCompareWorkspace(props: ScenarioCompareWorkspaceProps) {
         data-testid="scenario-compare-workspace-empty"
       >
         <div className="text-sm font-medium text-foreground">
-          Scenario Compare workspace is waiting on the canonical ledger.
+          Add a baseline snapshot from the Dashboard to start comparing scenarios.
         </div>
         <div className="text-xs text-muted-foreground mt-2">
-          Once the household snapshot is loaded, the workspace will render the
-          six initial scenarios side-by-side using existing engine outputs.
+          Once your household snapshot is in place, this workspace renders the
+          six initial scenarios side-by-side using existing engine outputs —
+          no setup required.
         </div>
-        <div
-          className="text-[10px] text-muted-foreground mt-2 font-mono"
-          data-testid="scenario-compare-workspace-empty-reason"
-        >
-          {result.emptyReason ?? "no-ledger"}
+        <div className="mt-3">
+          <a
+            href="/dashboard"
+            data-testid="scenario-compare-workspace-empty-cta"
+            className="inline-flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20"
+          >
+            Open Dashboard
+          </a>
         </div>
       </div>
     );

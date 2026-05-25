@@ -44,6 +44,7 @@ import {
   type UseScenarioPersistenceResult,
 } from "@/hooks/useScenarioPersistence";
 import { ScenarioPersistencePanel } from "@/components/ScenarioPersistencePanel";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 
 /* ─── Props ────────────────────────────────────────────────────────────── */
 
@@ -260,6 +261,7 @@ interface CompareTableProps {
 }
 
 function CompareTable({ result, mode }: CompareTableProps) {
+  const { auditMode } = useAuditMode();
   const keys = listMetricKeys();
   return (
     <div
@@ -313,7 +315,7 @@ function CompareTable({ result, mode }: CompareTableProps) {
                     key={r.scenario.id}
                     className={`p-3 text-sm tabular-nums ${incomplete ? "opacity-70 italic" : ""}`}
                     data-testid={`scenario-builder-compare-table-cell-${r.scenario.id}-${key}`}
-                    title={m.source}
+                    {...(auditMode ? { title: m.source } : {})}
                   >
                     <div data-testid={`scenario-builder-compare-table-value-${r.scenario.id}-${key}`}>
                       {formatScenarioMetric(m)}

@@ -607,7 +607,9 @@ console.log("\n§18  React SSR");
     "goal-solver-best-path",
     "goal-solver-alternative-paths",
     "goal-solver-action-plan",
-    "goal-solver-audit-trail",
+    // Sprint 11 #15: audit-trail was demoted into AdvancedDisclosure (collapsed by default).
+    // The wrapper is the entry-point in SSR; goal-solver-audit-trail mounts on toggle.
+    "goal-solver-advanced-disclosure",
   ];
   for (const id of required) {
     ok(`SSR: has testid "${id}"`, hasTestId(html, id), { sample: html.slice(0, 200) });
