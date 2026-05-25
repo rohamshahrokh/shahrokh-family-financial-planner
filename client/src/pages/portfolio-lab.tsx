@@ -1,12 +1,14 @@
 /**
- * portfolio-lab.tsx — Sprint 6 Phase 5.
+ * portfolio-lab.tsx — Sprint 7 True Portfolio Optimizer.
  *
- * Portfolio Lab Optimizer page. Loads the canonical ledger using the same
- * query pattern every other Sprint 6 page uses, then renders the
- * `PortfolioLab` component. The page does NO computation of its own —
- * every visible number is produced by the orchestration layer in
- * `portfolioLabOptimizer.ts`, which itself is a pure pass-through over
- * the Sprint 4D / Sprint 5 engines.
+ * Portfolio Lab page. Loads the canonical ledger using the same query
+ * pattern every other Sprint 6 page uses, then renders the Sprint 7
+ * `TruePortfolioOptimizer` shell (which itself renders the Sprint 6
+ * Phase 5 deep-dive panels beneath the optimisation engine). The page
+ * does NO computation of its own — every visible number is produced by
+ * the orchestration layer in `truePortfolioOptimizer.ts` /
+ * `portfolioLabOptimizer.ts`, which are pure pass-throughs over the
+ * existing canonical / Sprint 5 / Sprint 6 engines.
  */
 
 import * as React from "react";
@@ -15,7 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
 import { buildRiskInput, computeRiskRadar } from "@/lib/riskEngine";
-import { PortfolioLab } from "@/components/PortfolioLab";
+import { TruePortfolioOptimizer } from "@/components/TruePortfolioOptimizer";
 
 export default function PortfolioLabPage() {
   /* ─── Canonical ledger queries — same pattern as goal-closure-lab ──── */
@@ -81,13 +83,14 @@ export default function PortfolioLabPage() {
           Portfolio Lab Optimizer
         </h1>
         <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
-          The first true Portfolio Lab Optimizer workspace of Family Wealth Lab. The best
-          realistic path to your FIRE target, the exact combination of actions that get you
-          there fastest with acceptable risk, and the engine-grade audit trail behind every
-          number.
+          A genuine optimisation engine for Family Wealth Lab. Scenario search across
+          thousands of engine-backed combinations, gap-solver for the minimum change
+          required to reach your FIRE target, and an efficient frontier across speed,
+          probability, risk, and net worth — every number traceable to an existing
+          engine.
         </p>
       </header>
-      <PortfolioLab
+      <TruePortfolioOptimizer
         canonicalLedger={canonicalLedger}
         riskOutputs={riskOutputs}
       />

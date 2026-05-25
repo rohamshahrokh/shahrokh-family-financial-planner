@@ -1,0 +1,336 @@
+{
+  "empty": false,
+  "searchMetrics": {
+    "generated": 3168,
+    "valid": 3168,
+    "evaluated": 3168,
+    "frontierSize": 1602,
+    "failureCounts": {
+      "max-risk": 0,
+      "max-debt": 0,
+      "max-monthly-contribution": 0,
+      "max-property-count": 0,
+      "min-liquidity": 0,
+      "target-fire-year": 0
+    },
+    "capped": false,
+    "capacity": 12000
+  },
+  "constraintsResolved": {},
+  "goalReverseEngineering": {
+    "summary": "Working backwards from the canonical FIRE number at 4.0% SWR: household needs $2,400,000 of investible assets and $2,191/mo of contribution.",
+    "requiredNetWorth": "$2.40M",
+    "requiredAssetBase": "$2.40M",
+    "requiredMonthlyContribution": "$2.2k/mo",
+    "requiredPassiveIncome": "$96k/yr",
+    "targetFireDate": "—",
+    "incomplete": false
+  },
+  "recommendations": [
+    {
+      "category": "fire-speed",
+      "label": "Best FIRE-Speed Strategy",
+      "fireYear": "2045",
+      "probabilitySuccess": "23%",
+      "projectedNetWorth": "$951k",
+      "projectedPassiveIncome": "$0/yr",
+      "riskScore": "20 / 100",
+      "confidenceScore": "23%",
+      "notEngineModelled": false,
+      "incomplete": false,
+      "actionability": {
+        "what": "Accelerate debt reduction",
+        "when": "Aligned to FIRE target 2035.",
+        "why": "Redirect $7506/mo of surplus to extra principal repayment on the household's $1,219 of total debt. Saves ~$5269 of interest over 12 months at the current 5.85% rate. This action is expected to accelerate FIRE progress.",
+        "doNothing": "Without this action the household stays on the canonical projection (2045.6030116358659)."
+      }
+    },
+    {
+      "category": "risk-adjusted",
+      "label": "Best Risk-Adjusted Strategy",
+      "fireYear": "2046",
+      "probabilitySuccess": "23%",
+      "projectedNetWorth": "$856k",
+      "projectedPassiveIncome": "$0/yr",
+      "riskScore": "0 / 100",
+      "confidenceScore": "23%",
+      "notEngineModelled": false,
+      "incomplete": false,
+      "actionability": {
+        "what": "Hold current path",
+        "when": "Aligned to FIRE target 2035.",
+        "why": "Maintain the current allocation and contribution rhythm. 12-month projection inherits the canonical baseline: net worth $856, monthly surplus $15633, 17.5 months of cash buffer. This action is expected to stabilise FIRE progress.",
+        "doNothing": "Without this action the household stays on the canonical projection (2045.6030116358659)."
+      }
+    },
+    {
+      "category": "cashflow",
+      "label": "Best Cashflow Strategy",
+      "fireYear": "2045",
+      "probabilitySuccess": "23%",
+      "projectedNetWorth": "$912k",
+      "projectedPassiveIncome": "$41k/yr",
+      "riskScore": "60 / 100",
+      "confidenceScore": "23%",
+      "notEngineModelled": false,
+      "incomplete": false,
+      "actionability": {
+        "what": "Buy investment property",
+        "when": "Target action year: 2026.",
+        "why": "Acquire a ~$1,470 investment property at canonical 80% LVR. Adds ~$41/yr net rent and ~$88 of 12-month growth but draws ~$368 from cash and adds ~$7166/mo debt service. This action is expected to accelerate FIRE progress.",
+        "doNothing": "Without this action the household stays on the canonical projection (2045.6030116358659)."
+      }
+    },
+    {
+      "category": "probability",
+      "label": "Best Probability Strategy",
+      "fireYear": "2046",
+      "probabilitySuccess": "23%",
+      "projectedNetWorth": "$856k",
+      "projectedPassiveIncome": "$0/yr",
+      "riskScore": "0 / 100",
+      "confidenceScore": "23%",
+      "notEngineModelled": false,
+      "incomplete": false,
+      "actionability": {
+        "what": "Hold current path",
+        "when": "Aligned to FIRE target 2035.",
+        "why": "Maintain the current allocation and contribution rhythm. 12-month projection inherits the canonical baseline: net worth $856, monthly surplus $15633, 17.5 months of cash buffer. This action is expected to stabilise FIRE progress.",
+        "doNothing": "Without this action the household stays on the canonical projection (2045.6030116358659)."
+      }
+    },
+    {
+      "category": "hybrid",
+      "label": "Best Hybrid Strategy",
+      "fireYear": "2045",
+      "probabilitySuccess": "23%",
+      "projectedNetWorth": "$951k",
+      "projectedPassiveIncome": "$0/yr",
+      "riskScore": "20 / 100",
+      "confidenceScore": "23%",
+      "notEngineModelled": false,
+      "incomplete": false,
+      "actionability": {
+        "what": "Accelerate debt reduction",
+        "when": "Aligned to FIRE target 2035.",
+        "why": "Redirect $7506/mo of surplus to extra principal repayment on the household's $1,219 of total debt. Saves ~$5269 of interest over 12 months at the current 5.85% rate. This action is expected to accelerate FIRE progress.",
+        "doNothing": "Without this action the household stays on the canonical projection (2045.6030116358659)."
+      }
+    }
+  ],
+  "gapSolver": {
+    "pathFound": false,
+    "blocker": "goal-too-aggressive",
+    "summary": "Goal Achievement Search exhausted 3168 scenarios. Binding constraint: goal too aggressive.",
+    "shortfall": "$1.54M",
+    "optionCount": 0
+  },
+  "frontier": {
+    "paretoCount": 1602,
+    "points": [
+      {
+        "objective": "fastest-fire",
+        "label": "Fastest FIRE",
+        "pareto": true,
+        "fireYear": "2045",
+        "probabilitySuccess": "23%",
+        "riskScore": "20 / 100",
+        "projectedNetWorth": "$951k"
+      },
+      {
+        "objective": "highest-probability",
+        "label": "Highest Probability",
+        "pareto": true,
+        "fireYear": "2046",
+        "probabilitySuccess": "23%",
+        "riskScore": "0 / 100",
+        "projectedNetWorth": "$856k"
+      },
+      {
+        "objective": "lowest-risk",
+        "label": "Lowest Risk",
+        "pareto": true,
+        "fireYear": "2046",
+        "probabilitySuccess": "23%",
+        "riskScore": "0 / 100",
+        "projectedNetWorth": "$856k"
+      },
+      {
+        "objective": "highest-networth",
+        "label": "Highest Net Worth",
+        "pareto": true,
+        "fireYear": "2045",
+        "probabilitySuccess": "23%",
+        "riskScore": "20 / 100",
+        "projectedNetWorth": "$951k"
+      },
+      {
+        "objective": "best-risk-reward",
+        "label": "Best Risk/Reward",
+        "pareto": true,
+        "fireYear": "2046",
+        "probabilitySuccess": "23%",
+        "riskScore": "0 / 100",
+        "projectedNetWorth": "$856k"
+      }
+    ]
+  },
+  "audit": [
+    {
+      "id": "audit-goal-reverse-engineering",
+      "label": "Goal Reverse Engineering",
+      "enginesUsed": [
+        "canonicalFire",
+        "goalSolver"
+      ],
+      "inputsUsed": [
+        "canonicalFire.fireNumber",
+        "canonicalFire.targetAnnualIncome",
+        "canonicalFire.swrPct",
+        "goalSolver.requiredAssetBase",
+        "goalSolver.requiredMonthlyContribution"
+      ],
+      "confidenceSource": "bestMoveEngineSprint5.confidenceScore",
+      "riskSource": "no-risk-supplied",
+      "monteCarloSource": "no-mc-supplied",
+      "howCalculated": "Each required figure is read directly from canonicalFire or goalSolver. The optimiser never re-derives the FIRE number, target passive income, required asset base, or required contribution."
+    },
+    {
+      "id": "audit-scenario-generator",
+      "label": "Scenario Generator",
+      "enginesUsed": [
+        "truePortfolioOptimizer (orchestration only)"
+      ],
+      "inputsUsed": [
+        "scenario dimension lattice (property × investment × cash × property-year × risk-tolerance × target-year)"
+      ],
+      "confidenceSource": "bestMoveEngineSprint5.confidenceScore",
+      "riskSource": "no-risk-supplied",
+      "monteCarloSource": "no-mc-supplied",
+      "howCalculated": "Cartesian product over a fixed lattice. Stable scenario ids. No financial math — only labelling and tuple enumeration."
+    },
+    {
+      "id": "audit-scenario-evaluator",
+      "label": "Scenario Evaluator",
+      "enginesUsed": [
+        "decisionCandidates",
+        "decisionRanking",
+        "bestMoveEngineSprint5",
+        "goalSolver",
+        "canonicalHeadlineMetrics",
+        "monteCarloEngine",
+        "riskEngine"
+      ],
+      "inputsUsed": [
+        "decisionCandidates.candidates[*].projection",
+        "decisionCandidates.candidates[*].risk",
+        "decisionRanking.ranked[*].score",
+        "bestMoveEngineSprint5.bestNextAction",
+        "goalSolver.trace.projectedAchievementYear",
+        "canonicalHeadlineMetrics.netWorth",
+        "monteCarloEngine.prob_ff",
+        "riskEngine.overall_score"
+      ],
+      "confidenceSource": "bestMoveEngineSprint5.confidenceScore",
+      "riskSource": "decisionCandidates.risk.executionRisk",
+      "monteCarloSource": "decisionCandidates.risk.mcConfidence",
+      "howCalculated": "Every scenario carries pass-through values from existing engine outputs. No new financial formula is introduced in the evaluator."
+    },
+    {
+      "id": "audit-constraint-filter",
+      "label": "Constraint Filtering",
+      "enginesUsed": [
+        "truePortfolioOptimizer"
+      ],
+      "inputsUsed": [
+        "constraints.maxRiskScore",
+        "constraints.maxDebt",
+        "constraints.maxMonthlyContribution",
+        "constraints.maxPropertyCount",
+        "constraints.minLiquidityMonths",
+        "constraints.targetFireYear"
+      ],
+      "confidenceSource": "bestMoveEngineSprint5.confidenceScore",
+      "riskSource": "no-risk-supplied",
+      "monteCarloSource": "no-mc-supplied",
+      "howCalculated": "Each scenario tests each constraint independently and records the first binding constraint. Failure counts surface where the household is hitting limits."
+    },
+    {
+      "id": "audit-recommendations",
+      "label": "Five Recommendations",
+      "enginesUsed": [
+        "decisionCandidates",
+        "decisionRanking",
+        "bestMoveEngineSprint5",
+        "monteCarloEngine",
+        "goalSolver"
+      ],
+      "inputsUsed": [
+        "scenarioRecord.metrics.fireYear",
+        "scenarioRecord.metrics.probabilitySuccess",
+        "scenarioRecord.metrics.riskScore",
+        "scenarioRecord.metrics.confidenceScore",
+        "scenarioRecord.metrics.projectedPassiveIncome",
+        "scenarioRecord.metrics.rankingScore"
+      ],
+      "confidenceSource": "bestMoveEngineSprint5.confidenceScore",
+      "riskSource": "no-risk-supplied",
+      "monteCarloSource": "no-mc-supplied",
+      "howCalculated": "Each recommendation is a selection over the constraint-filtered scenario pool. No new dollar value is introduced — every metric is the pass-through from the scenario evaluator."
+    },
+    {
+      "id": "audit-gap-solver",
+      "label": "Gap Solver / Goal Achievement Search",
+      "enginesUsed": [
+        "goalSolver",
+        "canonicalFire",
+        "decisionCandidates",
+        "decisionRanking"
+      ],
+      "inputsUsed": [
+        "goalSolver.shortfallAmount",
+        "goalSolver.requiredMonthlyContribution",
+        "goalSolver.trace.monthlySurplusAvailable",
+        "canonicalFire.gap"
+      ],
+      "confidenceSource": "bestMoveEngineSprint5.confidenceScore",
+      "riskSource": "no-risk-supplied",
+      "monteCarloSource": "no-mc-supplied",
+      "howCalculated": "Walks the constraint-filtered pool, picks the first scenario whose FIRE year is ≤ targetFireYear (or P(success) ≥ 0.5 when no target year supplied). When nothing satisfies, names the binding constraint and quantifies the shortfall via goalSolver pass-through."
+    },
+    {
+      "id": "audit-efficient-frontier",
+      "label": "Efficient Frontier",
+      "enginesUsed": [
+        "truePortfolioOptimizer (selection only)"
+      ],
+      "inputsUsed": [
+        "scenarioRecord.metrics.fireYear",
+        "scenarioRecord.metrics.probabilitySuccess",
+        "scenarioRecord.metrics.riskScore",
+        "scenarioRecord.metrics.projectedNetWorth"
+      ],
+      "confidenceSource": "bestMoveEngineSprint5.confidenceScore",
+      "riskSource": "no-risk-supplied",
+      "monteCarloSource": "no-mc-supplied",
+      "howCalculated": "Frontier picks the best scenario for each objective and flags every non-dominated scenario in the valid pool. No new financial value is introduced."
+    },
+    {
+      "id": "audit-actionability",
+      "label": "Actionability Layer",
+      "enginesUsed": [
+        "decisionCandidates",
+        "goalSolver"
+      ],
+      "inputsUsed": [
+        "decisionCandidates.candidates[*].label",
+        "decisionCandidates.candidates[*].rationale",
+        "goalSolver.trace.projectedAchievementYear"
+      ],
+      "confidenceSource": "bestMoveEngineSprint5.confidenceScore",
+      "riskSource": "no-risk-supplied",
+      "monteCarloSource": "no-mc-supplied",
+      "howCalculated": "Every scenario carries a four-field actionability record: what (candidate label), when (scenario propertyYear or targetFireYear), why (candidate rationale + direction of deltaFireProgress), do-nothing (canonical projected year)."
+    }
+  ]
+}
