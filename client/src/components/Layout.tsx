@@ -109,6 +109,8 @@ const NAV_STEPS = [
       { href: "/decision",       label: "Decision Engine",     icon: Sparkles,        adminOnly: false },
       // Sprint 6 Phase 4 — primary closure workspace.
       { href: "/goal-closure-lab", label: "Goal Closure Lab",  icon: Target,          adminOnly: false },
+      // Sprint 6 Phase 5 — Portfolio Lab Optimizer workspace.
+      { href: "/portfolio-lab",   label: "Portfolio Lab",       icon: FlaskConical,    adminOnly: false },
       { href: "/ai-weekly-cfo",  label: "Sat. Bulletin",       icon: BrainCircuit,    adminOnly: false, requiredPermission: 'view_bulletin' as Permission },
       { href: "/ai-insights",    label: "AI Insights",         icon: Lightbulb,       adminOnly: false, requiredPermission: 'view_ai_insights' as Permission },
     ],
