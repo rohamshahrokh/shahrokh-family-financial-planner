@@ -69,6 +69,10 @@ import {
   selectCashToday,
   type DashboardInputs,
 } from "@/lib/dashboardDataContract";
+import { WinnerLoserDifferenceCards } from "@/components/scenario-compare/WinnerLoserDifferenceCards";
+import { ScenarioOutcomeComparisonChart } from "@/components/scenario-compare/ScenarioOutcomeComparisonChart";
+import type { ScenarioMetricRef } from "@/components/scenario-compare/WinnerLoserDifferenceCards";
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 
 // ─── Types / helpers ─────────────────────────────────────────────────────────
 
@@ -512,9 +516,11 @@ function NarrativeCard({
               Default {mPct(result.defaultProbability, 0)}
             </Badge>
           )}
-          <Badge variant="outline" className={bandClass(result.serviceability?.band)}>
-            {result.serviceability?.band ?? "—"}
-          </Badge>
+          {result.serviceability?.band ? (
+            <Badge variant="outline" className={bandClass(result.serviceability.band)}>
+              {result.serviceability.band}
+            </Badge>
+          ) : null}
         </div>
       </CardContent>
     </Card>
@@ -998,12 +1004,14 @@ export default function ScenarioCompareV2Page() {
                 sub={`${lastAssumptions.horizonYears}-year horizon`}
                 tone="indigo"
               />
-              <StatTile
-                label="vs Base"
-                value={baseFanEnd ? fmt$M(winnerFanEnd.p50 - baseFanEnd.p50) : "—"}
-                sub={baseFanEnd ? `Base: ${fmt$M(baseFanEnd.p50)}` : ""}
-                tone={baseFanEnd && winnerFanEnd.p50 >= baseFanEnd.p50 ? "emerald" : "rose"}
-              />
+              {baseFanEnd ? (
+                <StatTile
+                  label="vs Base"
+                  value={fmt$M(winnerFanEnd.p50 - baseFanEnd.p50)}
+                  sub={`Base: ${fmt$M(baseFanEnd.p50)}`}
+                  tone={winnerFanEnd.p50 >= baseFanEnd.p50 ? "emerald" : "rose"}
+                />
+              ) : null}
               <StatTile
                 label="Downside"
                 value={pct(winner.riskMetrics.downsideRisk, 1)}
@@ -1019,6 +1027,49 @@ export default function ScenarioCompareV2Page() {
             </CardContent>
           </Card>
         )}
+
+        {/* ── SPRINT 12 #4 — Winner / Loser / Difference cards ──────────────
+            Reads existing scenario results. Renders ABOVE the tabbed comparison
+            charts, ABOVE assumptions / methodology disclosure. */}
+        {results.length >= 2 && (() => {
+          const fanEnd = (r: ExtendedScenarioResult) => r.netWorthFan[r.netWorthFan.length - 1];
+          const baseRef: ScenarioMetricRef | null = base ? {
+            scenarioId: base.scenarioId,
+            name: base.name,
+            netWorthP50: fanEnd(base)?.p50 ?? null,
+            passiveIncomeP50: null,
+            probability: null,
+          } : null;
+          const winnerRef: ScenarioMetricRef | null = winner ? {
+            scenarioId: winner.scenarioId,
+            name: winner.name,
+            netWorthP50: fanEnd(winner)?.p50 ?? null,
+            passiveIncomeP50: null,
+            probability: null,
+          } : null;
+          // Loser = scenario with the lowest P50 NW at horizon end
+          const loserRow = [...results].sort((a, b) => (fanEnd(a)?.p50 ?? 0) - (fanEnd(b)?.p50 ?? 0))[0];
+          const loserRef: ScenarioMetricRef | null = loserRow && loserRow.scenarioId !== winner?.scenarioId ? {
+            scenarioId: loserRow.scenarioId,
+            name: loserRow.name,
+            netWorthP50: fanEnd(loserRow)?.p50 ?? null,
+            passiveIncomeP50: null,
+            probability: null,
+          } : null;
+          const refs: ScenarioMetricRef[] = results.map(r => ({
+            scenarioId: r.scenarioId,
+            name: r.name,
+            netWorthP50: fanEnd(r)?.p50 ?? null,
+            passiveIncomeP50: null,
+            probability: null,
+          }));
+          return (
+            <>
+              <WinnerLoserDifferenceCards base={baseRef} winner={winnerRef} loser={loserRef} />
+              <ScenarioOutcomeComparisonChart scenarios={refs} />
+            </>
+          );
+        })()}
 
         {/* ── SPRINT 11 #9 — Winner banner ───────────────────────────────
             Hero-style winner banner reading from existing narrative.winnerScenarioId
