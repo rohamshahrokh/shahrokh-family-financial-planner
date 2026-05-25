@@ -73,6 +73,7 @@ import ScenarioComparePage     from "./pages/scenario-compare";
 import ScenarioCompareV2Page   from "./pages/scenario-compare-v2";
 import WhatIfScenariosPage     from "./pages/what-if-scenarios";
 import ScenarioCompareWorkspacePage from "./pages/scenario-compare-workspace";
+import GoalClosureLabPage      from "./pages/goal-closure-lab";
 import DecisionPage            from "./pages/decision";
 import RiskRadarPage           from "./pages/risk-radar";
 import TaxAlphaPage            from "./pages/tax-alpha";
@@ -260,6 +261,10 @@ function AppRouter() {
             Orchestrates Sprint 5 engines into six side-by-side scenarios. */}
         <Route path="/scenario-compare-workspace">
           <ProtectedRoute component={ScenarioCompareWorkspacePage} title="Scenario Compare Workspace" />
+        </Route>
+        {/* Sprint 6 Phase 4 — Goal Closure Lab, the primary decision workspace. */}
+        <Route path="/goal-closure-lab">
+          <ProtectedRoute component={GoalClosureLabPage} title="Goal Closure Lab" />
         </Route>
         {/* Risk Radar — surfaced from Deep Analysis cards & sidebar nav */}
         <Route path="/risk-radar">

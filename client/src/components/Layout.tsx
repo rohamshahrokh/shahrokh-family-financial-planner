@@ -107,6 +107,8 @@ const NAV_STEPS = [
       // Decision Engine moves here in Phase 7 — it's the executive brain that
       // ranks priorities and drives the action queue, not a forecast model.
       { href: "/decision",       label: "Decision Engine",     icon: Sparkles,        adminOnly: false },
+      // Sprint 6 Phase 4 — primary closure workspace.
+      { href: "/goal-closure-lab", label: "Goal Closure Lab",  icon: Target,          adminOnly: false },
       { href: "/ai-weekly-cfo",  label: "Sat. Bulletin",       icon: BrainCircuit,    adminOnly: false, requiredPermission: 'view_bulletin' as Permission },
       { href: "/ai-insights",    label: "AI Insights",         icon: Lightbulb,       adminOnly: false, requiredPermission: 'view_ai_insights' as Permission },
     ],
