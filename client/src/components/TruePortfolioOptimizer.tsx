@@ -42,6 +42,8 @@ import { PathSimulationSection } from "@/components/PathSimulationSection";
 import { buildGoalSolverPro, EMPTY_GOAL_TARGETS, type GoalSolverProTargets } from "@/lib/goalSolverPro";
 import { GoalSolverProSection } from "@/components/GoalSolverProSection";
 import { computeCanonicalFire } from "@/lib/canonicalFire";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 
 export interface TruePortfolioOptimizerProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -73,6 +75,7 @@ function ScenarioMetricBlock({
   metric: ScenarioMetric;
   testidPrefix: string;
 }) {
+  const { auditMode } = useAuditMode();
   const text = formatScenarioMetric(metric);
   const incomplete = metric.incomplete;
   return (
@@ -89,7 +92,7 @@ function ScenarioMetricBlock({
       <span
         className="text-sm font-semibold text-foreground tabular-nums"
         data-testid={`${testidPrefix}-value`}
-        title={metric.source}
+        {...(auditMode ? { title: metric.source } : {})}
       >
         {text}
       </span>

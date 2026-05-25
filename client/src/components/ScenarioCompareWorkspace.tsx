@@ -30,6 +30,7 @@ import {
 import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 
 /* ─── Props ────────────────────────────────────────────────────────────── */
 
@@ -54,6 +55,7 @@ interface MetricCellProps {
 }
 
 function MetricCell({ metric, testidPrefix }: MetricCellProps) {
+  const { auditMode } = useAuditMode();
   const text = formatScenarioMetric(metric);
   const incompleteClass = metric.incomplete ? " opacity-70 italic" : "";
   return (
@@ -70,7 +72,7 @@ function MetricCell({ metric, testidPrefix }: MetricCellProps) {
       <span
         className="text-sm font-semibold text-foreground tabular-nums"
         data-testid={`${testidPrefix}-value`}
-        title={metric.source}
+        {...(auditMode ? { title: metric.source } : {})}
       >
         {text}
       </span>
@@ -171,6 +173,7 @@ interface CompareTableProps {
 }
 
 function CompareTable({ result }: CompareTableProps) {
+  const { auditMode } = useAuditMode();
   const metricKeys: Array<{
     key: keyof ScenarioRow["metrics"];
     label: string;
@@ -242,7 +245,7 @@ function CompareTable({ result }: CompareTableProps) {
                     key={row.id}
                     className={`p-3 text-sm tabular-nums ${incompleteClass}`}
                     data-testid={`scenario-compare-table-cell-${row.id}-${String(key)}`}
-                    title={m.source}
+                    {...(auditMode ? { title: m.source } : {})}
                   >
                     {formatScenarioMetric(m)}
                   </td>

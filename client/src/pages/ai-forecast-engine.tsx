@@ -19,6 +19,7 @@
 import { useEffect, useCallback, useRef, useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import { useAppStore } from "@/lib/store";
 import { formatCurrency, safeNum } from "@/lib/finance";
 import {
@@ -237,6 +238,7 @@ function ExplainRow({ label, detail }: { label: string; detail: string }) {
 export default function AIForecastEnginePage() {
   const { toast } = useToast();
   const { privacyMode } = useAppStore();
+  const { auditMode } = useAuditMode();
 
   const {
     forecastMode, setForecastMode,
@@ -386,6 +388,17 @@ export default function AIForecastEnginePage() {
     }
   }, [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expensesRows,
       stockTx, cryptoTx, stockDCA, cryptoDCA, plannedStock, plannedCrypto, bills, yearlyAssumptions, mcVolatility, expectedReturns]);
+
+  // Sprint 11 #19: keep reconciliation status observable for engineers without
+  // surfacing the "Drift detected" / "Reconciled" badge to end users.
+  useEffect(() => {
+    if (livePreviewRecon) {
+      console.debug(
+        `[ai-forecast-engine] livePreviewRecon=${livePreviewRecon.status}`,
+        livePreviewRecon,
+      );
+    }
+  }, [livePreviewRecon]);
 
   const handleSave = useCallback(async () => {
     await saveToSupabase();
@@ -952,9 +965,11 @@ export default function AIForecastEnginePage() {
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <Sparkles className={`w-4 h-4 ${livePreviewRecon.status === 'PASS' ? 'text-emerald-300' : 'text-red-300'}`} />
             <h2 className="text-sm font-bold text-foreground">Starting position — single source of truth</h2>
-            <span className={`ml-auto px-2 py-0.5 rounded-full text-xs font-semibold ${livePreviewRecon.status === 'PASS' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>
-              {livePreviewRecon.status === 'PASS' ? 'Reconciled with Dashboard' : 'Drift detected'}
-            </span>
+            {auditMode ? (
+              <span className={`ml-auto px-2 py-0.5 rounded-full text-xs font-semibold ${livePreviewRecon.status === 'PASS' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`} data-testid="forecast-recon-status-badge">
+                {livePreviewRecon.status === 'PASS' ? 'Reconciled with Dashboard' : 'Drift detected'}
+              </span>
+            ) : null}
           </div>
           <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
             Monte Carlo reads the same canonical snapshot as Dashboard / Net Worth / Decision Engine / Wealth Strategy / Reports.

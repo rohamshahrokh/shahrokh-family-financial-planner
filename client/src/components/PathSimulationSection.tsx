@@ -36,6 +36,7 @@ import {
   type PathSampleSummary,
   type PathSimulationAuditEntry,
 } from "@/lib/pathSimulationEngine";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 
 export interface PathSimulationSectionProps {
   result: PathSimulationResult;
@@ -108,11 +109,12 @@ function BandCell({
   fmt: "currency" | "currency-per-year" | "year";
   testid: string;
 }) {
+  const { auditMode } = useAuditMode();
   return (
     <span
       className="text-xs tabular-nums text-foreground"
       data-testid={testid}
-      title={band.source}
+      {...(auditMode ? { title: band.source } : {})}
     >
       {formatPathBand(band, fmt)}
       {band.incomplete ? (

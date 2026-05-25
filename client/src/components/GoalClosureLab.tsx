@@ -34,6 +34,7 @@ import {
 import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 
 export interface GoalClosureLabProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -67,6 +68,7 @@ interface MetricBlockProps {
 }
 
 function MetricBlock({ metric, testidPrefix, compact }: MetricBlockProps) {
+  const { auditMode } = useAuditMode();
   const text = formatClosureMetric(metric);
   return (
     <div
@@ -82,7 +84,7 @@ function MetricBlock({ metric, testidPrefix, compact }: MetricBlockProps) {
       <span
         className="text-sm font-semibold text-foreground tabular-nums"
         data-testid={`${testidPrefix}-value`}
-        title={metric.source}
+        {...(auditMode ? { title: metric.source } : {})}
       >
         {text}
       </span>
@@ -307,6 +309,7 @@ function BestPathCard({ section }: { section: ReturnType<typeof buildGoalClosure
 }
 
 function ActionGroup({ title, items, tid }: { title: string; items: ClosureAction[]; tid: string }) {
+  const { auditMode } = useAuditMode();
   return (
     <div className="rounded-md bg-muted/20 border border-border p-3" data-testid={tid}>
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{title}</div>
@@ -322,7 +325,7 @@ function ActionGroup({ title, items, tid }: { title: string; items: ClosureActio
               className="text-xs text-foreground leading-relaxed flex items-start gap-2"
               data-testid={`closure-lab-action-${a.id}`}
               data-horizon={a.horizon}
-              title={a.source}
+              {...(auditMode ? { title: a.source } : {})}
             >
               <span className="text-emerald-500 mt-0.5">•</span>
               <span>{a.text}</span>
