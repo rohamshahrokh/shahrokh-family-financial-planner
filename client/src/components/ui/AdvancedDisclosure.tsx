@@ -12,7 +12,7 @@
  *    can still trace numbers in a single click.
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import React, { useEffect, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
