@@ -1,0 +1,468 @@
+{
+  "empty": false,
+  "metadata": {
+    "strategiesSimulated": 8,
+    "simulationsPerStrategy": 1000,
+    "totalSimulations": 8000,
+    "seed": 8,
+    "assumptionSetVersion": "sprint8-v1.0"
+  },
+  "bestStrategy": {
+    "scenarioId": "none|none|debt-reduction|-|low|2050",
+    "label": "No IP · No new invest · Debt down · Risk low · FIRE 2050",
+    "category": null,
+    "probabilityFireSuccess": 100,
+    "probabilityLiquidityStress": 0,
+    "probabilityNegativeCashflow": 100,
+    "probabilityForcedSale": 0,
+    "netWorthBand": {
+      "p10": 921000,
+      "p50": 950000,
+      "p90": 981000,
+      "source": "decisionCandidates.projection (Sprint 7) × probabilisticWealthEngine assumption draws",
+      "incomplete": false,
+      "notEngineModelled": false
+    },
+    "passiveIncomeBand": {
+      "p10": 0,
+      "p50": 0,
+      "p90": 0,
+      "source": "decisionCandidates.projection (Sprint 7) × probabilisticWealthEngine assumption draws",
+      "incomplete": false,
+      "notEngineModelled": false
+    },
+    "fireYearBand": {
+      "p10": 2045,
+      "p50": 2045,
+      "p90": 2045,
+      "source": "goalSolver.trace.projectedAchievementYear × probabilisticWealthEngine assumption draws",
+      "incomplete": false,
+      "notEngineModelled": false
+    },
+    "requiredMonthlyContributionBand": {
+      "p10": 2095,
+      "p50": 2189,
+      "p90": 2291,
+      "source": "goalSolver.requiredMonthlyContribution × probabilisticWealthEngine assumption draws",
+      "incomplete": false,
+      "notEngineModelled": false
+    },
+    "deterministicScore": 0.280757,
+    "monteCarloConfidence": 50,
+    "robustScore": 25,
+    "whyRobust": "No IP · No new invest · Debt down · Risk low · FIRE 2050 delivers 100% probability of reaching FIRE on schedule, 50% Monte Carlo confidence, 0% liquidity-stress risk.",
+    "whatBreaks": "What could break this plan: 100% chance of negative cashflow."
+  },
+  "robustRanking": [
+    {
+      "label": "No IP · No new invest · Debt down · Risk low · FIRE 2050",
+      "deterministicScore": 0.280757,
+      "monteCarloConfidence": 50,
+      "robustScore": 25,
+      "probabilityFireSuccess": 100
+    },
+    {
+      "label": "No IP · No new invest · Debt down · Risk low · FIRE 2055",
+      "deterministicScore": 0.280757,
+      "monteCarloConfidence": 50,
+      "robustScore": 25,
+      "probabilityFireSuccess": 100
+    },
+    {
+      "label": "No IP · No new invest · Debt down · Risk low · FIRE 2060",
+      "deterministicScore": 0.280757,
+      "monteCarloConfidence": 50,
+      "robustScore": 25,
+      "probabilityFireSuccess": 100
+    },
+    {
+      "label": "No IP · No new invest · Debt down · Risk low · FIRE 2045",
+      "deterministicScore": 0.280757,
+      "monteCarloConfidence": 48,
+      "robustScore": 24,
+      "probabilityFireSuccess": 98
+    },
+    {
+      "label": "No IP · No new invest · Debt down · Risk low · FIRE 2035",
+      "deterministicScore": 0.280757,
+      "monteCarloConfidence": 0,
+      "robustScore": 0,
+      "probabilityFireSuccess": 0
+    },
+    {
+      "label": "No IP · No new invest · Hold cash · Risk low · FIRE 2035",
+      "deterministicScore": 0,
+      "monteCarloConfidence": 0,
+      "robustScore": 0,
+      "probabilityFireSuccess": 0
+    },
+    {
+      "label": "Buy IP 2026 · No new invest · Hold cash · Risk low · FIRE 2035",
+      "deterministicScore": 0.104848,
+      "monteCarloConfidence": 0,
+      "robustScore": 0,
+      "probabilityFireSuccess": 0
+    },
+    {
+      "label": "No IP · No new invest · Debt down · Risk low · FIRE 2040",
+      "deterministicScore": 0.280757,
+      "monteCarloConfidence": 0,
+      "robustScore": 0,
+      "probabilityFireSuccess": 0
+    }
+  ],
+  "sensitivity": [
+    {
+      "driver": "propertyCapitalGrowth",
+      "label": "Property capital growth",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": -2000,
+      "notEngineModelled": false,
+      "note": "Annual perturbation around canonical property capital-growth assumption (canonicalPropertyEconomics)."
+    },
+    {
+      "driver": "rentGrowth",
+      "label": "Rent growth",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 0,
+      "notEngineModelled": false,
+      "note": "Annual perturbation around canonical rental-income growth (canonicalCashflow rental component)."
+    },
+    {
+      "driver": "vacancy",
+      "label": "Vacancy",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 0,
+      "notEngineModelled": false,
+      "note": "Annual perturbation reducing rental income for vacancy risk; engine source: canonicalCashflow rental_income."
+    },
+    {
+      "driver": "interestRates",
+      "label": "Interest rates",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 0,
+      "notEngineModelled": false,
+      "note": "Annual perturbation on debt-service line; engine source: canonicalDebtService."
+    },
+    {
+      "driver": "inflation",
+      "label": "Inflation",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 0,
+      "notEngineModelled": false,
+      "note": "Inflation perturbation; engine source: canonicalFire.swrPct stress."
+    },
+    {
+      "driver": "etfReturn",
+      "label": "ETF / stock return",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 2000,
+      "notEngineModelled": false,
+      "note": "ETF/stock return perturbation; engine source: fireMonteCarlo expected returns."
+    },
+    {
+      "driver": "cryptoReturn",
+      "label": "Crypto return",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 0,
+      "notEngineModelled": true,
+      "note": "Crypto return perturbation; existing engines do not differentiate crypto-specific risk — flagged not-engine-modelled."
+    },
+    {
+      "driver": "incomeGrowth",
+      "label": "Income growth",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 0,
+      "notEngineModelled": false,
+      "note": "Household income growth perturbation; engine source: goalSolver.trace.monthlySurplusAvailable."
+    },
+    {
+      "driver": "expenseInflation",
+      "label": "Expense inflation",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 0,
+      "notEngineModelled": false,
+      "note": "Household expense inflation perturbation; engine source: canonicalCashflow expenses."
+    },
+    {
+      "driver": "maintenanceCost",
+      "label": "Maintenance cost",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 0,
+      "notEngineModelled": true,
+      "note": "Property maintenance cost — canonical engines do not break this out separately. Flagged not-engine-modelled."
+    },
+    {
+      "driver": "sellingCost",
+      "label": "Selling cost",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 0,
+      "notEngineModelled": true,
+      "note": "Property selling cost — canonical engines do not break this out separately. Flagged not-engine-modelled."
+    },
+    {
+      "driver": "taxImpact",
+      "label": "Tax impact",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 0,
+      "notEngineModelled": false,
+      "note": "Tax perturbation; engine source: canonicalTax aggregates."
+    },
+    {
+      "driver": "debtServiceStress",
+      "label": "Debt-service stress",
+      "deltaProbabilityFireSuccessPct": 0,
+      "deltaP50NetWorth": 0,
+      "notEngineModelled": false,
+      "note": "Debt service stress; engine source: canonicalDebtService."
+    }
+  ],
+  "assumptionSet": {
+    "version": "sprint8-v1.0",
+    "propertyCapitalGrowth": {
+      "mean": 1,
+      "stdDev": 0.04,
+      "min": 0.85,
+      "max": 1.15,
+      "notEngineModelled": false,
+      "note": "Annual perturbation around canonical property capital-growth assumption (canonicalPropertyEconomics)."
+    },
+    "rentGrowth": {
+      "mean": 1,
+      "stdDev": 0.02,
+      "min": 0.92,
+      "max": 1.08,
+      "notEngineModelled": false,
+      "note": "Annual perturbation around canonical rental-income growth (canonicalCashflow rental component)."
+    },
+    "vacancy": {
+      "mean": 1,
+      "stdDev": 0.03,
+      "min": 0.85,
+      "max": 1.15,
+      "notEngineModelled": false,
+      "note": "Annual perturbation reducing rental income for vacancy risk; engine source: canonicalCashflow rental_income."
+    },
+    "interestRates": {
+      "mean": 1,
+      "stdDev": 0.03,
+      "min": 0.9,
+      "max": 1.15,
+      "notEngineModelled": false,
+      "note": "Annual perturbation on debt-service line; engine source: canonicalDebtService."
+    },
+    "inflation": {
+      "mean": 1,
+      "stdDev": 0.015,
+      "min": 0.95,
+      "max": 1.07,
+      "notEngineModelled": false,
+      "note": "Inflation perturbation; engine source: canonicalFire.swrPct stress."
+    },
+    "etfReturn": {
+      "mean": 1,
+      "stdDev": 0.05,
+      "min": 0.8,
+      "max": 1.2,
+      "notEngineModelled": false,
+      "note": "ETF/stock return perturbation; engine source: fireMonteCarlo expected returns."
+    },
+    "cryptoReturn": {
+      "mean": 1,
+      "stdDev": 0.15,
+      "min": 0.6,
+      "max": 1.4,
+      "notEngineModelled": true,
+      "note": "Crypto return perturbation; existing engines do not differentiate crypto-specific risk — flagged not-engine-modelled."
+    },
+    "incomeGrowth": {
+      "mean": 1,
+      "stdDev": 0.02,
+      "min": 0.93,
+      "max": 1.1,
+      "notEngineModelled": false,
+      "note": "Household income growth perturbation; engine source: goalSolver.trace.monthlySurplusAvailable."
+    },
+    "expenseInflation": {
+      "mean": 1,
+      "stdDev": 0.02,
+      "min": 0.95,
+      "max": 1.08,
+      "notEngineModelled": false,
+      "note": "Household expense inflation perturbation; engine source: canonicalCashflow expenses."
+    },
+    "maintenanceCost": {
+      "mean": 1,
+      "stdDev": 0.03,
+      "min": 0.9,
+      "max": 1.2,
+      "notEngineModelled": true,
+      "note": "Property maintenance cost — canonical engines do not break this out separately. Flagged not-engine-modelled."
+    },
+    "sellingCost": {
+      "mean": 1,
+      "stdDev": 0.02,
+      "min": 0.95,
+      "max": 1.1,
+      "notEngineModelled": true,
+      "note": "Property selling cost — canonical engines do not break this out separately. Flagged not-engine-modelled."
+    },
+    "taxImpact": {
+      "mean": 1,
+      "stdDev": 0.02,
+      "min": 0.94,
+      "max": 1.08,
+      "notEngineModelled": false,
+      "note": "Tax perturbation; engine source: canonicalTax aggregates."
+    },
+    "debtServiceStress": {
+      "mean": 1,
+      "stdDev": 0.03,
+      "min": 0.92,
+      "max": 1.15,
+      "notEngineModelled": false,
+      "note": "Debt service stress; engine source: canonicalDebtService."
+    }
+  },
+  "audit": [
+    {
+      "id": "audit-prob-engine-assumption-set",
+      "label": "Assumption Set",
+      "enginesUsed": [
+        "probabilisticWealthEngine (Sprint 8)"
+      ],
+      "inputsUsed": [
+        "AssumptionSet ranges per driver"
+      ],
+      "confidenceSource": "probabilisticWealthEngine.monteCarloConfidence",
+      "riskSource": "probabilisticWealthEngine.probabilityLiquidityStress / probabilityForcedSale",
+      "monteCarloSource": "probabilisticWealthEngine seed=8, version=sprint8-v1.0",
+      "howCalculated": "Each driver is drawn independently every simulation step as a clamped Normal(μ, σ). Multipliers compose into per-trial perturbations of the Sprint 7 engine outputs — no new financial formula is introduced.",
+      "assumptions": [
+        "Property capital growth: μ=1, σ=0.04, [0.85, 1.15]",
+        "Rent growth: μ=1, σ=0.02, [0.92, 1.08]",
+        "Vacancy: μ=1, σ=0.03, [0.85, 1.15]",
+        "Interest rates: μ=1, σ=0.03, [0.9, 1.15]",
+        "Inflation: μ=1, σ=0.015, [0.95, 1.07]",
+        "ETF / stock return: μ=1, σ=0.05, [0.8, 1.2]",
+        "Crypto return: μ=1, σ=0.15, [0.6, 1.4] — not engine-modelled",
+        "Income growth: μ=1, σ=0.02, [0.93, 1.1]",
+        "Expense inflation: μ=1, σ=0.02, [0.95, 1.08]",
+        "Maintenance cost: μ=1, σ=0.03, [0.9, 1.2] — not engine-modelled",
+        "Selling cost: μ=1, σ=0.02, [0.95, 1.1] — not engine-modelled",
+        "Tax impact: μ=1, σ=0.02, [0.94, 1.08]",
+        "Debt-service stress: μ=1, σ=0.03, [0.92, 1.15]"
+      ]
+    },
+    {
+      "id": "audit-prob-engine-simulation-metadata",
+      "label": "Simulation Metadata",
+      "enginesUsed": [
+        "probabilisticWealthEngine"
+      ],
+      "inputsUsed": [
+        "seed=8",
+        "simulationsPerStrategy=1000",
+        "strategiesSimulated=8",
+        "totalSimulations=8000",
+        "assumptionSetVersion=sprint8-v1.0"
+      ],
+      "confidenceSource": "probabilisticWealthEngine.monteCarloConfidence",
+      "riskSource": "Sprint 7 scenario riskScore (pass-through)",
+      "monteCarloSource": "probabilisticWealthEngine seed=8, version=sprint8-v1.0",
+      "howCalculated": "Per-strategy independent PRNG ⇒ reproducible totals. Bands are rounded to nearest $1,000 (net worth/passive income), nearest year (FIRE year), and nearest dollar (required contribution). Probabilities round to integer percent.",
+      "assumptions": [
+        "Deterministic mulberry32 PRNG, seed offset 7919 per strategy.",
+        "Standard Normal via Box–Muller.",
+        "P10/P50/P90 are sample percentiles over the trial samples."
+      ]
+    },
+    {
+      "id": "audit-prob-engine-probability-derivation",
+      "label": "Probability Derivations",
+      "enginesUsed": [
+        "decisionCandidates",
+        "goalSolver",
+        "canonicalHeadlineMetrics",
+        "monteCarloEngine"
+      ],
+      "inputsUsed": [
+        "scenarioRecord.metrics.projectedNetWorth",
+        "scenarioRecord.metrics.projectedPassiveIncome",
+        "scenarioRecord.metrics.fireYear",
+        "scenarioRecord.metrics.liquidityPosition",
+        "scenarioRecord.metrics.requiredMonthlyContribution"
+      ],
+      "confidenceSource": "probabilisticWealthEngine.monteCarloConfidence",
+      "riskSource": "Sprint 7 scenario riskScore (pass-through)",
+      "monteCarloSource": "probabilisticWealthEngine seed=8, version=sprint8-v1.0",
+      "howCalculated": "Each probability is the share of trials satisfying the predicate. Counts use only the trials where the underlying engine baseline existed — missing baselines flow to incomplete rather than fake 0%/100% values.",
+      "assumptions": [
+        "Liquidity stress threshold = 3 months (matches canonicalRiskSurface).",
+        "Negative cashflow proxy = (passive income / 12) − required monthly contribution.",
+        "Forced sale proxy = projected net worth < 0 (Sprint 7 net worth already nets liabilities).",
+        "FIRE success = simulated FIRE year ≤ target FIRE year (when supplied) else ≤ goal-reverse-engineering target year."
+      ]
+    },
+    {
+      "id": "audit-prob-engine-robust-ranking",
+      "label": "Robust Strategy Ranking",
+      "enginesUsed": [
+        "decisionRanking",
+        "probabilisticWealthEngine"
+      ],
+      "inputsUsed": [
+        "scenarioRecord.metrics.rankingScore (Sprint 7 deterministic)",
+        "probabilisticWealthEngine.monteCarloConfidence"
+      ],
+      "confidenceSource": "probabilisticWealthEngine.monteCarloConfidence",
+      "riskSource": "Sprint 7 scenario riskScore (pass-through)",
+      "monteCarloSource": "probabilisticWealthEngine seed=8, version=sprint8-v1.0",
+      "howCalculated": "Strategies sorted by robustScore desc. Ties broken by simulation order which is itself seeded ⇒ reproducible.",
+      "assumptions": [
+        "Robust score = 0.5 × deterministic ranking + 0.5 × Monte Carlo confidence.",
+        "Monte Carlo confidence = P(FIRE) − 0.5 × P(liquidity stress) − 0.5 × P(negative cashflow) − 0.5 × P(forced sale).",
+        "When either component is missing, robust score falls back to whichever is available — never invented."
+      ]
+    },
+    {
+      "id": "audit-prob-engine-sensitivity",
+      "label": "Assumption Sensitivity",
+      "enginesUsed": [
+        "probabilisticWealthEngine"
+      ],
+      "inputsUsed": [
+        "AssumptionSet, AssumptionSet (with each σ × 2 in turn)"
+      ],
+      "confidenceSource": "probabilisticWealthEngine.monteCarloConfidence",
+      "riskSource": "Sprint 7 scenario riskScore (pass-through)",
+      "monteCarloSource": "probabilisticWealthEngine seed=8, version=sprint8-v1.0",
+      "howCalculated": "Per-driver delta vs the baseline assumption set is the simplest single-factor sensitivity — it reveals which assumption the strategy is most fragile to without introducing a new model.",
+      "assumptions": [
+        "Each driver is stress-tested by doubling its σ and re-running 500 trials against the leading strategy.",
+        "Sensitivity column 'Δ P(success)' is integer percentage points; column 'Δ P50 net worth' is rounded to nearest $1,000."
+      ]
+    },
+    {
+      "id": "audit-prob-engine-sprint7-passthrough",
+      "label": "Sprint 7 Pass-Through Provenance",
+      "enginesUsed": [
+        "truePortfolioOptimizer (Sprint 7)"
+      ],
+      "inputsUsed": [
+        "Sprint 7 scenarios array",
+        "Sprint 7 recommendations array",
+        "Sprint 7 frontier points",
+        "Sprint 7 audit trail"
+      ],
+      "confidenceSource": "bestMoveEngineSprint5.confidenceScore (Sprint 7 ancestor)",
+      "riskSource": "riskEngine.overall_score (Sprint 7 ancestor)",
+      "monteCarloSource": "Sprint 7 monteCarloEngine.prob_ff + Sprint 8 assumption draws",
+      "howCalculated": "Sprint 8 strategies inherit Sprint 7 ranking, frontier, and audit. Every probability surfaced here cites its Sprint 7 baseline.",
+      "assumptions": [
+        "Sprint 8 reads only Sprint 7 outputs and canonical engine values quoted in Sprint 7 audit. No engine bypassed.",
+        "Sprint 7 search metrics: generated=3168, valid=3168, frontier=1602."
+      ]
+    }
+  ]
+}
