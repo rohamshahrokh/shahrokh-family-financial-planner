@@ -35,6 +35,13 @@ import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
+// Sprint 13 — universal 4-section primary view
+import { FireCommandCenter } from "@/components/sprint13/FireCommandCenter";
+import { Top3ActionsRow } from "@/components/sprint13/Top3ActionsRow";
+import { BiggestBlockersRow } from "@/components/sprint13/BiggestBlockersRow";
+import { DoNothingOutcome } from "@/components/sprint13/DoNothingOutcome";
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
+import type { UserFacingAction, RankedBlocker } from "@/lib/goalSolverView";
 
 export interface GoalClosureLabProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -516,18 +523,103 @@ export function GoalClosureLab(props: GoalClosureLabProps) {
     );
   }
 
+  // Sprint 13 — derive the 4-section primary view from existing engine
+  // outputs. No new calculations: every number maps to a closure-lab metric.
+  const fire = result.bundle?.fire ?? null;
+  const head = result.bundle?.head ?? null;
+  const currentNW = head?.netWorth ?? fire?.netWorthNow ?? undefined;
+  const targetNW = fire?.fireNumber && fire.fireNumber > 0 ? fire.fireNumber : undefined;
+  const gap = result.goalStatus.gap.value ?? undefined;
+  const yearsRemaining = (() => {
+    const v = result.goalStatus.yearsAheadBehind.value;
+    return v != null && Number.isFinite(v) ? Math.max(0, Math.abs(v)) : undefined;
+  })();
+  const probability = result.goalStatus.confidence.value ?? undefined; // 0..1
+
+  // Top 3 actions — pull from ActionPlanSection. The closure-lab section
+  // exposes lists of typed actions per horizon; we render the first 3 in
+  // user-facing form. No engine-internal jargon survives here.
+  const closureActions: ClosureAction[] = (result.actionPlan.thisMonth ?? [])
+    .concat(result.actionPlan.next3Months ?? [])
+    .concat(result.actionPlan.next12Months ?? [])
+    .concat(result.actionPlan.majorMilestones ?? [])
+    .slice(0, 3);
+  const top3: UserFacingAction[] = closureActions.map((a) => ({
+    what: a.text,
+    when:
+      a.horizon === "this-month"
+        ? "This month"
+        : a.horizon === "next-3-months"
+        ? "Next 3 months"
+        : a.horizon === "next-12-months"
+        ? "Next 12 months"
+        : "Major milestone",
+    why: "Closure Lab next-step recommendation.",
+    expected: {},
+    sourceLabel: "Goal Solver",
+    internalRef: a.source,
+  }));
+
+  // Blockers — derive from the binding constraint. Closure Lab only surfaces
+  // ONE binding constraint; we render it as rank #1.
+  const blockers: RankedBlocker[] = result.gapAnalysis.bindingConstraint
+    ? [
+        {
+          rank: 1,
+          label: result.gapAnalysis.bindingConstraint,
+          impactScore: 5,
+          required: "Address the binding constraint above.",
+          expectedBenefit: "Removes the hardest single constraint in the plan.",
+          sourceLabel: "Goal Solver",
+        },
+      ]
+    : [];
+
+  // Do-nothing outcome — Closure Lab does not surface a counterfactual
+  // simulation, so we report the current state honestly (current NW + current
+  // passive income from headlines), with no FIRE-date / probability fields
+  // unless they can be sourced. Empty fields hide per P0.
+  const doNothingNW = currentNW;
+  const doNothingPI = head?.passiveIncome ?? undefined;
+
   return (
     <div
-      className={`flex flex-col gap-4 sm:gap-6 ${props.className ?? ""}`}
+      className={`flex flex-col gap-3 sm:gap-4 ${props.className ?? ""}`}
       data-testid="closure-lab-root"
     >
-      <GoalStatusCard       section={result.goalStatus} />
-      <GapAnalysisCard      section={result.gapAnalysis} />
-      <PathComparisonSection rows={result.pathComparison} />
-      <BestPathCard         section={result.bestPath} />
-      <ActionPlanCard       section={result.actionPlan} />
-      <AuditTrailCard       section={result.auditTrail} />
-      <StrategicIdeasCard   section={result.strategicIdeas} />
+      {/* Sprint 13 — universal 4-section primary view. */}
+      <FireCommandCenter
+        currentNetWorth={currentNW}
+        targetNetWorth={targetNW}
+        gap={gap}
+        yearsRemaining={yearsRemaining}
+        probability={probability}
+        testidPrefix="gcl-fcc"
+      />
+      <Top3ActionsRow actions={top3} testidPrefix="gcl-top3" />
+      <BiggestBlockersRow blockers={blockers} testidPrefix="gcl-blockers" />
+      <DoNothingOutcome
+        netWorth={doNothingNW}
+        passiveIncome={doNothingPI}
+        testidPrefix="gcl-do-nothing"
+      />
+
+      {/* Sprint 13 — every Sprint 6 Phase 4 section is demoted below. */}
+      <AdvancedDisclosure
+        title="View Supporting Analysis"
+        subtitle="Goal Status · Gap Analysis · Path Comparison · Best Path · Action Plan · Audit · Strategic Ideas"
+        data-testid="closure-lab-supporting-analysis"
+      >
+        <div className="flex flex-col gap-4 sm:gap-6">
+          <GoalStatusCard       section={result.goalStatus} />
+          <GapAnalysisCard      section={result.gapAnalysis} />
+          <PathComparisonSection rows={result.pathComparison} />
+          <BestPathCard         section={result.bestPath} />
+          <ActionPlanCard       section={result.actionPlan} />
+          <AuditTrailCard       section={result.auditTrail} />
+          <StrategicIdeasCard   section={result.strategicIdeas} />
+        </div>
+      </AdvancedDisclosure>
     </div>
   );
 }

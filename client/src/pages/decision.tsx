@@ -112,6 +112,24 @@ import ScenarioCompareV2Page from "./scenario-compare-v2";
 // Sprint 11 #6, #12 — Goal Solver Pro is the new primary surface on /decision.
 import { GoalSolverProTab } from "@/components/decisionEngine/GoalSolverProTab";
 import AssumptionsPanel from "@/components/AssumptionsPanel";
+// Sprint 13 — universal 4-section primary view
+import { FireCommandCenter } from "@/components/sprint13/FireCommandCenter";
+import { Top3ActionsRow } from "@/components/sprint13/Top3ActionsRow";
+import { BiggestBlockersRow } from "@/components/sprint13/BiggestBlockersRow";
+import { DoNothingOutcome } from "@/components/sprint13/DoNothingOutcome";
+import { RecommendedVsDoNothingChart } from "@/components/sprint13/RecommendedVsDoNothingChart";
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
+import {
+  selectFireGapSummary,
+  selectTop3UserFacingActions,
+  selectRankedBlockers,
+  selectDoNothingComparison,
+} from "@/lib/goalSolverView";
+import { computeCanonicalFire } from "@/lib/canonicalFire";
+import { buildTruePortfolioOptimizer } from "@/lib/truePortfolioOptimizer";
+import { buildProbabilisticWealthEngine } from "@/lib/probabilisticWealthEngine";
+import { buildPathSimulationEngine } from "@/lib/pathSimulationEngine";
+import { buildGoalSolverPro, EMPTY_GOAL_TARGETS } from "@/lib/goalSolverPro";
 import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
 import { registerTrace } from "@/lib/auditMode/auditRegistry";
 import {
@@ -1946,6 +1964,117 @@ function CandidateRow({
 
 // ─── Page (tabs) ─────────────────────────────────────────────────────────────
 
+/**
+ * Sprint 13 — universal 4-section primary view for /decision.
+ *
+ * Pulls the same canonical inputs that GoalSolverProTab uses (snapshot,
+ * properties, stocks, cryptos, holdings, income, expenses) and rebuilds the
+ * Sprint 7/8/9/10 chain locally so the hero can render even before the user
+ * clicks into the Goal Solver tab. No new engines; orchestration only.
+ */
+function Sprint13DecisionPrimary() {
+  const { data: snapshot } = useQuery<any>({
+    queryKey: ["/api/dashboard/snapshot"],
+    queryFn: () => apiRequest("GET", "/api/dashboard/snapshot").then(r => r.json()),
+  });
+  const { data: properties = [] } = useQuery<any[]>({
+    queryKey: ["/api/properties"],
+    queryFn: () => apiRequest("GET", "/api/properties").then(r => r.json()),
+  });
+  const { data: stocks = [] } = useQuery<any[]>({
+    queryKey: ["/api/stocks"],
+    queryFn: () => apiRequest("GET", "/api/stocks").then(r => r.json()),
+  });
+  const { data: cryptos = [] } = useQuery<any[]>({
+    queryKey: ["/api/cryptos"],
+    queryFn: () => apiRequest("GET", "/api/cryptos").then(r => r.json()),
+  });
+  const { data: incomeRecords = [] } = useQuery<any[]>({
+    queryKey: ["/api/income"],
+    queryFn: () => apiRequest("GET", "/api/income").then(r => r.json()),
+  });
+  const { data: expenses = [] } = useQuery<any[]>({
+    queryKey: ["/api/expenses"],
+    queryFn: () => apiRequest("GET", "/api/expenses").then(r => r.json()),
+  });
+  const { data: holdingsRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/holdings"],
+    queryFn: () => apiRequest("GET", "/api/holdings").then(r => r.json()),
+  });
+
+  const canonicalLedger: DashboardInputs | null = useMemo(() => {
+    if (!snapshot) return null;
+    return { snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses };
+  }, [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses]);
+
+  const canonical = canonicalLedger ? computeCanonicalFire(canonicalLedger) : null;
+  const sprint7 = useMemo(() => buildTruePortfolioOptimizer({ canonicalLedger }), [canonicalLedger]);
+  const probabilistic = useMemo(
+    () => buildProbabilisticWealthEngine({ sprint7Result: sprint7 }),
+    [sprint7],
+  );
+  const pathSim = useMemo(
+    () => buildPathSimulationEngine({ sprint7Result: sprint7, canonicalLedger: canonicalLedger ?? null }),
+    [sprint7, canonicalLedger],
+  );
+  const goalSolverResult = useMemo(() => {
+    const canonicalFire = canonical ?? {
+      swrPct: 4,
+      targetAnnualIncome: 0,
+      targetMonthlyIncome: 0,
+      fireNumber: 0,
+      netWorthNow: 0,
+      progressFraction: 0,
+      annualPassiveIncome: 0,
+      monthlyPassiveIncome: 0,
+      monthlyExpenses: 0,
+      passiveCoverage: null,
+      gap: 0,
+      source: "empty" as const,
+    };
+    return buildGoalSolverPro({
+      canonicalLedger,
+      canonicalFire,
+      sprint7Result: sprint7,
+      sprint8Result: probabilistic,
+      sprint9Result: pathSim,
+      targets: EMPTY_GOAL_TARGETS,
+    });
+  }, [canonicalLedger, canonical, sprint7, probabilistic, pathSim]);
+
+  const fireGap = selectFireGapSummary(goalSolverResult, canonical);
+  const top3 = selectTop3UserFacingActions(goalSolverResult);
+  const blockers = selectRankedBlockers(goalSolverResult);
+  const doNothing = selectDoNothingComparison(goalSolverResult, canonical);
+  const heroFan = pathSim.bestStrategy?.netWorthFan ?? pathSim.strategies[0]?.netWorthFan ?? [];
+  const recVsBaselineData = (heroFan as Array<{ year: number; p50: number }>).map((b) => ({
+    year: b.year,
+    recommended: b.p50,
+    doNothing: canonical?.netWorthNow ?? null,
+  }));
+
+  return (
+    <div className="flex flex-col gap-3 sm:gap-4" data-testid="decision-sprint13-primary">
+      <FireCommandCenter
+        currentNetWorth={fireGap.currentNetWorth}
+        targetNetWorth={fireGap.targetNetWorth}
+        gap={fireGap.gap}
+        yearsRemaining={fireGap.yearsRemaining}
+        probability={fireGap.probability}
+      />
+      <RecommendedVsDoNothingChart data={recVsBaselineData} />
+      <Top3ActionsRow actions={top3} />
+      <BiggestBlockersRow blockers={blockers} />
+      <DoNothingOutcome
+        netWorth={doNothing.netWorth}
+        passiveIncome={doNothing.passiveIncome}
+        probability={doNothing.probability}
+        fireDate={doNothing.fireYear}
+      />
+    </div>
+  );
+}
+
 export default function DecisionPage() {
   // Sprint 11 #6, #12 — Goal Solver Pro is now the primary surface. Quick
   // Decision and Advanced Builder remain reachable via the secondary tabs.
@@ -1978,6 +2107,18 @@ export default function DecisionPage() {
         </div>
       </div>
 
+      {/* Sprint 13 — 4-section primary view at the top of /decision. */}
+      <Sprint13DecisionPrimary />
+
+      {/* Sprint 13 — every Sprint 11/12 surface (Goal Solver Pro tab + Quick
+          Decision tab + Advanced Builder tab + AssumptionsPanel) is demoted
+          into a single "View Supporting Analysis" disclosure. Nothing is
+          deleted; the tabs still work, just one click away. */}
+      <AdvancedDisclosure
+        title="View Supporting Analysis"
+        subtitle="Goal Solver Pro · Quick Decision · Advanced Builder · Assumptions"
+        data-testid="decision-supporting-analysis"
+      >
       <Tabs value={tab} onValueChange={(v) => setTab(v as "goal-solver" | "quick" | "advanced")}>
         <TabsList className="grid w-full grid-cols-3 sm:w-auto sm:inline-flex">
           <TabsTrigger value="goal-solver" className="text-xs sm:text-sm h-11 sm:h-9" data-testid="decision-tab-goal-solver">
@@ -2011,6 +2152,7 @@ export default function DecisionPage() {
 
       {/* Audit fix P1.4: every engine assumption is surfaced here, collapsible. */}
       <AssumptionsPanel mode="compact" />
+      </AdvancedDisclosure>
     </div>
   );
 }

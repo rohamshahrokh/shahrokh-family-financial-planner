@@ -69,6 +69,13 @@ import {
   selectCashToday,
   type DashboardInputs,
 } from "@/lib/dashboardDataContract";
+// Sprint 13 — universal 4-section primary view
+import { FireCommandCenter } from "@/components/sprint13/FireCommandCenter";
+import { Top3ActionsRow } from "@/components/sprint13/Top3ActionsRow";
+import { BiggestBlockersRow } from "@/components/sprint13/BiggestBlockersRow";
+import { DoNothingOutcome } from "@/components/sprint13/DoNothingOutcome";
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
+import type { UserFacingAction, RankedBlocker } from "@/lib/goalSolverView";
 
 // ─── Types / helpers ─────────────────────────────────────────────────────────
 
@@ -973,6 +980,76 @@ export default function ScenarioCompareV2Page() {
 
       {/* ─── MAIN CONTENT ───────────────────────────────────────────────── */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 -mt-6 space-y-4 sm:space-y-6">
+        {/* ─── Sprint 13 — universal 4-section primary view ──────────────
+            For Scenario Compare, "FIRE Command Center" is repurposed as a
+            "Scenario Command Center" — same component, winner's metrics. */}
+        {(() => {
+          const baseFanEnd_ = base?.netWorthFan[base.netWorthFan.length - 1];
+          const winnerFanEnd_ = winner?.netWorthFan[winner.netWorthFan.length - 1];
+          const currentNW = liveReadouts && snapshot ? Number((snapshot as any).net_worth ?? (snapshot as any).netWorth ?? NaN) : undefined;
+          const targetNW = winnerFanEnd_?.p50;
+          const gap = currentNW != null && targetNW != null && Number.isFinite(currentNW) && Number.isFinite(targetNW)
+            ? targetNW - currentNW
+            : undefined;
+          const yearsRemaining = lastAssumptions.horizonYears;
+          const probability = narrative?.confidenceOverall != null ? narrative.confidenceOverall : undefined;
+
+          // Top 3 differences = winner vs base on three axes (NW, PI, prob).
+          const diffs: UserFacingAction[] = winner && baseFanEnd_ && winnerFanEnd_ ? [
+            {
+              what: `Median net worth uplift`,
+              when: `${lastAssumptions.horizonYears}-year horizon`,
+              why: `${winner.name} delivers higher median terminal net worth than the base scenario.`,
+              expected: { netWorth: winnerFanEnd_.p50 - baseFanEnd_.p50 },
+              sourceLabel: "Scenario Engine",
+            },
+            {
+              what: `Confidence vs base`,
+              when: `${lastAssumptions.horizonYears}-year horizon`,
+              why: `Overall confidence reflects sequencing/leverage robustness across simulations.`,
+              expected: { probability: (narrative?.confidenceOverall ?? 0) - 0.5 },
+              sourceLabel: "Scenario Engine",
+            },
+            {
+              what: `Recommendation rationale`,
+              when: "Now",
+              why: narrative?.tldr ?? "Why this scenario wins.",
+              expected: {},
+              sourceLabel: "Scenario Engine",
+            },
+          ] : [];
+
+          // Scenario Compare doesn't surface ranked blockers — show only when
+          // narrative offers one. We never invent blockers.
+          const blockers: RankedBlocker[] = [];
+
+          return (
+            <div className="flex flex-col gap-3 sm:gap-4" data-testid="scenario-compare-sprint13-primary">
+              <FireCommandCenter
+                currentNetWorth={currentNW}
+                targetNetWorth={targetNW}
+                gap={gap}
+                yearsRemaining={yearsRemaining}
+                probability={probability}
+                testidPrefix="sc-fcc"
+              />
+              <Top3ActionsRow actions={diffs} testidPrefix="sc-top3" title="Top 3 differences vs base" />
+              <BiggestBlockersRow blockers={blockers} testidPrefix="sc-blockers" />
+              <DoNothingOutcome
+                netWorth={baseFanEnd_?.p50}
+                fireDate={base?.scenarioId === "base" ? `${new Date().getFullYear() + lastAssumptions.horizonYears}` : undefined}
+                testidPrefix="sc-do-nothing"
+              />
+            </div>
+          );
+        })()}
+
+        <AdvancedDisclosure
+          title="View Supporting Analysis"
+          subtitle="Decision summary · Winner card · Tabbed comparison charts · Δ-vs-base · Save / load"
+          data-testid="scenario-compare-supporting-analysis"
+        >
+        <div className="flex flex-col gap-4 sm:gap-6">
         {/* ── DECISION SUMMARY CARD (premium) ───────────────────────────── */}
         {narrative && winner && winnerFanEnd && (
           <Card className="overflow-hidden shadow-xl border-purple-200">
@@ -1758,6 +1835,8 @@ export default function ScenarioCompareV2Page() {
             </CardContent>
           </Card>
         )}
+        </div>
+        </AdvancedDisclosure>
       </div>
 
       {/* ─── MOBILE STICKY BOTTOM ACTION BAR ──────────────────────────── */}
