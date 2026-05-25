@@ -20,6 +20,7 @@ import { apiRequest } from "@/lib/queryClient";
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
 import { buildRiskInput, computeRiskRadar } from "@/lib/riskEngine";
 import { ScenarioCompareWorkspace } from "@/components/ScenarioCompareWorkspace";
+import { ScenarioBuilderWorkspace } from "@/components/ScenarioBuilderWorkspace";
 
 export default function ScenarioCompareWorkspacePage() {
   /* ─── Canonical ledger queries — same pattern as decision.tsx ──────── */
@@ -102,6 +103,11 @@ export default function ScenarioCompareWorkspacePage() {
       </div>
 
       <ScenarioCompareWorkspace
+        canonicalLedger={canonicalLedger}
+        riskOutputs={riskOutputs}
+      />
+
+      <ScenarioBuilderWorkspace
         canonicalLedger={canonicalLedger}
         riskOutputs={riskOutputs}
       />
