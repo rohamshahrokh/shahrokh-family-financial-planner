@@ -57,6 +57,15 @@ import {
   Legend,
 } from "recharts";
 import { formatCurrency } from "@/lib/finance";
+import {
+  selectFireGapSummary,
+  selectTop3Actions,
+  selectDoNothingComparison,
+} from "@/lib/goalSolverView";
+import { FireGapSummaryBlock } from "@/components/portfolio-lab/FireGapSummaryBlock";
+import { Top3ActionsBlock } from "@/components/portfolio-lab/Top3ActionsBlock";
+import { PortfolioLabCharts } from "@/components/portfolio-lab/PortfolioLabCharts";
+import { DecisionFrame } from "@/components/ui/DecisionFrame";
 
 export interface TruePortfolioOptimizerProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -544,9 +553,11 @@ function FrontierCard({
                 <td className="py-2 pr-3 tabular-nums">{formatScenarioMetric(pt.metrics.riskScore)}</td>
                 <td className="py-2 pr-3 tabular-nums">{formatScenarioMetric(pt.metrics.projectedNetWorth)}</td>
                 <td className="py-2 pr-3">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${pt.pareto ? chipClass("ok") : chipClass("default")}`}>
-                    {pt.pareto ? "Pareto" : "—"}
-                  </span>
+                  {pt.pareto ? (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${chipClass("ok")}`}>
+                      Pareto
+                    </span>
+                  ) : null}
                 </td>
               </tr>
             ))}
@@ -765,7 +776,7 @@ function PortfolioLabHero({
         <div className="rounded-lg border border-border bg-card/70 p-3" data-testid="hero-where-now">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Where am I now?</div>
           <div className="text-xl font-semibold tabular-nums text-foreground">
-            {canonical ? formatCurrency(canonical.netWorthNow) : "—"}
+            {canonical ? formatCurrency(canonical.netWorthNow) : "Set up your ledger"}
           </div>
           <div className="text-[11px] text-muted-foreground mt-1">
             Net worth · {canonical && canonical.fireNumber > 0
@@ -814,7 +825,7 @@ function PortfolioLabHero({
         <div className="rounded-lg border border-border bg-card/70 p-3" data-testid="hero-why">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Why?</div>
           <div className="text-xs text-foreground leading-relaxed" data-testid="hero-why-text">
-            {whyWinsNarrative ?? featured?.actionability?.why ?? "—"}
+            {whyWinsNarrative ?? featured?.actionability?.why ?? "Complete your ledger to see the rationale."}
           </div>
           {whyWinsLabel ? (
             <div className="text-[11px] text-muted-foreground mt-1 italic">{whyWinsLabel}</div>
@@ -989,11 +1000,102 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
   // is null (e.g. user has not picked a target yet).
   const heroFan = pathSim.bestStrategy?.netWorthFan ?? pathSim.strategies[0]?.netWorthFan ?? [];
 
+  // Sprint 12 — advisor-style views over Sprint 10 canonical output.
+  const fireGap = useMemo(() => selectFireGapSummary(goalSolverResult), [goalSolverResult]);
+  const top3 = useMemo(() => selectTop3Actions(goalSolverResult), [goalSolverResult]);
+  const doNothing = useMemo(() => selectDoNothingComparison(goalSolverResult), [goalSolverResult]);
+  const canonicalFire = useMemo(
+    () => (props.canonicalLedger ? computeCanonicalFire(props.canonicalLedger) : null),
+    [props.canonicalLedger],
+  );
+  const baselineNW = canonicalFire?.netWorthNow ?? null;
+
   return (
     <div
       className={`flex flex-col gap-4 sm:gap-5 ${props.className ?? ""}`}
       data-testid="true-portfolio-optimizer"
     >
+      {/* Sprint 12 — FIRE Gap Summary tiles (8 KPIs). Reads selectFireGapSummary
+          over Sprint 10 canonical output. Collapses when no FIRE goal is set. */}
+      <FireGapSummaryBlock summary={fireGap} />
+
+      {/* Sprint 12 — 6-dimensional DecisionFrame primitive. Wires the Sprint 11
+          5-slot Hero into the new universal DecisionFrame so /portfolio-lab
+          answers the 6-dimension question with consistent testids. */}
+      <DecisionFrame
+        testidPrefix="portfolio-lab-decision-frame"
+        title="Your decision in one frame"
+        subtitle="Six questions, one answer — every number pulled from canonical engines."
+        currentPosition={{
+          label: "Current Position",
+          value: fireGap.currentNetWorth != null && Number.isFinite(fireGap.currentNetWorth)
+            ? formatCurrency(fireGap.currentNetWorth, true)
+            : undefined,
+          subtitle: fireGap.currentPassiveIncome != null && Number.isFinite(fireGap.currentPassiveIncome)
+            ? `${formatCurrency(fireGap.currentPassiveIncome, true)}/yr passive`
+            : undefined,
+          status: goalSolverResult.feasibility.status === "ACHIEVABLE"
+            ? "on-track"
+            : goalSolverResult.feasibility.status === "STRETCH"
+              ? "at-risk"
+              : "off-track",
+        }}
+        targetPosition={{
+          label: "Target Position",
+          value: fireGap.targetNetWorth != null && Number.isFinite(fireGap.targetNetWorth)
+            ? formatCurrency(fireGap.targetNetWorth, true)
+            : undefined,
+          subtitle: fireGap.targetFireYear != null
+            ? `by ${fireGap.targetFireYear}`
+            : undefined,
+        }}
+        gap={{
+          label: "Gap to close",
+          value: fireGap.netWorthGap != null && Number.isFinite(fireGap.netWorthGap) && fireGap.netWorthGap > 0
+            ? formatCurrency(fireGap.netWorthGap, true)
+            : undefined,
+          direction: "negative",
+          subtitle: fireGap.medianFireYear != null
+            ? `Engine median FIRE year: ${fireGap.medianFireYear}`
+            : undefined,
+        }}
+        recommendedAction={{
+          label: "Recommended Action",
+          value: top3[0]?.label,
+          subtitle: top3[0]?.dueYear ? `Due year: ${top3[0].dueYear}` : undefined,
+          ctaHref: "/decision",
+          ctaLabel: "Open Decision Engine",
+        }}
+        expectedOutcome={{
+          label: "Expected Outcome",
+          value: top3[0]?.netWorthDelta != null && Number.isFinite(top3[0].netWorthDelta) && top3[0].netWorthDelta !== 0
+            ? `+ ${formatCurrency(Math.abs(top3[0].netWorthDelta), true)} NW`
+            : undefined,
+          subtitle: top3[0]?.probabilityDelta != null && Number.isFinite(top3[0].probabilityDelta) && top3[0].probabilityDelta !== 0
+            ? `${top3[0].probabilityDelta > 0 ? "+" : "−"} ${Math.round(Math.abs(top3[0].probabilityDelta) * 100)}% success probability`
+            : undefined,
+        }}
+        doNothingOutcome={{
+          label: "Do Nothing Outcome",
+          value: doNothing.baselineNetWorth != null && Number.isFinite(doNothing.baselineNetWorth)
+            ? `End NW ${formatCurrency(doNothing.baselineNetWorth, true)}`
+            : undefined,
+          subtitle: doNothing.baselineProbability != null
+            ? `${Math.round(doNothing.baselineProbability * 100)}% FIRE probability if no action`
+            : undefined,
+        }}
+      />
+
+      {/* Sprint 12 — Top-3 actions to close the gap. */}
+      <Top3ActionsBlock actions={top3} />
+
+      {/* Sprint 12 — Required charts: current-vs-target, gap waterfall, path-vs-baseline. */}
+      <PortfolioLabCharts
+        summary={fireGap}
+        netWorthFan={heroFan as Array<{ year: number; p50: number }>}
+        baselineNetWorth={baselineNW}
+      />
+
       {/* Sprint 11 #1, #2 — Hero region (5 slots, baseline-vs-recommendation chart). */}
       <PortfolioLabHero
         canonicalLedger={props.canonicalLedger}
