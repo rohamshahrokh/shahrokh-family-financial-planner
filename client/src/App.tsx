@@ -258,10 +258,13 @@ function AppRouter() {
         <Route path="/what-if-scenarios">
           <ProtectedRoute component={WhatIfScenariosPage} title="What-If Scenarios" />
         </Route>
-        {/* Sprint 6 Phase 1 — Dedicated What-If Scenario Compare workspace.
-            Orchestrates Sprint 5 engines into six side-by-side scenarios. */}
+        {/* Sprint 11 #10 — redirect the legacy six-scenario workspace to the
+            V2 page so users land on the surface that already has Sprint 11
+            scorecards + winner banner + comparison tabs. The old testids on
+            ScenarioCompareWorkspace can be retired in a follow-up sweep.
+            TODO(sprint-12): retire `scenario-compare-workspace-*` testids. */}
         <Route path="/scenario-compare-workspace">
-          <ProtectedRoute component={ScenarioCompareWorkspacePage} title="Scenario Compare Workspace" />
+          <Redirect to="/scenario-compare-v2" />
         </Route>
         {/* Sprint 6 Phase 4 — Goal Closure Lab, the primary decision workspace. */}
         <Route path="/goal-closure-lab">

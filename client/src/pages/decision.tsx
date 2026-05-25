@@ -109,6 +109,8 @@ import type { NarrativeMode } from "@/lib/scenarioV2/decisionEngine/narrativeLay
 
 // Embedded power-user tab — re-uses every line of premium Scenario Lab UX.
 import ScenarioCompareV2Page from "./scenario-compare-v2";
+// Sprint 11 #6, #12 — Goal Solver Pro is the new primary surface on /decision.
+import { GoalSolverProTab } from "@/components/decisionEngine/GoalSolverProTab";
 import AssumptionsPanel from "@/components/AssumptionsPanel";
 import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
 import { registerTrace } from "@/lib/auditMode/auditRegistry";
@@ -1945,12 +1947,15 @@ function CandidateRow({
 // ─── Page (tabs) ─────────────────────────────────────────────────────────────
 
 export default function DecisionPage() {
-  const [tab, setTab] = useState<"quick" | "advanced">("quick");
+  // Sprint 11 #6, #12 — Goal Solver Pro is now the primary surface. Quick
+  // Decision and Advanced Builder remain reachable via the secondary tabs.
+  const [tab, setTab] = useState<"goal-solver" | "quick" | "advanced">("goal-solver");
 
   // Sync browser hash so deep-links work and refreshing preserves the active tab.
   useEffect(() => {
     const hash = window.location.hash.replace("#", "");
     if (hash === "advanced") setTab("advanced");
+    else if (hash === "quick") setTab("quick");
   }, []);
 
   useEffect(() => {
@@ -1965,16 +1970,20 @@ export default function DecisionPage() {
           <HelpLink topic={HELP_TOPICS.decisionEngineOverview} variant="icon" ariaLabel="How the Decision Engine works" />
         </div>
         <p className="text-xs sm:text-sm text-muted-foreground">
-          One engine, two interfaces. Quick Decision auto-ranks the best paths;
-          Advanced Builder lets you author scenarios event-by-event.
+          Reverse-engineer your wealth goal: see feasibility, the gap to target, the next-best action,
+          and the alternative paths. Power-user surfaces remain available below.
         </p>
         <div className="pt-0.5">
           <HelpLink topic={HELP_TOPICS.simpleVsAdvanced} variant="learn-more" label="Simple vs Advanced — which one should I use?" />
         </div>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as "quick" | "advanced")}>
-        <TabsList className="grid w-full grid-cols-2 sm:w-auto sm:inline-flex">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "goal-solver" | "quick" | "advanced")}>
+        <TabsList className="grid w-full grid-cols-3 sm:w-auto sm:inline-flex">
+          <TabsTrigger value="goal-solver" className="text-xs sm:text-sm h-11 sm:h-9" data-testid="decision-tab-goal-solver">
+            <Target className="h-3.5 w-3.5 mr-1.5" />
+            Goal Solver Pro
+          </TabsTrigger>
           <TabsTrigger value="quick" className="text-xs sm:text-sm h-11 sm:h-9">
             <Sparkles className="h-3.5 w-3.5 mr-1.5" />
             Quick Decision
@@ -1984,6 +1993,10 @@ export default function DecisionPage() {
             Advanced Builder
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="goal-solver" className="mt-4">
+          <GoalSolverProTab />
+        </TabsContent>
 
         <TabsContent value="quick" className="mt-4">
           <QuickDecisionTab />

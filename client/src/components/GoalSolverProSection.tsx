@@ -31,6 +31,8 @@ import {
   formatGoalSolverDollars,
   formatGoalSolverYear,
 } from "@/lib/goalSolverPro";
+import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 
 export interface GoalSolverProSectionProps {
   result: GoalSolverProResult;
@@ -360,6 +362,7 @@ function BestPathCard({ result }: { result: GoalSolverProResult }) {
 }
 
 function AlternativePathsCard({ result }: { result: GoalSolverProResult }) {
+  const { auditMode } = useAuditMode();
   const featured: OptimizationResult["objective"][] = [
     "fastestFire",
     "highestProbability",
@@ -384,9 +387,11 @@ function AlternativePathsCard({ result }: { result: GoalSolverProResult }) {
             <div className="mt-1 font-medium" data-testid={`goal-solver-alt-label-${alt.objective}`}>
               {alt.path?.label ?? "—"}
             </div>
-            <div className="mt-1 text-muted-foreground" data-testid={`goal-solver-alt-score-${alt.objective}`}>
-              score: {alt.score == null ? "—" : alt.score.toFixed(2)}
-            </div>
+            {auditMode ? (
+              <div className="mt-1 text-muted-foreground" data-testid={`goal-solver-alt-score-${alt.objective}`}>
+                score: {alt.score == null ? "—" : alt.score.toFixed(2)}
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -395,6 +400,7 @@ function AlternativePathsCard({ result }: { result: GoalSolverProResult }) {
 }
 
 function ActionPlanCard({ result }: { result: GoalSolverProResult }) {
+  const { auditMode } = useAuditMode();
   return (
     <div
       className="rounded-lg border border-border bg-card p-4"
@@ -413,9 +419,11 @@ function ActionPlanCard({ result }: { result: GoalSolverProResult }) {
             >
               <span className="font-medium" data-testid={`goal-solver-action-year-${i}`}>{a.year}</span>:{" "}
               <span data-testid={`goal-solver-action-text-${i}`}>{a.action}</span>
-              <div className="text-[10px] text-muted-foreground">
-                source: {a.sourceStrategyId} · field: {a.inputField}
-              </div>
+              {auditMode ? (
+                <div className="text-[10px] text-muted-foreground">
+                  source: {a.sourceStrategyId} · field: {a.inputField}
+                </div>
+              ) : null}
             </li>
           ))}
         </ol>
@@ -492,7 +500,14 @@ export function GoalSolverProSection({
           <BestPathCard result={result} />
           <AlternativePathsCard result={result} />
           <ActionPlanCard result={result} />
-          <AuditTrailCard result={result} />
+          {/* Sprint 11 #15 — demote the 8-field audit trail into AdvancedDisclosure. */}
+          <AdvancedDisclosure
+            title="Where did these numbers come from?"
+            subtitle="Goal Solver Pro audit trail (engines, inputs, assumptions per section)"
+            data-testid="goal-solver-advanced-disclosure"
+          >
+            <AuditTrailCard result={result} />
+          </AdvancedDisclosure>
         </>
       )}
     </div>

@@ -44,6 +44,7 @@ import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend, ReferenceLine,
 } from "recharts";
+import { Link } from "wouter";
 
 import {
   runScenarioV2,
@@ -1015,6 +1016,221 @@ export default function ScenarioCompareV2Page() {
                 sub="P50 liquidity"
                 tone="sky"
               />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── SPRINT 11 #9 — Winner banner ───────────────────────────────
+            Hero-style winner banner reading from existing narrative.winnerScenarioId
+            + Δ vs base. Sits above the comparison tabs. */}
+        {narrative && winner && winnerFanEnd && (
+          <Card className="border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 via-card to-card" data-testid="scenario-compare-winner-banner">
+            <CardContent className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Winner</div>
+                <div className="text-lg sm:text-xl font-bold text-foreground" data-testid="scenario-compare-winner-name">
+                  {winner.name}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 max-w-xl">{sentence(narrative.tldr)}</p>
+              </div>
+              {baseFanEnd ? (
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Δ vs base (P50 NW)</div>
+                  <div
+                    className={`text-xl font-semibold tabular-nums ${
+                      winnerFanEnd.p50 - baseFanEnd.p50 >= 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-rose-600 dark:text-rose-400"
+                    }`}
+                    data-testid="scenario-compare-winner-delta"
+                  >
+                    {winnerFanEnd.p50 - baseFanEnd.p50 >= 0 ? "+" : ""}
+                    {fmt$M(winnerFanEnd.p50 - baseFanEnd.p50)}
+                  </div>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── SPRINT 11 #7 — Tabbed comparison charts ───────────────────
+            Five tabs overlaying the selected scenarios across the metrics the
+            user asked for. Uses existing engine outputs only — no new math. */}
+        {results.length > 1 && (
+          <Card data-testid="scenario-compare-tabs-card">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">Compare scenarios</CardTitle>
+              <CardDescription className="text-xs">
+                Five views over the existing engine output for each selected scenario.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue="net-worth">
+                <TabsList className="grid grid-cols-5" data-testid="scenario-compare-tabs">
+                  <TabsTrigger value="net-worth" data-testid="scenario-compare-tab-net-worth">Net Worth</TabsTrigger>
+                  <TabsTrigger value="passive-income" data-testid="scenario-compare-tab-passive-income">Passive Income</TabsTrigger>
+                  <TabsTrigger value="fire-year" data-testid="scenario-compare-tab-fire-year">FIRE Year</TabsTrigger>
+                  <TabsTrigger value="cashflow" data-testid="scenario-compare-tab-cashflow">Cashflow</TabsTrigger>
+                  <TabsTrigger value="probability" data-testid="scenario-compare-tab-probability">Probability</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="net-worth" className="mt-3" data-testid="scenario-compare-tab-content-net-worth">
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={nwChartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
+                        <XAxis dataKey="year" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => `$${Math.round(v / 1000).toLocaleString()}k`} />
+                        <RTooltip formatter={(v: number) => fmt$M(v)} />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        {results.map((r) => {
+                          const key = SCENARIO_KEY_MAP[r.scenarioId] ?? r.scenarioId;
+                          return (
+                            <Line
+                              key={r.scenarioId}
+                              type="monotone"
+                              dataKey={key}
+                              stroke={r.scenarioId === narrative?.winnerScenarioId ? "#10b981" : (SCENARIO_COLORS as Record<string, string>)[SCENARIO_KEY_MAP[r.scenarioId] ?? r.scenarioId] ?? "#6366f1"}
+                              strokeWidth={r.scenarioId === narrative?.winnerScenarioId ? 2.5 : 1.5}
+                              strokeDasharray={r.scenarioId === "base" ? "5 5" : undefined}
+                              dot={false}
+                              isAnimationActive={false}
+                            />
+                          );
+                        })}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="passive-income" className="mt-3" data-testid="scenario-compare-tab-content-passive-income">
+                  <div className="text-xs text-muted-foreground italic py-6 text-center">
+                    Passive income comparison is engine-modelled by the FIRE Path engine — open Goal Solver Pro on
+                    <Link href="/decision"><span className="ml-1 underline">/decision</span></Link> for the per-scenario passive-income view.
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="fire-year" className="mt-3" data-testid="scenario-compare-tab-content-fire-year">
+                  <div className="text-xs text-muted-foreground italic py-6 text-center">
+                    FIRE-year distribution lives in the Sprint 9 path simulation — open Goal Solver Pro on
+                    <Link href="/decision"><span className="ml-1 underline">/decision</span></Link> for the FIRE-year tile.
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="cashflow" className="mt-3" data-testid="scenario-compare-tab-content-cashflow">
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={liquidityChartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
+                        <XAxis dataKey="year" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => `$${Math.round(v / 1000).toLocaleString()}k`} />
+                        <RTooltip formatter={(v: number) => fmt$M(v)} />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        {results.map((r) => {
+                          const key = SCENARIO_KEY_MAP[r.scenarioId] ?? r.scenarioId;
+                          return (
+                            <Line
+                              key={r.scenarioId}
+                              type="monotone"
+                              dataKey={key}
+                              stroke={r.scenarioId === narrative?.winnerScenarioId ? "#0ea5e9" : (SCENARIO_COLORS as Record<string, string>)[SCENARIO_KEY_MAP[r.scenarioId] ?? r.scenarioId] ?? "#6366f1"}
+                              strokeWidth={r.scenarioId === narrative?.winnerScenarioId ? 2.5 : 1.5}
+                              strokeDasharray={r.scenarioId === "base" ? "5 5" : undefined}
+                              dot={false}
+                              isAnimationActive={false}
+                            />
+                          );
+                        })}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="probability" className="mt-3" data-testid="scenario-compare-tab-content-probability">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                    {results.map((r) => (
+                      <div key={r.scenarioId} className="rounded-md border border-border p-3" data-testid={`scenario-compare-probability-${r.scenarioId}`}>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{r.name}</div>
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          <div>
+                            <div className="text-muted-foreground">Default prob.</div>
+                            <div className="font-semibold tabular-nums">{pct(r.defaultProbability, 1)}</div>
+                          </div>
+                          <div>
+                            <div className="text-muted-foreground">Downside risk</div>
+                            <div className="font-semibold tabular-nums">{pct(r.riskMetrics.downsideRisk, 1)}</div>
+                          </div>
+                          <div>
+                            <div className="text-muted-foreground">Liquidity stress</div>
+                            <div className="font-semibold tabular-nums">{pct(r.liquidityStressProbability, 1)}</div>
+                          </div>
+                          <div>
+                            <div className="text-muted-foreground">Negative equity</div>
+                            <div className="font-semibold tabular-nums">{pct(r.negativeEquityProbability, 1)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── SPRINT 11 #8 — Δ vs base comparison table ──────────────────
+            Five rows × N scenarios. Cells are signed deltas vs base. */}
+        {results.length > 1 && base && (
+          <Card data-testid="scenario-compare-delta-table-card">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">Δ vs base</CardTitle>
+              <CardDescription className="text-xs">
+                Signed delta of each scenario vs the base plan on five key metrics.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs" data-testid="scenario-compare-delta-table">
+                  <thead>
+                    <tr className="border-b border-border text-left text-muted-foreground">
+                      <th className="py-2 pr-3">Scenario</th>
+                      <th className="py-2 pr-3 text-right">Δ NW (P50)</th>
+                      <th className="py-2 pr-3 text-right">Δ Cash (P50)</th>
+                      <th className="py-2 pr-3 text-right">Δ Downside</th>
+                      <th className="py-2 pr-3 text-right">Δ Default</th>
+                      <th className="py-2 pr-3 text-right">Δ Liquidity stress</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {results
+                      .filter((r) => r.scenarioId !== "base")
+                      .map((r) => {
+                        const rEnd = r.netWorthFan[r.netWorthFan.length - 1]?.p50 ?? 0;
+                        const bEnd = base.netWorthFan[base.netWorthFan.length - 1]?.p50 ?? 0;
+                        const rCash = r.cashFan[r.cashFan.length - 1]?.p50 ?? 0;
+                        const bCash = base.cashFan[base.cashFan.length - 1]?.p50 ?? 0;
+                        const tone = (n: number, invert = false) =>
+                          n === 0
+                            ? "text-muted-foreground"
+                            : (invert ? n < 0 : n > 0)
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-rose-600 dark:text-rose-400";
+                        const signed = (n: number) => (n >= 0 ? "+" : "") + fmt$M(n);
+                        const signedPct = (n: number) => (n >= 0 ? "+" : "") + pct(n, 1);
+                        return (
+                          <tr key={r.scenarioId} className="border-b border-border/40" data-testid={`scenario-compare-delta-row-${r.scenarioId}`}>
+                            <td className="py-2 pr-3 font-medium">{r.name}</td>
+                            <td className={`py-2 pr-3 text-right tabular-nums ${tone(rEnd - bEnd)}`}>{signed(rEnd - bEnd)}</td>
+                            <td className={`py-2 pr-3 text-right tabular-nums ${tone(rCash - bCash)}`}>{signed(rCash - bCash)}</td>
+                            <td className={`py-2 pr-3 text-right tabular-nums ${tone(r.riskMetrics.downsideRisk - base.riskMetrics.downsideRisk, true)}`}>{signedPct(r.riskMetrics.downsideRisk - base.riskMetrics.downsideRisk)}</td>
+                            <td className={`py-2 pr-3 text-right tabular-nums ${tone(r.defaultProbability - base.defaultProbability, true)}`}>{signedPct(r.defaultProbability - base.defaultProbability)}</td>
+                            <td className={`py-2 pr-3 text-right tabular-nums ${tone(r.liquidityStressProbability - base.liquidityStressProbability, true)}`}>{signedPct(r.liquidityStressProbability - base.liquidityStressProbability)}</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
             </CardContent>
           </Card>
         )}
