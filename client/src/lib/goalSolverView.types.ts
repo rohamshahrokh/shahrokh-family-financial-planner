@@ -72,3 +72,55 @@ export interface DoNothingComparison {
   baselinePassiveIncome: number | null;
   recommendedPassiveIncome: number | null;
 }
+
+/* ─── Sprint 13 advisor-style view shapes ──────────────────────────────── */
+
+export interface SourceRef {
+  label: string;
+  detail?: string | null;
+}
+
+export interface FireCommandCenterData {
+  currentNetWorth: number | null;
+  currentNetWorthSource: SourceRef;
+  targetNetWorth: number | null;
+  targetNetWorthSource: SourceRef;
+  gap: number | null;
+  gapSource: SourceRef;
+  yearsRemaining: number | null;
+  targetYear: number | null;
+  yearsRemainingSource: SourceRef;
+  medianYearsRemaining: number | null;
+  medianFireYear: number | null;
+  probability: number | null;
+  probabilitySource: SourceRef;
+}
+
+export interface Top3ActionDetail {
+  what: string;
+  when: number | null;
+  why: string;
+  expectedNetWorthDelta: number | null;
+  expectedPassiveIncomeDelta: number | null;
+  expectedProbabilityDelta: number | null;
+  sourceStrategyId?: string;
+  engineType: string;
+}
+
+export interface RankedBlockerDetail {
+  rank: number;
+  label: string;
+  impact: string | null;
+  requiredImprovement: string | null;
+  expectedBenefit: string | null;
+  sourceLabel: string;
+  sourceDetail: string | null;
+}
+
+export interface DoNothingOutcome {
+  netWorth: number | null;
+  passiveIncome: number | null;
+  probability: number | null;
+  expectedFireYear: number | null;
+  source: SourceRef;
+}

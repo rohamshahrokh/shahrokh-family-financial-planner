@@ -20,7 +20,12 @@ import type {
   RankedBlocker,
   MinimumChange,
   DoNothingComparison,
+  FireCommandCenterData,
+  Top3ActionDetail,
+  RankedBlockerDetail,
+  DoNothingOutcome,
 } from "./goalSolverView.types";
+import { filterAndRewriteActionPlan, rewriteAction } from "./actionLabelMap";
 
 const REQUIRED_PROB_BAR = 0.7;
 
@@ -332,3 +337,125 @@ export function selectDoNothingComparison(result: GoalSolverProResult): DoNothin
     recommendedPassiveIncome: best?.passiveIncomeP50 ?? null,
   };
 }
+
+/* ─── Sprint 13 advisor-style selectors ───────────────────────────────── */
+
+/**
+ * 5-tile FIRE Command Center data:
+ * Current Net Worth · Target Net Worth · Gap · Years Remaining · Probability.
+ *
+ * Pure projection over the existing FireGapSummary + Sprint 10 feasibility
+ * fields. No new computation other than `targetFireYear - currentYear`
+ * subtraction for the "Years Remaining" derived figure.
+ */
+export function selectFireCommandCenterData(result: GoalSolverProResult): FireCommandCenterData {
+  const summary = selectFireGapSummary(result);
+  const currentYear = new Date().getFullYear();
+  const targetYear = summary.targetFireYear;
+  const medianYear = summary.medianFireYear;
+  const yearsRemaining = finite(targetYear) ? Math.max(0, (targetYear as number) - currentYear) : null;
+  const medianYearsRemaining = finite(medianYear) ? Math.max(0, (medianYear as number) - currentYear) : null;
+
+  return {
+    currentNetWorth: summary.currentNetWorth,
+    currentNetWorthSource: { label: "Canonical Ledger", detail: "goalSolver.gap.netWorth.actual" },
+    targetNetWorth: summary.targetNetWorth,
+    targetNetWorthSource: { label: "Dashboard Goal", detail: "goalSolver.targets.targetNetWorth" },
+    gap: summary.netWorthGap,
+    gapSource: { label: "Goal Solver", detail: "goalSolver.gap.netWorth.shortfall" },
+    yearsRemaining,
+    targetYear,
+    yearsRemainingSource: {
+      label: "Dashboard Goal",
+      detail: targetYear != null ? `goalSolver.targets.targetFireYear=${targetYear}` : "no FIRE year set",
+    },
+    medianYearsRemaining,
+    medianFireYear: medianYear,
+    probability: summary.currentProbability,
+    probabilitySource: { label: "Path Simulation", detail: "goalSolver.feasibility.probabilityOfSuccess" },
+  };
+}
+
+/**
+ * 3 user-facing actions with WHAT/WHEN/WHY/EXPECTED RESULT structure.
+ * Filters internal checkpoints + applies actionLabelMap.
+ */
+export function selectTop3ActionsDetailed(result: GoalSolverProResult): Top3ActionDetail[] {
+  const best = result.bestPath;
+  if (!best) return [];
+
+  const filtered = filterAndRewriteActionPlan(result.actionPlan);
+  if (filtered.length === 0) return [];
+
+  const baselineProbability = findBaselineProbability(result);
+  const baselineNW = findBaselineNetWorth(result);
+  const baselineIncome = findBaselineIncome(result);
+
+  const out: Top3ActionDetail[] = [];
+  const seen = new Set<string>();
+  for (const e of filtered) {
+    if (seen.has(e.rewritten.label)) continue;
+    seen.add(e.rewritten.label);
+
+    const nwDelta = deltaOrNull(best.netWorthP50, baselineNW);
+    const piDelta = deltaOrNull(best.passiveIncomeP50, baselineIncome);
+    const probDelta = deltaOrNull(best.probabilityFireByTarget, baselineProbability);
+
+    out.push({
+      what: e.rewritten.label,
+      when: finite(e.year) ? (e.year as number) : null,
+      why: e.auditNote || "Engine-traced action — see Supporting Analysis for the full audit trail.",
+      expectedNetWorthDelta: nwDelta,
+      expectedPassiveIncomeDelta: piDelta,
+      expectedProbabilityDelta: probDelta,
+      sourceStrategyId: e.sourceStrategyId,
+      engineType: e.rewritten.type,
+    });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+/**
+ * 3 ranked blockers with: label · impact · required improvement · expected benefit.
+ */
+export function selectRankedBlockersDetailed(result: GoalSolverProResult): RankedBlockerDetail[] {
+  const ranked = selectRankedBlockers(result);
+  const out: RankedBlockerDetail[] = [];
+  for (const r of ranked) {
+    out.push({
+      rank: r.rank,
+      label: r.label,
+      impact:
+        r.estimatedImpactProbability != null
+          ? `${Math.round(r.estimatedImpactProbability * 100)}% probability impact`
+          : r.estimatedImpactNetWorth != null
+            ? `${formatGapValue("$", r.estimatedImpactNetWorth)} net-worth impact`
+            : null,
+      requiredImprovement: r.requiredChange,
+      expectedBenefit:
+        r.estimatedImpactProbability != null
+          ? `+${Math.round(r.estimatedImpactProbability * 100)}% feasibility if closed`
+          : null,
+      sourceLabel: "Goal Solver",
+      sourceDetail: `goalSolver.blockers[rank=${r.rank}]`,
+    });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+/**
+ * 4-line "Do Nothing" outcome: NW / PI / Probability / Expected FIRE Date.
+ */
+export function selectDoNothingOutcome(result: GoalSolverProResult): DoNothingOutcome {
+  const dn = selectDoNothingComparison(result);
+  return {
+    netWorth: dn.baselineNetWorth,
+    passiveIncome: dn.baselinePassiveIncome,
+    probability: dn.baselineProbability,
+    expectedFireYear: dn.baselineFireYear,
+    source: { label: "Path Simulation", detail: "goalSolver.alternativePaths.min" },
+  };
+}
+
