@@ -79,6 +79,7 @@ import DecisionPage            from "./pages/decision";
 import RiskRadarPage           from "./pages/risk-radar";
 import TaxAlphaPage            from "./pages/tax-alpha";
 import AuditCoveragePage       from "./pages/audit-coverage";
+import ActionPlanPage          from "./pages/action-plan";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -273,6 +274,10 @@ function AppRouter() {
         {/* Sprint 6 Phase 5 — Portfolio Lab Optimizer workspace. */}
         <Route path="/portfolio-lab">
           <ProtectedRoute component={PortfolioLabPage} title="Portfolio Lab Optimizer" />
+        </Route>
+        {/* Sprint 14 — Action Plan: unified MOVE shell over existing engines. */}
+        <Route path="/action-plan">
+          <ProtectedRoute component={ActionPlanPage} title="Action Plan" />
         </Route>
         {/* Risk Radar — surfaced from Deep Analysis cards & sidebar nav */}
         <Route path="/risk-radar">
