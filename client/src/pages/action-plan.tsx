@@ -108,38 +108,6 @@ function Card({ children, testId, className }: { children: React.ReactNode; test
   );
 }
 
-function ConfidenceChip({ value }: { value: number | null | undefined }) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return <span className="text-[10px] text-muted-foreground">—</span>;
-  }
-  const pct = Math.round(value * 100);
-  return (
-    <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-      {pct}% confidence
-    </span>
-  );
-}
-
-function RiskChip({ level }: { level?: string | null }) {
-  if (!level) return null;
-  const cssVar =
-    level === "high" ? "--danger" :
-    level === "medium" ? "--gold" :
-    "--success";
-  return (
-    <span
-      className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded shrink-0"
-      style={{
-        background: `hsl(var(${cssVar}) / 0.12)`,
-        color: `hsl(var(${cssVar}))`,
-        border: `1px solid hsl(var(${cssVar}) / 0.3)`,
-      }}
-    >
-      {level} risk
-    </span>
-  );
-}
-
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Verdict line (Sprint 14.2-A)                                               */
 /* One-line plain-English call. Reads bestMove + confidence from the engine   */
@@ -551,7 +519,19 @@ function TopActionsSection({ unified }: { unified: UnifiedBestMoveResult | null 
       <ol className="space-y-2">
         {items.map((rec, idx) => {
           const plain = labelize(rec.title);
+          // Same field the recommended-action card uses for its impact label.
           const dollars = rec.expectedFinancialImpact?.annualDollar ?? rec.netWorthImpact?.delta;
+          const impactLead =
+            typeof dollars === "number" && Number.isFinite(dollars)
+              ? `${formatCurrency(dollars)}/yr`
+              : (rec.benefitLabel ?? null);
+          const confPct =
+            typeof rec.confidenceScore === "number" && Number.isFinite(rec.confidenceScore)
+              ? Math.round(rec.confidenceScore * 100)
+              : null;
+          const riskLabel = rec.riskLevel
+            ? `${rec.riskLevel.charAt(0).toUpperCase()}${rec.riskLevel.slice(1)} risk`
+            : null;
           return (
             <li key={rec.id}>
               <Card testId={`ac-top-action-${idx}`} className="flex items-start gap-3">
@@ -560,16 +540,23 @@ function TopActionsSection({ unified }: { unified: UnifiedBestMoveResult | null 
                   {idx + 2}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <p className="text-sm font-semibold">{plain}</p>
-                    <span className="text-xs font-semibold num-display">
-                      {typeof dollars === "number" && Number.isFinite(dollars)
-                        ? formatCurrency(dollars)
-                        : (rec.benefitLabel ?? "—")}
-                    </span>
-                    <RiskChip level={rec.riskLevel} />
-                    <ConfidenceChip value={rec.confidenceScore} />
-                  </div>
+                  {/* Plain-English sentence: lead with the dollar benefit, then action. */}
+                  <p className="text-sm leading-snug" data-testid={`ac-top-action-${idx}-sentence`}>
+                    {impactLead && (
+                      <>
+                        <span className="font-semibold num-display">{impactLead}</span>
+                        <span className="text-muted-foreground"> — </span>
+                      </>
+                    )}
+                    <span className="font-medium">{plain}.</span>
+                  </p>
+                  {(riskLabel || confPct !== null) && (
+                    <p className="text-[11px] text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-1.5">
+                      {riskLabel && <span>{riskLabel}</span>}
+                      {riskLabel && confPct !== null && <span aria-hidden className="text-muted-foreground/50">·</span>}
+                      {confPct !== null && <span>{confPct}% confident</span>}
+                    </p>
+                  )}
                   {auditMode && (
                     <p className="text-[10px] text-muted-foreground/80 mt-1">
                       engine: "{rec.title}"
