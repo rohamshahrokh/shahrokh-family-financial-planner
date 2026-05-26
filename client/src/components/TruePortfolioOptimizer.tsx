@@ -85,6 +85,7 @@ import {
   projectRecommendationForGate,
   RECOMMENDATION_UNAVAILABLE_TEXT,
 } from "@/lib/recommendationGate";
+import { selectDoNothingBaseline } from "@/lib/doNothingBaseline";
 
 export interface TruePortfolioOptimizerProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -1115,6 +1116,18 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
   // verdict must check this flag and render the goal sentinel.
   const feasibilityIncomplete = goalSolverResult.feasibility.status === "INCOMPLETE";
 
+  // Sprint 13 P0-4 — real Do-Nothing forecast. Replaces the prior flat-held
+  // baselineNetWorth constant (PortfolioLabCharts.tsx:108) with a true
+  // canonical NW × canonical growth projection. When the breakdown isn't
+  // reconciled, the forecast is null and the chart MUST hide rather than
+  // fabricate a flat line.
+  const doNothingForecast = useMemo(() => {
+    if (!props.canonicalLedger) return null;
+    const horizon = Math.max(heroFan.length || 0, 10);
+    return selectDoNothingBaseline(props.canonicalLedger, horizon);
+  }, [props.canonicalLedger, heroFan]);
+  const doNothingForecastPoints = doNothingForecast?.points ?? null;
+
   // Sprint 13 P0-1 — Replace the FireCommandCenter's `currentNetWorth`
   // input with the breakdown-derived figure so every NW renderer ties to
   // the same selectCanonicalNetWorthBreakdown() output. When reconciled
@@ -1179,6 +1192,7 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
       <RecommendedVsDoNothingChart
         netWorthFan={heroFan as Array<{ year: number; p50: number }>}
         doNothingNetWorth={baselineNW}
+        doNothingForecast={doNothingForecastPoints}
         recommendedFireYear={fireCommand.medianFireYear}
         doNothingFireYear={doNothingOutcome.expectedFireYear}
         testidPrefix="s13-portfolio-lab-rec-vs-donothing-chart"
@@ -1268,6 +1282,7 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
             summary={fireGapPatched}
             netWorthFan={heroFan as Array<{ year: number; p50: number }>}
             baselineNetWorth={baselineNW}
+            doNothingForecast={doNothingForecast}
           />
           <PortfolioLabHero
             canonicalLedger={props.canonicalLedger}

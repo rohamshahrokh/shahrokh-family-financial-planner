@@ -29,7 +29,19 @@ export interface RvDFanPoint {
 
 interface Props {
   netWorthFan: RvDFanPoint[];
+  /**
+   * Sprint 12 legacy flat-hold value. Kept for back-compat. Sprint 13 P0-4
+   * prefers `doNothingForecast` (a real per-year projection). When the
+   * forecast is supplied AND non-empty it takes priority over this value.
+   */
   doNothingNetWorth: number | null | undefined;
+  /**
+   * Sprint 13 P0-4 — real do-nothing forecast: canonical NW projected at
+   * canonical growth (no actions, no scenario modifications). When this
+   * is null/empty AND `doNothingNetWorth` is also null, the chart hides
+   * itself and an empty-state is rendered (no fabricated flat line).
+   */
+  doNothingForecast?: Array<{ year: number; netWorth: number }> | null;
   recommendedFireYear?: number | null;
   doNothingFireYear?: number | null;
   testidPrefix?: string;
@@ -39,20 +51,51 @@ interface Props {
 export function RecommendedVsDoNothingChart({
   netWorthFan,
   doNothingNetWorth,
+  doNothingForecast,
   recommendedFireYear,
   doNothingFireYear,
   testidPrefix = "s13-rec-vs-donothing-chart",
   heightPx = 180,
 }: Props) {
+  // Sprint 13 P0-4 — prefer the real per-year forecast over the legacy
+  // flat-held scalar. The map lets us join doNothing by year so the lines
+  // share an X axis with the Sprint 9 fan.
+  const forecastByYear = new Map<number, number>();
+  if (Array.isArray(doNothingForecast)) {
+    for (const p of doNothingForecast) forecastByYear.set(p.year, p.netWorth);
+  }
+  const hasRealForecast = forecastByYear.size > 0;
   const data = (netWorthFan ?? [])
     .filter((p) => Number.isFinite(p?.p50))
-    .map((p) => ({
-      year: p.year,
-      recommended: p.p50 as number,
-      doNothing: Number.isFinite(doNothingNetWorth as number) ? (doNothingNetWorth as number) : null,
-    }));
+    .map((p) => {
+      const dn = hasRealForecast
+        ? forecastByYear.get(p.year)
+        : Number.isFinite(doNothingNetWorth as number)
+          ? (doNothingNetWorth as number)
+          : null;
+      return {
+        year: p.year,
+        recommended: p.p50 as number,
+        doNothing: dn ?? null,
+      };
+    });
 
   if (data.length === 0) return null;
+
+  // Sprint 13 P0-4 — when no usable Do-Nothing data was supplied (neither
+  // a real forecast nor a legacy scalar), render the empty-state instead
+  // of fabricating a flat line.
+  const doNothingDataMissing = data.every((d) => d.doNothing == null);
+  if (doNothingDataMissing) {
+    return (
+      <Card className="p-3 border-dashed border-border bg-card" data-testid={`${testidPrefix}-unavailable`}>
+        <div className="text-xs font-semibold text-foreground">Recommended vs Do Nothing</div>
+        <div className="text-[11px] text-muted-foreground mt-0.5">
+          Do-Nothing baseline unavailable — forecast engine returned no data.
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-3 border-border bg-card" data-testid={testidPrefix}>

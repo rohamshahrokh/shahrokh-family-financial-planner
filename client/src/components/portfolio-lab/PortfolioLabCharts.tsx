@@ -30,6 +30,8 @@ import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/finance";
 import { isEmptyValue } from "@/lib/uiEmptyField";
 import type { FireGapSummary } from "@/lib/goalSolverView.types";
+import type { DoNothingForecast } from "@/lib/doNothingBaseline";
+import { DO_NOTHING_UNAVAILABLE_TEXT } from "@/lib/doNothingBaseline";
 
 interface YearBand {
   year: number;
@@ -40,6 +42,13 @@ interface Props {
   summary: FireGapSummary;
   netWorthFan: YearBand[];
   baselineNetWorth: number | null;
+  /**
+   * Sprint 13 P0-4 — real do-nothing forecast (canonical NW projected at
+   * canonical growth, no actions). When null, the path-vs-baseline chart
+   * is HIDDEN and an empty-state message is shown instead of a fabricated
+   * flat line.
+   */
+  doNothingForecast?: DoNothingForecast | null;
 }
 
 function fmt(v: number): string {
@@ -71,7 +80,7 @@ function ChartCard({
   );
 }
 
-export function PortfolioLabCharts({ summary, netWorthFan, baselineNetWorth }: Props) {
+export function PortfolioLabCharts({ summary, netWorthFan, baselineNetWorth, doNothingForecast }: Props) {
   // Chart 1: Current vs Target NW
   const currentVsTargetData =
     !isEmptyValue(summary.currentNetWorth) && !isEmptyValue(summary.targetNetWorth)
@@ -102,11 +111,21 @@ export function PortfolioLabCharts({ summary, netWorthFan, baselineNetWorth }: P
   })();
 
   // Chart 3: Path vs baseline (line)
+  // Sprint 13 P0-4 — the "Do nothing" line is now sourced from the real
+  // canonical Do-Nothing forecast (canonical NW projected at canonical
+  // growth, no actions, no scenario modifications). When the forecast is
+  // null, the chart is hidden entirely and an empty-state is rendered
+  // (no flat-held constant fabrication).
+  const doNothingByYear = new Map<number, number>();
+  if (doNothingForecast) {
+    for (const p of doNothingForecast.points) doNothingByYear.set(p.year, p.netWorth);
+  }
   const pathBaselineData = (netWorthFan ?? []).map((b) => ({
     year: b.year,
     Recommended: b.p50,
-    "Do nothing": baselineNetWorth,
+    "Do nothing": doNothingByYear.get(b.year) ?? null,
   }));
+  const doNothingUnavailable = !doNothingForecast || doNothingForecast.points.length === 0;
 
   return (
     <section className="grid grid-cols-1 lg:grid-cols-3 gap-3" data-testid="pl-charts">
@@ -170,10 +189,24 @@ export function PortfolioLabCharts({ summary, netWorthFan, baselineNetWorth }: P
         </ResponsiveContainer>
       </ChartCard>
 
+      {doNothingUnavailable ? (
+        <Card
+          className="p-4 border-dashed"
+          data-testid="s13-do-nothing-baseline-unavailable"
+        >
+          <h4 className="text-sm font-semibold text-foreground">Recommended Path vs Do Nothing</h4>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Forecast trajectory comparison
+          </p>
+          <div className="mt-3 text-xs text-muted-foreground italic" data-testid="s13-do-nothing-baseline-unavailable-text">
+            {DO_NOTHING_UNAVAILABLE_TEXT}
+          </div>
+        </Card>
+      ) : (
       <ChartCard
-        testid="pl-chart-path-vs-baseline"
+        testid="s13-do-nothing-baseline-chart"
         title="Recommended Path vs Do Nothing"
-        caption="Solid = engine-recommended trajectory (Sprint 9 p50). Dashed = current snapshot held flat."
+        caption="Solid = engine-recommended trajectory (Sprint 9 p50). Dashed = canonical NW projected at canonical growth, no actions applied."
         empty={pathBaselineData.length === 0}
       >
         <ResponsiveContainer width="100%" height="100%">
@@ -205,6 +238,7 @@ export function PortfolioLabCharts({ summary, netWorthFan, baselineNetWorth }: P
           </LineChart>
         </ResponsiveContainer>
       </ChartCard>
+      )}
     </section>
   );
 }
