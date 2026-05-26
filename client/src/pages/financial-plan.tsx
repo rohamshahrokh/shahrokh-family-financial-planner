@@ -319,6 +319,183 @@ function IncomeEngineTraceButton({
   );
 }
 
+// ─── FIRE Goal panel ───────────────────────────────────────────────────────
+//
+// Sprint 14.1-B. Reads and writes the canonical mc_fire_settings row through
+// the same /api/mc-fire-settings access path the rest of the codebase uses.
+// Writing here flips goals_set=true (and stamps goal_set_timestamp) so the
+// Action Centre's section B switches from "Goal not set" to a summary card.
+//
+// IMPORTANT: this panel does NOT touch any forecast / Monte Carlo / FIRE
+// calculation logic. It only mutates the four input fields on mc_fire_settings.
+//
+function FireGoalPanel() {
+  const qc = useQueryClient();
+  const { auditMode } = useAuditMode();
+  const { toast } = useToast();
+
+  const { data: mcSettings, isLoading } = useQuery<any>({
+    queryKey: ["/api/mc-fire-settings"],
+    queryFn: () => apiRequest("GET", "/api/mc-fire-settings").then(r => r.json()),
+  });
+
+  // Local form state hydrated from the canonical row.
+  const [targetAge,     setTargetAge]     = useState<string>("");
+  const [passiveMonth,  setPassiveMonth]  = useState<string>("");
+  const [swrPct,        setSwrPct]        = useState<string>("");
+  const [hydrated,      setHydrated]      = useState(false);
+
+  useEffect(() => {
+    if (hydrated || !mcSettings) return;
+    if (typeof mcSettings === "object") {
+      const r = mcSettings as any;
+      if (typeof r.target_fire_age === "number")        setTargetAge(String(r.target_fire_age));
+      if (typeof r.target_passive_monthly === "number") setPassiveMonth(String(r.target_passive_monthly));
+      if (typeof r.swr_pct === "number")                setSwrPct(String(r.swr_pct));
+      setHydrated(true);
+    }
+  }, [mcSettings, hydrated]);
+
+  const ageNum     = Number(targetAge);
+  const passiveNum = Number(passiveMonth);
+  const swrNum     = Number(swrPct);
+  const ageValid     = Number.isFinite(ageNum) && ageNum >= 18 && ageNum <= 80;
+  const passiveValid = Number.isFinite(passiveNum) && passiveNum > 0;
+  const swrValid     = Number.isFinite(swrNum) && swrNum >= 1 && swrNum <= 10;
+  const allValid     = ageValid && passiveValid && swrValid;
+
+  // Already-saved flag drives the Action Centre's "Goal set" summary.
+  const alreadyGoalsSet = !!(mcSettings as any)?.goals_set;
+
+  const onSave = async () => {
+    if (!allValid) {
+      toast({
+        title: "Check your FIRE goal inputs",
+        description: "Age 18–80, passive income > 0, SWR 1–10%.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      await apiRequest("PUT", "/api/mc-fire-settings", {
+        target_fire_age: ageNum,
+        target_passive_monthly: passiveNum,
+        swr_pct: swrNum,
+        goals_set: true,
+        goal_set_timestamp: new Date().toISOString(),
+      });
+      // Invalidate so Action Centre's `useCanonicalGoal` re-fetches and Section B
+      // flips from "Goal not set" to the summary card without a hard reload.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["/api/mc-fire-settings"] }),
+        qc.invalidateQueries({ queryKey: ["/api/canonical-goal"] }),
+      ]);
+      toast({ title: "FIRE goal saved", description: "Your Action Centre is now using these targets." });
+    } catch (err: any) {
+      toast({
+        title: "Could not save FIRE goal",
+        description: err?.message ?? "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <section id="fire-goal" data-testid="fp-fire-goal-panel">
+      <SectionCard title="FIRE Goal" icon={<Target className="w-4 h-4 text-amber-400" />}>
+        <div className="pt-3 space-y-3">
+          <div className="rounded-lg border border-border bg-secondary/30 p-3 text-xs text-muted-foreground flex items-start gap-2">
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <div>
+              <p>
+                Set the retirement target the Action Centre and the unified
+                recommendation engine read from.
+              </p>
+              {auditMode && (
+                <p className="mt-1 text-[10px]">
+                  Writes to <code>mc_fire_settings</code>{" "}
+                  (target_fire_age, target_passive_monthly, swr_pct,
+                  goals_set, goal_set_timestamp).
+                </p>
+              )}
+            </div>
+          </div>
+
+          {isLoading ? (
+            <p className="text-xs text-muted-foreground">Loading FIRE goal…</p>
+          ) : (
+            <>
+              <FieldRow
+                label="Target FIRE age"
+                value={targetAge}
+                onChange={setTargetAge}
+                prefix=""
+                suffix="yrs"
+                hint="When you want to be financially independent (18–80)"
+              />
+              <FieldRow
+                label="Target passive income (monthly)"
+                value={passiveMonth}
+                onChange={setPassiveMonth}
+                hint="The monthly spending you want passive income to cover"
+              />
+              <FieldRow
+                label="Safe withdrawal rate (SWR)"
+                value={swrPct}
+                onChange={setSwrPct}
+                prefix=""
+                suffix="%"
+                hint="Typical range 3–5%. The Action Centre uses this to size the FIRE number."
+              />
+
+              <div className="mt-2 pt-3 border-t border-border/60 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground">
+                  {alreadyGoalsSet
+                    ? "Goal is currently set — saving updates it."
+                    : "Saving will mark this goal as set."}
+                </div>
+                <Button
+                  size="sm"
+                  onClick={onSave}
+                  disabled={!allValid}
+                  data-testid="fp-fire-goal-save"
+                  className="gap-1.5"
+                >
+                  <Target className="w-3.5 h-3.5" />
+                  {alreadyGoalsSet ? "Update FIRE goal" : "Save FIRE goal"}
+                </Button>
+              </div>
+
+              {!allValid && (
+                <p className="text-[10px] text-amber-400">
+                  {!ageValid && "Age must be between 18 and 80. "}
+                  {!passiveValid && "Passive income must be positive. "}
+                  {!swrValid && "SWR must be between 1 and 10%."}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      </SectionCard>
+    </section>
+  );
+}
+
+// On mount, if the URL hash points to #fire-goal, scroll the panel into view.
+// Used by the Action Centre CTA: /financial-plan#fire-goal.
+function useScrollToFireGoalHash() {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash !== "#fire-goal") return;
+    // Defer until the panel has rendered.
+    const t = window.setTimeout(() => {
+      const el = document.getElementById("fire-goal");
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+    return () => window.clearTimeout(t);
+  }, []);
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function MyFinancialPlan() {
@@ -326,6 +503,7 @@ export default function MyFinancialPlan() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const { openTrace } = useAuditMode();
+  useScrollToFireGoalHash();
 
   // ── Data queries ────────────────────────────────────────────────────────────
   const { data: snapshot, isLoading: loadingSnap } = useQuery<any>({
@@ -939,6 +1117,12 @@ export default function MyFinancialPlan() {
           </div>
         </div>
       </SectionCard>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          Sprint 14.1-B — Canonical FIRE Goal panel
+          Writes to mc_fire_settings; flips goals_set so Action Centre updates.
+      ═══════════════════════════════════════════════════════════════════ */}
+      <FireGoalPanel />
 
       {/* ═══════════════════════════════════════════════════════════════════
           SECTION 5 — Investing & FIRE Goals

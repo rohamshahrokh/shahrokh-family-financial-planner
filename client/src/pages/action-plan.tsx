@@ -241,7 +241,7 @@ function FireGoalSection() {
               Tell us when you want to retire and how much income you want, and we'll plan from there.
             </div>
           </div>
-          <Link href="/financial-plan">
+          <Link href="/financial-plan#fire-goal">
             <Button data-testid="ac-goal-cta">Set your FIRE goal in Family Plan</Button>
           </Link>
         </Card>
@@ -275,7 +275,7 @@ function FireGoalSection() {
           </div>
         </div>
         <div className="mt-3">
-          <Link href="/financial-plan">
+          <Link href="/financial-plan#fire-goal">
             <button className="text-xs underline text-muted-foreground hover:text-foreground" data-testid="ac-goal-edit">
               Edit in Family Plan →
             </button>
