@@ -809,6 +809,7 @@ export default function ActionPlanPage() {
 
   /* Supporting-analysis disclosure. */
   const [showSupport, setShowSupport] = useState(false);
+  const { auditMode } = useAuditMode();
 
   return (
     <div
@@ -845,17 +846,26 @@ export default function ActionPlanPage() {
           <div className="mt-3 text-xs text-muted-foreground space-y-3" data-testid="ac-supporting-content">
             <LabSummaryCards ledger={canonicalLedger} />
             <p>
-              All numbers above come from existing canonical selectors. Net worth and
-              progress come from <code>canonicalHeadlineMetrics</code> and{" "}
-              <code>canonicalFire</code>. Goal fields come from{" "}
-              <code>mc_fire_settings</code> via <code>/api/canonical-goal</code>.
-              The next move and top actions come from <code>computeUnifiedBestMove</code>{" "}
-              — the same orchestrator the dashboard uses.
+              All numbers above come from the same trusted sources the rest of
+              the app uses. Net worth and progress come from the household ledger,
+              your FIRE goal comes from your saved settings, and the next move
+              and top actions come from the same recommendation engine the
+              dashboard uses.
             </p>
-            <p>
-              Want formulas, source lineage, and engine trace details? Turn on{" "}
-              <strong>Audit Mode</strong> in the header.
-            </p>
+            {auditMode ? (
+              <p>
+                Engine lineage: <code>canonicalHeadlineMetrics</code> +{" "}
+                <code>canonicalFire</code> for headline figures;{" "}
+                <code>mc_fire_settings</code> via <code>/api/canonical-goal</code>{" "}
+                for the FIRE goal; <code>computeUnifiedBestMove</code> for the
+                next-move and top-actions list.
+              </p>
+            ) : (
+              <p>
+                Want formulas, source lineage, and engine trace details? Turn on{" "}
+                <strong>Audit Mode</strong> in the header.
+              </p>
+            )}
           </div>
         )}
       </div>
