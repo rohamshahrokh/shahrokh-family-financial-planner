@@ -56,6 +56,24 @@ import type { DashboardInputs } from "@/lib/dashboardDataContract";
 import {
   selectMonthlyIncome, selectMonthlyExpensesLedger, selectMonthlySurplus, selectCashToday,
 } from "@/lib/dashboardDataContract";
+// Sprint 13 — universal 4-section layout primitives + selectors.
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
+import { FireCommandCenter } from "@/components/decision-system/FireCommandCenter";
+import { Top3ActionsSection } from "@/components/decision-system/Top3ActionsSection";
+import { BiggestBlockersSection } from "@/components/decision-system/BiggestBlockersSection";
+import { DoNothingOutcomeSection } from "@/components/decision-system/DoNothingOutcomeSection";
+import { RecommendedVsDoNothingChart } from "@/components/decision-system/RecommendedVsDoNothingChart";
+import {
+  selectFireCommandCenterData,
+  selectTop3ActionsDetailed,
+  selectRankedBlockersDetailed,
+  selectDoNothingOutcome,
+} from "@/lib/goalSolverView";
+import { buildGoalSolverPro, EMPTY_GOAL_TARGETS } from "@/lib/goalSolverPro";
+import { buildTruePortfolioOptimizer } from "@/lib/truePortfolioOptimizer";
+import { buildProbabilisticWealthEngine } from "@/lib/probabilisticWealthEngine";
+import { buildPathSimulationEngine } from "@/lib/pathSimulationEngine";
+import { computeCanonicalFire } from "@/lib/canonicalFire";
 import {
   generateQuickDecisionCandidates,
   getQuestionPreset,
@@ -1950,6 +1968,98 @@ function CandidateRow({
 
 // ─── Page (tabs) ─────────────────────────────────────────────────────────────
 
+function DecisionPageS13Hero() {
+  // Sprint 13 — page-level above-fold 4-section reality-check layout for
+  // /decision. Builds the same S7/8/9/10 chain that powers /portfolio-lab
+  // so every tile has a canonical source. Empty values collapse via the
+  // S11 uiEmptyField primitive — no placeholder dashes ever render.
+  const { data: snapshot } = useQuery<any>({
+    queryKey: ["/api/snapshot"],
+    queryFn: () => apiRequest("GET", "/api/snapshot").then((r) => r.json()),
+  });
+  const { data: properties = [] } = useQuery<any[]>({
+    queryKey: ["/api/properties"],
+    queryFn: () => apiRequest("GET", "/api/properties").then((r) => r.json()),
+  });
+  const { data: stocks = [] } = useQuery<any[]>({
+    queryKey: ["/api/stocks"],
+    queryFn: () => apiRequest("GET", "/api/stocks").then((r) => r.json()),
+  });
+  const { data: cryptos = [] } = useQuery<any[]>({
+    queryKey: ["/api/crypto"],
+    queryFn: () => apiRequest("GET", "/api/crypto").then((r) => r.json()),
+  });
+  const { data: expenses = [] } = useQuery<any[]>({
+    queryKey: ["/api/expenses"],
+    queryFn: () => apiRequest("GET", "/api/expenses").then((r) => r.json()),
+  });
+  const { data: incomeRecords = [] } = useQuery<any[]>({
+    queryKey: ["/api/income"],
+    queryFn: () => apiRequest("GET", "/api/income").then((r) => r.json()),
+  });
+  const { data: holdingsRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/holdings"],
+    queryFn: () => apiRequest("GET", "/api/holdings").then((r) => r.json()),
+  });
+
+  const dashboardInputs: DashboardInputs | null = useMemo(() => {
+    if (!snapshot) return null;
+    return { snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses };
+  }, [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses]);
+
+  const s13 = useMemo(() => {
+    if (!dashboardInputs) return null;
+    try {
+      const sprint7 = buildTruePortfolioOptimizer({
+        canonicalLedger: dashboardInputs,
+        constraints: {},
+      });
+      const sprint8 = buildProbabilisticWealthEngine({ sprint7Result: sprint7 });
+      const sprint9 = buildPathSimulationEngine({
+        sprint7Result: sprint7,
+        canonicalLedger: dashboardInputs,
+      });
+      const canonicalFire = computeCanonicalFire(dashboardInputs);
+      const result = buildGoalSolverPro({
+        canonicalLedger: dashboardInputs,
+        canonicalFire,
+        sprint7Result: sprint7,
+        sprint8Result: sprint8,
+        sprint9Result: sprint9,
+        targets: EMPTY_GOAL_TARGETS,
+      });
+      return {
+        fireCommand: selectFireCommandCenterData(result),
+        top3: selectTop3ActionsDetailed(result),
+        blockers: selectRankedBlockersDetailed(result),
+        doNothing: selectDoNothingOutcome(result),
+        fan: (sprint9.bestStrategy?.netWorthFan ?? sprint9.strategies[0]?.netWorthFan ?? []) as Array<{ year: number; p50: number }>,
+        baselineNW: canonicalFire.netWorthNow,
+      };
+    } catch {
+      return null;
+    }
+  }, [dashboardInputs]);
+
+  if (!s13) return null;
+
+  return (
+    <div className="space-y-4">
+      <FireCommandCenter data={s13.fireCommand} testidPrefix="s13-decision-fire-command-center" />
+      <Top3ActionsSection actions={s13.top3} testidPrefix="s13-decision-top3-actions" />
+      <BiggestBlockersSection blockers={s13.blockers} testidPrefix="s13-decision-biggest-blockers" />
+      <DoNothingOutcomeSection outcome={s13.doNothing} testidPrefix="s13-decision-do-nothing-outcome" />
+      <RecommendedVsDoNothingChart
+        netWorthFan={s13.fan}
+        doNothingNetWorth={s13.baselineNW}
+        recommendedFireYear={s13.fireCommand.medianFireYear}
+        doNothingFireYear={s13.doNothing.expectedFireYear}
+        testidPrefix="s13-decision-rec-vs-donothing-chart"
+      />
+    </div>
+  );
+}
+
 export default function DecisionPage() {
   // Sprint 11 #6, #12 — Goal Solver Pro is now the primary surface. Quick
   // Decision and Advanced Builder remain reachable via the secondary tabs.
@@ -1982,6 +2092,14 @@ export default function DecisionPage() {
         </div>
       </div>
 
+      {/* Sprint 13 — above-fold 4-section reality-check layout. */}
+      <DecisionPageS13Hero />
+
+      <AdvancedDisclosure
+        title="View Supporting Analysis"
+        subtitle="Goal Solver Pro · Quick Decision engine · Advanced Builder · Assumptions"
+        data-testid="s13-decision-supporting-analysis"
+      >
       <Tabs value={tab} onValueChange={(v) => setTab(v as "goal-solver" | "quick" | "advanced")}>
         <TabsList className="grid w-full grid-cols-3 sm:w-auto sm:inline-flex">
           <TabsTrigger value="goal-solver" className="text-xs sm:text-sm h-11 sm:h-9" data-testid="decision-tab-goal-solver">
@@ -2015,6 +2133,7 @@ export default function DecisionPage() {
 
       {/* Audit fix P1.4: every engine assumption is surfaced here, collapsible. */}
       <AssumptionsPanel mode="compact" />
+      </AdvancedDisclosure>
     </div>
   );
 }
