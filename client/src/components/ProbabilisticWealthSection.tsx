@@ -404,21 +404,29 @@ function RobustRanking({ result }: { result: ProbabilisticWealthEngineResult }) 
       data-testid="prob-engine-robust-ranking"
     >
       <header className="mb-3">
-        <h2 className="text-base font-semibold text-foreground" data-testid="prob-engine-robust-ranking-title">
-          Robust Strategy Ranking
-        </h2>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Robust score = 0.5 × deterministic ranking + 0.5 × Monte Carlo confidence. Higher is better.
-        </p>
-        {/* REMEDIATION B-2: not persisted to sf_scenario_results — recomputed
-            every render from the canonical engines. Phase B did not wire the
-            strategy ↔ scenario-id mapping required to durably save these. */}
-        <p
-          className="mt-1 text-[10px] uppercase tracking-wider text-amber-600 dark:text-amber-400"
-          data-testid="prob-engine-robust-ranking-transient"
-        >
-          Transient — not persisted (in-memory only)
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h2 className="text-base font-semibold text-foreground" data-testid="prob-engine-robust-ranking-title">
+              Robust Strategy Ranking
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Robust score = 0.5 × deterministic ranking + 0.5 × Monte Carlo confidence. Higher is better.
+            </p>
+          </div>
+          {/* REMEDIATION C-5 (extends B-2): transient badge with tooltip — these
+              rankings are not persisted to sf_scenario_results. Phase B did not
+              wire the strategy ↔ scenario-id mapping required to durably save them. */}
+          <span
+            className="shrink-0 inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:text-amber-300"
+            data-testid="prob-engine-robust-ranking-transient"
+            data-variant="scenario"
+            data-transient="true"
+            title="Transient — these rankings live in memory only. They are recomputed every render from the canonical engines until per-strategy → scenario-id persistence is wired."
+          >
+            <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+            Transient — not saved
+          </span>
+        </div>
       </header>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">

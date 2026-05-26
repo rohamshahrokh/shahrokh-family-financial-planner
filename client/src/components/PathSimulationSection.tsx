@@ -188,22 +188,30 @@ function StrategyRanking({ result }: { result: PathSimulationResult }) {
       data-testid="path-sim-strategy-ranking"
     >
       <header className="mb-3">
-        <h3 className="text-sm font-semibold text-foreground" data-testid="path-sim-strategy-ranking-title">
-          Strategy Ranking (by robust score)
-        </h3>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Composite of P(FIRE by target), shortfall avoidance, cashflow stability, and net worth strength.
-        </p>
-        {/* REMEDIATION B-2: these rankings are computed in-memory by the
-            optimizer each render. They are NOT persisted to sf_scenario_results
-            (the per-strategy ↔ scenario-id mapping doesn't exist yet). Re-runs
-            may shift order as data changes; nothing here is durable. */}
-        <p
-          className="mt-1 text-[10px] uppercase tracking-wider text-amber-600 dark:text-amber-400"
-          data-testid="path-sim-strategy-ranking-transient"
-        >
-          Transient — not persisted (in-memory only)
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground" data-testid="path-sim-strategy-ranking-title">
+              Strategy Ranking (by robust score)
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Composite of P(FIRE by target), shortfall avoidance, cashflow stability, and net worth strength.
+            </p>
+          </div>
+          {/* REMEDIATION C-5 (extends B-2): transient badge with tooltip. These
+              rankings live in memory only — they are NOT persisted to
+              sf_scenario_results (the per-strategy ↔ scenario-id mapping
+              doesn't exist yet). Re-runs may shift order. */}
+          <span
+            className="shrink-0 inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:text-amber-300"
+            data-testid="path-sim-strategy-ranking-transient"
+            data-variant="scenario"
+            data-transient="true"
+            title="Transient — these rankings live in memory only. They are not persisted to sf_scenario_results until per-strategy → scenario-id mapping is wired."
+          >
+            <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+            Transient — not saved
+          </span>
+        </div>
       </header>
       <div className="overflow-x-auto">
         <table className="w-full text-xs tabular-nums" data-testid="path-sim-strategy-ranking-table">

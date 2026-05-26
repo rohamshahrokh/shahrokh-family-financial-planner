@@ -33,10 +33,11 @@ export function isEmptyValue(v: unknown): boolean {
     const t = v.trim();
     if (t.length === 0) return true;
     if (EMPTY_STRINGS.has(t)) return true;
-    if (t === "0") return true;
-    if (t === "$0") return true;
-    if (t === "0%") return true;
-    if (t === "0.0") return true;
+    // REMEDIATION C-2: a real zero is a meaningful value (ledger NW $0,
+    // 0% probability, etc.) and must render. Only undefined/null/NaN/""
+    // and the explicit placeholder strings above are "empty". Previously
+    // "0", "$0", "0%", "0.0" were treated as empty — that hid legitimate
+    // zero readings behind CTAs/dashes.
     return false;
   }
   if (Array.isArray(v)) return v.length === 0;
