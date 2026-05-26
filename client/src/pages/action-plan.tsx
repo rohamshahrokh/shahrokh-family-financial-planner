@@ -386,9 +386,26 @@ function FireGoalSection() {
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Section C — Recommended Next Move                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
+// Truncate a sentence to its first full stop (or N chars). Returns
+// { head, tail } so callers can hide the tail behind a disclosure.
+function splitReasoning(text: string | null | undefined): { head: string; tail: string } {
+  if (!text) return { head: "", tail: "" };
+  const trimmed = text.trim();
+  const firstStop = trimmed.search(/[.!?](\s|$)/);
+  if (firstStop > 0 && firstStop < trimmed.length - 1) {
+    return {
+      head: trimmed.slice(0, firstStop + 1),
+      tail: trimmed.slice(firstStop + 1).trim(),
+    };
+  }
+  // No early sentence break: hide nothing.
+  return { head: trimmed, tail: "" };
+}
+
 function RecommendedNextMoveSection({ unified }: { unified: UnifiedBestMoveResult | null }) {
   const { auditMode } = useAuditMode();
   const rec = unified?.unified?.bestMove ?? null;
+  const [showMore, setShowMore] = useState(false);
 
   if (!rec) {
     return (
@@ -401,15 +418,31 @@ function RecommendedNextMoveSection({ unified }: { unified: UnifiedBestMoveResul
 
   const plain = labelize(rec.title);
   const dollarImpact = rec.expectedFinancialImpact?.annualDollar ?? rec.netWorthImpact?.delta;
+  const impactLabel =
+    typeof dollarImpact === "number" && Number.isFinite(dollarImpact)
+      ? `${formatCurrency(dollarImpact)} expected`
+      : rec.benefitLabel ?? null;
   const whenLabel = (() => {
     switch (rec.urgency) {
       case "immediate": return "This week";
       case "this_quarter": return "This quarter";
       case "this_year": return "This year";
       case "monitor": return "Monitor";
-      default: return "—";
+      default: return null;
     }
   })();
+  const confPct =
+    typeof rec.confidenceScore === "number" && Number.isFinite(rec.confidenceScore)
+      ? Math.round(rec.confidenceScore * 100)
+      : null;
+  const { head: whyHead, tail: whyTail } = splitReasoning(rec.reasoning);
+
+  // Single chip-row separators rendered between non-null chips.
+  const chipPieces: React.ReactNode[] = [];
+  if (whenLabel) chipPieces.push(<span key="when">{whenLabel}</span>);
+  if (rec.riskLevel) chipPieces.push(<span key="risk" className="capitalize">{rec.riskLevel} risk</span>);
+  if (confPct !== null) chipPieces.push(<span key="conf">{confPct}% confident</span>);
+  if (impactLabel) chipPieces.push(<span key="impact" className="num-display">{impactLabel}</span>);
 
   return (
     <section data-testid="action-centre-next-move">
@@ -421,35 +454,67 @@ function RecommendedNextMoveSection({ unified }: { unified: UnifiedBestMoveResul
             1
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <p className="text-sm sm:text-base font-semibold">{plain}</p>
-              {auditMode && <SourceChip>engine: "{rec.title}"</SourceChip>}
-            </div>
-            <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-2 mt-3 text-xs">
-              <div>
-                <dt className="text-[10px] uppercase tracking-widest text-muted-foreground">When</dt>
-                <dd className="font-medium">{whenLabel}</dd>
+            {/* Plain-English verb line first; technical engine label is now a small subtitle. */}
+            <p className="text-sm sm:text-base font-semibold leading-snug">{plain}</p>
+            {rec.title && rec.title.trim() !== plain && (
+              <p
+                className="text-[11px] text-muted-foreground mt-0.5 leading-snug"
+                data-testid="ac-next-move-subtitle"
+              >
+                {rec.title}
+              </p>
+            )}
+            {auditMode && (
+              <p className="text-[10px] text-muted-foreground/80 mt-0.5">engine: "{rec.title}"</p>
+            )}
+
+            {/* Single chip row replaces the 4-cell WHEN/IMPACT/RISK/CONF grid. */}
+            {chipPieces.length > 0 && (
+              <div
+                className="mt-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-1"
+                data-testid="ac-next-move-chips"
+              >
+                {chipPieces.map((piece, i) => (
+                  <React.Fragment key={i}>
+                    {piece}
+                    {i < chipPieces.length - 1 && <span aria-hidden className="text-muted-foreground/50">·</span>}
+                  </React.Fragment>
+                ))}
               </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-widest text-muted-foreground">Expected impact</dt>
-                <dd className="font-medium num-display">
-                  {typeof dollarImpact === "number" && Number.isFinite(dollarImpact)
-                    ? formatCurrency(dollarImpact)
-                    : (rec.benefitLabel ?? "—")}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-widest text-muted-foreground">Risk</dt>
-                <dd className="font-medium capitalize">{rec.riskLevel ?? "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-widest text-muted-foreground">Confidence</dt>
-                <dd className="font-medium"><ConfidenceChip value={rec.confidenceScore} /></dd>
-              </div>
-            </dl>
-            <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
-              <span className="font-semibold text-foreground">Why: </span>{rec.reasoning}
-            </p>
+            )}
+
+            {/* Why: truncated to first sentence; rest hides behind a disclosure. */}
+            {whyHead && (
+              <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
+                <span className="font-semibold text-foreground">Why: </span>
+                {whyHead}
+                {whyTail && !showMore && " "}
+                {whyTail && !showMore && (
+                  <button
+                    type="button"
+                    onClick={() => setShowMore(true)}
+                    className="underline text-muted-foreground hover:text-foreground"
+                    data-testid="ac-next-move-more-detail"
+                  >
+                    More detail
+                  </button>
+                )}
+                {whyTail && showMore && (
+                  <>
+                    {" "}{whyTail}{" "}
+                    <button
+                      type="button"
+                      onClick={() => setShowMore(false)}
+                      className="underline text-muted-foreground hover:text-foreground"
+                      data-testid="ac-next-move-less-detail"
+                    >
+                      Show less
+                    </button>
+                  </>
+                )}
+              </p>
+            )}
+
             {rec.cta && (
               <div className="mt-3">
                 <Link href={rec.cta.route}>
