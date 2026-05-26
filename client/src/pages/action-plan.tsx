@@ -634,32 +634,29 @@ function DoNothingSection(props: {
     ? today + delta
     : null;
 
+  // Sprint 14.2-E: when the impact data is empty (the predicate the section
+  // previously used to render its "Run the forecast…" fallback line), hide
+  // the entire section — heading and card — rather than showing an empty
+  // placeholder that always wins the user's first scroll.
+  if (today === null || ifAct === null) return null;
+
+  const actingText = `${formatCurrency(ifAct)} ${horizon ? `over ${horizon} year${horizon === 1 ? "" : "s"}` : "with this action"}`;
+  const doingNothingText = `${formatCurrency(today)} (status quo, today)`;
+
   return (
     <section data-testid="action-centre-do-nothing">
       <h2 className="text-base sm:text-lg font-semibold mb-2">If you act vs. do nothing</h2>
       <Card testId="ac-do-nothing-card">
-        {today === null || ifAct === null ? (
-          <div className="text-sm text-muted-foreground">
-            Run the forecast to see a side-by-side comparison.
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:gap-6">
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Do nothing</div>
-              <div className="text-base sm:text-xl font-bold num-display mt-1">{formatCurrency(today)}</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">Status quo, today</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Recommended path</div>
-              <div className="text-base sm:text-xl font-bold num-display mt-1" style={{ color: "hsl(var(--success))" }}>
-                {formatCurrency(ifAct)}
-              </div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">
-                {horizon ? `over ${horizon} year${horizon === 1 ? "" : "s"}` : "with this action"}
-              </div>
-            </div>
-          </div>
-        )}
+        <ul className="space-y-1.5 text-sm">
+          <li data-testid="ac-do-nothing-acting">
+            <span className="font-semibold text-foreground">Acting today: </span>
+            <span className="num-display" style={{ color: "hsl(var(--success))" }}>{actingText}</span>
+          </li>
+          <li data-testid="ac-do-nothing-status-quo">
+            <span className="font-semibold text-foreground">Doing nothing: </span>
+            <span className="num-display text-muted-foreground">{doingNothingText}</span>
+          </li>
+        </ul>
         {auditMode && (
           <p className="text-[10px] text-muted-foreground/80 mt-3">
             today: canonicalHeadlineMetrics.netWorth · delta: bestMove.netWorthImpact.delta ?? expectedFinancialImpact.annualDollar
