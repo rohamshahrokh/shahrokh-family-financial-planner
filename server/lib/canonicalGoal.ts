@@ -12,8 +12,28 @@
  * onto this selector.
  */
 
-const SUPABASE_URL = "https://uoraduyyxhtzixcsaidg.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVvcmFkdXl5eGh0eml4Y3NhaWRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTgsImV4cCI6MjA5MjY5NzAxOH0.qNrqDlG4j0lfGKDsmGyywP8DZeMurB02UWv4bdevW7c";
+// Supabase connection — read from env. In production we hard-fail on missing
+// config rather than letting a request fall through with no credentials and
+// silently return null (which the caller would interpret as "no goal set").
+// Local/dev `process.env` is loaded from `.env` per docs/12-deployment-guide.md.
+const SUPABASE_URL =
+  process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? "";
+const SUPABASE_KEY =
+  process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY ?? "";
+
+if (process.env.NODE_ENV === "production") {
+  if (!SUPABASE_URL) {
+    throw new Error(
+      "[canonicalGoal] SUPABASE_URL (or VITE_SUPABASE_URL) is not set in production",
+    );
+  }
+  if (!SUPABASE_KEY) {
+    throw new Error(
+      "[canonicalGoal] SUPABASE_ANON_KEY (or VITE_SUPABASE_ANON_KEY) is not set in production",
+    );
+  }
+}
+
 const SB_HEADERS = {
   apikey: SUPABASE_KEY,
   Authorization: `Bearer ${SUPABASE_KEY}`,
