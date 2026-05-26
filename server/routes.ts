@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
+import { getCanonicalGoal } from "./lib/canonicalGoal";
 
 // ─── Supabase helpers (server-side) ────────────────────────────────────────────
 // These mirror the client-side supabaseClient.ts so the server can also read/write
@@ -316,6 +317,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return;
     }
     res.json(record);
+  });
+
+  // ─── Canonical Goal (FWL Remediation Phase A) ──────────────────────────────
+  // Single source of truth for the user's FIRE goal. Reads mc_fire_settings.
+  // Returns { status: "NOT_SET" } if the user has not explicitly saved a goal.
+  app.get("/api/canonical-goal", async (req, res) => {
+    const ownerId =
+      (req as any).user?.id ?? (req.query.ownerId as string) ?? "shahrokh-family-main";
+    try {
+      const goal = await getCanonicalGoal(ownerId);
+      res.json(goal);
+    } catch (err: any) {
+      res
+        .status(500)
+        .json({ status: "NOT_SET", reason: `canonical-goal lookup failed: ${err?.message ?? err}` });
+    }
   });
 
   return httpServer;
