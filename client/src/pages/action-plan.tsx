@@ -108,35 +108,47 @@ function Card({ children, testId, className }: { children: React.ReactNode; test
   );
 }
 
-function ConfidenceChip({ value }: { value: number | null | undefined }) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return <span className="text-[10px] text-muted-foreground">—</span>;
-  }
-  const pct = Math.round(value * 100);
-  return (
-    <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-      {pct}% confidence
-    </span>
-  );
-}
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Verdict line (Sprint 14.2-A)                                               */
+/* One-line plain-English call. Reads bestMove + confidence from the engine   */
+/* output the page already loads — no new computation.                        */
+/* ────────────────────────────────────────────────────────────────────────── */
+function VerdictLine({ unified }: { unified: UnifiedBestMoveResult | null }) {
+  const { auditMode } = useAuditMode();
+  const rec = unified?.unified?.bestMove ?? null;
 
-function RiskChip({ level }: { level?: string | null }) {
-  if (!level) return null;
-  const cssVar =
-    level === "high" ? "--danger" :
-    level === "medium" ? "--gold" :
-    "--success";
+  if (!rec) {
+    return (
+      <div
+        data-testid="ac-verdict-line"
+        className="text-sm sm:text-base font-medium text-muted-foreground"
+      >
+        Run a forecast to get your next move.
+      </div>
+    );
+  }
+
+  const plain = labelize(rec.title);
+  const confPct =
+    typeof rec.confidenceScore === "number" && Number.isFinite(rec.confidenceScore)
+      ? Math.round(rec.confidenceScore * 100)
+      : null;
+
   return (
-    <span
-      className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded shrink-0"
-      style={{
-        background: `hsl(var(${cssVar}) / 0.12)`,
-        color: `hsl(var(${cssVar}))`,
-        border: `1px solid hsl(var(${cssVar}) / 0.3)`,
-      }}
+    <div
+      data-testid="ac-verdict-line"
+      className="text-sm sm:text-base font-semibold leading-snug"
     >
-      {level} risk
-    </span>
+      <span className="text-foreground">{plain}</span>
+      {confPct !== null && (
+        <span className="text-muted-foreground font-normal"> ({confPct}% confidence)</span>
+      )}
+      {auditMode && (
+        <span className="ml-2 text-[10px] text-muted-foreground/80 font-normal">
+          engine: "{rec.title}"
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -146,8 +158,9 @@ function RiskChip({ level }: { level?: string | null }) {
 function CurrentPositionSection(props: {
   ledger: DashboardInputs | null;
   goalTargetNetWorth: number | null;
+  unified: UnifiedBestMoveResult | null;
 }) {
-  const { ledger, goalTargetNetWorth } = props;
+  const { ledger, goalTargetNetWorth, unified } = props;
   const { auditMode } = useAuditMode();
 
   const head = ledger ? computeCanonicalHeadlineMetrics(ledger) : null;
@@ -175,7 +188,21 @@ function CurrentPositionSection(props: {
     snapshotUpdatedAt ? new Date(snapshotUpdatedAt) : null,
   );
 
-  const freshTone =
+  const forecastFresh = fresh.status === "FRESH";
+  const forecastRunDate = decisionAt ? new Date(decisionAt) : null;
+  const forecastRunLabel =
+    forecastFresh && forecastRunDate
+      ? forecastRunDate.toLocaleDateString(undefined, { day: "numeric", month: "short" })
+      : null;
+  const forecastChipLabel =
+    fresh.status === "STALE" ? "Out of date" :
+    fresh.status === "FRESH" ? "Up to date" :
+    "Not run";
+  const forecastChipBg =
+    fresh.status === "FRESH" ? "hsl(var(--success) / 0.12)" :
+    fresh.status === "STALE" ? "hsl(var(--gold) / 0.15)" :
+    "hsl(var(--danger) / 0.12)";
+  const forecastChipFg =
     fresh.status === "FRESH" ? "hsl(var(--success))" :
     fresh.status === "STALE" ? "hsl(var(--gold))" :
     "hsl(var(--danger))";
@@ -186,9 +213,15 @@ function CurrentPositionSection(props: {
         <h2 className="text-base sm:text-lg font-semibold">Where you are today</h2>
         {auditMode && <SourceChip>computeCanonicalHeadlineMetrics · computeCanonicalFire</SourceChip>}
       </header>
+
+      {/* Verdict-first hero — single line above the tile grid. */}
+      <Card testId="ac-verdict-card" className="border-l-4" >
+        <VerdictLine unified={unified} />
+      </Card>
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
         <Card testId="ac-tile-nw">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Net worth today</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">NET WORTH</div>
           <div className="text-base sm:text-lg font-bold num-display mt-1">
             {nw !== null ? formatCurrency(nw) : "—"}
           </div>
@@ -196,7 +229,7 @@ function CurrentPositionSection(props: {
         </Card>
 
         <Card testId="ac-tile-fire-progress">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Progress to FIRE</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">FIRE %</div>
           <div className="text-base sm:text-lg font-bold num-display mt-1">
             {fireProgressPct !== null ? `${fireProgressPct.toFixed(1)}%` : "—"}
           </div>
@@ -204,18 +237,43 @@ function CurrentPositionSection(props: {
         </Card>
 
         <Card testId="ac-tile-passive-coverage">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Passive covers</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">PASSIVE COVER</div>
           <div className="text-base sm:text-lg font-bold num-display mt-1">
-            {passiveCoveragePct !== null ? `${passiveCoveragePct}% of expenses` : "—"}
+            {passiveCoveragePct !== null ? `${passiveCoveragePct}%` : "—"}
           </div>
           {auditMode && <SourceChip>canonicalFire.passiveCoverage</SourceChip>}
         </Card>
 
         <Card testId="ac-tile-forecast">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Forecast</div>
-          <div className="text-base sm:text-lg font-bold num-display mt-1" style={{ color: freshTone }}>
-            {fresh.status === "FRESH" ? "Up to date" : fresh.status === "STALE" ? "Out of date" : "Not run"}
-          </div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">FORECAST</div>
+          {forecastFresh ? (
+            <div className="text-sm sm:text-base font-semibold mt-1">
+              {forecastRunLabel ?? "Up to date"}
+            </div>
+          ) : (
+            <div className="mt-1 flex items-center gap-2 flex-wrap">
+              <span
+                data-testid="ac-tile-forecast-chip"
+                className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded"
+                style={{
+                  background: forecastChipBg,
+                  color: forecastChipFg,
+                  border: `1px solid ${forecastChipFg}`,
+                }}
+              >
+                {forecastChipLabel}
+              </span>
+              <Link href="/wealth-strategy">
+                <button
+                  type="button"
+                  className="text-[11px] underline text-muted-foreground hover:text-foreground"
+                  data-testid="ac-tile-forecast-run-now"
+                >
+                  Run now →
+                </button>
+              </Link>
+            </div>
+          )}
           {auditMode && <SourceChip>{fresh.reason}</SourceChip>}
         </Card>
       </div>
@@ -225,10 +283,23 @@ function CurrentPositionSection(props: {
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Section B — FIRE Goal                                                      */
+/* When NOT_SET: dismissible nudge card (session-only, sessionStorage).       */
+/* When SET:     single-line summary chip with an "Edit ↗" link.              */
 /* ────────────────────────────────────────────────────────────────────────── */
+const GOAL_CARD_DISMISSED_KEY = "fwl.action_centre.goal_card_dismissed.v1";
+
 function FireGoalSection() {
   const { auditMode } = useAuditMode();
   const { data: goal, isLoading } = useCanonicalGoal();
+
+  // Per-session dismissal of the "Goal not set" nudge. Reappears on a new
+  // browser session. Only consulted in the NOT_SET branch.
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.sessionStorage.getItem(GOAL_CARD_DISMISSED_KEY) === "1";
+    } catch { return false; }
+  });
 
   if (isLoading) {
     return (
@@ -239,55 +310,66 @@ function FireGoalSection() {
   }
 
   if (!goal || goal.status === "NOT_SET") {
+    if (dismissed) return null;
+    const dismiss = () => {
+      setDismissed(true);
+      if (typeof window === "undefined") return;
+      try { window.sessionStorage.setItem(GOAL_CARD_DISMISSED_KEY, "1"); } catch { /* ignore */ }
+    };
     return (
       <section data-testid="action-centre-fire-goal">
-        <Card testId="ac-goal-not-set" className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-          <div className="flex-1">
-            <div className="text-sm font-semibold">Goal not set</div>
+        <Card testId="ac-goal-not-set" className="relative flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+          <div className="flex-1 pr-6">
+            <div className="text-sm font-semibold">Pick your FIRE goal</div>
             <div className="text-xs text-muted-foreground mt-1">
-              Tell us when you want to retire and how much income you want, and we'll plan from there.
+              Pick a FIRE age and target monthly income so the Action Centre
+              can size recommendations to your goal.
             </div>
           </div>
           <Link href="/financial-plan#fire-goal">
-            <Button data-testid="ac-goal-cta">Set your FIRE goal in Family Plan</Button>
+            <Button data-testid="ac-goal-cta">Set your FIRE goal</Button>
           </Link>
+          <button
+            type="button"
+            onClick={dismiss}
+            aria-label="Dismiss"
+            data-testid="ac-goal-not-set-dismiss"
+            className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+          >
+            <span aria-hidden className="text-base leading-none">×</span>
+          </button>
         </Card>
       </section>
     );
   }
 
-  // goal.status === "SET"
+  // goal.status === "SET" — single-line summary chip.
   return (
     <section data-testid="action-centre-fire-goal">
-      <Card testId="ac-goal-set">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-base sm:text-lg font-semibold">Your FIRE goal</h2>
-          {auditMode && <SourceChip>From Family Plan / FIRE settings</SourceChip>}
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 mt-2">
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Retire by age</div>
-            <div className="text-base sm:text-lg font-bold num-display">{goal.targetFireAge}</div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Passive income / mo</div>
-            <div className="text-base sm:text-lg font-bold num-display">{formatCurrency(goal.targetPassiveMonthly)}</div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Net worth needed</div>
-            <div className="text-base sm:text-lg font-bold num-display">{formatCurrency(goal.targetNetWorth)}</div>
-            {auditMode && (
-              <SourceChip>= passive × 12 ÷ ({goal.swrPct}% SWR)</SourceChip>
-            )}
-          </div>
-        </div>
-        <div className="mt-3">
-          <Link href="/financial-plan#fire-goal">
-            <button className="text-xs underline text-muted-foreground hover:text-foreground" data-testid="ac-goal-edit">
-              Edit in Family Plan →
-            </button>
-          </Link>
-        </div>
+      <Card testId="ac-goal-set" className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-xs sm:text-sm">
+          <span className="font-semibold">FIRE goal:</span>{" "}
+          <span className="num-display font-medium">
+            {formatCurrency(goal.targetPassiveMonthly)}
+          </span>
+          <span className="text-muted-foreground">/mo passive by age </span>
+          <span className="font-medium">{goal.targetFireAge}</span>
+          <span className="text-muted-foreground">.</span>
+        </span>
+        <Link href="/financial-plan#fire-goal">
+          <button
+            type="button"
+            data-testid="ac-goal-edit"
+            className="text-xs underline text-muted-foreground hover:text-foreground"
+          >
+            Edit ↗
+          </button>
+        </Link>
+        {auditMode && (
+          <SourceChip>
+            mc_fire_settings · NW needed = {formatCurrency(goal.targetNetWorth)} (= passive × 12 ÷ {goal.swrPct}% SWR)
+          </SourceChip>
+        )}
       </Card>
     </section>
   );
@@ -296,9 +378,26 @@ function FireGoalSection() {
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Section C — Recommended Next Move                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
+// Truncate a sentence to its first full stop (or N chars). Returns
+// { head, tail } so callers can hide the tail behind a disclosure.
+function splitReasoning(text: string | null | undefined): { head: string; tail: string } {
+  if (!text) return { head: "", tail: "" };
+  const trimmed = text.trim();
+  const firstStop = trimmed.search(/[.!?](\s|$)/);
+  if (firstStop > 0 && firstStop < trimmed.length - 1) {
+    return {
+      head: trimmed.slice(0, firstStop + 1),
+      tail: trimmed.slice(firstStop + 1).trim(),
+    };
+  }
+  // No early sentence break: hide nothing.
+  return { head: trimmed, tail: "" };
+}
+
 function RecommendedNextMoveSection({ unified }: { unified: UnifiedBestMoveResult | null }) {
   const { auditMode } = useAuditMode();
   const rec = unified?.unified?.bestMove ?? null;
+  const [showMore, setShowMore] = useState(false);
 
   if (!rec) {
     return (
@@ -311,15 +410,31 @@ function RecommendedNextMoveSection({ unified }: { unified: UnifiedBestMoveResul
 
   const plain = labelize(rec.title);
   const dollarImpact = rec.expectedFinancialImpact?.annualDollar ?? rec.netWorthImpact?.delta;
+  const impactLabel =
+    typeof dollarImpact === "number" && Number.isFinite(dollarImpact)
+      ? `${formatCurrency(dollarImpact)} expected`
+      : rec.benefitLabel ?? null;
   const whenLabel = (() => {
     switch (rec.urgency) {
       case "immediate": return "This week";
       case "this_quarter": return "This quarter";
       case "this_year": return "This year";
       case "monitor": return "Monitor";
-      default: return "—";
+      default: return null;
     }
   })();
+  const confPct =
+    typeof rec.confidenceScore === "number" && Number.isFinite(rec.confidenceScore)
+      ? Math.round(rec.confidenceScore * 100)
+      : null;
+  const { head: whyHead, tail: whyTail } = splitReasoning(rec.reasoning);
+
+  // Single chip-row separators rendered between non-null chips.
+  const chipPieces: React.ReactNode[] = [];
+  if (whenLabel) chipPieces.push(<span key="when">{whenLabel}</span>);
+  if (rec.riskLevel) chipPieces.push(<span key="risk" className="capitalize">{rec.riskLevel} risk</span>);
+  if (confPct !== null) chipPieces.push(<span key="conf">{confPct}% confident</span>);
+  if (impactLabel) chipPieces.push(<span key="impact" className="num-display">{impactLabel}</span>);
 
   return (
     <section data-testid="action-centre-next-move">
@@ -331,35 +446,67 @@ function RecommendedNextMoveSection({ unified }: { unified: UnifiedBestMoveResul
             1
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <p className="text-sm sm:text-base font-semibold">{plain}</p>
-              {auditMode && <SourceChip>engine: "{rec.title}"</SourceChip>}
-            </div>
-            <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-2 mt-3 text-xs">
-              <div>
-                <dt className="text-[10px] uppercase tracking-widest text-muted-foreground">When</dt>
-                <dd className="font-medium">{whenLabel}</dd>
+            {/* Plain-English verb line first; technical engine label is now a small subtitle. */}
+            <p className="text-sm sm:text-base font-semibold leading-snug">{plain}</p>
+            {rec.title && rec.title.trim() !== plain && (
+              <p
+                className="text-[11px] text-muted-foreground mt-0.5 leading-snug"
+                data-testid="ac-next-move-subtitle"
+              >
+                {rec.title}
+              </p>
+            )}
+            {auditMode && (
+              <p className="text-[10px] text-muted-foreground/80 mt-0.5">engine: "{rec.title}"</p>
+            )}
+
+            {/* Single chip row replaces the 4-cell WHEN/IMPACT/RISK/CONF grid. */}
+            {chipPieces.length > 0 && (
+              <div
+                className="mt-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-1"
+                data-testid="ac-next-move-chips"
+              >
+                {chipPieces.map((piece, i) => (
+                  <React.Fragment key={i}>
+                    {piece}
+                    {i < chipPieces.length - 1 && <span aria-hidden className="text-muted-foreground/50">·</span>}
+                  </React.Fragment>
+                ))}
               </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-widest text-muted-foreground">Expected impact</dt>
-                <dd className="font-medium num-display">
-                  {typeof dollarImpact === "number" && Number.isFinite(dollarImpact)
-                    ? formatCurrency(dollarImpact)
-                    : (rec.benefitLabel ?? "—")}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-widest text-muted-foreground">Risk</dt>
-                <dd className="font-medium capitalize">{rec.riskLevel ?? "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-widest text-muted-foreground">Confidence</dt>
-                <dd className="font-medium"><ConfidenceChip value={rec.confidenceScore} /></dd>
-              </div>
-            </dl>
-            <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
-              <span className="font-semibold text-foreground">Why: </span>{rec.reasoning}
-            </p>
+            )}
+
+            {/* Why: truncated to first sentence; rest hides behind a disclosure. */}
+            {whyHead && (
+              <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
+                <span className="font-semibold text-foreground">Why: </span>
+                {whyHead}
+                {whyTail && !showMore && " "}
+                {whyTail && !showMore && (
+                  <button
+                    type="button"
+                    onClick={() => setShowMore(true)}
+                    className="underline text-muted-foreground hover:text-foreground"
+                    data-testid="ac-next-move-more-detail"
+                  >
+                    More detail
+                  </button>
+                )}
+                {whyTail && showMore && (
+                  <>
+                    {" "}{whyTail}{" "}
+                    <button
+                      type="button"
+                      onClick={() => setShowMore(false)}
+                      className="underline text-muted-foreground hover:text-foreground"
+                      data-testid="ac-next-move-less-detail"
+                    >
+                      Show less
+                    </button>
+                  </>
+                )}
+              </p>
+            )}
+
             {rec.cta && (
               <div className="mt-3">
                 <Link href={rec.cta.route}>
@@ -396,7 +543,19 @@ function TopActionsSection({ unified }: { unified: UnifiedBestMoveResult | null 
       <ol className="space-y-2">
         {items.map((rec, idx) => {
           const plain = labelize(rec.title);
+          // Same field the recommended-action card uses for its impact label.
           const dollars = rec.expectedFinancialImpact?.annualDollar ?? rec.netWorthImpact?.delta;
+          const impactLead =
+            typeof dollars === "number" && Number.isFinite(dollars)
+              ? `${formatCurrency(dollars)}/yr`
+              : (rec.benefitLabel ?? null);
+          const confPct =
+            typeof rec.confidenceScore === "number" && Number.isFinite(rec.confidenceScore)
+              ? Math.round(rec.confidenceScore * 100)
+              : null;
+          const riskLabel = rec.riskLevel
+            ? `${rec.riskLevel.charAt(0).toUpperCase()}${rec.riskLevel.slice(1)} risk`
+            : null;
           return (
             <li key={rec.id}>
               <Card testId={`ac-top-action-${idx}`} className="flex items-start gap-3">
@@ -405,16 +564,23 @@ function TopActionsSection({ unified }: { unified: UnifiedBestMoveResult | null 
                   {idx + 2}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <p className="text-sm font-semibold">{plain}</p>
-                    <span className="text-xs font-semibold num-display">
-                      {typeof dollars === "number" && Number.isFinite(dollars)
-                        ? formatCurrency(dollars)
-                        : (rec.benefitLabel ?? "—")}
-                    </span>
-                    <RiskChip level={rec.riskLevel} />
-                    <ConfidenceChip value={rec.confidenceScore} />
-                  </div>
+                  {/* Plain-English sentence: lead with the dollar benefit, then action. */}
+                  <p className="text-sm leading-snug" data-testid={`ac-top-action-${idx}-sentence`}>
+                    {impactLead && (
+                      <>
+                        <span className="font-semibold num-display">{impactLead}</span>
+                        <span className="text-muted-foreground"> — </span>
+                      </>
+                    )}
+                    <span className="font-medium">{plain}.</span>
+                  </p>
+                  {(riskLabel || confPct !== null) && (
+                    <p className="text-[11px] text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-1.5">
+                      {riskLabel && <span>{riskLabel}</span>}
+                      {riskLabel && confPct !== null && <span aria-hidden className="text-muted-foreground/50">·</span>}
+                      {confPct !== null && <span>{confPct}% confident</span>}
+                    </p>
+                  )}
                   {auditMode && (
                     <p className="text-[10px] text-muted-foreground/80 mt-1">
                       engine: "{rec.title}"
@@ -432,17 +598,25 @@ function TopActionsSection({ unified }: { unified: UnifiedBestMoveResult | null 
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Section E — Blockers                                                       */
-/* The unified engine does not expose a structured "blockers" field, so per   */
-/* spec we surface the no-blocker fallback message.                           */
+/* The unified engine does not currently expose a structured "blockers"       */
+/* field. Sprint 14.2-F: hide the entire section (heading + card) whenever    */
+/* the only thing it would render is the no-blockers fallback string. If a    */
+/* future engine extension surfaces real blockers, this function should be    */
+/* extended to read them and re-enable the section automatically.             */
 /* ────────────────────────────────────────────────────────────────────────── */
-function BlockersSection() {
+function BlockersSection({ unified }: { unified: UnifiedBestMoveResult | null }) {
+  const blockers = (unified as any)?.unified?.blockers ?? null;
+  const hasRealBlockers = Array.isArray(blockers) && blockers.length > 0;
+  if (!hasRealBlockers) return null;
   return (
     <section data-testid="action-centre-blockers">
       <h2 className="text-base sm:text-lg font-semibold mb-2">Blockers</h2>
-      <Card testId="ac-blockers-none">
-        <div className="text-sm text-muted-foreground">
-          No hard blockers detected based on current assumptions.
-        </div>
+      <Card testId="ac-blockers-list">
+        <ul className="text-sm space-y-1">
+          {blockers.map((b: any, i: number) => (
+            <li key={i} className="text-foreground">{typeof b === "string" ? b : (b?.label ?? JSON.stringify(b))}</li>
+          ))}
+        </ul>
       </Card>
     </section>
   );
@@ -468,32 +642,29 @@ function DoNothingSection(props: {
     ? today + delta
     : null;
 
+  // Sprint 14.2-E: when the impact data is empty (the predicate the section
+  // previously used to render its "Run the forecast…" fallback line), hide
+  // the entire section — heading and card — rather than showing an empty
+  // placeholder that always wins the user's first scroll.
+  if (today === null || ifAct === null) return null;
+
+  const actingText = `${formatCurrency(ifAct)} ${horizon ? `over ${horizon} year${horizon === 1 ? "" : "s"}` : "with this action"}`;
+  const doingNothingText = `${formatCurrency(today)} (status quo, today)`;
+
   return (
     <section data-testid="action-centre-do-nothing">
       <h2 className="text-base sm:text-lg font-semibold mb-2">If you act vs. do nothing</h2>
       <Card testId="ac-do-nothing-card">
-        {today === null || ifAct === null ? (
-          <div className="text-sm text-muted-foreground">
-            Run the forecast to see a side-by-side comparison.
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:gap-6">
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Do nothing</div>
-              <div className="text-base sm:text-xl font-bold num-display mt-1">{formatCurrency(today)}</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">Status quo, today</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Recommended path</div>
-              <div className="text-base sm:text-xl font-bold num-display mt-1" style={{ color: "hsl(var(--success))" }}>
-                {formatCurrency(ifAct)}
-              </div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">
-                {horizon ? `over ${horizon} year${horizon === 1 ? "" : "s"}` : "with this action"}
-              </div>
-            </div>
-          </div>
-        )}
+        <ul className="space-y-1.5 text-sm">
+          <li data-testid="ac-do-nothing-acting">
+            <span className="font-semibold text-foreground">Acting today: </span>
+            <span className="num-display" style={{ color: "hsl(var(--success))" }}>{actingText}</span>
+          </li>
+          <li data-testid="ac-do-nothing-status-quo">
+            <span className="font-semibold text-foreground">Doing nothing: </span>
+            <span className="num-display text-muted-foreground">{doingNothingText}</span>
+          </li>
+        </ul>
         {auditMode && (
           <p className="text-[10px] text-muted-foreground/80 mt-3">
             today: canonicalHeadlineMetrics.netWorth · delta: bestMove.netWorthImpact.delta ?? expectedFinancialImpact.annualDollar
@@ -825,11 +996,11 @@ export default function ActionPlanPage() {
         </p>
       </header>
 
-      <CurrentPositionSection ledger={canonicalLedger} goalTargetNetWorth={goalTargetNW} />
+      <CurrentPositionSection ledger={canonicalLedger} goalTargetNetWorth={goalTargetNW} unified={unified} />
       <FireGoalSection />
       <RecommendedNextMoveSection unified={unified} />
       <TopActionsSection unified={unified} />
-      <BlockersSection />
+      <BlockersSection unified={unified} />
       <DoNothingSection unified={unified} ledger={canonicalLedger} />
       <ChecklistSection unified={unified} />
 
