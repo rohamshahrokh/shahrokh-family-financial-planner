@@ -24,7 +24,7 @@ import {
   // Step 3 — Future
   BarChart2, Sigma, FlaskConical, FileText,
   // Step 4 — Move
-  Lightbulb, BrainCircuit, ClipboardCheck,
+  Lightbulb, BrainCircuit, ClipboardCheck, Beaker,
   // Support / System
   HelpCircle, Settings, Microscope,
   // UI chrome
@@ -114,10 +114,16 @@ const NAV_STEPS: Array<{
     sublabel: "Action · What should I do next",
     badgeClass: "step-4",
     items: [
-      // Sprint 14 — Action Plan is the unified MOVE shell. The legacy
-      // /decision, /goal-closure-lab, /portfolio-lab routes stay registered
-      // for power-user deep links but no longer appear in the sidebar.
+      // Sprint 14 — Action Plan is the unified MOVE shell, kept lean
+      // (plain-English, ~1.85 mobile scrolls, no embedded heavy compute).
+      //
+      // Sprint 14.3 — Decision Lab is the summary-first hub over the three
+      // deeper analytical pages (/decision, /goal-closure-lab, /portfolio-lab).
+      // The legacy routes stay registered AND reachable directly (power users,
+      // bookmarks, deep links); Decision Lab simply provides hierarchy and a
+      // single place to find them.
       { href: "/action-plan",    label: "Action Plan",         icon: ClipboardCheck,  adminOnly: false },
+      { href: "/decision-lab",   label: "Decision Lab",        icon: Beaker,          adminOnly: false },
     ],
   },
 ];
