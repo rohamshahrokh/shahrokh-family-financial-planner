@@ -386,6 +386,11 @@ export function runScenarioForecast(params: {
   const otherDebts0 = safeNum(ov.other_debts ?? snap?.other_debts ?? 0);
   const mortgageRate = safeNum(ov.mortgage_rate ?? snap?.mortgage_rate ?? 6.25) / 100;
 
+  /**
+   * @deprecated FWL Remediation Sprint Phase A — `sf_scenarios.swr` is a
+   * scattered SWR source. Use `getCanonicalGoal()` / `useCanonicalGoal()`
+   * (mc_fire_settings.swr_pct) instead. Phase B will rewire this callsite.
+   */
   const swr = safeNum(scenario.swr) / 100;
   const emergencyBuffer = monthlyExpenses * 6;
 
@@ -906,6 +911,11 @@ export function runWiMonteCarlo(params: {
   const { scenario, properties, stockPlans, cryptoPlans, assumptions, snap, simulations = 1000 } = params;
   const targetYear = scenario.target_year;
   const targetMonthly = scenario.target_passive_income;
+  /**
+   * @deprecated FWL Remediation Sprint Phase A — `sf_scenarios.swr` is a
+   * scattered SWR source. Use `getCanonicalGoal()` / `useCanonicalGoal()`
+   * (mc_fire_settings.swr_pct) instead. Phase B will rewire this callsite.
+   */
   const swr = scenario.swr / 100;
 
   const profile = PROFILE_DEFAULTS[scenario.profile as keyof typeof PROFILE_DEFAULTS] ?? PROFILE_DEFAULTS.moderate;

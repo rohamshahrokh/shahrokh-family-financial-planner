@@ -811,6 +811,13 @@ export default function SettingsPage() {
 
   // ── General settings ──────────────────────────────────────────────────────
   // ── App-wide settings: loaded from Supabase on mount ───────────────────────
+  /**
+   * @deprecated FWL Remediation Sprint Phase A — `safe_withdrawal_rate`
+   * within `sf_app_settings.settings.assumptions` is a scattered SWR source.
+   * The canonical SWR now lives at `mc_fire_settings.swr_pct` and must be
+   * read via `getCanonicalGoal()` / `useCanonicalGoal()`. Phase B will
+   * rewire callsites and stop persisting SWR through sf_app_settings.
+   */
   const DEFAULT_ASSUMPTIONS = {
     inflation: 3, ppor_growth: 6, super_return: 8, safe_withdrawal_rate: 4, risk_profile: 'moderate',
   };
