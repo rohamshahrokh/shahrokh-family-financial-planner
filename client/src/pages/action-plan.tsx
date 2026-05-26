@@ -598,17 +598,25 @@ function TopActionsSection({ unified }: { unified: UnifiedBestMoveResult | null 
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Section E — Blockers                                                       */
-/* The unified engine does not expose a structured "blockers" field, so per   */
-/* spec we surface the no-blocker fallback message.                           */
+/* The unified engine does not currently expose a structured "blockers"       */
+/* field. Sprint 14.2-F: hide the entire section (heading + card) whenever    */
+/* the only thing it would render is the no-blockers fallback string. If a    */
+/* future engine extension surfaces real blockers, this function should be    */
+/* extended to read them and re-enable the section automatically.             */
 /* ────────────────────────────────────────────────────────────────────────── */
-function BlockersSection() {
+function BlockersSection({ unified }: { unified: UnifiedBestMoveResult | null }) {
+  const blockers = (unified as any)?.unified?.blockers ?? null;
+  const hasRealBlockers = Array.isArray(blockers) && blockers.length > 0;
+  if (!hasRealBlockers) return null;
   return (
     <section data-testid="action-centre-blockers">
       <h2 className="text-base sm:text-lg font-semibold mb-2">Blockers</h2>
-      <Card testId="ac-blockers-none">
-        <div className="text-sm text-muted-foreground">
-          No hard blockers detected based on current assumptions.
-        </div>
+      <Card testId="ac-blockers-list">
+        <ul className="text-sm space-y-1">
+          {blockers.map((b: any, i: number) => (
+            <li key={i} className="text-foreground">{typeof b === "string" ? b : (b?.label ?? JSON.stringify(b))}</li>
+          ))}
+        </ul>
       </Card>
     </section>
   );
@@ -992,7 +1000,7 @@ export default function ActionPlanPage() {
       <FireGoalSection />
       <RecommendedNextMoveSection unified={unified} />
       <TopActionsSection unified={unified} />
-      <BlockersSection />
+      <BlockersSection unified={unified} />
       <DoNothingSection unified={unified} ledger={canonicalLedger} />
       <ChecklistSection unified={unified} />
 
