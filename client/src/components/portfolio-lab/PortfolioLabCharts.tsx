@@ -199,7 +199,11 @@ export function PortfolioLabCharts({
       <ChartCard
         testid="pl-chart-path-vs-baseline"
         title="Current Path vs Recommended Path vs Target"
-        caption="Solid green = engine-recommended trajectory (Sprint 9 p50). Dashed grey = your current path with no new strategies (ledger NW projected at the current portfolio's blended expected return). Purple = your FIRE target."
+        caption={
+          isEmptyValue(summary.targetNetWorth)
+            ? "Solid green = engine-recommended trajectory (Sprint 9 p50). Solid grey = your current path with no new strategies (ledger NW projected at the current portfolio's blended expected return). Target line: Goal not set — set a FIRE goal on the Dashboard to plot the target."
+            : "Solid green = engine-recommended trajectory (Sprint 9 p50). Solid grey = your current path with no new strategies (ledger NW projected at the current portfolio's blended expected return). Dashed purple = your FIRE target."
+        }
         empty={pathBaselineData.length === 0}
       >
         <ResponsiveContainer width="100%" height="100%">
@@ -215,8 +219,8 @@ export function PortfolioLabCharts({
             <Line
               type="monotone"
               dataKey="Current Path"
-              stroke="#9ca3af"
-              strokeDasharray="5 5"
+              stroke="#6b7280"
+              strokeWidth={2}
               dot={false}
               isAnimationActive={false}
             />
