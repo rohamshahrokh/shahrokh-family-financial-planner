@@ -2,7 +2,7 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 import { getCanonicalGoal } from "./lib/canonicalGoal";
-import { evaluateFreshness } from "../client/src/lib/forecastFreshness";
+import { evaluateFreshness } from "../shared/forecastFreshness";
 
 // ─── Supabase helpers (server-side) ────────────────────────────────────────────
 // These mirror the client-side supabaseClient.ts so the server can also read/write
