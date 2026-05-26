@@ -42,6 +42,13 @@ import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
+import {
+  selectPropertyEquity,
+  selectStocksTotal,
+  selectCryptoTotal,
+  selectCashToday,
+  selectSuperCombined,
+} from "@/lib/dashboardDataContract";
 import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics";
 import { computeCanonicalFire } from "@/lib/canonicalFire";
 import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
@@ -498,6 +505,99 @@ function DoNothingSection(props: {
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Lab Summary Cards (Sprint 14.1-C)                                          */
+/* Lightweight links to Goal Closure Lab + Portfolio Lab. Numbers come from   */
+/* existing canonical selectors only — no new engine. Rendered inside the     */
+/* "View supporting analysis" disclosure so the Action Centre keeps to its    */
+/* 2–3 mobile-scroll target.                                                  */
+/* ────────────────────────────────────────────────────────────────────────── */
+function LabSummaryCards({ ledger }: { ledger: DashboardInputs | null }) {
+  const { auditMode } = useAuditMode();
+  const head = ledger ? computeCanonicalHeadlineMetrics(ledger) : null;
+  const fire = ledger ? computeCanonicalFire(ledger) : null;
+
+  // Goal Closure: gap-to-goal headline from the canonical FIRE selector.
+  const gap = fire?.gap ?? null;
+
+  // Portfolio Lab: 4-bucket snapshot from existing selectors. We don't
+  // recompute allocation here — only sum the canonical bucket values and let
+  // the page render them as currency.
+  const buckets = ledger
+    ? [
+        { label: "Property",   value: selectPropertyEquity(ledger) },
+        { label: "Stocks",     value: selectStocksTotal(ledger) + selectCryptoTotal(ledger) },
+        { label: "Cash",       value: selectCashToday(ledger) },
+        { label: "Super",      value: selectSuperCombined(ledger) },
+      ]
+    : null;
+  const bucketTotal = buckets ? buckets.reduce((a, b) => a + b.value, 0) : 0;
+
+  return (
+    <div className="space-y-2" data-testid="ac-lab-summary-cards">
+      <Card testId="ac-lab-summary-goal-closure">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Goal Closure Lab</div>
+            <div className="text-base sm:text-lg font-bold num-display mt-1">
+              {gap !== null
+                ? gap > 0
+                  ? `${formatCurrency(gap)} to go`
+                  : "On target"
+                : "Not available"}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              How far you are from your FIRE number, and what closes the gap.
+            </div>
+            {auditMode && <SourceChip>canonicalFire.gap = fireNumber − netWorth</SourceChip>}
+          </div>
+          <Link href="/goal-closure-lab">
+            <Button size="sm" variant="outline" data-testid="ac-lab-summary-goal-closure-cta">
+              Open Goal Closure Lab
+            </Button>
+          </Link>
+        </div>
+      </Card>
+
+      <Card testId="ac-lab-summary-portfolio">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Portfolio Lab</div>
+            <div className="text-xs text-muted-foreground mt-1 mb-2">
+              Where your wealth sits today.
+            </div>
+            {buckets && bucketTotal > 0 ? (
+              <ul className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                {buckets.map(b => {
+                  const pct = bucketTotal > 0 ? Math.round((Math.max(b.value, 0) / bucketTotal) * 100) : 0;
+                  return (
+                    <li key={b.label} className="flex items-baseline justify-between gap-2">
+                      <span className="text-muted-foreground">{b.label}</span>
+                      <span className="font-medium num-display">{pct}%</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <div className="text-sm text-muted-foreground">Not available</div>
+            )}
+            {auditMode && (
+              <SourceChip>
+                selectPropertyEquity · selectStocksTotal+selectCryptoTotal · selectCashToday · selectSuperCombined
+              </SourceChip>
+            )}
+          </div>
+          <Link href="/portfolio-lab">
+            <Button size="sm" variant="outline" data-testid="ac-lab-summary-portfolio-cta">
+              Open Portfolio Lab
+            </Button>
+          </Link>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Section G — Checklist                                                      */
 /* Persists to mc_fire_settings.action_checklist (JSONB). localStorage is     */
 /* used ONLY as an emergency fallback when the Supabase write fails or the    */
@@ -742,7 +842,8 @@ export default function ActionPlanPage() {
           {showSupport ? "Hide supporting analysis" : "View supporting analysis"}
         </button>
         {showSupport && (
-          <div className="mt-3 text-xs text-muted-foreground space-y-2" data-testid="ac-supporting-content">
+          <div className="mt-3 text-xs text-muted-foreground space-y-3" data-testid="ac-supporting-content">
+            <LabSummaryCards ledger={canonicalLedger} />
             <p>
               All numbers above come from existing canonical selectors. Net worth and
               progress come from <code>canonicalHeadlineMetrics</code> and{" "}
