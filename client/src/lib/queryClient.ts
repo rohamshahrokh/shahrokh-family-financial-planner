@@ -24,6 +24,7 @@ import { sbBills, sbBudgets, sbTelegramSettings, sbAlertLogs, sbFamilyMsgLog, sb
 import { sbFireSettings, sbFireScenarioConfig, sbFireYearAssumptions } from "./supabaseClient";
 import { sbTaxProfile } from "./supabaseClient";
 import { sbMCFireSettings, sbMCFireResults, sbMCFirePresets } from "./supabaseClient";
+import { evaluateFreshness } from "./forecastFreshness";
 import {
   getDemoDataset,
   DEMO_FIRE_SETTINGS, DEMO_FIRE_SCENARIO_CONFIG, DEMO_APP_SETTINGS, DEMO_TAX_PROFILE,
@@ -399,6 +400,17 @@ async function handleDemoRequest(method: string, path: string, body?: unknown): 
       return { status: "NOT_SET", reason: "demo mode — no canonical goal saved" };
     }
   }
+  if (path === "/api/forecast-freshness") {
+    if (m === "GET") {
+      return {
+        runDate: null,
+        sourceSnapshotDate: null,
+        status: "MISSING",
+        staleByDays: null,
+        reason: "demo mode — no forecast run recorded",
+      };
+    }
+  }
 
   // ── Telegram / Alert Logs / Family Msg — stub
   if (path === "/api/telegram-settings") {
@@ -761,6 +773,24 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
     if (m === "GET") {
       const row = (await sbMCFireSettings.get()) as any;
       return deriveCanonicalGoalFromRow(row);
+    }
+  }
+
+  // ── Forecast Freshness — compares MC run age vs snapshot age. ──────────
+  if (path === "/api/forecast-freshness") {
+    if (m === "GET") {
+      const [resultRow, snapshotRow] = await Promise.all([
+        sbMCFireResults.get().catch(() => null),
+        localStore.getSnapshot().catch(() => null),
+      ]);
+      const runIso =
+        (resultRow as any)?.ran_at ??
+        (resultRow as any)?.updated_at ??
+        (resultRow as any)?.created_at ?? null;
+      const snapIso = (snapshotRow as any)?.updated_at ?? null;
+      const runDate  = runIso  ? new Date(runIso)  : null;
+      const snapDate = snapIso ? new Date(snapIso) : null;
+      return evaluateFreshness(runDate, snapDate);
     }
   }
 
