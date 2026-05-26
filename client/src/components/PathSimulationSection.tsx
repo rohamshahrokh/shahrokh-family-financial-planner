@@ -194,6 +194,16 @@ function StrategyRanking({ result }: { result: PathSimulationResult }) {
         <p className="text-xs text-muted-foreground mt-0.5">
           Composite of P(FIRE by target), shortfall avoidance, cashflow stability, and net worth strength.
         </p>
+        {/* REMEDIATION B-2: these rankings are computed in-memory by the
+            optimizer each render. They are NOT persisted to sf_scenario_results
+            (the per-strategy ↔ scenario-id mapping doesn't exist yet). Re-runs
+            may shift order as data changes; nothing here is durable. */}
+        <p
+          className="mt-1 text-[10px] uppercase tracking-wider text-amber-600 dark:text-amber-400"
+          data-testid="path-sim-strategy-ranking-transient"
+        >
+          Transient — not persisted (in-memory only)
+        </p>
       </header>
       <div className="overflow-x-auto">
         <table className="w-full text-xs tabular-nums" data-testid="path-sim-strategy-ranking-table">
