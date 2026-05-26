@@ -173,6 +173,12 @@ export interface GoalSolverResult {
 export function runGoalSolver(input: GoalSolverInput): GoalSolverResult {
   const rolloutCount = Math.max(8, input.rolloutCount ?? 256);
   const seed = input.seed ?? 1_731_405_001;
+  /**
+   * @deprecated FWL Remediation Sprint Phase A — the `?? 0.04` hardcoded SWR
+   * fallback is forbidden. Read SWR via `getCanonicalGoal()` /
+   * `useCanonicalGoal()` from `mc_fire_settings.swr_pct` and surface
+   * "Goal not set" instead of inventing 4%. Phase B will rewire this callsite.
+   */
   const swr = input.swr ?? 0.04;
   const horizon = Math.max(12, input.horizonMonths);
   const monthlySurplus = Math.max(0, input.monthlySurplus);
