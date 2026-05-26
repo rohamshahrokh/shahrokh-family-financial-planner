@@ -256,6 +256,30 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     action: false,
   });
 
+  // Sprint 14.1 — Wealth Strategy acts as an expandable parent for its
+  // depth>=1 children (Property/Stocks/Crypto/Debt/Tax/CGT). Default expanded,
+  // persisted to localStorage so refresh restores the user's last choice.
+  const WEALTH_NAV_KEY = "fwl.nav.wealthStrategy.expanded";
+  const [wealthExpanded, setWealthExpanded] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const raw = window.localStorage.getItem(WEALTH_NAV_KEY);
+      if (raw === null) return true;
+      return raw === "true";
+    } catch {
+      return true;
+    }
+  });
+  const toggleWealthExpanded = () => {
+    setWealthExpanded(prev => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        try { window.localStorage.setItem(WEALTH_NAV_KEY, String(next)); } catch { /* no-op */ }
+      }
+      return next;
+    });
+  };
+
   // Auto-open the section that contains the active route
   useEffect(() => {
     const activeStep = getActiveStep(location, isAdmin, hasPermission);
@@ -441,11 +465,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       the preceding depth=0 parent. Same render path is used
                       on desktop and mobile (the sidebar is one component). */}
                   {(() => {
+                    const WEALTH_HREF = "/wealth-strategy";
                     const renderItem = (item: NavItem) => {
                       const { href, label, icon: Icon } = item;
                       const depth = item.depth ?? 0;
                       const active = isPathActive(href, location);
                       const isChild = depth > 0;
+                      const isWealthParent =
+                        depth === 0 && href === WEALTH_HREF && stepDef.id === "strategy";
+                      // Sprint 14.1 — inactive child labels use muted text so
+                      // the active child remains the strongest visual anchor.
+                      const childTextClass =
+                        isChild && !active ? " text-muted-foreground" : "";
                       return (
                         <Link
                           key={href}
@@ -462,8 +493,36 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                               ...(isChild && !active ? { opacity: 0.7 } : {}),
                             }}
                           />
-                          <span className={isChild ? "text-[12px]" : "text-[13px]"}>{label}</span>
-                          {active && (
+                          <span className={`${isChild ? "text-[12px]" : "text-[13px]"}${childTextClass}`}>
+                            {label}
+                          </span>
+                          {/* Sprint 14.1 — chevron toggle button is nested
+                              inside the <Link>; preventDefault + stopPropagation
+                              ensure clicking the chevron does NOT navigate. */}
+                          {isWealthParent && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toggleWealthExpanded();
+                              }}
+                              aria-expanded={wealthExpanded}
+                              aria-controls="nav-wealth-strategy-children"
+                              aria-label={wealthExpanded ? "Collapse Wealth Strategy" : "Expand Wealth Strategy"}
+                              data-testid="nav-wealth-strategy-toggle"
+                              className="ml-auto inline-flex items-center justify-center w-8 h-8 p-1.5 rounded hover:bg-muted/40 -mr-1.5 shrink-0"
+                            >
+                              <ChevronDown
+                                className="w-3.5 h-3.5 transition-transform duration-200"
+                                style={{
+                                  transform: wealthExpanded ? "rotate(0deg)" : "rotate(-90deg)",
+                                  color: active ? accentColor : "hsl(var(--muted-foreground))",
+                                }}
+                              />
+                            </button>
+                          )}
+                          {active && !isWealthParent && (
                             <ChevronRight
                               className="w-3 h-3 ml-auto shrink-0"
                               style={{ color: accentColor }}
@@ -475,14 +534,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
                     // Walk visibleItems and emit either a parent <Link> or a
                     // wrapped child-group <div> for each contiguous run of
-                    // depth>=1 items.
+                    // depth>=1 items. Sprint 14.1: when the depth-0 item that
+                    // precedes a child run is Wealth Strategy, the child run
+                    // is gated on wealthExpanded.
                     const out: React.ReactNode[] = [];
                     let i = 0;
+                    let lastParentHref: string | null = null;
                     while (i < visibleItems.length) {
                       const item = visibleItems[i];
                       const depth = item.depth ?? 0;
                       if (depth === 0) {
                         out.push(renderItem(item));
+                        lastParentHref = item.href;
                         i++;
                       } else {
                         // Collect contiguous children
@@ -494,10 +557,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           group.push(visibleItems[i]);
                           i++;
                         }
+                        const isWealthGroup = lastParentHref === WEALTH_HREF;
+                        if (isWealthGroup && !wealthExpanded) {
+                          // Collapsed — skip rendering this child run entirely.
+                          continue;
+                        }
                         out.push(
                           <div
                             key={`child-group-${group[0].href}`}
-                            className="my-1 ml-4 pl-1 space-y-0.5"
+                            id={isWealthGroup ? "nav-wealth-strategy-children" : undefined}
+                            className="my-2 ml-4 pl-1 py-1.5 space-y-0.5 rounded-r-md bg-muted/30"
                             style={{
                               borderLeft: `1px solid ${
                                 isActiveSection
