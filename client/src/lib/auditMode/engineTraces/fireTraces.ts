@@ -12,6 +12,12 @@
  *   - fire:swr-used          Safe Withdrawal Rate locked into the calculation
  *   - fire:passive-gap       Capital gap between investable-now and target
  *   - fire:time-saved-lost   Years saved/lost between fastest and slowest scenarios
+ *
+ * @deprecated FWL Remediation Sprint Phase A — every `settings.safe_withdrawal_rate ?? 4`
+ * read in this file is a scattered SWR source. The canonical SWR is
+ * `mc_fire_settings.swr_pct` and must be read via `getCanonicalGoal()` /
+ * `useCanonicalGoal()`. Phase B will rewire the FIRE-path engine and these
+ * trace factories onto the canonical selector.
  */
 
 import type { FIREPathResult, FIRESettingsResolved } from '../../firePathEngine';

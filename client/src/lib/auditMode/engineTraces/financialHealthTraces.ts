@@ -433,6 +433,12 @@ export function buildLiveFinancialHealthTracesFromRiskRadar(
   //      categories (cash_buffer + debt_ratio + super reference).
   //
   // We never render redirect text as the finalValue — only a numeric live %.
+  /**
+   * @deprecated FWL Remediation Sprint Phase A — the `?? 0.04` hardcoded SWR
+   * fallback is forbidden. Read SWR via `getCanonicalGoal()` /
+   * `useCanonicalGoal()` from `mc_fire_settings.swr_pct`. Phase B will rewire
+   * this trace onto the canonical selector.
+   */
   const swrUsed = extras.swr ?? 0.04;
   const investableLive = extras.investable;
   const annualExpensesLive = extras.annualExpenses;

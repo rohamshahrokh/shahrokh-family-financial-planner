@@ -41,6 +41,14 @@ export interface FIRESettings {
 
   // FIRE target
   desired_monthly_passive?:    number;
+  /**
+   * @deprecated FWL Remediation Sprint Phase A — read SWR via
+   * `getCanonicalGoal()` (server) / `useCanonicalGoal()` (client) from
+   * `mc_fire_settings.swr_pct` instead. This field still flows through the
+   * fire-path engine because sf_fire_settings is shimmed to mc_fire_settings,
+   * but the hardcoded 4% default fallback is forbidden — Phase B will rewire
+   * callsites and remove the default.
+   */
   safe_withdrawal_rate?:       number;   // %, default 4.0
   include_super_in_fire?:      boolean;
   include_ppor_equity?:        boolean;
@@ -275,6 +283,12 @@ const DEFAULTS: FIRESettingsResolved = {
   desired_fire_age:           0,
   desired_partner_fire_age:   0,
   desired_monthly_passive:    null,    // → shows "Needs setup"
+  /**
+   * @deprecated FWL Remediation Sprint Phase A — hardcoded 4% default is
+   * forbidden. Phase B will replace this with the canonical-goal selector;
+   * when goals_set=false the UI must render "Goal not set" instead of
+   * silently using 4%.
+   */
   safe_withdrawal_rate:       4.0,     // DEFAULT — AU standard
   include_super_in_fire:      true,
   include_ppor_equity:        false,

@@ -24,6 +24,7 @@ import { sbBills, sbBudgets, sbTelegramSettings, sbAlertLogs, sbFamilyMsgLog, sb
 import { sbFireSettings, sbFireScenarioConfig, sbFireYearAssumptions } from "./supabaseClient";
 import { sbTaxProfile } from "./supabaseClient";
 import { sbMCFireSettings, sbMCFireResults, sbMCFirePresets } from "./supabaseClient";
+import { evaluateFreshness } from "./forecastFreshness";
 import {
   getDemoDataset,
   DEMO_FIRE_SETTINGS, DEMO_FIRE_SCENARIO_CONFIG, DEMO_APP_SETTINGS, DEMO_TAX_PROFILE,
@@ -41,6 +42,43 @@ function isStaticDeployment(): boolean {
 }
 
 const USE_LOCAL_STORE = isStaticDeployment();
+
+// ─── Canonical-Goal derivation (FWL Remediation Phase A) ─────────────────────
+// Mirrors server/lib/canonicalGoal.ts:deriveCanonicalGoal. The static and demo
+// handlers below need a local copy because static deployment doesn't run the
+// Express server. Keep both copies in sync.
+function deriveCanonicalGoalFromRow(row: any): unknown {
+  if (!row || typeof row !== "object") {
+    return { status: "NOT_SET", reason: "mc_fire_settings row not found for owner" };
+  }
+  if (row.goals_set !== true) {
+    return { status: "NOT_SET", reason: "goals_set is false — user has not explicitly saved a FIRE goal" };
+  }
+  const swrPct = typeof row.swr_pct === "number" ? row.swr_pct : null;
+  if (swrPct === null || !Number.isFinite(swrPct) || swrPct <= 0) {
+    return { status: "NOT_SET", reason: "swr_pct is null, zero, or non-finite — cannot derive FIRE number" };
+  }
+  const targetFireAge =
+    typeof row.target_fire_age === "number" && Number.isFinite(row.target_fire_age)
+      ? row.target_fire_age : null;
+  const targetPassiveMonthly =
+    typeof row.target_passive_monthly === "number" && Number.isFinite(row.target_passive_monthly)
+      ? row.target_passive_monthly : null;
+  if (targetFireAge === null) return { status: "NOT_SET", reason: "target_fire_age is missing" };
+  if (targetPassiveMonthly === null) return { status: "NOT_SET", reason: "target_passive_monthly is missing" };
+  const targetPassiveAnnual = targetPassiveMonthly * 12;
+  const targetNetWorth      = targetPassiveAnnual / (swrPct / 100);
+  return {
+    status: "SET",
+    targetFireAge,
+    targetPassiveMonthly,
+    swrPct,
+    targetPassiveAnnual,
+    targetNetWorth,
+    goalSetTimestamp: row.goal_set_timestamp ?? row.updated_at ?? new Date(0).toISOString(),
+    source: "mc_fire_settings",
+  };
+}
 
 // ─── Demo Mode helper ─────────────────────────────────────────────────────────
 // Check the Zustand persisted store without importing the hook (safe outside React)
@@ -355,6 +393,23 @@ async function handleDemoRequest(method: string, path: string, body?: unknown): 
   }
   if (path === "/api/mc-fire-presets") {
     if (m === "GET") return [];
+  }
+  // ── Canonical Goal — demo always reports NOT_SET (no real user goal saved).
+  if (path === "/api/canonical-goal") {
+    if (m === "GET") {
+      return { status: "NOT_SET", reason: "demo mode — no canonical goal saved" };
+    }
+  }
+  if (path === "/api/forecast-freshness") {
+    if (m === "GET") {
+      return {
+        runDate: null,
+        sourceSnapshotDate: null,
+        status: "MISSING",
+        staleByDays: null,
+        reason: "demo mode — no forecast run recorded",
+      };
+    }
   }
 
   // ── Telegram / Alert Logs / Family Msg — stub
@@ -709,6 +764,34 @@ async function handleLocalRequest(method: string, path: string, body?: unknown):
   // ── MC FIRE Presets ─────────────────────────────────────────────────────
   if (path === "/api/mc-fire-presets") {
     if (m === "GET")  return await sbMCFirePresets.getAll();
+  }
+
+  // ── Canonical Goal (FWL Remediation Phase A) ────────────────────────────
+  // Derives directly from mc_fire_settings. Returns { status: "NOT_SET" } if
+  // the user has not explicitly saved a FIRE goal — UI must not invent defaults.
+  if (path === "/api/canonical-goal") {
+    if (m === "GET") {
+      const row = (await sbMCFireSettings.get()) as any;
+      return deriveCanonicalGoalFromRow(row);
+    }
+  }
+
+  // ── Forecast Freshness — compares MC run age vs snapshot age. ──────────
+  if (path === "/api/forecast-freshness") {
+    if (m === "GET") {
+      const [resultRow, snapshotRow] = await Promise.all([
+        sbMCFireResults.get().catch(() => null),
+        localStore.getSnapshot().catch(() => null),
+      ]);
+      const runIso =
+        (resultRow as any)?.ran_at ??
+        (resultRow as any)?.updated_at ??
+        (resultRow as any)?.created_at ?? null;
+      const snapIso = (snapshotRow as any)?.updated_at ?? null;
+      const runDate  = runIso  ? new Date(runIso)  : null;
+      const snapDate = snapIso ? new Date(snapIso) : null;
+      return evaluateFreshness(runDate, snapDate);
+    }
   }
 
   // ─── Market Data (prices + news) — fetched server-side to avoid CORS ────

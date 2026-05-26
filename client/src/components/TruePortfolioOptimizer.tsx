@@ -21,6 +21,8 @@
 import * as React from "react";
 import { useMemo, useState } from "react";
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
+import { selectCanonicalNetWorth } from "@/lib/dashboardDataContract";
+import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
 import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
@@ -65,7 +67,11 @@ import {
 import { FireGapSummaryBlock } from "@/components/portfolio-lab/FireGapSummaryBlock";
 import { Top3ActionsBlock } from "@/components/portfolio-lab/Top3ActionsBlock";
 import { PortfolioLabCharts } from "@/components/portfolio-lab/PortfolioLabCharts";
+import { buildDoNothingForecast } from "@/lib/doNothingForecast";
+import { evaluateFreshness } from "@/lib/forecastFreshness";
 import { DecisionFrame } from "@/components/ui/DecisionFrame";
+import { ForecastFreshnessBanner } from "@/components/portfolio-lab/ForecastFreshnessBanner";
+import { useToast } from "@/hooks/use-toast";
 
 export interface TruePortfolioOptimizerProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -952,6 +958,13 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
     [result, props.canonicalLedger],
   );
 
+  // REMEDIATION B-1 / B-6: read canonical goal so we can pass goalNotSet +
+  // canonical required-probability into selectFireGapSummary instead of
+  // letting the engine forge "ACHIEVABLE" with empty inputs.
+  const canonicalGoalQuery = useCanonicalGoal();
+  const canonicalGoal = canonicalGoalQuery.data ?? null;
+  const goalNotSet = !canonicalGoal || canonicalGoal.status !== "SET";
+
   // Sprint 10 — Goal Solver Pro. Pure orchestration over Sprint 7/8/9
   // outputs. Used here (Sprint 11) only to feed the Hero's feasibility slot;
   // user-driven target editing now lives on /decision (Sprint 11 #6).
@@ -972,15 +985,43 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
           gap: 0,
           source: "empty" as const,
         };
+    // REMEDIATION B-1: when canonical goal is SET, thread the canonical
+    // targets into the engine so feasibility status is not faked to
+    // ACHIEVABLE by an empty-targets short-circuit. When NOT_SET, leave the
+    // targets empty AND set goalNotSet=true on the engine input — the
+    // feasibility builder uses that to return 'GOAL_NOT_SET' rather than
+    // ACHIEVABLE.
+    const targets =
+      canonicalGoal && canonicalGoal.status === "SET"
+        ? {
+            targetNetWorth: canonicalGoal.targetNetWorth,
+            targetPassiveIncomeAnnual: canonicalGoal.targetPassiveAnnual,
+            targetPassiveIncomeMonthly: canonicalGoal.targetPassiveMonthly,
+          }
+        : EMPTY_GOAL_TARGETS;
+    // REMEDIATION B-4: derive forecast freshness from the MC run timestamp +
+    // the canonical-ledger snapshot timestamp so the engine output carries
+    // { isStale, staleReason }. Phase C will render a "Stale forecast" banner
+    // off these fields.
+    const mcRunAtStr = props.monteCarloOutputs?.ran_at ?? null;
+    const snapshotAtStr =
+      (props.canonicalLedger?.snapshot as { updated_at?: string | null } | null | undefined)
+        ?.updated_at ?? null;
+    const fresh = evaluateFreshness(
+      mcRunAtStr ? new Date(mcRunAtStr) : null,
+      snapshotAtStr ? new Date(snapshotAtStr) : null,
+    );
     return buildGoalSolverPro({
       canonicalLedger: props.canonicalLedger ?? null,
       canonicalFire,
       sprint7Result: result,
       sprint8Result: probabilistic,
       sprint9Result: pathSim,
-      targets: EMPTY_GOAL_TARGETS,
+      targets,
+      goalNotSet,
+      forecastFreshness: { status: fresh.status, reason: fresh.reason },
     });
-  }, [props.canonicalLedger, result, probabilistic, pathSim]);
+  }, [props.canonicalLedger, props.monteCarloOutputs, result, probabilistic, pathSim, canonicalGoal, goalNotSet]);
 
   // Sprint 11: pull `whyThisWins` from the Sprint 6 Phase 5 PortfolioLab
   // engine so the Hero can render the narrative without re-deriving it.
@@ -1001,7 +1042,63 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
   const heroFan = pathSim.bestStrategy?.netWorthFan ?? pathSim.strategies[0]?.netWorthFan ?? [];
 
   // Sprint 12 — advisor-style views over Sprint 10 canonical output.
-  const fireGap = useMemo(() => selectFireGapSummary(goalSolverResult), [goalSolverResult]);
+  // REMEDIATION B-1: thread ledger NW so Current NW comes from the canonical
+  // ledger selector, NEVER from a future-year forecast P50.
+  const ledgerNetWorth = useMemo(
+    () => (props.canonicalLedger ? selectCanonicalNetWorth(props.canonicalLedger).netWorth : null),
+    [props.canonicalLedger],
+  );
+  const fireGap = useMemo(
+    () =>
+      selectFireGapSummary(goalSolverResult, {
+        ledgerNetWorth,
+        goalNotSet,
+        canonicalRequiredProbability: null,
+      }),
+    [goalSolverResult, ledgerNetWorth, goalNotSet],
+  );
+  // REMEDIATION B-1 / C-6: assert the displayed Current NW matches ledger NW;
+  // throws in dev, logs in prod. Catches any future regression where a
+  // forecast P50 leaks back into the Current NW slot. C-6 also surfaces the
+  // drift as a non-blocking dev-mode toast and console warning so an
+  // engineer notices even when the throw is caught by a parent boundary.
+  const { toast: nwInvariantToast } = useToast();
+  React.useEffect(() => {
+    if (ledgerNetWorth == null || fireGap.currentNetWorth == null) return;
+    const displayed = fireGap.currentNetWorth;
+    if (!Number.isFinite(displayed)) return;
+    const diff = Math.abs(displayed - ledgerNetWorth);
+    if (diff <= 1) return;
+    const msg =
+      `[NW-INVARIANT] Current NW (${displayed.toLocaleString()}) drifted from ` +
+      `ledger NW (${ledgerNetWorth.toLocaleString()}); diff ${diff.toLocaleString()}.`;
+    // Dev-mode loud warning. import.meta.env.DEV is true in vite dev.
+    if ((import.meta as any).env?.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn(msg);
+      nwInvariantToast({
+        title: "Current NW invariant drift (dev)",
+        description: msg,
+        variant: "destructive",
+      });
+    } else {
+      // eslint-disable-next-line no-console
+      console.error(msg);
+    }
+  }, [ledgerNetWorth, fireGap.currentNetWorth, nwInvariantToast]);
+  // Render-phase throw removed — invariant is enforced via the useEffect at
+  // L~1069 to avoid blacking out the page on stale-state races. See PR #88
+  // review: a synchronous throw inside render unmounts the subtree (and any
+  // parent error boundary), which is fatal in dev even though the drift is
+  // recoverable. The useEffect logs+toasts the same condition non-blockingly.
+  // REMEDIATION C-3: surface the freshness verdict produced by Phase B so the
+  // top-of-page banner can render. Mirrors the same evaluateFreshness call
+  // inside goalSolverResult so the props are kept in lockstep.
+  const mcRunAt = props.monteCarloOutputs?.ran_at ?? null;
+  const snapshotAt =
+    (props.canonicalLedger?.snapshot as { updated_at?: string | null } | null | undefined)
+      ?.updated_at ?? null;
+  const forecastStale = goalSolverResult.isStale === true;
   const top3 = useMemo(() => selectTop3Actions(goalSolverResult), [goalSolverResult]);
   const doNothing = useMemo(() => selectDoNothingComparison(goalSolverResult), [goalSolverResult]);
   const canonicalFire = useMemo(
@@ -1015,9 +1112,27 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
       className={`flex flex-col gap-4 sm:gap-5 ${props.className ?? ""}`}
       data-testid="true-portfolio-optimizer"
     >
+      {/* REMEDIATION C-3: forecast freshness banner reads goalSolverResult.isStale
+          (Phase B engine output). Renders amber when STALE, blue when MISSING,
+          nothing when FRESH. */}
+      {/* TODO(KI-17): Re-run Monte Carlo CTA intentionally unwired. The banner
+          omits onRerun, so the button does not render (see ForecastFreshnessBanner
+          L73-82, L108-118). Deferred until /api/mc/run endpoint exists. */}
+      <ForecastFreshnessBanner
+        isStale={goalSolverResult.isStale}
+        staleReason={goalSolverResult.staleReason}
+        runDate={mcRunAt}
+        snapshotDate={snapshotAt}
+      />
+
       {/* Sprint 12 — FIRE Gap Summary tiles (8 KPIs). Reads selectFireGapSummary
-          over Sprint 10 canonical output. Collapses when no FIRE goal is set. */}
-      <FireGapSummaryBlock summary={fireGap} />
+          over Sprint 10 canonical output. Collapses when no FIRE goal is set.
+          REMEDIATION C-1: SourceTag chips per locked decision #7. */}
+      <FireGapSummaryBlock
+        summary={fireGap}
+        monteCarloRunDate={mcRunAt}
+        forecastStale={forecastStale}
+      />
 
       {/* Sprint 12 — 6-dimensional DecisionFrame primitive. Wires the Sprint 11
           5-slot Hero into the new universal DecisionFrame so /portfolio-lab
@@ -1089,11 +1204,21 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
       {/* Sprint 12 — Top-3 actions to close the gap. */}
       <Top3ActionsBlock actions={top3} />
 
-      {/* Sprint 12 — Required charts: current-vs-target, gap waterfall, path-vs-baseline. */}
+      {/* Sprint 12 — Required charts: current-vs-target, gap waterfall, path-vs-baseline.
+          REMEDIATION B-3: the do-nothing series is now a real per-year forecast
+          built from the ledger + blended expected return, NOT a flat constant. */}
       <PortfolioLabCharts
         summary={fireGap}
         netWorthFan={heroFan as Array<{ year: number; p50: number }>}
         baselineNetWorth={baselineNW}
+        doNothingSeries={
+          props.canonicalLedger
+            ? buildDoNothingForecast({
+                ledger: props.canonicalLedger,
+                years: (heroFan as Array<{ year: number }>).map((b) => b.year),
+              })
+            : []
+        }
       />
 
       {/* Sprint 11 #1, #2 — Hero region (5 slots, baseline-vs-recommendation chart). */}

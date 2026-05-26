@@ -75,6 +75,15 @@ export interface CanonicalFire {
   source: "user_target" | "monthly_expenses_fallback" | "empty";
 }
 
+/**
+ * @deprecated FWL Remediation Sprint Phase A — use `getCanonicalGoal()` /
+ * `useCanonicalGoal()` from server/lib/canonicalGoal.ts /
+ * client/src/lib/useCanonicalGoal.ts instead. The hardcoded 4% fallback in
+ * this clamp is forbidden by the Remediation Sprint: if the user has not
+ * explicitly set a SWR via `mc_fire_settings.swr_pct`, the UI must surface
+ * "Goal not set" rather than silently picking 4%. Phase B will rewire all
+ * callsites onto the canonical selector and delete this helper.
+ */
 const clampSwr = (raw: number | undefined): number => {
   // The dashboard / reports / fire-path SWR setting is bounded [2, 8] in the
   // UI. Anything outside that is treated as a misread input → fall back to 4%.
