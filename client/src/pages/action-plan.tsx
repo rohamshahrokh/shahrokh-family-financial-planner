@@ -8,16 +8,36 @@
  *   D. Top Actions             — up to 3 from unified topPriorities/all
  *   E. Blockers                — placeholder ("No hard blockers detected …")
  *   F. Do-Nothing Outcome      — recommended gap vs status-quo, text comparison
- *   G. Checklist               — local UI + localStorage
+ *   G. Checklist               — persists to mc_fire_settings.action_checklist
+ *                                (JSONB), with localStorage as emergency fallback
  *
  * NO new financial engine. Every number routes through an EXISTING canonical
  * selector (computeCanonicalHeadlineMetrics, computeCanonicalFire,
- * computeUnifiedBestMove, useCanonicalGoal, evaluateFreshness). Audit Mode
- * gates raw engine labels, formulas, and source-lineage chips.
+ * computeUnifiedBestMove, useCanonicalGoal, evaluateFreshness).
+ *
+ * ── Audit-gate pattern (READ THIS BEFORE EDITING) ──────────────────────────
+ * Every card on this page uses the SAME gate:
+ *   const { auditMode } = useAuditMode();
+ *   ...
+ *   {auditMode && <SourceChip>...selector/formula...</SourceChip>}
+ *
+ * Rules for contributors:
+ *   1. Plain-English copy and canonical numbers ALWAYS render — they are not
+ *      audit-only. The audit gate ONLY hides formulas, lineage chips, raw
+ *      selector names, and engine-trace IDs.
+ *   2. Never call `useAuditMode()` at the page root and prop-drill the flag —
+ *      call it inside each card that needs it. This keeps unrelated cards from
+ *      re-rendering when the toggle flips and makes the gate auditable per
+ *      component (grep for `auditMode &&`).
+ *   3. Never write "if (auditMode) { compute X }" — compute the canonical
+ *      number unconditionally and only gate its DISPLAY.
+ *   4. New cards must follow the same pattern (see CurrentPositionSection,
+ *      FireGoalSection, RecommendedNextMoveSection for examples).
+ * ────────────────────────────────────────────────────────────────────────────
  */
 
 import * as React from "react";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -479,12 +499,36 @@ function DoNothingSection(props: {
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Section G — Checklist                                                      */
-/* Local UI state + localStorage. No backend, no schema.                      */
+/* Persists to mc_fire_settings.action_checklist (JSONB). localStorage is     */
+/* used ONLY as an emergency fallback when the Supabase write fails or the    */
+/* row is unreachable.                                                        */
 /* ────────────────────────────────────────────────────────────────────────── */
 const CHECKLIST_STORAGE_KEY = "fwl.action_centre.checklist.v1";
+const CHECKLIST_DEBOUNCE_MS = 400;
+
+type ChecklistEntry = { checked: boolean; checked_at: string | null };
+type ChecklistMap = Record<string, ChecklistEntry>;
+
+function normalizeChecklist(raw: unknown): ChecklistMap {
+  if (!raw || typeof raw !== "object") return {};
+  const out: ChecklistMap = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (val && typeof val === "object" && "checked" in (val as any)) {
+      const v = val as any;
+      out[key] = {
+        checked: !!v.checked,
+        checked_at: typeof v.checked_at === "string" ? v.checked_at : null,
+      };
+    } else if (typeof val === "boolean") {
+      // Tolerate the old localStorage shape ({ [id]: boolean }) so we can
+      // recover any in-flight ticks from before the migration.
+      out[key] = { checked: val, checked_at: null };
+    }
+  }
+  return out;
+}
 
 function ChecklistSection({ unified }: { unified: UnifiedBestMoveResult | null }) {
-  const recs = unified?.unified?.all ?? [];
   // Derive 3–5 items from bestMove + top actions.
   const items = useMemo(() => {
     const bm = unified?.unified?.bestMove;
@@ -499,31 +543,78 @@ function ChecklistSection({ unified }: { unified: UnifiedBestMoveResult | null }
     }));
   }, [unified]);
 
-  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  // Canonical source: mc_fire_settings.action_checklist. The same Supabase
+  // shim every other settings panel uses (sbMCFireSettings via
+  // /api/mc-fire-settings — see client/src/lib/queryClient.ts:753).
+  const { data: mcSettings, refetch: refetchSettings } = useQuery<any>({
+    queryKey: ["/api/mc-fire-settings"],
+    queryFn: () => apiRequest("GET", "/api/mc-fire-settings").then(r => r.json()),
+  });
 
-  // Hydrate from localStorage on mount (SSR-safe).
+  const [checked, setChecked] = useState<ChecklistMap>({});
+  const hydratedFromRemote = useRef(false);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Hydrate from Supabase first; localStorage is only an emergency fallback
+  // when the canonical row is unavailable.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(CHECKLIST_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object") setChecked(parsed);
+    if (hydratedFromRemote.current) return;
+    if (mcSettings && typeof mcSettings === "object") {
+      const remote = (mcSettings as any).action_checklist;
+      if (remote && typeof remote === "object" && Object.keys(remote).length > 0) {
+        setChecked(normalizeChecklist(remote));
+        hydratedFromRemote.current = true;
+        return;
       }
-    } catch { /* ignore */ }
-  }, []);
+      // Row exists but no checklist saved yet — try local fallback ONCE so we
+      // don't lose pre-migration ticks. After this, remote is authoritative.
+      hydratedFromRemote.current = true;
+      if (typeof window === "undefined") return;
+      try {
+        const raw = window.localStorage.getItem(CHECKLIST_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const normalized = normalizeChecklist(parsed);
+          if (Object.keys(normalized).length > 0) setChecked(normalized);
+        }
+      } catch { /* ignore */ }
+    }
+  }, [mcSettings]);
 
-  // Persist on change.
+  // Persist on change. Debounced UPSERT through the canonical settings path;
+  // localStorage is mirrored so a network failure does not lose user state.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(checked));
-    } catch { /* ignore */ }
-  }, [checked]);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(checked));
+      } catch { /* ignore — localStorage full / disabled */ }
+    }
+    if (!hydratedFromRemote.current) return; // don't write back during hydrate
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      apiRequest("PUT", "/api/mc-fire-settings", { action_checklist: checked })
+        .then(() => { refetchSettings().catch(() => { /* ignore */ }); })
+        .catch(() => {
+          // Swallow: we already mirrored to localStorage, the user keeps state
+          // locally until the next successful save. No new toast — matches the
+          // page's existing silent-fallback pattern for canonical settings.
+        });
+    }, CHECKLIST_DEBOUNCE_MS);
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, [checked, refetchSettings]);
 
   if (items.length === 0) return null;
 
-  const toggle = (id: string) => setChecked(prev => ({ ...prev, [id]: !prev[id] }));
+  const toggle = (id: string) => setChecked(prev => {
+    const next = { ...prev };
+    const wasChecked = !!next[id]?.checked;
+    next[id] = wasChecked
+      ? { checked: false, checked_at: null }
+      : { checked: true, checked_at: new Date().toISOString() };
+    return next;
+  });
 
   return (
     <section data-testid="action-centre-checklist">
@@ -532,7 +623,7 @@ function ChecklistSection({ unified }: { unified: UnifiedBestMoveResult | null }
         <p className="text-xs text-muted-foreground mb-2">Tick what you've done. Saved to this browser.</p>
         <ul className="space-y-1.5">
           {items.map(item => {
-            const isChecked = !!checked[item.id];
+            const isChecked = !!checked[item.id]?.checked;
             return (
               <li
                 key={item.id}
