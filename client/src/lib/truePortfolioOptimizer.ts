@@ -74,6 +74,10 @@ import type { BestMoveResult } from "./bestMoveEngineSprint5";
 import type { CFOAdvisorResult } from "./cfoAdvisor";
 import type { RiskRadarResult } from "./riskEngine";
 import type { MonteCarloResult } from "./forecastStore";
+import {
+  filterValidStrategies,
+  type ExcludedStrategy,
+} from "./strategyValidity";
 
 /* ─── Display-contract primitives ──────────────────────────────────────── */
 
@@ -382,6 +386,15 @@ export interface TruePortfolioOptimizerResult {
   frontier: EfficientFrontierSection;
   searchMetrics: ScenarioSearchMetrics;
   auditTrail: TrueOptimizerAuditSection;
+  /**
+   * Sprint 13 P0-5 debug — strategies excluded from ranking by the
+   * validity filter (missing fireYear / netWorth / passiveIncome /
+   * liquidity / riskScore / confidence). Present for audit visibility only;
+   * UI does not render these.
+   */
+  _debug?: {
+    excludedStrategies: ExcludedStrategy[];
+  };
 }
 
 /* ─── Defaults / capacity ──────────────────────────────────────────────── */
@@ -881,10 +894,40 @@ function applyConstraints(
 
 /* ─── Recommendation selection ─────────────────────────────────────────── */
 
+/**
+ * Sprint 13 P0-5 — strategy validity filter. Excludes any scenario missing
+ * ANY of: fireYear, netWorth, passiveIncome, liquidity, riskScore,
+ * confidence. Excluded rows are recorded under `_debug.excludedStrategies`
+ * on the returned result for audit visibility.
+ */
+function projectScenarioForValidity(s: ScenarioRecord): import("./strategyValidity").ValidatableStrategy {
+  return {
+    id: s.id,
+    label: s.label,
+    fireYear: s.metrics.fireYear?.value ?? null,
+    netWorth: s.metrics.projectedNetWorth?.value ?? null,
+    passiveIncome: s.metrics.projectedPassiveIncome?.value ?? null,
+    liquidity: s.metrics.liquidityPosition?.value ?? null,
+    riskScore: s.metrics.riskScore?.value ?? null,
+    confidence: s.metrics.confidenceScore?.value ?? null,
+  };
+}
+
+interface PickRecommendationsResult {
+  recommendations: Recommendation[];
+  excludedStrategies: ExcludedStrategy[];
+}
+
 function pickRecommendations(
   pool: ScenarioRecord[],
-): Recommendation[] {
+): PickRecommendationsResult {
   const valid = pool.filter(s => s.valid);
+  // Sprint 13 P0-5 — drop scenarios that don't have ALL six required
+  // engine outputs before they enter ranking. Per audit, this prevents
+  // partial scenarios from being declared a "best" pick.
+  const validityFilter = filterValidStrategies(valid.map(projectScenarioForValidity));
+  const keptIds = new Set(validityFilter.kept.map(s => s.id ?? ""));
+  const rankPool = valid.filter(s => keptIds.has(s.id));
 
   function bestBy<T>(
     arr: ScenarioRecord[],
@@ -947,8 +990,9 @@ function pickRecommendations(
     };
   }
 
-  const fireSpeed   = bestBy(valid, s => s.metrics.fireYear.value, "min");
-  const riskAdj     = bestBy(valid, s => {
+  const excludedStrategies = validityFilter.excluded;
+  const fireSpeed   = bestBy(rankPool, s => s.metrics.fireYear.value, "min");
+  const riskAdj     = bestBy(rankPool, s => {
     const risk = s.metrics.riskScore.value;
     const conf = s.metrics.confidenceScore.value;
     if (risk == null || conf == null) return null;
@@ -956,17 +1000,20 @@ function pickRecommendations(
     // financial assumption introduced.
     return conf / Math.max(risk, 1);
   }, "max");
-  const cashflow    = bestBy(valid, s => s.metrics.projectedPassiveIncome.value, "max");
-  const probability = bestBy(valid, s => s.metrics.probabilitySuccess.value, "max");
-  const hybrid      = bestBy(valid, s => s.metrics.rankingScore.value, "max");
+  const cashflow    = bestBy(rankPool, s => s.metrics.projectedPassiveIncome.value, "max");
+  const probability = bestBy(rankPool, s => s.metrics.probabilitySuccess.value, "max");
+  const hybrid      = bestBy(rankPool, s => s.metrics.rankingScore.value, "max");
 
-  return [
-    wrap("fire-speed",     "Best FIRE-Speed Strategy",   fireSpeed),
-    wrap("risk-adjusted",  "Best Risk-Adjusted Strategy", riskAdj),
-    wrap("cashflow",       "Best Cashflow Strategy",      cashflow),
-    wrap("probability",    "Best Probability Strategy",   probability),
-    wrap("hybrid",         "Best Hybrid Strategy",        hybrid),
-  ];
+  return {
+    recommendations: [
+      wrap("fire-speed",     "Best FIRE-Speed Strategy",   fireSpeed),
+      wrap("risk-adjusted",  "Best Risk-Adjusted Strategy", riskAdj),
+      wrap("cashflow",       "Best Cashflow Strategy",      cashflow),
+      wrap("probability",    "Best Probability Strategy",   probability),
+      wrap("hybrid",         "Best Hybrid Strategy",        hybrid),
+    ],
+    excludedStrategies,
+  };
 }
 
 /* ─── Gap solver ───────────────────────────────────────────────────────── */
@@ -1472,7 +1519,9 @@ export function buildTruePortfolioOptimizer(
   const validCount = filtered.filter(s => s.valid).length;
 
   // ─── Recommendations ──────────────────────────────────────────────────
-  const recommendations = pickRecommendations(filtered);
+  // Sprint 13 P0-5 — `pickRecommendations` now returns both the top picks
+  // and the excluded scenarios (those missing required engine outputs).
+  const { recommendations, excludedStrategies } = pickRecommendations(filtered);
 
   // ─── Frontier ─────────────────────────────────────────────────────────
   const frontier = buildFrontier(filtered);
@@ -1509,6 +1558,7 @@ export function buildTruePortfolioOptimizer(
     frontier,
     searchMetrics,
     auditTrail,
+    _debug: { excludedStrategies },
   };
 }
 

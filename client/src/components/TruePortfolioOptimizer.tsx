@@ -405,9 +405,38 @@ function Cell({ label, value, testid }: { label: string; value: string; testid: 
 
 function RecommendationsGrid({
   recommendations,
+  blocked,
+  reason,
 }: {
   recommendations: Recommendation[];
+  /** Sprint 13 P0-2 — when true, render the sentinel instead of the grid. */
+  blocked?: boolean;
+  /** Reason from the gate (rendered in audit mode for debugging). */
+  reason?: string;
 }) {
+  // Sprint 13 P0-2 — recommendation gate: when ANY rec is incomplete, the
+  // entire grid is replaced with the sentinel string. No ranking, no
+  // winner, no partial render.
+  if (blocked) {
+    return (
+      <section
+        className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-4 sm:p-5 shadow-sm"
+        data-testid="s13-recommendation-gate-blocked"
+      >
+        <header className="mb-2">
+          <h2 className="text-base font-semibold text-foreground">Recommendations</h2>
+        </header>
+        <div className="text-sm text-rose-700 dark:text-rose-300" data-testid="s13-recommendation-gate-blocked-text">
+          {RECOMMENDATION_UNAVAILABLE_TEXT}
+        </div>
+        {reason ? (
+          <div className="mt-1 text-[11px] text-muted-foreground" data-testid="s13-recommendation-gate-blocked-reason">
+            {reason}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
   return (
     <section
       className="rounded-lg border border-border bg-card p-4 sm:p-5 shadow-sm"
@@ -1282,7 +1311,11 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
       />
       <GoalReverseEngineeringCard section={result.goalReverseEngineering} />
       <ConstraintsPanel constraints={constraints} onChange={setConstraints} />
-      <RecommendationsGrid recommendations={result.recommendations} />
+      <RecommendationsGrid
+        recommendations={result.recommendations}
+        blocked={!recommendationGate.ok}
+        reason={recommendationGate.reason}
+      />
       <GapSolverCard gap={result.gapSolver} />
       <FrontierCard frontier={result.frontier} />
       <ScenarioMatrixCard

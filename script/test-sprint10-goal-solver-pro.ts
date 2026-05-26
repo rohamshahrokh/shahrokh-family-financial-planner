@@ -161,6 +161,8 @@ let lenient: GoalSolverProResult;
     targetNetWorth: 1_000_000,
     targetFireYear: 2060,
     targetPassiveIncomeAnnual: 30_000,
+    // Sprint 13 P0-3 — explicit-set marker required by validateGoalTargets().
+    fireTargetMonthlyIncomeSetAt: "2026-05-01T00:00:00.000Z",
   };
   lenient = buildGoalSolverPro({
     canonicalLedger: FIXTURE_RICH,
@@ -175,7 +177,7 @@ let lenient: GoalSolverProResult;
   ok("engineVersion correct", lenient.engineVersion === PATH_GOAL_SOLVER_VERSION);
   ok("seed surfaced", lenient.seed === DEFAULT_GOAL_SOLVER_SEED);
   ok("feasibility.status set", typeof lenient.feasibility.status === "string");
-  ok("feasibility.status ∈ enum", ["ACHIEVABLE", "STRETCH", "UNLIKELY", "IMPOSSIBLE"].includes(lenient.feasibility.status));
+  ok("feasibility.status ∈ enum", ["ACHIEVABLE", "STRETCH", "UNLIKELY", "IMPOSSIBLE", "INCOMPLETE"].includes(lenient.feasibility.status));
   ok("feasibility.probabilityOfSuccess finite or null", lenient.feasibility.probabilityOfSuccess === null || Number.isFinite(lenient.feasibility.probabilityOfSuccess));
   ok("feasibility.medianFireYear finite or null", lenient.feasibility.medianFireYear === null || Number.isFinite(lenient.feasibility.medianFireYear));
   ok("gap entries populated for 3 targets", lenient.gap.entries.length === 3);
@@ -229,10 +231,13 @@ let impossible: GoalSolverProResult;
     targetFireYear: 2028,
     targetNetWorth: 50_000_000,
     targetPassiveIncomeAnnual: 2_000_000,
+    targetFireYear: 2080,
     targetPropertyCount: 0,           // also force candidates with property to fail
     targetMonthlyContributionLimit: 50, // unreasonably low → eliminates everyone
     targetRiskLimit: 1,
     targetLiquidityMinimum: 9999,
+    // Sprint 13 P0-3 — explicit-set marker required by validateGoalTargets().
+    fireTargetMonthlyIncomeSetAt: "2026-05-01T00:00:00.000Z",
   };
   impossible = buildGoalSolverPro({
     canonicalLedger: FIXTURE_TIGHT,
@@ -463,7 +468,14 @@ console.log("\n§12  Determinism");
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * §13 — Empty targets ⇒ feasibility ACHIEVABLE + gap empty
+ * §13 — Empty targets ⇒ feasibility INCOMPLETE (Sprint 13 P0-3)
+ *
+ * Prior behaviour: forced status="ACHIEVABLE" when targets are empty, which
+ * silently turned the schema-default $20k/mo income into $240k/yr · $6M
+ * targets and rendered an "on-track" verdict for users who had never set a
+ * FIRE goal. Sprint 13 P0-3 closes this hole: buildFeasibility() now calls
+ * validateGoalTargets() and returns status="INCOMPLETE" + missingFields[]
+ * when targets aren't persisted.
  * ═══════════════════════════════════════════════════════════════════════════ */
 console.log("\n§13  Empty targets");
 {
@@ -476,7 +488,11 @@ console.log("\n§13  Empty targets");
     sprint9Result: sprint9,
     targets: EMPTY_GOAL_TARGETS,
   });
-  ok("empty targets: status ACHIEVABLE", r.feasibility.status === "ACHIEVABLE");
+  ok("empty targets: status INCOMPLETE", r.feasibility.status === "INCOMPLETE");
+  ok(
+    "empty targets: missingFields populated",
+    Array.isArray(r.feasibility.missingFields) && (r.feasibility.missingFields?.length ?? 0) > 0,
+  );
   ok("empty targets: gap.entries length === 0", r.gap.entries.length === 0);
   ok("empty targets: gap.blockers empty", r.gap.blockers.length === 0);
   ok("empty targets: constraints.checks empty", r.constraints.checks.length === 0);
