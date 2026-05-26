@@ -476,7 +476,10 @@ console.log("\n§13  Empty targets");
     sprint9Result: sprint9,
     targets: EMPTY_GOAL_TARGETS,
   });
-  ok("empty targets: status ACHIEVABLE", r.feasibility.status === "ACHIEVABLE");
+  // REMEDIATION B-5: empty targets now resolve to GOAL_NOT_SET (was ACHIEVABLE).
+  // The engine must not forge confidence from empty inputs — that was the
+  // smoking-gun bug where a user with no goal saw a green "achievable" badge.
+  ok("empty targets: status GOAL_NOT_SET", r.feasibility.status === "GOAL_NOT_SET");
   ok("empty targets: gap.entries length === 0", r.gap.entries.length === 0);
   ok("empty targets: gap.blockers empty", r.gap.blockers.length === 0);
   ok("empty targets: constraints.checks empty", r.constraints.checks.length === 0);
