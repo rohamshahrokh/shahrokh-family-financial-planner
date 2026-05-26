@@ -466,18 +466,22 @@ function buildDelayPurchase(
         ? annualIncome * CANONICAL_IP_LTV_MULTIPLIER
         : 0;
   if (inferredPrice <= 0) return null;
-  // Delaying by 12 months means: stay with current path for 1 year, then
-  // (out of scope here) re-evaluate. The 12-month projection = baseline +
-  // 1 year of canonical growth on current investible base.
+  // REMEDIATION B-5: this is a closed-form "investibleBase × growth" estimate,
+  // NOT a real forecast. Marked incomplete=true so downstream UI can render it
+  // as "Estimate only — run a forecast for precise projection". A proper wire
+  // through pathSimulationEngine for the delay scenario is tracked but out of
+  // scope for this phase; the estimate is still directionally useful as a
+  // ranking signal.
   const growthOnBase = ctx.investibleBase * ctx.growth;
   return {
     id: "candidate-delay-purchase",
     kind: "delay-purchase",
     label: "Delay property purchase by 12 months",
     rationale:
-      `Defer the ~$${roundK(inferredPrice)} IP purchase by 12 months. Preserves the cash buffer, ` +
-      `keeps debt service flat, and grows the current investible base by ~$${roundK(growthOnBase)} ` +
-      `at the canonical ${(ctx.growth * 100).toFixed(1)}% nominal growth assumption.`,
+      `Estimate only (closed-form): defer the ~$${roundK(inferredPrice)} IP purchase by 12 months. ` +
+      `Preserves the cash buffer, keeps debt service flat, and grows the current investible base by ` +
+      `~$${roundK(growthOnBase)} at the canonical ${(ctx.growth * 100).toFixed(1)}% nominal growth ` +
+      `assumption. Run a forecast for a real path projection.`,
     isBaseline: false,
     magnitude: Math.round(inferredPrice),
     projection: {
@@ -500,7 +504,7 @@ function buildDelayPurchase(
       liquidityRisk: liquidityRiskFromRunway(ctx.baselineLiquidityMonths),
       mcConfidence: adjustMcConfidence(ctx.mc, 0),
     },
-    incomplete: false,
+    incomplete: true,
   };
 }
 

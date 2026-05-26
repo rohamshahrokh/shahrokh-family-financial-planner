@@ -22,7 +22,16 @@ import type {
   DoNothingComparison,
 } from "./goalSolverView.types";
 
-const REQUIRED_PROB_BAR = 0.7;
+/**
+ * REMEDIATION B-6: default probability bar when the canonical goal config
+ * does not supply one. Tagged in the view as `requiredProbabilitySource:
+ * 'default'` so the UI can render it as "(default)".
+ */
+export const REQUIRED_PROB_BAR_DEFAULT = 0.7;
+/** @deprecated REMEDIATION B-6: use REQUIRED_PROB_BAR_DEFAULT or the value
+ *   resolved from useCanonicalGoal. Kept for selectMinimumChange which has not
+ *   been wired through canonical goal yet. */
+const REQUIRED_PROB_BAR = REQUIRED_PROB_BAR_DEFAULT;
 
 function finite(v: number | null | undefined): v is number {
   return typeof v === "number" && Number.isFinite(v);
@@ -32,8 +41,29 @@ function findGap(result: GoalSolverProResult, field: GapEntry["field"]): GapEntr
   return result.gap.entries.find((e) => e.field === field);
 }
 
+/**
+ * Optional context for selectFireGapSummary that the caller MUST thread through
+ * from the canonical layer:
+ *   - `ledgerNetWorth`: from selectCanonicalNetWorth(). Required for the
+ *     Current NW tile to be correct. If omitted, currentNetWorth is null
+ *     (UI shows "—") — we NEVER fall back to a future-year forecast P50.
+ *   - `canonicalRequiredProbability`: from the user's saved goal config when
+ *     available; otherwise the default 0.70 bar is used and
+ *     `requiredProbabilitySource = 'default'`.
+ *   - `goalNotSet`: from useCanonicalGoal — when true, targets/gaps stay
+ *     null but the Current NW tile still shows the ledger value.
+ */
+export interface FireGapSummaryContext {
+  ledgerNetWorth?: number | null;
+  canonicalRequiredProbability?: number | null;
+  goalNotSet?: boolean;
+}
+
 /** Read FIRE Gap Summary tiles (8 KPIs) from Sprint 10 canonical fields. */
-export function selectFireGapSummary(result: GoalSolverProResult): FireGapSummary {
+export function selectFireGapSummary(
+  result: GoalSolverProResult,
+  ctx: FireGapSummaryContext = {},
+): FireGapSummary {
   const best = result.bestPath;
   const targets = result.targets;
   const nwGap = findGap(result, "netWorth");
@@ -41,10 +71,16 @@ export function selectFireGapSummary(result: GoalSolverProResult): FireGapSummar
   const piMonthlyGap = findGap(result, "passiveIncomeMonthly");
   const fireYearGap = findGap(result, "fireYear");
 
-  const currentNetWorth = finite(nwGap?.actual)
-    ? (nwGap!.actual as number)
-    : finite(best?.netWorthP50)
-      ? best!.netWorthP50
+  // REMEDIATION B-1: Current NW MUST come from the ledger. The earlier code
+  // fell back to `best.netWorthP50` (the target-year forecast median), which
+  // produced the smoking-gun bug where displayed Current NW = $3.15M but the
+  // actual ledger NW = $856,500. The gap-row "actual" is also OK to use ONLY
+  // when ledger is unavailable, because that actual was itself sourced from
+  // the ledger upstream; but the forecast fallback is removed entirely.
+  const currentNetWorth: number | null = finite(ctx.ledgerNetWorth)
+    ? (ctx.ledgerNetWorth as number)
+    : finite(nwGap?.actual)
+      ? (nwGap!.actual as number)
       : null;
 
   const targetNetWorth = finite(targets.targetNetWorth)
@@ -57,13 +93,14 @@ export function selectFireGapSummary(result: GoalSolverProResult): FireGapSummar
       : null;
 
   // Passive income — prefer annual when provided, fall back to monthly*12.
+  // We do NOT fall back to `best.passiveIncomeP50` for the same reason as NW:
+  // the bestPath forecast is a future-year projection, not a snapshot of
+  // current income. If the gap row is missing it stays null.
   const currentPassiveIncome = finite(piAnnualGap?.actual)
     ? (piAnnualGap!.actual as number)
     : finite(piMonthlyGap?.actual)
       ? (piMonthlyGap!.actual as number) * 12
-      : finite(best?.passiveIncomeP50)
-        ? best!.passiveIncomeP50
-        : null;
+      : null;
 
   const targetPassiveIncome = finite(targets.targetPassiveIncomeAnnual)
     ? (targets.targetPassiveIncomeAnnual as number)
@@ -77,9 +114,14 @@ export function selectFireGapSummary(result: GoalSolverProResult): FireGapSummar
       : null;
 
   const currentProbability = result.feasibility.probabilityOfSuccess ?? null;
-  // "Required" probability = the configured 0.70 ACHIEVABLE bar (existing
-  // Sprint 10 threshold in classifyStatus).
-  const requiredProbability = REQUIRED_PROB_BAR;
+
+  // REMEDIATION B-6: prefer canonical goal config; fall back to default and
+  // tag the source so the UI can render it as "(default)".
+  const requiredProbability = finite(ctx.canonicalRequiredProbability)
+    ? (ctx.canonicalRequiredProbability as number)
+    : REQUIRED_PROB_BAR_DEFAULT;
+  const requiredProbabilitySource: "canonical" | "default" =
+    finite(ctx.canonicalRequiredProbability) ? "canonical" : "default";
 
   const targetFireYear =
     finite(targets.targetFireYear) ? (targets.targetFireYear as number) :
@@ -98,8 +140,10 @@ export function selectFireGapSummary(result: GoalSolverProResult): FireGapSummar
     passiveIncomeGap,
     currentProbability,
     requiredProbability,
+    requiredProbabilitySource,
     targetFireYear,
     medianFireYear,
+    goalNotSet: ctx.goalNotSet === true,
   };
 }
 

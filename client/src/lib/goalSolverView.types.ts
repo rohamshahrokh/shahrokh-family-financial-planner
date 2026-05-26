@@ -6,7 +6,16 @@
  */
 
 export interface FireGapSummary {
+  /**
+   * REMEDIATION B-1: must come from ledger (selectCanonicalNetWorth) — NEVER
+   * from a forecast P50 fallback. Pass `ledgerNetWorth` into
+   * selectFireGapSummary; if absent, this stays null.
+   */
   currentNetWorth: number | null;
+  /**
+   * REMEDIATION B-1: when the user has not set a goal, target is null and the
+   * UI must render "Goal not set" instead of inventing a default.
+   */
   targetNetWorth: number | null;
   netWorthGap: number | null;
   currentPassiveIncome: number | null;
@@ -14,8 +23,20 @@ export interface FireGapSummary {
   passiveIncomeGap: number | null;
   currentProbability: number | null;
   requiredProbability: number | null;
+  /**
+   * REMEDIATION B-6: 'canonical' when read from the user's saved goal config,
+   * 'default' when falling back to the hardcoded 0.70 bar. UIs should tag the
+   * value as "(default)" when source is 'default'.
+   */
+  requiredProbabilitySource: "canonical" | "default";
   targetFireYear: number | null;
   medianFireYear: number | null;
+  /**
+   * REMEDIATION B-1: true when the user has not saved a FIRE goal. UIs should
+   * render "Goal not set" for target/gap cells but still show ledger-derived
+   * Current NW.
+   */
+  goalNotSet: boolean;
 }
 
 export interface Top3Action {

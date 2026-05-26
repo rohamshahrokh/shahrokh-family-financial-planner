@@ -75,6 +75,10 @@ export function FireGapSummaryBlock({ summary }: Props) {
     isEmptyValue(summary.targetFireYear);
 
   if (noTarget) {
+    // REMEDIATION B-1: even when no FIRE goal is set, surface the ledger-
+    // derived Current NW so the user always sees their actual position.
+    // Only the target/gap cells should show as "Goal not set".
+    const currentNwFmt = fmt$(summary.currentNetWorth);
     return (
       <Card
         className="p-4 sm:p-5 border-dashed border-muted-foreground/40 bg-muted/20"
@@ -87,6 +91,12 @@ export function FireGapSummaryBlock({ summary }: Props) {
               Enter your target net worth and FIRE year on the Dashboard. Once set, this block shows your
               current position, target, and gap — calculated from the canonical engines.
             </p>
+            {currentNwFmt ? (
+              <div className="mt-3 inline-flex items-baseline gap-2" data-testid="pl-fire-gap-empty-current-nw">
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Current Net Worth (ledger)</span>
+                <span className="text-base font-semibold tabular-nums text-foreground">{currentNwFmt}</span>
+              </div>
+            ) : null}
           </div>
           <a href="/" data-testid="pl-fire-gap-empty-cta">
             <Button variant="default" className="gap-1">
@@ -161,7 +171,11 @@ export function FireGapSummaryBlock({ summary }: Props) {
           value={fmtPct(summary.requiredProbability)}
           testid="pl-fire-gap-required-prob"
           emphasis="target"
-          subtitle="to be ACHIEVABLE"
+          subtitle={
+            summary.requiredProbabilitySource === "default"
+              ? "default 70% bar (no goal-config override)"
+              : "from goal config"
+          }
         />
       </div>
     </Card>
