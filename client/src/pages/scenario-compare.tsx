@@ -48,6 +48,26 @@ import {
   ReferenceLine,
 } from "recharts";
 
+// Sprint 13 — universal 4-section layout primitives + selectors.
+import type { DashboardInputs } from "@/lib/dashboardDataContract";
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
+import { FireCommandCenter } from "@/components/decision-system/FireCommandCenter";
+import { Top3ActionsSection } from "@/components/decision-system/Top3ActionsSection";
+import { BiggestBlockersSection } from "@/components/decision-system/BiggestBlockersSection";
+import { DoNothingOutcomeSection } from "@/components/decision-system/DoNothingOutcomeSection";
+import { RecommendedVsDoNothingChart } from "@/components/decision-system/RecommendedVsDoNothingChart";
+import {
+  selectFireCommandCenterData,
+  selectTop3ActionsDetailed,
+  selectRankedBlockersDetailed,
+  selectDoNothingOutcome,
+} from "@/lib/goalSolverView";
+import { buildGoalSolverPro, EMPTY_GOAL_TARGETS } from "@/lib/goalSolverPro";
+import { buildTruePortfolioOptimizer } from "@/lib/truePortfolioOptimizer";
+import { buildProbabilisticWealthEngine } from "@/lib/probabilisticWealthEngine";
+import { buildPathSimulationEngine } from "@/lib/pathSimulationEngine";
+import { computeCanonicalFire } from "@/lib/canonicalFire";
+
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 type RiskLevel = "conservative" | "moderate" | "aggressive";
@@ -682,6 +702,98 @@ const RADAR_AXES = [
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+function ScenarioCompareS13Hero() {
+  // Sprint 13 — page-level above-fold 4-section reality-check layout for
+  // /scenario-compare. Reuses the same S7/8/9/10 chain that powers the
+  // other decision screens so source tags resolve to a single canonical
+  // engine per tile. Empty values collapse via the S11 uiEmptyField rule.
+  const { data: snapshot } = useQuery<any>({
+    queryKey: ["/api/snapshot"],
+    queryFn: () => apiRequest("GET", "/api/snapshot").then((r) => r.json()),
+  });
+  const { data: properties = [] } = useQuery<any[]>({
+    queryKey: ["/api/properties"],
+    queryFn: () => apiRequest("GET", "/api/properties").then((r) => r.json()),
+  });
+  const { data: stocks = [] } = useQuery<any[]>({
+    queryKey: ["/api/stocks"],
+    queryFn: () => apiRequest("GET", "/api/stocks").then((r) => r.json()),
+  });
+  const { data: cryptos = [] } = useQuery<any[]>({
+    queryKey: ["/api/crypto"],
+    queryFn: () => apiRequest("GET", "/api/crypto").then((r) => r.json()),
+  });
+  const { data: expenses = [] } = useQuery<any[]>({
+    queryKey: ["/api/expenses"],
+    queryFn: () => apiRequest("GET", "/api/expenses").then((r) => r.json()),
+  });
+  const { data: incomeRecords = [] } = useQuery<any[]>({
+    queryKey: ["/api/income"],
+    queryFn: () => apiRequest("GET", "/api/income").then((r) => r.json()),
+  });
+  const { data: holdingsRaw = [] } = useQuery<any[]>({
+    queryKey: ["/api/holdings"],
+    queryFn: () => apiRequest("GET", "/api/holdings").then((r) => r.json()),
+  });
+
+  const dashboardInputs: DashboardInputs | null = useMemo(() => {
+    if (!snapshot) return null;
+    return { snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses };
+  }, [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses]);
+
+  const s13 = useMemo(() => {
+    if (!dashboardInputs) return null;
+    try {
+      const sprint7 = buildTruePortfolioOptimizer({
+        canonicalLedger: dashboardInputs,
+        constraints: {},
+      });
+      const sprint8 = buildProbabilisticWealthEngine({ sprint7Result: sprint7 });
+      const sprint9 = buildPathSimulationEngine({
+        sprint7Result: sprint7,
+        canonicalLedger: dashboardInputs,
+      });
+      const canonicalFire = computeCanonicalFire(dashboardInputs);
+      const result = buildGoalSolverPro({
+        canonicalLedger: dashboardInputs,
+        canonicalFire,
+        sprint7Result: sprint7,
+        sprint8Result: sprint8,
+        sprint9Result: sprint9,
+        targets: EMPTY_GOAL_TARGETS,
+      });
+      return {
+        fireCommand: selectFireCommandCenterData(result),
+        top3: selectTop3ActionsDetailed(result),
+        blockers: selectRankedBlockersDetailed(result),
+        doNothing: selectDoNothingOutcome(result),
+        fan: (sprint9.bestStrategy?.netWorthFan ?? sprint9.strategies[0]?.netWorthFan ?? []) as Array<{ year: number; p50: number }>,
+        baselineNW: canonicalFire.netWorthNow,
+      };
+    } catch {
+      return null;
+    }
+  }, [dashboardInputs]);
+
+  if (!s13) return null;
+
+  return (
+    <div className="space-y-4">
+      <FireCommandCenter data={s13.fireCommand} testidPrefix="s13-scenario-compare-fire-command-center" />
+      <Top3ActionsSection actions={s13.top3} testidPrefix="s13-scenario-compare-top3-actions" />
+      <BiggestBlockersSection blockers={s13.blockers} testidPrefix="s13-scenario-compare-biggest-blockers" />
+      <DoNothingOutcomeSection outcome={s13.doNothing} testidPrefix="s13-scenario-compare-do-nothing-outcome" />
+      <RecommendedVsDoNothingChart
+        netWorthFan={s13.fan}
+        doNothingNetWorth={s13.baselineNW}
+        recommendedFireYear={s13.fireCommand.medianFireYear}
+        doNothingFireYear={s13.doNothing.expectedFireYear}
+        testidPrefix="s13-scenario-compare-rec-vs-donothing-chart"
+      />
+    </div>
+  );
+}
+
 export default function ScenarioCompareLab() {
   const { toast } = useToast();
 
@@ -872,6 +984,15 @@ export default function ScenarioCompareLab() {
 
   return (
     <div className="space-y-4 pb-16">
+
+      {/* Sprint 13 — above-fold 4-section reality-check layout. */}
+      <ScenarioCompareS13Hero />
+
+      <AdvancedDisclosure
+        title="View Supporting Analysis"
+        subtitle="Scenario builder · winner/loser comparisons · cashflow/risk/Monte Carlo deep-dives"
+        data-testid="s13-scenario-compare-supporting-analysis"
+      >
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1536,6 +1657,7 @@ export default function ScenarioCompareLab() {
           growth rates, and interest rates are assumptions that may differ materially from actual outcomes.
         </p>
       </div>
+      </AdvancedDisclosure>
     </div>
   );
 }
