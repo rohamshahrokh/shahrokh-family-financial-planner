@@ -29,3 +29,17 @@ WHERE (swr_pct IS NOT NULL AND swr_pct <> 4)
 
 COMMENT ON COLUMN public.mc_fire_settings.goals_set IS 'Explicit flag: TRUE when user has saved their FIRE goal. FALSE means UI must show "Goal not set" and not derive targets from defaults.';
 COMMENT ON COLUMN public.mc_fire_settings.goal_set_timestamp IS 'When goals_set was last flipped to TRUE.';
+
+-- ─── ROLLBACK ────────────────────────────────────────────────────────────────
+-- The migration is additive and idempotent. To roll back, execute the SQL
+-- below (commented to keep this file forward-only by default):
+--
+--   ALTER TABLE public.mc_fire_settings
+--     DROP COLUMN IF EXISTS goals_set,
+--     DROP COLUMN IF EXISTS goal_set_timestamp;
+--
+-- Rolling back loses the user's "goal explicitly set" signal — the UI will
+-- revert to inferring goals from non-null target_fire_age / target_passive_monthly,
+-- which is the pre-Phase-A behaviour. No data outside these two columns is
+-- affected. See PR #88 review item #6.
+-- ─────────────────────────────────────────────────────────────────────────────
