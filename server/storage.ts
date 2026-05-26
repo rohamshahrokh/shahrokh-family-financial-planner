@@ -211,6 +211,12 @@ const _missingCols: Array<[string, string]> = [
   ["subscriptions_monthly",       "REAL DEFAULT 0"],
   ["fire_target_age",             "REAL DEFAULT 55"],
   ["fire_target_monthly_income",  "REAL DEFAULT 20000"],
+  // Sprint 13 P0-3 — explicit-set flag for fire_target_monthly_income.
+  // NULL = user has never persisted a FIRE target (the column still holds
+  // the schema default $20,000). Set this to an ISO timestamp when the
+  // user saves a value on /financial-plan. Used by validateGoalTargets()
+  // to refuse silent substitution of the schema default → $240k/$6M.
+  ["fire_target_monthly_income_set_at", "TEXT"],
   ["property_savings_monthly",    "REAL DEFAULT 0"],
   ["roham_super_balance",         "REAL DEFAULT 0"],
   ["fara_super_balance",          "REAL DEFAULT 0"],

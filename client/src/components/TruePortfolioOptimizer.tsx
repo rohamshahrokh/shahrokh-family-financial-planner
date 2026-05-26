@@ -75,6 +75,16 @@ import { Top3ActionsSection } from "@/components/decision-system/Top3ActionsSect
 import { BiggestBlockersSection } from "@/components/decision-system/BiggestBlockersSection";
 import { DoNothingOutcomeSection } from "@/components/decision-system/DoNothingOutcomeSection";
 import { RecommendedVsDoNothingChart } from "@/components/decision-system/RecommendedVsDoNothingChart";
+import {
+  selectCanonicalNetWorthBreakdown,
+  NW_RECONCILIATION_FAILED_TEXT,
+} from "@/lib/netWorthBreakdown";
+import { NetWorthAuditPanel } from "@/components/portfolio-lab/NetWorthAuditPanel";
+import {
+  gateRecommendations,
+  projectRecommendationForGate,
+  RECOMMENDATION_UNAVAILABLE_TEXT,
+} from "@/lib/recommendationGate";
 
 export interface TruePortfolioOptimizerProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -738,6 +748,9 @@ function PortfolioLabHero({
   netWorthFan,
 }: HeroProps) {
   const canonical = canonicalLedger ? computeCanonicalFire(canonicalLedger) : null;
+  // Sprint 13 P0-1 — gate Hero NW on the canonical breakdown reconciliation.
+  const heroBreakdown = canonicalLedger ? selectCanonicalNetWorthBreakdown(canonicalLedger) : null;
+  const heroNwReconciled = heroBreakdown?.reconciled ?? false;
   const featured = recommendations.find(r => r.category === "hybrid") ?? recommendations[0] ?? null;
 
   // Slot 2 — feasibility status / probability bar
@@ -785,7 +798,11 @@ function PortfolioLabHero({
         <div className="rounded-lg border border-border bg-card/70 p-3" data-testid="hero-where-now">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Where am I now?</div>
           <div className="text-xl font-semibold tabular-nums text-foreground">
-            {canonical ? formatCurrency(canonical.netWorthNow) : "Set up your ledger"}
+            {!canonical
+              ? "Set up your ledger"
+              : !heroNwReconciled
+                ? NW_RECONCILIATION_FAILED_TEXT
+                : formatCurrency(heroBreakdown!.netWorth)}
           </div>
           <div className="text-[11px] text-muted-foreground mt-1">
             Net worth · {canonical && canonical.fireNumber > 0
@@ -962,8 +979,14 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
   );
 
   // Sprint 10 — Goal Solver Pro. Pure orchestration over Sprint 7/8/9
-  // outputs. Used here (Sprint 11) only to feed the Hero's feasibility slot;
-  // user-driven target editing now lives on /decision (Sprint 11 #6).
+  // outputs. Used here (Sprint 11) to feed the Hero's feasibility slot.
+  //
+  // Sprint 13 P0-3 — replace the unconditional EMPTY_GOAL_TARGETS pass-through
+  // (per audit TruePortfolioOptimizer.tsx:981) with the actual persisted
+  // FIRE targets from the canonical ledger snapshot. The fire_target_*
+  // columns + the explicit-set marker are forwarded to buildGoalSolverPro,
+  // which now refuses to short-circuit to ACHIEVABLE when the validator
+  // returns INCOMPLETE.
   const goalSolverResult = useMemo(() => {
     const canonicalFire = props.canonicalLedger
       ? computeCanonicalFire(props.canonicalLedger)
@@ -981,13 +1004,26 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
           gap: 0,
           source: "empty" as const,
         };
+    const snap = (props.canonicalLedger?.snapshot ?? {}) as any;
+    const fireTargetMonthlyIncomeRaw =
+      snap.fire_target_monthly_income !== undefined &&
+      snap.fire_target_monthly_income !== null
+        ? Number(snap.fire_target_monthly_income)
+        : null;
+    const fireTargetMonthlyIncomeSetAt =
+      snap.fire_target_monthly_income_set_at ?? null;
+    const targets = {
+      ...EMPTY_GOAL_TARGETS,
+      fireTargetMonthlyIncomeRaw,
+      fireTargetMonthlyIncomeSetAt,
+    };
     return buildGoalSolverPro({
       canonicalLedger: props.canonicalLedger ?? null,
       canonicalFire,
       sprint7Result: result,
       sprint8Result: probabilistic,
       sprint9Result: pathSim,
-      targets: EMPTY_GOAL_TARGETS,
+      targets,
     });
   }, [props.canonicalLedger, result, probabilistic, pathSim]);
 
@@ -1023,16 +1059,83 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
     () => (props.canonicalLedger ? computeCanonicalFire(props.canonicalLedger) : null),
     [props.canonicalLedger],
   );
-  const baselineNW = canonicalFire?.netWorthNow ?? null;
+
+  // Sprint 13 P0-1 — canonical NW breakdown with lineage + reconciliation
+  // gate. Every NW renderer below MUST use this (currentPosition,
+  // FireCommandCenter via summary patches, hero baseline). If
+  // reconciled===false the UI MUST render NW_RECONCILIATION_FAILED_TEXT
+  // instead of the figure.
+  const nwBreakdown = useMemo(
+    () => (props.canonicalLedger ? selectCanonicalNetWorthBreakdown(props.canonicalLedger) : null),
+    [props.canonicalLedger],
+  );
+  const nwReconciled = nwBreakdown?.reconciled ?? false;
+  const baselineNW = nwReconciled ? (nwBreakdown?.netWorth ?? null) : null;
+
+  // Sprint 13 P0-2 — gate recommendations BEFORE rendering rankings. When
+  // any required field (fireYear, confidence, requiredContribution,
+  // requiredAssetBase, requiredPassiveIncome) is missing on ANY rec, the
+  // entire RecommendationsGrid surface is replaced with the sentinel.
+  const recommendationGate = useMemo(
+    () => gateRecommendations(result.recommendations.map((r) => projectRecommendationForGate(r as any))),
+    [result.recommendations],
+  );
+
+  // Sprint 13 P0-3 — feasibility may now return status="INCOMPLETE" when
+  // goal targets aren't persisted. Surfaces that depend on a feasibility
+  // verdict must check this flag and render the goal sentinel.
+  const feasibilityIncomplete = goalSolverResult.feasibility.status === "INCOMPLETE";
+
+  // Sprint 13 P0-1 — Replace the FireCommandCenter's `currentNetWorth`
+  // input with the breakdown-derived figure so every NW renderer ties to
+  // the same selectCanonicalNetWorthBreakdown() output. When reconciled
+  // is false, set the value to NaN so the tile collapses via isEmptyValue
+  // (the Hero "Where am I now?" tile will render the sentinel separately).
+  const fireCommandPatched = useMemo(() => {
+    if (!nwBreakdown) return fireCommand;
+    return {
+      ...fireCommand,
+      currentNetWorth: nwReconciled ? nwBreakdown.netWorth : NaN,
+    };
+  }, [fireCommand, nwBreakdown, nwReconciled]);
+
+  // Sprint 13 P0-1 — patch fireGap (S12 view) the same way so the
+  // FireGapSummaryBlock + DecisionFrame currentPosition pull from the
+  // canonical breakdown rather than path-sim p50 drift.
+  const fireGapPatched = useMemo(() => {
+    if (!nwBreakdown) return fireGap;
+    return {
+      ...fireGap,
+      currentNetWorth: nwReconciled ? nwBreakdown.netWorth : NaN,
+    };
+  }, [fireGap, nwBreakdown, nwReconciled]);
 
   return (
     <div
       className={`flex flex-col gap-4 sm:gap-5 ${props.className ?? ""}`}
       data-testid="true-portfolio-optimizer"
     >
+      {/* Sprint 13 P0-1 — NW reconciliation sentinel. When the canonical
+          breakdown fails the $1 reconciliation contract, replace ALL NW
+          figures with NW_RECONCILIATION_FAILED_TEXT instead of partial
+          renders. The audit panel still shows the lineage delta so
+          engineers can debug it. */}
+      {nwBreakdown != null && !nwReconciled ? (
+        <div
+          className="rounded-md border border-rose-500/40 bg-rose-500/5 p-3 text-sm text-rose-700 dark:text-rose-300"
+          data-testid="s13-nw-reconciliation-failed"
+        >
+          {NW_RECONCILIATION_FAILED_TEXT}
+        </div>
+      ) : null}
+
+      {nwBreakdown != null ? (
+        <NetWorthAuditPanel breakdown={nwBreakdown} />
+      ) : null}
+
       {/* Sprint 13 — Universal 4-section reality-check layout.
           Section 1: FIRE Command Center (5 hero tiles with SourceTags) */}
-      <FireCommandCenter data={fireCommand} testidPrefix="s13-portfolio-lab-fire-command-center" />
+      <FireCommandCenter data={fireCommandPatched} testidPrefix="s13-portfolio-lab-fire-command-center" />
 
       {/* Section 2: Top 3 Actions (WHAT / WHEN / WHY / EXPECTED RESULT) */}
       <Top3ActionsSection actions={top3Detailed} testidPrefix="s13-portfolio-lab-top3-actions" />
@@ -1060,24 +1163,31 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
         data-testid="s13-portfolio-lab-supporting-analysis"
       >
         <div className="flex flex-col gap-4">
-          <FireGapSummaryBlock summary={fireGap} />
+          <FireGapSummaryBlock summary={fireGapPatched} />
           <DecisionFrame
             testidPrefix="portfolio-lab-decision-frame"
             title="Your decision in one frame"
             subtitle="Six questions, one answer — every number pulled from canonical engines."
             currentPosition={{
               label: "Current Position",
-              value: fireGap.currentNetWorth != null && Number.isFinite(fireGap.currentNetWorth)
-                ? formatCurrency(fireGap.currentNetWorth, true)
+              value: !nwReconciled
+                ? NW_RECONCILIATION_FAILED_TEXT
+                : fireGapPatched.currentNetWorth != null && Number.isFinite(fireGapPatched.currentNetWorth)
+                  ? formatCurrency(fireGapPatched.currentNetWorth, true)
+                  : undefined,
+              subtitle: fireGapPatched.currentPassiveIncome != null && Number.isFinite(fireGapPatched.currentPassiveIncome)
+                ? `${formatCurrency(fireGapPatched.currentPassiveIncome, true)}/yr passive`
                 : undefined,
-              subtitle: fireGap.currentPassiveIncome != null && Number.isFinite(fireGap.currentPassiveIncome)
-                ? `${formatCurrency(fireGap.currentPassiveIncome, true)}/yr passive`
-                : undefined,
-              status: goalSolverResult.feasibility.status === "ACHIEVABLE"
-                ? "on-track"
-                : goalSolverResult.feasibility.status === "STRETCH"
-                  ? "at-risk"
-                  : "off-track",
+              // Sprint 13 P0-3 — when goal targets aren't persisted, the
+              // feasibility verdict is INCOMPLETE and we MUST NOT show a
+              // "on-track" status driven by the schema-default short-circuit.
+              status: feasibilityIncomplete
+                ? "off-track"
+                : goalSolverResult.feasibility.status === "ACHIEVABLE"
+                  ? "on-track"
+                  : goalSolverResult.feasibility.status === "STRETCH"
+                    ? "at-risk"
+                    : "off-track",
             }}
             targetPosition={{
               label: "Target Position",
@@ -1126,7 +1236,7 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
           />
           <Top3ActionsBlock actions={top3} />
           <PortfolioLabCharts
-            summary={fireGap}
+            summary={fireGapPatched}
             netWorthFan={heroFan as Array<{ year: number; p50: number }>}
             baselineNetWorth={baselineNW}
           />

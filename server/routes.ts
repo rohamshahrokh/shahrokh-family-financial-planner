@@ -58,6 +58,8 @@ const SQLITE_SNAPSHOT_COLS = new Set([
   "utilities_monthly", "subscriptions_monthly",
   // Goals & FIRE
   "fire_target_age", "fire_target_monthly_income", "property_savings_monthly",
+  // Sprint 13 P0-3 — explicit-set marker (null = schema default still in place)
+  "fire_target_monthly_income_set_at",
   // Super per-person
   "roham_super_balance", "fara_super_balance",
   // Cash split — all four cash buckets + offset
@@ -72,6 +74,31 @@ function toSQLiteSnapshot(row: Record<string, any>): Record<string, any> {
     if (SQLITE_SNAPSHOT_COLS.has(k)) out[k] = v;
   }
   return out;
+}
+
+/**
+ * Sprint 13 P0-3 — stamp fire_target_monthly_income_set_at automatically
+ * the first time the user PUTs a non-null fire_target_monthly_income value.
+ *
+ * The presence of this timestamp is what validateGoalTargets() checks to
+ * distinguish "user explicitly set $20k" from "schema default $20k". When
+ * the payload already includes a set_at value, leave it intact.
+ */
+function stampFireTargetSetAt(body: Record<string, any>): Record<string, any> {
+  if (!body || typeof body !== "object") return body;
+  const hasIncome =
+    body.fire_target_monthly_income !== undefined &&
+    body.fire_target_monthly_income !== null;
+  const hasSetAt =
+    body.fire_target_monthly_income_set_at !== undefined &&
+    body.fire_target_monthly_income_set_at !== null;
+  if (hasIncome && !hasSetAt) {
+    return {
+      ...body,
+      fire_target_monthly_income_set_at: new Date().toISOString(),
+    };
+  }
+  return body;
 }
 
 // ─── Cold-start hydration ──────────────────────────────────────────────────────
@@ -103,17 +130,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.put("/api/snapshot", (req, res) => {
+    const body = stampFireTargetSetAt(req.body);
     // 1. Write to SQLite (strip unknown columns) — instant reactive update for all pages
-    const data = storage.updateSnapshot(toSQLiteSnapshot(req.body));
+    const data = storage.updateSnapshot(toSQLiteSnapshot(body));
     // 2. Write full payload to Supabase — permanent, includes all extended fields
-    sbUpsertSnapshot(req.body).catch(() => {});
+    sbUpsertSnapshot(body).catch(() => {});
     res.json(data);
   });
 
   // POST alias for snapshot — same as PUT
   app.post("/api/snapshot", (req, res) => {
-    const data = storage.updateSnapshot(toSQLiteSnapshot(req.body));
-    sbUpsertSnapshot(req.body).catch(() => {});
+    const body = stampFireTargetSetAt(req.body);
+    const data = storage.updateSnapshot(toSQLiteSnapshot(body));
+    sbUpsertSnapshot(body).catch(() => {});
     res.json(data);
   });
 

@@ -39,6 +39,10 @@ import {
   selectIpLoanBalanceSettled,
 } from "./dashboardDataContract";
 import type { FireMCPlanInput, FireMCSettings } from "./fireMonteCarlo";
+import {
+  validateGoalTargets,
+  type GoalValidationField,
+} from "./goalValidation";
 
 export const PATH_GOAL_SOLVER_VERSION = "sprint-10.goal-solver.v1";
 export const DEFAULT_GOAL_SOLVER_SEED = 10;
@@ -57,13 +61,29 @@ export interface GoalSolverProTargets {
   targetRiskLimit?: number | null;
   targetLiquidityMinimum?: number | null;
   targetRetirementYear?: number | null;
+  /**
+   * Sprint 13 P0-3 — explicit-set marker for the snapshot's
+   * fire_target_monthly_income column. NULL means the user has never
+   * persisted a FIRE target and the column still holds the schema default
+   * ($20,000). validateGoalTargets() refuses to treat the schema default
+   * as a user goal.
+   */
+  fireTargetMonthlyIncomeSetAt?: string | null;
+  /** The raw snapshot value, surfaced to the validator for context only. */
+  fireTargetMonthlyIncomeRaw?: number | null;
 }
 
 export const EMPTY_GOAL_TARGETS: GoalSolverProTargets = {};
 
 /* ─── Output types ──────────────────────────────────────────────────── */
 
-export type FeasibilityStatus = "ACHIEVABLE" | "STRETCH" | "UNLIKELY" | "IMPOSSIBLE";
+export type FeasibilityStatus =
+  | "ACHIEVABLE"
+  | "STRETCH"
+  | "UNLIKELY"
+  | "IMPOSSIBLE"
+  /** Sprint 13 P0-3 — user has not persisted enough goal targets to verdict. */
+  | "INCOMPLETE";
 
 export interface AuditFields {
   enginesUsed: string[];
@@ -89,6 +109,11 @@ export interface FeasibilitySection {
   /** Sprint 9 best strategy expected FIRE year (median). */
   expectedFireYear: number | null;
   audit: AuditFields;
+  /**
+   * Sprint 13 P0-3 — populated when goal targets fail validation. UI MUST
+   * NOT render a verdict / ranking when this list is non-empty.
+   */
+  missingFields?: GoalValidationField[];
 }
 
 export type GapField =
@@ -401,12 +426,42 @@ function buildFeasibility(
   const sprint8RobustScore = sprint8Best && typeof sprint8Best.robustScore === "number"
     ? sprint8Best.robustScore
     : null;
-  const noTargets = Object.values(targets).every(
-    (v) => v == null || v === "" || (typeof v === "number" && !Number.isFinite(v)),
-  );
+  // Sprint 13 P0-3 — validate the user's persisted goal targets BEFORE
+  // we issue any verdict. If targets are missing OR the
+  // fire_target_monthly_income_set_at marker is null (schema default still
+  // in place), we MUST return status="INCOMPLETE" instead of silently
+  // forcing "ACHIEVABLE" — the prior behaviour, which the audit flagged at
+  // goalSolverPro.ts:404-432, caused every Portfolio Lab user without
+  // persisted goals to see "on-track" plus the $240k/$6M schema-default
+  // derived target.
+  const validation = validateGoalTargets({
+    targetFireYear: targets.targetFireYear,
+    targetRetirementYear: targets.targetRetirementYear,
+    targetNetWorth: targets.targetNetWorth,
+    targetPassiveIncomeAnnual: targets.targetPassiveIncomeAnnual,
+    targetPassiveIncomeMonthly: targets.targetPassiveIncomeMonthly,
+    fireTargetMonthlyIncomeRaw: targets.fireTargetMonthlyIncomeRaw,
+    fireTargetMonthlyIncomeSetAt: targets.fireTargetMonthlyIncomeSetAt,
+  });
+
+  if (validation.status === "INCOMPLETE") {
+    return {
+      status: "INCOMPLETE",
+      probabilityOfSuccess: null,
+      medianFireYear: null,
+      bestCaseFireYear: null,
+      worstCaseFireYear: null,
+      expectedFireYear: null,
+      audit: defaultAudit({
+        howCalculated: `Feasibility unavailable — ${validation.reason}`,
+      }),
+      missingFields: validation.missingFields,
+    };
+  }
+
   if (best == null) {
     return {
-      status: noTargets ? "ACHIEVABLE" : "UNLIKELY",
+      status: "UNLIKELY",
       probabilityOfSuccess: null,
       medianFireYear: null,
       bestCaseFireYear: null,
@@ -423,12 +478,7 @@ function buildFeasibility(
   const optimistic = best.fireYearBand.p10;
   const pessimistic = best.fireYearBand.p90;
 
-  let status: FeasibilityStatus;
-  if (noTargets) {
-    status = "ACHIEVABLE";
-  } else {
-    status = classifyStatus(prob, hardConstraintViolated);
-  }
+  const status: FeasibilityStatus = classifyStatus(prob, hardConstraintViolated);
 
   return {
     status,
