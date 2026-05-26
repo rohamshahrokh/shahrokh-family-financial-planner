@@ -182,3 +182,27 @@ export const timelineEvents = sqliteTable("timeline_events", {
 export const insertTimelineEventSchema = createInsertSchema(timelineEvents).omit({ id: true, created_at: true });
 export type InsertTimelineEvent = z.infer<typeof insertTimelineEventSchema>;
 export type TimelineEvent = typeof timelineEvents.$inferSelect;
+
+// ─── mc_fire_settings (Supabase-only) ─────────────────────────────────
+// This table lives in Supabase (Postgres), not in the legacy SQLite schema
+// above. We expose its TypeScript shape here so client/server can share a
+// single source of truth for the row layout. Access goes through
+// `client/src/lib/supabaseClient.ts -> sbMCFireSettings` (read/upsert) and the
+// server `getCanonicalGoal()` selector. No drizzle table is declared because
+// drizzle in this repo targets only the SQLite snapshot store.
+export interface ActionChecklistEntry {
+  checked: boolean;
+  checked_at: string | null;
+}
+export type ActionChecklist = Record<string, ActionChecklistEntry>;
+
+export interface McFireSettings {
+  id: string;
+  goals_set: boolean | null;
+  goal_set_timestamp: string | null;
+  target_fire_age: number | null;
+  target_passive_monthly: number | null;
+  swr_pct: number | null;
+  action_checklist: ActionChecklist;
+  updated_at: string | null;
+}
