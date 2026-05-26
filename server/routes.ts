@@ -2,6 +2,7 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 import { getCanonicalGoal } from "./lib/canonicalGoal";
+import { evaluateFreshness } from "../client/src/lib/forecastFreshness";
 
 // ─── Supabase helpers (server-side) ────────────────────────────────────────────
 // These mirror the client-side supabaseClient.ts so the server can also read/write
@@ -332,6 +333,47 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res
         .status(500)
         .json({ status: "NOT_SET", reason: `canonical-goal lookup failed: ${err?.message ?? err}` });
+    }
+  });
+
+  // ─── Forecast Freshness (FWL Remediation Phase A) ──────────────────────────
+  // Compares the last MC FIRE run (`mc_fire_results.ran_at`) to the source
+  // snapshot (`sf_snapshot.updated_at`) and returns FRESH / STALE / MISSING.
+  // Used by UI banners to tell the user whether a re-run is required.
+  app.get("/api/forecast-freshness", async (req, res) => {
+    const ownerId =
+      (req as any).user?.id ?? (req.query.ownerId as string) ?? "shahrokh-family-main";
+    try {
+      const [resultRow, snapshotRow] = await Promise.all([
+        fetch(
+          `${SUPABASE_URL}/rest/v1/mc_fire_results?id=eq.${encodeURIComponent(ownerId)}&limit=1`,
+          { headers: SB_HEADERS },
+        )
+          .then(r => (r.ok ? r.json() : []))
+          .then((rows: any[]) => rows?.[0] ?? null)
+          .catch(() => null),
+        fetch(
+          `${SUPABASE_URL}/rest/v1/sf_snapshot?id=eq.${encodeURIComponent(ownerId)}&limit=1`,
+          { headers: SB_HEADERS },
+        )
+          .then(r => (r.ok ? r.json() : []))
+          .then((rows: any[]) => rows?.[0] ?? null)
+          .catch(() => null),
+      ]);
+      const runIso =
+        resultRow?.ran_at ?? resultRow?.updated_at ?? resultRow?.created_at ?? null;
+      const snapIso = snapshotRow?.updated_at ?? null;
+      const runDate = runIso ? new Date(runIso) : null;
+      const snapDate = snapIso ? new Date(snapIso) : null;
+      res.json(evaluateFreshness(runDate, snapDate));
+    } catch (err: any) {
+      res.status(500).json({
+        runDate: null,
+        sourceSnapshotDate: null,
+        status: "MISSING",
+        staleByDays: null,
+        reason: `forecast-freshness lookup failed: ${err?.message ?? err}`,
+      });
     }
   });
 
