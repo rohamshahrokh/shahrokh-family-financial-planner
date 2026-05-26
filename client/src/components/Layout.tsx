@@ -17,20 +17,19 @@ import { AuditModeToggle } from "@/components/auditMode/AuditModeToggle";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 // FWL P1b: Global tax-regime selector strip (route-scoped, additive).
 import {
-  // Step 1 — Snapshot
-  LayoutDashboard, TrendingUp, DollarSign, Receipt, PiggyBank,
-  HeartPulse, Landmark,
-  // Step 2 — Strategy
+  // Step 1 — Today
+  LayoutDashboard, TrendingUp, DollarSign, Receipt,
+  // Step 2 — Plan
   Home, Bitcoin, CreditCard, Calculator, Target, ClipboardList, Briefcase,
-  // Step 3 — Forecast
-  BarChart2, Activity, Sigma, Zap, Map, FlaskConical, FileText, Sparkles,
-  // Step 4 — Action
-  Lightbulb, Bell, Calendar, BrainCircuit,
+  // Step 3 — Future
+  BarChart2, Sigma, FlaskConical, FileText,
+  // Step 4 — Move
+  Lightbulb, BrainCircuit, ClipboardCheck,
   // Support / System
   HelpCircle, Settings, Microscope,
   // UI chrome
   LogOut, Sun, Moon, SunMoon, Menu, X, Clock, Eye, EyeOff,
-  ChevronDown, ChevronRight, Database, Newspaper,
+  ChevronDown, ChevronRight, Database, Newspaper, HeartPulse,
 } from "lucide-react";
 
 // ─── Navigation Structure ─────────────────────────────────────────────────────
@@ -45,7 +44,27 @@ import {
 //   FUTURE · Forecast  — Where am I heading?
 //   MOVE   · Action    — What should I do next?
 // The Decision Engine sits in MOVE because it drives the weekly action queue.
-const NAV_STEPS = [
+// Sprint 14 — IA reorganisation. Nav items now carry a `depth` (0 | 1 | 2)
+// for visual indent so the renderer at L346+ can show nested hierarchy
+// without restructuring its iteration shape (smallest-diff extension).
+type NavItem = {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  adminOnly: boolean;
+  requiredPermission?: Permission;
+  /** 0 = top-level, 1 = child, 2 = grandchild (visual indent only) */
+  depth?: 0 | 1 | 2;
+};
+
+const NAV_STEPS: Array<{
+  id: string;
+  step: number;
+  label: string;
+  sublabel: string;
+  badgeClass: string;
+  items: NavItem[];
+}> = [
   {
     id: "snapshot",
     step: 1,
@@ -55,11 +74,8 @@ const NAV_STEPS = [
     items: [
       { href: "/dashboard",       label: "Executive Overview",  icon: LayoutDashboard, adminOnly: false },
       { href: "/expenses",        label: "Income & Expenses",   icon: DollarSign,      adminOnly: false },
-      { href: "/recurring-bills", label: "Recurring Bills",     icon: Receipt,         adminOnly: false },
       { href: "/budget",          label: "Monthly Budget",      icon: Target,          adminOnly: false },
-      { href: "/timeline",        label: "Net Worth Timeline",  icon: TrendingUp,      adminOnly: false },
-      { href: "/data-health",     label: "Data Health",         icon: HeartPulse,      adminOnly: true  },
-      { href: "/ledger-audit",    label: "Ledger Audit",        icon: Database,        adminOnly: true  },
+      { href: "/recurring-bills", label: "Recurring Bills",     icon: Receipt,         adminOnly: false },
     ],
   },
   {
@@ -71,12 +87,12 @@ const NAV_STEPS = [
     items: [
       { href: "/financial-plan",  label: "Family Plan",         icon: ClipboardList,   adminOnly: false },
       { href: "/wealth-strategy", label: "Wealth Strategy",     icon: Briefcase,       adminOnly: false },
-      { href: "/property",        label: "Property",            icon: Home,            adminOnly: false },
-      { href: "/stocks",          label: "Stocks",              icon: BarChart2,       adminOnly: false },
-      { href: "/crypto",          label: "Crypto",              icon: Bitcoin,         adminOnly: false },
-      { href: "/debt-strategy",   label: "Debt Strategy",       icon: CreditCard,      adminOnly: false },
-      { href: "/tax",             label: "Tax Strategy",        icon: Calculator,      adminOnly: false },
-      { href: "/cgt-simulator",   label: "CGT Simulator",       icon: BarChart2,       adminOnly: false },
+      { href: "/property",        label: "Property",            icon: Home,            adminOnly: false, depth: 1 },
+      { href: "/stocks",          label: "Stocks",              icon: BarChart2,       adminOnly: false, depth: 1 },
+      { href: "/crypto",          label: "Crypto",              icon: Bitcoin,         adminOnly: false, depth: 1 },
+      { href: "/debt-strategy",   label: "Debt Strategy",       icon: CreditCard,      adminOnly: false, depth: 1 },
+      { href: "/tax",             label: "Tax Strategy",        icon: Calculator,      adminOnly: false, depth: 1 },
+      { href: "/cgt-simulator",   label: "CGT Simulator",       icon: BarChart2,       adminOnly: false, depth: 2 },
     ],
   },
   {
@@ -86,15 +102,9 @@ const NAV_STEPS = [
     sublabel: "Forecast · Where am I heading",
     badgeClass: "step-3",
     items: [
-      { href: "/ai-forecast-engine", label: "Forecast Engine",      icon: Sigma,         adminOnly: true  },
-      // Sprint 6 Phase 1 — dedicated What-If Scenario Compare workspace.
-      { href: "/scenario-compare-workspace", label: "Scenario Compare", icon: FlaskConical, adminOnly: false },
-      // Hidden from sidebar (V1) — routes retained:
-      //   /what-if-scenarios       (legacy What-If)
-      //   /scenario-compare        (legacy Scenario Lab)
-      //   /scenario-compare-legacy (V1 of V1)
-      { href: "/market-news",        label: "Market News",            icon: Newspaper,     adminOnly: false },
-      { href: "/reports",            label: "Reports",                icon: FileText,      adminOnly: false },
+      { href: "/timeline",                    label: "Net Worth Timeline", icon: TrendingUp,   adminOnly: false },
+      { href: "/ai-forecast-engine",          label: "Forecast Engine",    icon: Sigma,        adminOnly: false },
+      { href: "/scenario-compare-v2",         label: "Scenario Compare",   icon: FlaskConical, adminOnly: false, depth: 1 },
     ],
   },
   {
@@ -104,25 +114,35 @@ const NAV_STEPS = [
     sublabel: "Action · What should I do next",
     badgeClass: "step-4",
     items: [
-      // Decision Engine moves here in Phase 7 — it's the executive brain that
-      // ranks priorities and drives the action queue, not a forecast model.
-      { href: "/decision",       label: "Decision Engine",     icon: Sparkles,        adminOnly: false },
-      // Sprint 6 Phase 4 — primary closure workspace.
-      { href: "/goal-closure-lab", label: "Goal Closure Lab",  icon: Target,          adminOnly: false },
-      // Sprint 6 Phase 5 — Portfolio Lab Optimizer workspace.
-      { href: "/portfolio-lab",   label: "Portfolio Lab",       icon: FlaskConical,    adminOnly: false },
-      { href: "/ai-weekly-cfo",  label: "Sat. Bulletin",       icon: BrainCircuit,    adminOnly: false, requiredPermission: 'view_bulletin' as Permission },
-      { href: "/ai-insights",    label: "AI Insights",         icon: Lightbulb,       adminOnly: false, requiredPermission: 'view_ai_insights' as Permission },
+      // Sprint 14 — Action Plan is the unified MOVE shell. The legacy
+      // /decision, /goal-closure-lab, /portfolio-lab routes stay registered
+      // for power-user deep links but no longer appear in the sidebar.
+      { href: "/action-plan",    label: "Action Plan",         icon: ClipboardCheck,  adminOnly: false },
     ],
   },
 ];
 
-// ─── Support / System links (outside the four workflow steps) ─────────────────
+// ─── Secondary / System links (outside the four workflow steps) ───────────────
+// Sprint 14: SUPPORT_LINKS split into SECONDARY (information / reports) and
+// SYSTEM (settings / admin tooling). Renderer below preserves the old slot.
 
-const SUPPORT_LINKS = [
-  { href: "/help",     label: "Help",     icon: HelpCircle, adminOnly: false },
-  { href: "/settings", label: "Settings", icon: Settings,   adminOnly: false },
+const SECONDARY_LINKS: NavItem[] = [
+  { href: "/ai-insights",   label: "AI Insights",   icon: Lightbulb,   adminOnly: false, requiredPermission: 'view_ai_insights' as Permission },
+  { href: "/market-news",   label: "Market News",   icon: Newspaper,   adminOnly: false },
+  { href: "/reports",       label: "Reports",       icon: FileText,    adminOnly: false },
+  { href: "/ai-weekly-cfo", label: "Sat. Bulletin", icon: BrainCircuit, adminOnly: false, requiredPermission: 'view_bulletin' as Permission, depth: 1 },
 ];
+
+const SYSTEM_LINKS: NavItem[] = [
+  { href: "/settings",    label: "Settings",    icon: Settings,   adminOnly: false },
+  { href: "/help",        label: "Help",        icon: HelpCircle, adminOnly: false },
+  { href: "/data-health", label: "Data Health", icon: HeartPulse, adminOnly: true  },
+];
+
+// Combined alias preserved so existing helpers (getActiveStep,
+// isSupportActive, TopBarBreadcrumb) keep matching all non-workflow routes
+// without a wider rewrite.
+const SUPPORT_LINKS: NavItem[] = [...SECONDARY_LINKS, ...SYSTEM_LINKS];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -415,7 +435,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         : "hsl(var(--border))",
                     }}
                   />
-                  {visibleItems.map(({ href, label, icon: Icon }) => {
+                  {visibleItems.map((item) => {
+                    const { href, label, icon: Icon } = item;
+                    const depth = item.depth ?? 0;
                     const active = isPathActive(href, location);
                     return (
                       <Link
@@ -424,6 +446,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         onClick={() => setMobileOpen(false)}
                         data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
                         className={`nav-item${active ? " active" : ""}`}
+                        style={depth > 0 ? { paddingLeft: `${0.75 + depth * 0.85}rem` } : undefined}
                       >
                         <Icon
                           className="nav-item-icon"
@@ -449,23 +472,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           );
         })}
 
-        {/* ─── SUPPORT / SYSTEM ─────────────────────────────────────────── */}
-        <div
-          className="mt-3 pt-3"
-          style={{ borderTop: "1px solid hsl(var(--border) / 0.5)" }}
-        >
-          <p className="px-3 mb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50 select-none">
-            Support
-          </p>
-          {SUPPORT_LINKS.filter(l => seeItem(l)).map(({ href, label, icon: Icon }) => {
+        {/* ─── SECONDARY / SYSTEM ───────────────────────────────────────────
+            Sprint 14 IA — Secondary surfaces (insights / news / reports)
+            sit above SYSTEM (settings / admin). Both share the same render
+            shape as workflow items and honour `depth` for visual indent. */}
+        {(() => {
+          const renderLink = (item: NavItem) => {
+            const { href, label, icon: Icon } = item;
+            const depth = item.depth ?? 0;
             const active = isPathActive(href, location);
             return (
               <Link
                 key={href}
                 href={href}
                 onClick={() => setMobileOpen(false)}
-                data-testid={`nav-${label.toLowerCase()}`}
+                data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
                 className={`nav-item${active ? " active" : ""}`}
+                style={depth > 0 ? { paddingLeft: `${0.75 + depth * 0.85}rem` } : undefined}
               >
                 <Icon
                   className="nav-item-icon"
@@ -477,8 +500,38 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 )}
               </Link>
             );
-          })}
-        </div>
+          };
+          const visibleSecondary = SECONDARY_LINKS.filter(l => seeItem(l));
+          const visibleSystem = SYSTEM_LINKS.filter(l => seeItem(l));
+          return (
+            <>
+              {visibleSecondary.length > 0 && (
+                <div
+                  className="mt-3 pt-3"
+                  style={{ borderTop: "1px solid hsl(var(--border) / 0.5)" }}
+                  data-testid="nav-section-secondary"
+                >
+                  <p className="px-3 mb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50 select-none">
+                    Secondary
+                  </p>
+                  {visibleSecondary.map(renderLink)}
+                </div>
+              )}
+              {visibleSystem.length > 0 && (
+                <div
+                  className="mt-3 pt-3"
+                  style={{ borderTop: "1px solid hsl(var(--border) / 0.5)" }}
+                  data-testid="nav-section-system"
+                >
+                  <p className="px-3 mb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50 select-none">
+                    System
+                  </p>
+                  {visibleSystem.map(renderLink)}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {/* ─── ADMIN / DEVELOPER TOOLS ───────────────────────────────────────
             Audit Coverage report is the entry-point for the global Audit Mode
