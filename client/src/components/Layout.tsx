@@ -435,37 +435,84 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         : "hsl(var(--border))",
                     }}
                   />
-                  {visibleItems.map((item) => {
-                    const { href, label, icon: Icon } = item;
-                    const depth = item.depth ?? 0;
-                    const active = isPathActive(href, location);
-                    return (
-                      <Link
-                        key={href}
-                        href={href}
-                        onClick={() => setMobileOpen(false)}
-                        data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
-                        className={`nav-item${active ? " active" : ""}`}
-                        style={depth > 0 ? { paddingLeft: `${0.75 + depth * 0.85}rem` } : undefined}
-                      >
-                        <Icon
-                          className="nav-item-icon"
-                          style={
-                            active
-                              ? { color: accentColor }
-                              : {}
-                          }
-                        />
-                        <span className="text-[13px]">{label}</span>
-                        {active && (
-                          <ChevronRight
-                            className="w-3 h-3 ml-auto shrink-0"
-                            style={{ color: accentColor }}
+                  {/* Sprint 14 visual-hierarchy refinement — render items so
+                      contiguous depth>=1 runs are wrapped in a left-border
+                      "tree branch" element that visually ties children to
+                      the preceding depth=0 parent. Same render path is used
+                      on desktop and mobile (the sidebar is one component). */}
+                  {(() => {
+                    const renderItem = (item: NavItem) => {
+                      const { href, label, icon: Icon } = item;
+                      const depth = item.depth ?? 0;
+                      const active = isPathActive(href, location);
+                      const isChild = depth > 0;
+                      return (
+                        <Link
+                          key={href}
+                          href={href}
+                          onClick={() => setMobileOpen(false)}
+                          data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
+                          className={`nav-item${active ? " active" : ""}`}
+                          style={isChild ? { paddingLeft: `${0.75 + depth * 1.5}rem` } : undefined}
+                        >
+                          <Icon
+                            className="nav-item-icon"
+                            style={{
+                              ...(active ? { color: accentColor } : {}),
+                              ...(isChild && !active ? { opacity: 0.7 } : {}),
+                            }}
                           />
-                        )}
-                      </Link>
-                    );
-                  })}
+                          <span className={isChild ? "text-[12px]" : "text-[13px]"}>{label}</span>
+                          {active && (
+                            <ChevronRight
+                              className="w-3 h-3 ml-auto shrink-0"
+                              style={{ color: accentColor }}
+                            />
+                          )}
+                        </Link>
+                      );
+                    };
+
+                    // Walk visibleItems and emit either a parent <Link> or a
+                    // wrapped child-group <div> for each contiguous run of
+                    // depth>=1 items.
+                    const out: React.ReactNode[] = [];
+                    let i = 0;
+                    while (i < visibleItems.length) {
+                      const item = visibleItems[i];
+                      const depth = item.depth ?? 0;
+                      if (depth === 0) {
+                        out.push(renderItem(item));
+                        i++;
+                      } else {
+                        // Collect contiguous children
+                        const group: NavItem[] = [];
+                        while (
+                          i < visibleItems.length &&
+                          (visibleItems[i].depth ?? 0) > 0
+                        ) {
+                          group.push(visibleItems[i]);
+                          i++;
+                        }
+                        out.push(
+                          <div
+                            key={`child-group-${group[0].href}`}
+                            className="my-1 ml-4 pl-1 space-y-0.5"
+                            style={{
+                              borderLeft: `1px solid ${
+                                isActiveSection
+                                  ? `${borderColor}60`
+                                  : "hsl(var(--border))"
+                              }`,
+                            }}
+                          >
+                            {group.map(renderItem)}
+                          </div>,
+                        );
+                      }
+                    }
+                    return out;
+                  })()}
                 </div>
               )}
             </div>
@@ -481,6 +528,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             const { href, label, icon: Icon } = item;
             const depth = item.depth ?? 0;
             const active = isPathActive(href, location);
+            const isChild = depth > 0;
             return (
               <Link
                 key={href}
@@ -488,19 +536,55 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 onClick={() => setMobileOpen(false)}
                 data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
                 className={`nav-item${active ? " active" : ""}`}
-                style={depth > 0 ? { paddingLeft: `${0.75 + depth * 0.85}rem` } : undefined}
+                style={isChild ? { paddingLeft: `${0.75 + depth * 1.5}rem` } : undefined}
               >
                 <Icon
                   className="nav-item-icon"
-                  style={active ? { color: "hsl(var(--muted-foreground))" } : {}}
+                  style={{
+                    ...(active ? { color: "hsl(var(--muted-foreground))" } : {}),
+                    ...(isChild && !active ? { opacity: 0.7 } : {}),
+                  }}
                 />
-                <span className="text-[13px]">{label}</span>
+                <span className={isChild ? "text-[12px]" : "text-[13px]"}>{label}</span>
                 {active && (
                   <ChevronRight className="w-3 h-3 ml-auto shrink-0 text-muted-foreground" />
                 )}
               </Link>
             );
           };
+
+          // Sprint 14 visual-hierarchy refinement — wrap contiguous depth>=1
+          // runs in a left-border element so child links read as nested
+          // beneath their preceding parent (matches the workflow nav).
+          const renderList = (items: NavItem[]) => {
+            const out: React.ReactNode[] = [];
+            let i = 0;
+            while (i < items.length) {
+              const item = items[i];
+              const depth = item.depth ?? 0;
+              if (depth === 0) {
+                out.push(renderLink(item));
+                i++;
+              } else {
+                const group: NavItem[] = [];
+                while (i < items.length && (items[i].depth ?? 0) > 0) {
+                  group.push(items[i]);
+                  i++;
+                }
+                out.push(
+                  <div
+                    key={`child-group-${group[0].href}`}
+                    className="my-1 ml-4 pl-1 space-y-0.5"
+                    style={{ borderLeft: "1px solid hsl(var(--border))" }}
+                  >
+                    {group.map(renderLink)}
+                  </div>,
+                );
+              }
+            }
+            return out;
+          };
+
           const visibleSecondary = SECONDARY_LINKS.filter(l => seeItem(l));
           const visibleSystem = SYSTEM_LINKS.filter(l => seeItem(l));
           return (
@@ -514,7 +598,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <p className="px-3 mb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50 select-none">
                     Secondary
                   </p>
-                  {visibleSecondary.map(renderLink)}
+                  {renderList(visibleSecondary)}
                 </div>
               )}
               {visibleSystem.length > 0 && (
@@ -526,7 +610,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <p className="px-3 mb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50 select-none">
                     System
                   </p>
-                  {visibleSystem.map(renderLink)}
+                  {renderList(visibleSystem)}
                 </div>
               )}
             </>
