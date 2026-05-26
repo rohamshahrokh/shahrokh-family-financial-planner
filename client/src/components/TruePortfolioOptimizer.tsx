@@ -21,10 +21,7 @@
 import * as React from "react";
 import { useMemo, useState } from "react";
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
-import {
-  selectCanonicalNetWorth,
-  assertCurrentNwIsLedger,
-} from "@/lib/dashboardDataContract";
+import { selectCanonicalNetWorth } from "@/lib/dashboardDataContract";
 import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
 import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
@@ -1089,11 +1086,11 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
       console.error(msg);
     }
   }, [ledgerNetWorth, fireGap.currentNetWorth, nwInvariantToast]);
-  // Keep the original synchronous assert so callers in dev still see a hard
-  // throw via the dashboardDataContract invariant.
-  if (ledgerNetWorth != null) {
-    assertCurrentNwIsLedger(fireGap.currentNetWorth, ledgerNetWorth, "TruePortfolioOptimizer.fireGap");
-  }
+  // Render-phase throw removed — invariant is enforced via the useEffect at
+  // L~1069 to avoid blacking out the page on stale-state races. See PR #88
+  // review: a synchronous throw inside render unmounts the subtree (and any
+  // parent error boundary), which is fatal in dev even though the drift is
+  // recoverable. The useEffect logs+toasts the same condition non-blockingly.
   // REMEDIATION C-3: surface the freshness verdict produced by Phase B so the
   // top-of-page banner can render. Mirrors the same evaluateFreshness call
   // inside goalSolverResult so the props are kept in lockstep.
@@ -1118,6 +1115,9 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
       {/* REMEDIATION C-3: forecast freshness banner reads goalSolverResult.isStale
           (Phase B engine output). Renders amber when STALE, blue when MISSING,
           nothing when FRESH. */}
+      {/* TODO(KI-17): Re-run Monte Carlo CTA intentionally unwired. The banner
+          omits onRerun, so the button does not render (see ForecastFreshnessBanner
+          L73-82, L108-118). Deferred until /api/mc/run endpoint exists. */}
       <ForecastFreshnessBanner
         isStale={goalSolverResult.isStale}
         staleReason={goalSolverResult.staleReason}
