@@ -283,10 +283,23 @@ function CurrentPositionSection(props: {
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Section B — FIRE Goal                                                      */
+/* When NOT_SET: dismissible nudge card (session-only, sessionStorage).       */
+/* When SET:     single-line summary chip with an "Edit ↗" link.              */
 /* ────────────────────────────────────────────────────────────────────────── */
+const GOAL_CARD_DISMISSED_KEY = "fwl.action_centre.goal_card_dismissed.v1";
+
 function FireGoalSection() {
   const { auditMode } = useAuditMode();
   const { data: goal, isLoading } = useCanonicalGoal();
+
+  // Per-session dismissal of the "Goal not set" nudge. Reappears on a new
+  // browser session. Only consulted in the NOT_SET branch.
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.sessionStorage.getItem(GOAL_CARD_DISMISSED_KEY) === "1";
+    } catch { return false; }
+  });
 
   if (isLoading) {
     return (
@@ -297,55 +310,66 @@ function FireGoalSection() {
   }
 
   if (!goal || goal.status === "NOT_SET") {
+    if (dismissed) return null;
+    const dismiss = () => {
+      setDismissed(true);
+      if (typeof window === "undefined") return;
+      try { window.sessionStorage.setItem(GOAL_CARD_DISMISSED_KEY, "1"); } catch { /* ignore */ }
+    };
     return (
       <section data-testid="action-centre-fire-goal">
-        <Card testId="ac-goal-not-set" className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-          <div className="flex-1">
-            <div className="text-sm font-semibold">Goal not set</div>
+        <Card testId="ac-goal-not-set" className="relative flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+          <div className="flex-1 pr-6">
+            <div className="text-sm font-semibold">Pick your FIRE goal</div>
             <div className="text-xs text-muted-foreground mt-1">
-              Tell us when you want to retire and how much income you want, and we'll plan from there.
+              Pick a FIRE age and target monthly income so the Action Centre
+              can size recommendations to your goal.
             </div>
           </div>
           <Link href="/financial-plan#fire-goal">
-            <Button data-testid="ac-goal-cta">Set your FIRE goal in Family Plan</Button>
+            <Button data-testid="ac-goal-cta">Set your FIRE goal</Button>
           </Link>
+          <button
+            type="button"
+            onClick={dismiss}
+            aria-label="Dismiss"
+            data-testid="ac-goal-not-set-dismiss"
+            className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+          >
+            <span aria-hidden className="text-base leading-none">×</span>
+          </button>
         </Card>
       </section>
     );
   }
 
-  // goal.status === "SET"
+  // goal.status === "SET" — single-line summary chip.
   return (
     <section data-testid="action-centre-fire-goal">
-      <Card testId="ac-goal-set">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-base sm:text-lg font-semibold">Your FIRE goal</h2>
-          {auditMode && <SourceChip>From Family Plan / FIRE settings</SourceChip>}
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 mt-2">
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Retire by age</div>
-            <div className="text-base sm:text-lg font-bold num-display">{goal.targetFireAge}</div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Passive income / mo</div>
-            <div className="text-base sm:text-lg font-bold num-display">{formatCurrency(goal.targetPassiveMonthly)}</div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Net worth needed</div>
-            <div className="text-base sm:text-lg font-bold num-display">{formatCurrency(goal.targetNetWorth)}</div>
-            {auditMode && (
-              <SourceChip>= passive × 12 ÷ ({goal.swrPct}% SWR)</SourceChip>
-            )}
-          </div>
-        </div>
-        <div className="mt-3">
-          <Link href="/financial-plan#fire-goal">
-            <button className="text-xs underline text-muted-foreground hover:text-foreground" data-testid="ac-goal-edit">
-              Edit in Family Plan →
-            </button>
-          </Link>
-        </div>
+      <Card testId="ac-goal-set" className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-xs sm:text-sm">
+          <span className="font-semibold">FIRE goal:</span>{" "}
+          <span className="num-display font-medium">
+            {formatCurrency(goal.targetPassiveMonthly)}
+          </span>
+          <span className="text-muted-foreground">/mo passive by age </span>
+          <span className="font-medium">{goal.targetFireAge}</span>
+          <span className="text-muted-foreground">.</span>
+        </span>
+        <Link href="/financial-plan#fire-goal">
+          <button
+            type="button"
+            data-testid="ac-goal-edit"
+            className="text-xs underline text-muted-foreground hover:text-foreground"
+          >
+            Edit ↗
+          </button>
+        </Link>
+        {auditMode && (
+          <SourceChip>
+            mc_fire_settings · NW needed = {formatCurrency(goal.targetNetWorth)} (= passive × 12 ÷ {goal.swrPct}% SWR)
+          </SourceChip>
+        )}
       </Card>
     </section>
   );
