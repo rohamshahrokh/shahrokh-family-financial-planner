@@ -80,6 +80,7 @@ import RiskRadarPage           from "./pages/risk-radar";
 import TaxAlphaPage            from "./pages/tax-alpha";
 import AuditCoveragePage       from "./pages/audit-coverage";
 import ActionPlanPage          from "./pages/action-plan";
+import DecisionLabPage         from "./pages/decision-lab";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -278,6 +279,12 @@ function AppRouter() {
         {/* Sprint 14 — Action Plan: unified MOVE shell over existing engines. */}
         <Route path="/action-plan">
           <ProtectedRoute component={ActionPlanPage} title="Action Plan" />
+        </Route>
+        {/* Sprint 14.3 — Decision Lab: summary-first hub over /decision,
+            /goal-closure-lab, and /portfolio-lab. Adds NO new engine; runs
+            only the cheap canonical selectors. */}
+        <Route path="/decision-lab">
+          <ProtectedRoute component={DecisionLabPage} title="Decision Lab" />
         </Route>
         {/* Risk Radar — surfaced from Deep Analysis cards & sidebar nav */}
         <Route path="/risk-radar">
