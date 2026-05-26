@@ -70,6 +70,8 @@ import {
 import { FireGapSummaryBlock } from "@/components/portfolio-lab/FireGapSummaryBlock";
 import { Top3ActionsBlock } from "@/components/portfolio-lab/Top3ActionsBlock";
 import { PortfolioLabCharts } from "@/components/portfolio-lab/PortfolioLabCharts";
+import { buildDoNothingForecast } from "@/lib/doNothingForecast";
+import { evaluateFreshness } from "@/lib/forecastFreshness";
 import { DecisionFrame } from "@/components/ui/DecisionFrame";
 
 export interface TruePortfolioOptimizerProps {
@@ -998,6 +1000,18 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
             targetPassiveIncomeMonthly: canonicalGoal.targetPassiveMonthly,
           }
         : EMPTY_GOAL_TARGETS;
+    // REMEDIATION B-4: derive forecast freshness from the MC run timestamp +
+    // the canonical-ledger snapshot timestamp so the engine output carries
+    // { isStale, staleReason }. Phase C will render a "Stale forecast" banner
+    // off these fields.
+    const mcRunAtStr = props.monteCarloOutputs?.ran_at ?? null;
+    const snapshotAtStr =
+      (props.canonicalLedger?.snapshot as { updated_at?: string | null } | null | undefined)
+        ?.updated_at ?? null;
+    const fresh = evaluateFreshness(
+      mcRunAtStr ? new Date(mcRunAtStr) : null,
+      snapshotAtStr ? new Date(snapshotAtStr) : null,
+    );
     return buildGoalSolverPro({
       canonicalLedger: props.canonicalLedger ?? null,
       canonicalFire,
@@ -1006,8 +1020,9 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
       sprint9Result: pathSim,
       targets,
       goalNotSet,
+      forecastFreshness: { status: fresh.status, reason: fresh.reason },
     });
-  }, [props.canonicalLedger, result, probabilistic, pathSim, canonicalGoal, goalNotSet]);
+  }, [props.canonicalLedger, props.monteCarloOutputs, result, probabilistic, pathSim, canonicalGoal, goalNotSet]);
 
   // Sprint 11: pull `whyThisWins` from the Sprint 6 Phase 5 PortfolioLab
   // engine so the Hero can render the narrative without re-deriving it.
@@ -1136,11 +1151,21 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
       {/* Sprint 12 — Top-3 actions to close the gap. */}
       <Top3ActionsBlock actions={top3} />
 
-      {/* Sprint 12 — Required charts: current-vs-target, gap waterfall, path-vs-baseline. */}
+      {/* Sprint 12 — Required charts: current-vs-target, gap waterfall, path-vs-baseline.
+          REMEDIATION B-3: the do-nothing series is now a real per-year forecast
+          built from the ledger + blended expected return, NOT a flat constant. */}
       <PortfolioLabCharts
         summary={fireGap}
         netWorthFan={heroFan as Array<{ year: number; p50: number }>}
         baselineNetWorth={baselineNW}
+        doNothingSeries={
+          props.canonicalLedger
+            ? buildDoNothingForecast({
+                ledger: props.canonicalLedger,
+                years: (heroFan as Array<{ year: number }>).map((b) => b.year),
+              })
+            : []
+        }
       />
 
       {/* Sprint 11 #1, #2 — Hero region (5 slots, baseline-vs-recommendation chart). */}

@@ -36,10 +36,20 @@ interface YearBand {
   p50: number;
 }
 
+/**
+ * REMEDIATION B-3: the Do-Nothing series is now a real per-year forecast,
+ * not a flat constant. Caller supplies a `doNothingSeries` of (year, netWorth)
+ * built from buildDoNothingForecast(); the chart draws three lines —
+ * Current Path / Recommended Path / Target Line.
+ *
+ * `baselineNetWorth` is retained for backward compatibility and used as the
+ * fallback when `doNothingSeries` is empty (legacy callers).
+ */
 interface Props {
   summary: FireGapSummary;
   netWorthFan: YearBand[];
   baselineNetWorth: number | null;
+  doNothingSeries?: { year: number; netWorth: number }[];
 }
 
 function fmt(v: number): string {
@@ -71,7 +81,12 @@ function ChartCard({
   );
 }
 
-export function PortfolioLabCharts({ summary, netWorthFan, baselineNetWorth }: Props) {
+export function PortfolioLabCharts({
+  summary,
+  netWorthFan,
+  baselineNetWorth,
+  doNothingSeries,
+}: Props) {
   // Chart 1: Current vs Target NW
   const currentVsTargetData =
     !isEmptyValue(summary.currentNetWorth) && !isEmptyValue(summary.targetNetWorth)
@@ -101,11 +116,22 @@ export function PortfolioLabCharts({ summary, netWorthFan, baselineNetWorth }: P
     ];
   })();
 
-  // Chart 3: Path vs baseline (line)
+  // Chart 3: Path vs baseline (line). REMEDIATION B-3: prefer the real
+  // doNothingSeries when supplied; fall back to the legacy flat baseline only
+  // when the caller has not yet wired the forecast. A "Target" reference line
+  // is added when the summary has a target NW.
+  const doNothingByYear = new Map<number, number>();
+  (doNothingSeries ?? []).forEach((d) => doNothingByYear.set(d.year, d.netWorth));
   const pathBaselineData = (netWorthFan ?? []).map((b) => ({
     year: b.year,
-    Recommended: b.p50,
-    "Do nothing": baselineNetWorth,
+    "Current Path": doNothingByYear.has(b.year)
+      ? doNothingByYear.get(b.year)
+      : baselineNetWorth,
+    "Recommended Path": b.p50,
+    Target:
+      summary.targetNetWorth != null && Number.isFinite(summary.targetNetWorth)
+        ? summary.targetNetWorth
+        : null,
   }));
 
   return (
@@ -172,8 +198,8 @@ export function PortfolioLabCharts({ summary, netWorthFan, baselineNetWorth }: P
 
       <ChartCard
         testid="pl-chart-path-vs-baseline"
-        title="Recommended Path vs Do Nothing"
-        caption="Solid = engine-recommended trajectory (Sprint 9 p50). Dashed = current snapshot held flat."
+        title="Current Path vs Recommended Path vs Target"
+        caption="Solid green = engine-recommended trajectory (Sprint 9 p50). Dashed grey = your current path with no new strategies (ledger NW projected at the current portfolio's blended expected return). Purple = your FIRE target."
         empty={pathBaselineData.length === 0}
       >
         <ResponsiveContainer width="100%" height="100%">
@@ -188,7 +214,7 @@ export function PortfolioLabCharts({ summary, netWorthFan, baselineNetWorth }: P
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <Line
               type="monotone"
-              dataKey="Do nothing"
+              dataKey="Current Path"
               stroke="#9ca3af"
               strokeDasharray="5 5"
               dot={false}
@@ -196,11 +222,20 @@ export function PortfolioLabCharts({ summary, netWorthFan, baselineNetWorth }: P
             />
             <Line
               type="monotone"
-              dataKey="Recommended"
+              dataKey="Recommended Path"
               stroke="#10b981"
               strokeWidth={2}
               dot={false}
               isAnimationActive={false}
+            />
+            <Line
+              type="monotone"
+              dataKey="Target"
+              stroke="#a855f7"
+              strokeDasharray="2 4"
+              dot={false}
+              isAnimationActive={false}
+              connectNulls
             />
           </LineChart>
         </ResponsiveContainer>

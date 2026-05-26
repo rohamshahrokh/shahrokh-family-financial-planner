@@ -410,6 +410,15 @@ function RobustRanking({ result }: { result: ProbabilisticWealthEngineResult }) 
         <p className="text-xs text-muted-foreground mt-0.5">
           Robust score = 0.5 × deterministic ranking + 0.5 × Monte Carlo confidence. Higher is better.
         </p>
+        {/* REMEDIATION B-2: not persisted to sf_scenario_results — recomputed
+            every render from the canonical engines. Phase B did not wire the
+            strategy ↔ scenario-id mapping required to durably save these. */}
+        <p
+          className="mt-1 text-[10px] uppercase tracking-wider text-amber-600 dark:text-amber-400"
+          data-testid="prob-engine-robust-ranking-transient"
+        >
+          Transient — not persisted (in-memory only)
+        </p>
       </header>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
