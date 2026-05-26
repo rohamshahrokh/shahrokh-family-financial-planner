@@ -21,6 +21,11 @@
 import * as React from "react";
 import { useMemo, useState } from "react";
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
+import {
+  selectCanonicalNetWorth,
+  assertCurrentNwIsLedger,
+} from "@/lib/dashboardDataContract";
+import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
 import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
@@ -952,6 +957,13 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
     [result, props.canonicalLedger],
   );
 
+  // REMEDIATION B-1 / B-6: read canonical goal so we can pass goalNotSet +
+  // canonical required-probability into selectFireGapSummary instead of
+  // letting the engine forge "ACHIEVABLE" with empty inputs.
+  const canonicalGoalQuery = useCanonicalGoal();
+  const canonicalGoal = canonicalGoalQuery.data ?? null;
+  const goalNotSet = !canonicalGoal || canonicalGoal.status !== "SET";
+
   // Sprint 10 — Goal Solver Pro. Pure orchestration over Sprint 7/8/9
   // outputs. Used here (Sprint 11) only to feed the Hero's feasibility slot;
   // user-driven target editing now lives on /decision (Sprint 11 #6).
@@ -972,15 +984,30 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
           gap: 0,
           source: "empty" as const,
         };
+    // REMEDIATION B-1: when canonical goal is SET, thread the canonical
+    // targets into the engine so feasibility status is not faked to
+    // ACHIEVABLE by an empty-targets short-circuit. When NOT_SET, leave the
+    // targets empty AND set goalNotSet=true on the engine input — the
+    // feasibility builder uses that to return 'GOAL_NOT_SET' rather than
+    // ACHIEVABLE.
+    const targets =
+      canonicalGoal && canonicalGoal.status === "SET"
+        ? {
+            targetNetWorth: canonicalGoal.targetNetWorth,
+            targetPassiveIncomeAnnual: canonicalGoal.targetPassiveAnnual,
+            targetPassiveIncomeMonthly: canonicalGoal.targetPassiveMonthly,
+          }
+        : EMPTY_GOAL_TARGETS;
     return buildGoalSolverPro({
       canonicalLedger: props.canonicalLedger ?? null,
       canonicalFire,
       sprint7Result: result,
       sprint8Result: probabilistic,
       sprint9Result: pathSim,
-      targets: EMPTY_GOAL_TARGETS,
+      targets,
+      goalNotSet,
     });
-  }, [props.canonicalLedger, result, probabilistic, pathSim]);
+  }, [props.canonicalLedger, result, probabilistic, pathSim, canonicalGoal, goalNotSet]);
 
   // Sprint 11: pull `whyThisWins` from the Sprint 6 Phase 5 PortfolioLab
   // engine so the Hero can render the narrative without re-deriving it.
@@ -1001,7 +1028,27 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
   const heroFan = pathSim.bestStrategy?.netWorthFan ?? pathSim.strategies[0]?.netWorthFan ?? [];
 
   // Sprint 12 — advisor-style views over Sprint 10 canonical output.
-  const fireGap = useMemo(() => selectFireGapSummary(goalSolverResult), [goalSolverResult]);
+  // REMEDIATION B-1: thread ledger NW so Current NW comes from the canonical
+  // ledger selector, NEVER from a future-year forecast P50.
+  const ledgerNetWorth = useMemo(
+    () => (props.canonicalLedger ? selectCanonicalNetWorth(props.canonicalLedger).netWorth : null),
+    [props.canonicalLedger],
+  );
+  const fireGap = useMemo(
+    () =>
+      selectFireGapSummary(goalSolverResult, {
+        ledgerNetWorth,
+        goalNotSet,
+        canonicalRequiredProbability: null,
+      }),
+    [goalSolverResult, ledgerNetWorth, goalNotSet],
+  );
+  // REMEDIATION B-1: assert the displayed Current NW matches ledger NW; throws
+  // in dev, logs in prod. Catches any future regression where a forecast P50
+  // leaks back into the Current NW slot.
+  if (ledgerNetWorth != null) {
+    assertCurrentNwIsLedger(fireGap.currentNetWorth, ledgerNetWorth, "TruePortfolioOptimizer.fireGap");
+  }
   const top3 = useMemo(() => selectTop3Actions(goalSolverResult), [goalSolverResult]);
   const doNothing = useMemo(() => selectDoNothingComparison(goalSolverResult), [goalSolverResult]);
   const canonicalFire = useMemo(

@@ -861,6 +861,43 @@ export function reconcileNetWorth(
   };
 }
 
+/**
+ * Remediation B-1 invariant: a displayed "current net worth" value MUST come
+ * from the ledger (selectCanonicalNetWorth), never from a future-year forecast
+ * P50. The smoking gun in Phase 0 reconciliation was Current NW = $3,150,000
+ * leaking from `pathSim.bestStrategy.netWorthBand.p50` at the target year while
+ * the actual ledger NW was $856,500.
+ *
+ * Throws in development if the two disagree by > $1; logs an error and returns
+ * silently in production so we never crash a user page over a reconciliation
+ * drift. Either way, the violation is observable.
+ */
+export function assertCurrentNwIsLedger(
+  currentNw: number | null | undefined,
+  ledgerNw: number | null | undefined,
+  context: string = "assertCurrentNwIsLedger",
+): void {
+  if (currentNw == null || ledgerNw == null) return;
+  if (!Number.isFinite(currentNw) || !Number.isFinite(ledgerNw)) return;
+  const diff = Math.abs((currentNw as number) - (ledgerNw as number));
+  if (diff <= 1) return;
+  const msg =
+    `${context}: displayed Current NW ($${Math.round(currentNw as number).toLocaleString()}) ` +
+    `does not match ledger NW ($${Math.round(ledgerNw as number).toLocaleString()}); ` +
+    `diff $${Math.round(diff).toLocaleString()}. Current NW must come from selectCanonicalNetWorth, ` +
+    `never a future-year forecast P50.`;
+  const isProd =
+    typeof process !== "undefined" &&
+    process.env &&
+    process.env.NODE_ENV === "production";
+  if (isProd) {
+    // eslint-disable-next-line no-console
+    console.error(`[NW-INVARIANT] ${msg}`);
+    return;
+  }
+  throw new Error(`[NW-INVARIANT] ${msg}`);
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Canonical Income selector (audit fix P1.2)
 // ────────────────────────────────────────────────────────────────────────────

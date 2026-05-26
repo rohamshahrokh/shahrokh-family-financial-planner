@@ -63,7 +63,19 @@ export const EMPTY_GOAL_TARGETS: GoalSolverProTargets = {};
 
 /* ─── Output types ──────────────────────────────────────────────────── */
 
-export type FeasibilityStatus = "ACHIEVABLE" | "STRETCH" | "UNLIKELY" | "IMPOSSIBLE";
+/**
+ * REMEDIATION B-5: 'GOAL_NOT_SET' is the canonical signal that the user has
+ * not saved a FIRE goal (per useCanonicalGoal). The engine MUST return this
+ * instead of forging 'ACHIEVABLE' when targets are empty. UIs should render
+ * "Goal not set — set a target on the Dashboard" rather than a green
+ * "achievable" badge.
+ */
+export type FeasibilityStatus =
+  | "ACHIEVABLE"
+  | "STRETCH"
+  | "UNLIKELY"
+  | "IMPOSSIBLE"
+  | "GOAL_NOT_SET";
 
 export interface AuditFields {
   enginesUsed: string[];
@@ -242,6 +254,15 @@ export interface GoalSolverProResult {
   alternativePaths: OptimizationResult[];
   actionPlan: ActionPlanEntry[];
   auditTrail: AuditEntry[];
+  /**
+   * REMEDIATION B-4: forecast freshness surfaced on the engine output so the
+   * UI doesn't need to re-derive it. `isStale=true` triggers a "Stale forecast
+   * — re-run" banner in Phase C; `staleReason` carries the human message.
+   * When the caller did not supply `forecastFreshness` in inputs, both fields
+   * are null and the UI should treat the verdict as unknown.
+   */
+  isStale: boolean | null;
+  staleReason: string | null;
 }
 
 /* ─── Inputs ────────────────────────────────────────────────────────── */
@@ -256,6 +277,18 @@ export interface GoalSolverProInputs {
   mcSettings?: Partial<FireMCSettings>;
   targets: GoalSolverProTargets;
   seed?: number;
+  /**
+   * REMEDIATION B-5: when true (canonical-goal says NOT_SET), feasibility
+   * returns 'GOAL_NOT_SET' instead of forging 'ACHIEVABLE'. Callers should
+   * pass !canonicalGoal || canonicalGoal.status !== 'SET'.
+   */
+  goalNotSet?: boolean;
+  /**
+   * REMEDIATION B-4: caller passes the freshness verdict for the source
+   * snapshot so the engine output can surface { isStale, staleReason } and
+   * downstream UI can render a "Stale forecast" banner without re-deriving it.
+   */
+  forecastFreshness?: { status: "FRESH" | "STALE" | "MISSING"; reason: string } | null;
 }
 
 /* ─── Helpers ───────────────────────────────────────────────────────── */
@@ -395,6 +428,7 @@ function buildFeasibility(
   sprint8: ProbabilisticWealthEngineResult | null | undefined,
   targets: GoalSolverProTargets,
   hardConstraintViolated: boolean,
+  goalNotSet: boolean = false,
 ): FeasibilitySection {
   const best = sprint9.bestStrategy;
   const sprint8Best = sprint8?.bestStrategy ?? null;
@@ -404,9 +438,30 @@ function buildFeasibility(
   const noTargets = Object.values(targets).every(
     (v) => v == null || v === "" || (typeof v === "number" && !Number.isFinite(v)),
   );
+
+  // REMEDIATION B-5: GOAL_NOT_SET is the canonical answer when (a) the caller
+  // told us the canonical goal is NOT_SET, OR (b) targets are empty. NEVER
+  // return ACHIEVABLE with empty/NaN inputs — that was the smoking-gun bug
+  // where the engine forged confidence the user hadn't earned.
+  if (goalNotSet || noTargets) {
+    return {
+      status: "GOAL_NOT_SET",
+      probabilityOfSuccess: null,
+      medianFireYear: null,
+      bestCaseFireYear: null,
+      worstCaseFireYear: null,
+      expectedFireYear: null,
+      audit: defaultAudit({
+        howCalculated: goalNotSet
+          ? "canonical-goal status = NOT_SET — no FIRE target saved; feasibility undefined"
+          : "no targets supplied to buildGoalSolverPro — feasibility undefined",
+      }),
+    };
+  }
+
   if (best == null) {
     return {
-      status: noTargets ? "ACHIEVABLE" : "UNLIKELY",
+      status: "UNLIKELY",
       probabilityOfSuccess: null,
       medianFireYear: null,
       bestCaseFireYear: null,
@@ -423,12 +478,7 @@ function buildFeasibility(
   const optimistic = best.fireYearBand.p10;
   const pessimistic = best.fireYearBand.p90;
 
-  let status: FeasibilityStatus;
-  if (noTargets) {
-    status = "ACHIEVABLE";
-  } else {
-    status = classifyStatus(prob, hardConstraintViolated);
-  }
+  const status: FeasibilityStatus = classifyStatus(prob, hardConstraintViolated);
 
   return {
     status,
@@ -1467,14 +1517,15 @@ export function buildGoalSolverPro(inputs: GoalSolverProInputs): GoalSolverProRe
       seed,
       targets,
       feasibility: {
-        status: "ACHIEVABLE",
+        // REMEDIATION B-5: empty inputs ⇒ GOAL_NOT_SET, never ACHIEVABLE.
+        status: "GOAL_NOT_SET",
         probabilityOfSuccess: null,
         medianFireYear: null,
         bestCaseFireYear: null,
         worstCaseFireYear: null,
         expectedFireYear: null,
         audit: defaultAudit({
-          howCalculated: "Empty Sprint 9 + empty targets ⇒ trivially ACHIEVABLE (no requirements)",
+          howCalculated: "Empty Sprint 9 + empty targets ⇒ feasibility undefined (GOAL_NOT_SET)",
         }),
       },
       gap: {
@@ -1510,6 +1561,10 @@ export function buildGoalSolverPro(inputs: GoalSolverProInputs): GoalSolverProRe
       alternativePaths: [],
       actionPlan: [],
       auditTrail: [],
+      isStale: inputs.forecastFreshness ? inputs.forecastFreshness.status !== "FRESH" : null,
+      staleReason: inputs.forecastFreshness && inputs.forecastFreshness.status !== "FRESH"
+        ? inputs.forecastFreshness.reason
+        : null,
     };
   }
 
@@ -1521,7 +1576,13 @@ export function buildGoalSolverPro(inputs: GoalSolverProInputs): GoalSolverProRe
     constraintResult.section.candidatesPassing === 0;
 
   // 1. Feasibility
-  const feasibility = buildFeasibility(sprint9, inputs.sprint8Result ?? null, targets, hardViolation);
+  const feasibility = buildFeasibility(
+    sprint9,
+    inputs.sprint8Result ?? null,
+    targets,
+    hardViolation,
+    inputs.goalNotSet === true,
+  );
 
   // 2. Gap analysis
   const gap = buildGap(sprint9, sprint7, inputs.canonicalLedger, targets);
@@ -1585,6 +1646,12 @@ export function buildGoalSolverPro(inputs: GoalSolverProInputs): GoalSolverProRe
     actionPlan,
   );
 
+  // REMEDIATION B-4: surface freshness onto the result. UI in Phase C will
+  // render a "Stale forecast" banner when isStale is true.
+  const fresh = inputs.forecastFreshness ?? null;
+  const isStale = fresh ? fresh.status !== "FRESH" : null;
+  const staleReason = fresh && fresh.status !== "FRESH" ? fresh.reason : null;
+
   return {
     empty: false,
     engineVersion: PATH_GOAL_SOLVER_VERSION,
@@ -1599,6 +1666,8 @@ export function buildGoalSolverPro(inputs: GoalSolverProInputs): GoalSolverProRe
     alternativePaths: opt.alternatives,
     actionPlan,
     auditTrail,
+    isStale,
+    staleReason,
   };
 }
 
