@@ -141,13 +141,58 @@ function RiskChip({ level }: { level?: string | null }) {
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Verdict line (Sprint 14.2-A)                                               */
+/* One-line plain-English call. Reads bestMove + confidence from the engine   */
+/* output the page already loads — no new computation.                        */
+/* ────────────────────────────────────────────────────────────────────────── */
+function VerdictLine({ unified }: { unified: UnifiedBestMoveResult | null }) {
+  const { auditMode } = useAuditMode();
+  const rec = unified?.unified?.bestMove ?? null;
+
+  if (!rec) {
+    return (
+      <div
+        data-testid="ac-verdict-line"
+        className="text-sm sm:text-base font-medium text-muted-foreground"
+      >
+        Run a forecast to get your next move.
+      </div>
+    );
+  }
+
+  const plain = labelize(rec.title);
+  const confPct =
+    typeof rec.confidenceScore === "number" && Number.isFinite(rec.confidenceScore)
+      ? Math.round(rec.confidenceScore * 100)
+      : null;
+
+  return (
+    <div
+      data-testid="ac-verdict-line"
+      className="text-sm sm:text-base font-semibold leading-snug"
+    >
+      <span className="text-foreground">{plain}</span>
+      {confPct !== null && (
+        <span className="text-muted-foreground font-normal"> ({confPct}% confidence)</span>
+      )}
+      {auditMode && (
+        <span className="ml-2 text-[10px] text-muted-foreground/80 font-normal">
+          engine: "{rec.title}"
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Section A — Current Position                                               */
 /* ────────────────────────────────────────────────────────────────────────── */
 function CurrentPositionSection(props: {
   ledger: DashboardInputs | null;
   goalTargetNetWorth: number | null;
+  unified: UnifiedBestMoveResult | null;
 }) {
-  const { ledger, goalTargetNetWorth } = props;
+  const { ledger, goalTargetNetWorth, unified } = props;
   const { auditMode } = useAuditMode();
 
   const head = ledger ? computeCanonicalHeadlineMetrics(ledger) : null;
@@ -175,7 +220,21 @@ function CurrentPositionSection(props: {
     snapshotUpdatedAt ? new Date(snapshotUpdatedAt) : null,
   );
 
-  const freshTone =
+  const forecastFresh = fresh.status === "FRESH";
+  const forecastRunDate = decisionAt ? new Date(decisionAt) : null;
+  const forecastRunLabel =
+    forecastFresh && forecastRunDate
+      ? forecastRunDate.toLocaleDateString(undefined, { day: "numeric", month: "short" })
+      : null;
+  const forecastChipLabel =
+    fresh.status === "STALE" ? "Out of date" :
+    fresh.status === "FRESH" ? "Up to date" :
+    "Not run";
+  const forecastChipBg =
+    fresh.status === "FRESH" ? "hsl(var(--success) / 0.12)" :
+    fresh.status === "STALE" ? "hsl(var(--gold) / 0.15)" :
+    "hsl(var(--danger) / 0.12)";
+  const forecastChipFg =
     fresh.status === "FRESH" ? "hsl(var(--success))" :
     fresh.status === "STALE" ? "hsl(var(--gold))" :
     "hsl(var(--danger))";
@@ -186,9 +245,15 @@ function CurrentPositionSection(props: {
         <h2 className="text-base sm:text-lg font-semibold">Where you are today</h2>
         {auditMode && <SourceChip>computeCanonicalHeadlineMetrics · computeCanonicalFire</SourceChip>}
       </header>
+
+      {/* Verdict-first hero — single line above the tile grid. */}
+      <Card testId="ac-verdict-card" className="border-l-4" >
+        <VerdictLine unified={unified} />
+      </Card>
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
         <Card testId="ac-tile-nw">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Net worth today</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">NET WORTH</div>
           <div className="text-base sm:text-lg font-bold num-display mt-1">
             {nw !== null ? formatCurrency(nw) : "—"}
           </div>
@@ -196,7 +261,7 @@ function CurrentPositionSection(props: {
         </Card>
 
         <Card testId="ac-tile-fire-progress">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Progress to FIRE</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">FIRE %</div>
           <div className="text-base sm:text-lg font-bold num-display mt-1">
             {fireProgressPct !== null ? `${fireProgressPct.toFixed(1)}%` : "—"}
           </div>
@@ -204,18 +269,43 @@ function CurrentPositionSection(props: {
         </Card>
 
         <Card testId="ac-tile-passive-coverage">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Passive covers</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">PASSIVE COVER</div>
           <div className="text-base sm:text-lg font-bold num-display mt-1">
-            {passiveCoveragePct !== null ? `${passiveCoveragePct}% of expenses` : "—"}
+            {passiveCoveragePct !== null ? `${passiveCoveragePct}%` : "—"}
           </div>
           {auditMode && <SourceChip>canonicalFire.passiveCoverage</SourceChip>}
         </Card>
 
         <Card testId="ac-tile-forecast">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Forecast</div>
-          <div className="text-base sm:text-lg font-bold num-display mt-1" style={{ color: freshTone }}>
-            {fresh.status === "FRESH" ? "Up to date" : fresh.status === "STALE" ? "Out of date" : "Not run"}
-          </div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">FORECAST</div>
+          {forecastFresh ? (
+            <div className="text-sm sm:text-base font-semibold mt-1">
+              {forecastRunLabel ?? "Up to date"}
+            </div>
+          ) : (
+            <div className="mt-1 flex items-center gap-2 flex-wrap">
+              <span
+                data-testid="ac-tile-forecast-chip"
+                className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded"
+                style={{
+                  background: forecastChipBg,
+                  color: forecastChipFg,
+                  border: `1px solid ${forecastChipFg}`,
+                }}
+              >
+                {forecastChipLabel}
+              </span>
+              <Link href="/wealth-strategy">
+                <button
+                  type="button"
+                  className="text-[11px] underline text-muted-foreground hover:text-foreground"
+                  data-testid="ac-tile-forecast-run-now"
+                >
+                  Run now →
+                </button>
+              </Link>
+            </div>
+          )}
           {auditMode && <SourceChip>{fresh.reason}</SourceChip>}
         </Card>
       </div>
@@ -825,7 +915,7 @@ export default function ActionPlanPage() {
         </p>
       </header>
 
-      <CurrentPositionSection ledger={canonicalLedger} goalTargetNetWorth={goalTargetNW} />
+      <CurrentPositionSection ledger={canonicalLedger} goalTargetNetWorth={goalTargetNW} unified={unified} />
       <FireGoalSection />
       <RecommendedNextMoveSection unified={unified} />
       <TopActionsSection unified={unified} />
