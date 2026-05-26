@@ -26,6 +26,14 @@ export interface ForecastFreshnessBannerProps {
   staleReason: string | null;
   runDate: string | null;
   snapshotDate: string | null;
+  /**
+   * Optional re-run handler. When omitted, the "Re-run Monte Carlo" / "Run
+   * Monte Carlo" button is NOT rendered (see L73-82, L108-118).
+   *
+   * KI-17: production parents (e.g. TruePortfolioOptimizer) intentionally omit
+   * this until the `/api/mc/run` endpoint exists. Do not stub a placeholder
+   * handler — showing a button that does nothing is worse than showing none.
+   */
   onRerun?: () => void;
   className?: string;
 }
