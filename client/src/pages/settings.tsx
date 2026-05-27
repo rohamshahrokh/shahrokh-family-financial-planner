@@ -811,15 +811,14 @@ export default function SettingsPage() {
 
   // ── General settings ──────────────────────────────────────────────────────
   // ── App-wide settings: loaded from Supabase on mount ───────────────────────
-  /**
-   * @deprecated FWL Remediation Sprint Phase A — `safe_withdrawal_rate`
-   * within `sf_app_settings.settings.assumptions` is a scattered SWR source.
-   * The canonical SWR now lives at `mc_fire_settings.swr_pct` and must be
-   * read via `getCanonicalGoal()` / `useCanonicalGoal()`. Phase B will
-   * rewire callsites and stop persisting SWR through sf_app_settings.
-   */
+  // Sprint 20 PR-F1 — the FIRE Safe Withdrawal Rate is owned exclusively by
+  // the canonical FIRE goal surface (/financial-plan#fire-goal →
+  // mc_fire_settings.swr_pct). The legacy
+  // `sf_app_settings.assumptions.safe_withdrawal_rate` mirror was deleted from
+  // the Settings → Planning Assumptions inputs; only non-FIRE assumptions
+  // (inflation, PPOR growth, super return, risk profile) remain editable here.
   const DEFAULT_ASSUMPTIONS = {
-    inflation: 3, ppor_growth: 6, super_return: 8, safe_withdrawal_rate: 4, risk_profile: 'moderate',
+    inflation: 3, ppor_growth: 6, super_return: 8, risk_profile: 'moderate',
   };
   const DEFAULT_USER = {
     display_name: 'Roham Shahrokh', currency: 'AUD', timezone: 'Australia/Brisbane', notifications: true,
@@ -1232,7 +1231,6 @@ export default function SettingsPage() {
             { label: 'Inflation Rate %', key: 'inflation', step: 0.5 },
             { label: 'PPOR Growth %', key: 'ppor_growth', step: 0.5 },
             { label: 'Super Return %', key: 'super_return', step: 0.5 },
-            { label: 'Safe Withdrawal Rate %', key: 'safe_withdrawal_rate', step: 0.5 },
           ].map(f => (
             <div key={f.key}>
               <label className="text-xs text-muted-foreground">{f.label}</label>

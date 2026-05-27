@@ -79,6 +79,20 @@ import {
   resolveEffectiveSwr,
   type SwrInputs,
 } from "@/lib/recommendationEngine/swrBandSelector";
+import {
+  effectiveSwr as canonicalEffectiveSwr,
+  requiredNetWorth as canonicalRequiredNetWorth,
+  requiredMonthlyInvesting as canonicalRequiredMonthlyInvesting,
+  feasibilityScore as canonicalFeasibilityScore,
+} from "@/lib/canonicalFireDerivations";
+import type {
+  CanonicalFireRiskTolerance,
+  CanonicalFireTarget,
+} from "@/types/canonicalFire";
+import {
+  DEFAULT_LIQUIDITY_BUFFER_MONTHS,
+  DEFAULT_MAX_RISK_TOLERANCE,
+} from "@/types/canonicalFire";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -339,6 +353,37 @@ function IncomeEngineTraceButton({
 // IMPORTANT: this panel does NOT touch any forecast / Monte Carlo / FIRE
 // calculation logic. It only mutates the four input fields on mc_fire_settings.
 //
+// LocalStorage key for the F1 advanced fields that don't yet have a column
+// on mc_fire_settings. These persist across reloads on the same browser and
+// the engine reads them through the CanonicalFireTarget shape. Downstream
+// PRs may migrate them to a server-side column when the schema allows.
+const FIRE_ADVANCED_LS_KEY = "sprint20.fireTarget.advanced.v1";
+
+interface PersistedAdvancedFire {
+  targetNetWorth?: number;
+  minLiquidityBufferMonths?: number;
+  maxRiskTolerance?: CanonicalFireRiskTolerance;
+}
+
+function readPersistedAdvancedFire(): PersistedAdvancedFire {
+  try {
+    const raw = window.localStorage.getItem(FIRE_ADVANCED_LS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as PersistedAdvancedFire;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePersistedAdvancedFire(v: PersistedAdvancedFire): void {
+  try {
+    window.localStorage.setItem(FIRE_ADVANCED_LS_KEY, JSON.stringify(v));
+  } catch {
+    /* localStorage unavailable — non-fatal */
+  }
+}
+
 function FireGoalPanel() {
   const { auditMode } = useAuditMode();
   const { toast } = useToast();
@@ -364,6 +409,11 @@ function FireGoalPanel() {
   const [targetYear, setTargetYear] = useState<string>("");
   const [passiveMonth, setPassiveMonth] = useState<string>("");
   const [swrOverride, setSwrOverride] = useState<string>("");
+  // PR-F1 advanced fields. swrOverride above persists via mc_fire_settings.swr_pct;
+  // the three below are client-persisted via localStorage until a column lands.
+  const [targetNetWorth, setTargetNetWorth] = useState<string>("");
+  const [minLiquidityBufferMonths, setMinLiquidityBufferMonths] = useState<string>("");
+  const [maxRiskTolerance, setMaxRiskTolerance] = useState<CanonicalFireRiskTolerance | "">("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
@@ -383,12 +433,18 @@ function FireGoalPanel() {
     if (typeof r.swr_pct === "number") {
       setSwrOverride(String(r.swr_pct));
     }
+    const adv = readPersistedAdvancedFire();
+    if (typeof adv.targetNetWorth === "number") setTargetNetWorth(String(adv.targetNetWorth));
+    if (typeof adv.minLiquidityBufferMonths === "number") setMinLiquidityBufferMonths(String(adv.minLiquidityBufferMonths));
+    if (adv.maxRiskTolerance) setMaxRiskTolerance(adv.maxRiskTolerance);
     setHydrated(true);
   }, [mcSettings, hydrated, currentAge]);
 
   const yearNum = Number(targetYear);
   const passiveNum = Number(passiveMonth);
   const swrNum = swrOverride === "" ? undefined : Number(swrOverride);
+  const tnwNum = targetNetWorth === "" ? undefined : Number(targetNetWorth);
+  const liqNum = minLiquidityBufferMonths === "" ? undefined : Number(minLiquidityBufferMonths);
 
   const minYear = new Date().getFullYear() + 1;
   const maxYear = new Date().getFullYear() + 60;
@@ -397,7 +453,13 @@ function FireGoalPanel() {
   const swrValid = swrNum === undefined
     ? true
     : Number.isFinite(swrNum) && (swrNum as number) >= 1 && (swrNum as number) <= 10;
-  const allValid = yearValid && passiveValid && swrValid;
+  const tnwValid = tnwNum === undefined
+    ? true
+    : Number.isFinite(tnwNum) && (tnwNum as number) > 0;
+  const liqValid = liqNum === undefined
+    ? true
+    : Number.isFinite(liqNum) && (liqNum as number) >= 0 && (liqNum as number) <= 60;
+  const allValid = yearValid && passiveValid && swrValid && tnwValid && liqValid;
 
   // Engine-selected SWR band — uses the household's broad-strokes shape from
   // the persisted MC settings (or sensible defaults if not yet hydrated).
@@ -435,6 +497,80 @@ function FireGoalPanel() {
   const derivedAge = deriveTargetAge(yearNum, currentAge);
   const alreadyGoalsSet = !!(mcSettings as any)?.goals_set;
 
+  // Build the canonical CanonicalFireTarget on the fly so derived values use
+  // the same single-source pure functions every downstream engine will.
+  const canonicalTarget: CanonicalFireTarget | null = useMemo(() => {
+    if (!yearValid || !passiveValid) return null;
+    const target: CanonicalFireTarget = {
+      targetFireYear: yearNum,
+      targetPassiveIncomeMonthly: passiveNum,
+    };
+    const advanced: NonNullable<CanonicalFireTarget["advanced"]> = {};
+    if (swrNum !== undefined && Number.isFinite(swrNum) && (swrNum as number) > 0) {
+      advanced.safeWithdrawalRateOverride = (swrNum as number) / 100;
+    }
+    if (tnwNum !== undefined && tnwValid) {
+      advanced.targetNetWorth = tnwNum as number;
+    }
+    if (liqNum !== undefined && liqValid) {
+      advanced.minLiquidityBufferMonths = liqNum as number;
+    }
+    if (maxRiskTolerance) {
+      advanced.maxRiskTolerance = maxRiskTolerance;
+    }
+    if (Object.keys(advanced).length > 0) target.advanced = advanced;
+    return target;
+  }, [yearValid, passiveValid, yearNum, passiveNum, swrNum, tnwNum, tnwValid, liqNum, liqValid, maxRiskTolerance]);
+
+  // Derived values rendered without requiring Save.
+  const derivedRequiredNw = canonicalTarget ? canonicalRequiredNetWorth(canonicalTarget) : 0;
+  const derivedEffectiveSwrDecimal = canonicalTarget ? canonicalEffectiveSwr(canonicalTarget) : 0;
+  const householdSnapshot = useMemo(() => {
+    const r = (mcSettings ?? {}) as any;
+    const cash = Number(r.start_cash) || 0;
+    const offset = Number(r.start_offset) || 0;
+    const ppor = Number(r.start_ppor) || 0;
+    const stocks = Number(r.start_stocks) || 0;
+    const crypto = Number(r.start_crypto) || 0;
+    const superBal = Number(r.start_super) || 0;
+    const mortgage = Number(r.start_mortgage) || 0;
+    const other = Number(r.start_other_debts) || 0;
+    const monthlyIncome = Number(r.start_monthly_income) || 0;
+    const monthlyExpenses = Number(r.start_monthly_expenses) || 0;
+    const nw = cash + offset + ppor + stocks + crypto + superBal - mortgage - other;
+    const surplus = Math.max(0, monthlyIncome - monthlyExpenses);
+    return {
+      currentYear: new Date().getFullYear(),
+      currentNetWorth: nw,
+      currentMonthlySurplus: surplus,
+      liquidAssets: cash + offset,
+      monthlyExpenses,
+      expectedAnnualReturn: 0.07,
+    };
+  }, [mcSettings]);
+  const yearsToTarget = canonicalTarget
+    ? canonicalTarget.targetFireYear - householdSnapshot.currentYear
+    : 0;
+  const derivedMonthlyInvesting = canonicalTarget
+    ? canonicalRequiredMonthlyInvesting(
+        canonicalTarget,
+        householdSnapshot.currentNetWorth,
+        yearsToTarget,
+        householdSnapshot.expectedAnnualReturn,
+      )
+    : 0;
+  const feasibility = canonicalTarget
+    ? canonicalFeasibilityScore(canonicalTarget, householdSnapshot)
+    : null;
+
+  const emptyStatePrompt = !yearValid && !passiveValid
+    ? "Add a target FIRE year and monthly passive income to continue."
+    : !yearValid
+      ? "Add a target FIRE year to continue."
+      : !passiveValid
+        ? "Add a monthly passive income target to continue."
+        : null;
+
   const onSave = async () => {
     if (!allValid) {
       toast({
@@ -450,6 +586,12 @@ function FireGoalPanel() {
         targetMonthlyPassiveIncome: passiveNum,
         swrOverride: swrNum,
         currentAge,
+      });
+      // Persist the F1 advanced fields that don't yet have a server column.
+      writePersistedAdvancedFire({
+        targetNetWorth: tnwNum,
+        minLiquidityBufferMonths: liqNum,
+        maxRiskTolerance: maxRiskTolerance || undefined,
       });
       toast({
         title: "FIRE goal saved",
@@ -483,6 +625,9 @@ function FireGoalPanel() {
                   (target_fire_age, target_passive_monthly, swr_pct,
                   goals_set, goal_set_timestamp). Target year is converted to
                   age at write boundary using current_age={currentAge}.
+                  Advanced fields (target_net_worth, min_liquidity_buffer_months,
+                  max_risk_tolerance) persist client-side in localStorage key
+                  <code> {FIRE_ADVANCED_LS_KEY}</code> until a server column lands.
                 </p>
               )}
             </div>
@@ -501,11 +646,20 @@ function FireGoalPanel() {
                 hint={`Pick the calendar year (${minYear}–${maxYear})`}
               />
               <FieldRow
-                label="Target passive income (monthly)"
+                label="Target monthly passive income"
                 value={passiveMonth}
                 onChange={setPassiveMonth}
                 hint="The monthly spending you want passive income to cover"
               />
+
+              {emptyStatePrompt && (
+                <p
+                  className="rounded border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-300"
+                  data-testid="fp-fire-goal-empty-prompt"
+                >
+                  {emptyStatePrompt}
+                </p>
+              )}
 
               {yearValid && (
                 <div className="rounded border border-border/60 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground">
@@ -536,20 +690,57 @@ function FireGoalPanel() {
               </button>
 
               {advancedOpen && (
-                <div className="rounded border border-dashed border-border/60 bg-secondary/10 p-3 space-y-2">
+                <div
+                  className="rounded border border-dashed border-border/60 bg-secondary/10 p-3 space-y-2"
+                  data-testid="fp-fire-goal-advanced-panel"
+                >
                   <p className="text-[11px] text-muted-foreground">
-                    Override the safe withdrawal rate if you have a specific
-                    rate you want the planner to use. Leave blank to use the
-                    engine-selected band.
+                    These overrides are optional. Leave any field blank to use
+                    the planner default.
                   </p>
                   <FieldRow
-                    label="Safe withdrawal rate (override)"
+                    label="Target net worth (optional)"
+                    value={targetNetWorth}
+                    onChange={setTargetNetWorth}
+                    hint="When set, replaces the SWR-derived required asset base."
+                  />
+                  <FieldRow
+                    label="Safe withdrawal rate override (optional)"
                     value={swrOverride}
                     onChange={setSwrOverride}
                     prefix=""
                     suffix="%"
-                    hint="Optional. Typical range 3–5%."
+                    hint="Typical range 3–5%."
                   />
+                  <FieldRow
+                    label="Minimum liquidity buffer in months (optional)"
+                    value={minLiquidityBufferMonths}
+                    onChange={setMinLiquidityBufferMonths}
+                    prefix=""
+                    suffix="mo"
+                    hint={`Default ${DEFAULT_LIQUIDITY_BUFFER_MONTHS} months.`}
+                  />
+                  <div className="grid grid-cols-2 sm:grid-cols-3 items-center gap-2 py-2.5">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Maximum risk tolerance (optional)</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Default {DEFAULT_MAX_RISK_TOLERANCE}.
+                      </p>
+                    </div>
+                    <div className="col-span-1 sm:col-span-2 flex items-center gap-1.5 justify-end">
+                      <select
+                        value={maxRiskTolerance}
+                        onChange={e => setMaxRiskTolerance(e.target.value as CanonicalFireRiskTolerance | "")}
+                        className="h-8 text-sm rounded border border-border bg-background px-2"
+                        data-testid="fp-fire-goal-risk-select"
+                      >
+                        <option value="">(planner default)</option>
+                        <option value="conservative">Conservative</option>
+                        <option value="balanced">Balanced</option>
+                        <option value="growth">Growth</option>
+                      </select>
+                    </div>
+                  </div>
                   {effective.overrideNotice && (
                     <p className="text-[11px] text-amber-300" data-testid="fp-fire-swr-override-notice">
                       {effective.overrideNotice}
@@ -558,6 +749,69 @@ function FireGoalPanel() {
                   <p className="text-[10px] text-muted-foreground/80">
                     Engine rationale: {engineBand.rationale}
                   </p>
+                </div>
+              )}
+
+              {canonicalTarget && feasibility && (
+                <div
+                  className="rounded border border-border bg-card/40 px-3 py-3 space-y-2"
+                  data-testid="fp-fire-goal-derived"
+                >
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    What this means
+                  </p>
+                  <dl className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <dt className="text-muted-foreground">Required net worth</dt>
+                      <dd
+                        className="font-mono text-foreground font-semibold"
+                        data-testid="fp-fire-derived-required-nw"
+                      >
+                        {formatCurrency(derivedRequiredNw, true)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">
+                        Estimated monthly investing required
+                      </dt>
+                      <dd
+                        className="font-mono text-foreground font-semibold"
+                        data-testid="fp-fire-derived-monthly-investing"
+                      >
+                        {Number.isFinite(derivedMonthlyInvesting)
+                          ? formatCurrency(derivedMonthlyInvesting, true)
+                          : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">Effective SWR</dt>
+                      <dd className="font-mono text-foreground font-semibold">
+                        {(derivedEffectiveSwrDecimal * 100).toFixed(2)}%
+                      </dd>
+                    </div>
+                    <div className="sm:col-span-3">
+                      <dt className="text-muted-foreground">Feasibility</dt>
+                      <dd
+                        className="text-foreground font-semibold capitalize"
+                        data-testid="fp-fire-derived-feasibility"
+                      >
+                        {feasibility.band}
+                        <span className="text-[10px] text-muted-foreground ml-2">
+                          (score {feasibility.score.toFixed(2)})
+                        </span>
+                      </dd>
+                      {feasibility.blockers.length > 0 && (
+                        <ul
+                          className="mt-1.5 list-disc list-inside text-[11px] text-muted-foreground space-y-0.5"
+                          data-testid="fp-fire-derived-blockers"
+                        >
+                          {feasibility.blockers.map(b => (
+                            <li key={b}>{b}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </dl>
                 </div>
               )}
 
@@ -583,7 +837,9 @@ function FireGoalPanel() {
                 <p className="text-[10px] text-amber-400">
                   {!yearValid && `Year must be between ${minYear} and ${maxYear}. `}
                   {!passiveValid && "Passive income must be positive. "}
-                  {!swrValid && "SWR override must be between 1 and 10%."}
+                  {!swrValid && "SWR override must be between 1 and 10%. "}
+                  {!tnwValid && "Target net worth must be positive when set. "}
+                  {!liqValid && "Liquidity buffer must be 0–60 months."}
                 </p>
               )}
             </>

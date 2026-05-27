@@ -20,6 +20,7 @@ import {
   deriveTargetAge,
   targetYearFromAge,
 } from "./fireGoalCanonical";
+import type { CanonicalFireTarget } from "@/types/canonicalFire";
 
 /** Source shape we can migrate FROM. */
 export interface LegacyFireGoalSource {
@@ -175,3 +176,48 @@ export async function runFireGoalMigration(args: {
 }
 
 export { MIGRATED_FLAG_KEY };
+
+/**
+ * Sprint 20 PR-F1 — map a CanonicalFireGoal (legacy interface that still backs
+ * the in-flight Sprint 20 PR-A reader/writer) onto the canonical
+ * CanonicalFireTarget shape consumed by F1+ engines.
+ *
+ * The output is deliberately minimal: only the two primary fields, plus an
+ * advanced.safeWithdrawalRateOverride when the user has saved an explicit
+ * percentage. The advanced fields targetNetWorth / minLiquidityBufferMonths /
+ * maxRiskTolerance are NOT stored in mc_fire_settings yet — they live on the
+ * in-memory canonical target so F1's UI can edit them; F2/F3 will add their
+ * persistence path when those engines come online.
+ */
+export function toCanonicalFireTarget(
+  goal: CanonicalFireGoal,
+): CanonicalFireTarget {
+  const advancedSwr =
+    Number.isFinite(goal.swrOverride) && (goal.swrOverride as number) > 0
+      ? (goal.swrOverride as number) / 100
+      : undefined;
+  const target: CanonicalFireTarget = {
+    targetFireYear: goal.targetFireYear,
+    targetPassiveIncomeMonthly: goal.targetMonthlyPassiveIncome,
+  };
+  if (advancedSwr !== undefined) {
+    target.advanced = { safeWithdrawalRateOverride: advancedSwr };
+  }
+  return target;
+}
+
+/**
+ * Sprint 20 PR-F1 — synthesise a CanonicalFireTarget directly from a legacy
+ * source. Convenience wrapper around synthesiseCanonicalFireGoal that adapts
+ * the percentage-style swrOverride into the decimal-style override the
+ * canonical target type uses (e.g. legacy swr_pct=4 → 0.04).
+ *
+ * Returns null when no legacy fields are present.
+ */
+export function synthesiseCanonicalFireTarget(
+  source: LegacyFireGoalSource,
+): CanonicalFireTarget | null {
+  const synth = synthesiseCanonicalFireGoal(source);
+  if (!synth.migrated) return null;
+  return toCanonicalFireTarget(synth.canonical);
+}
