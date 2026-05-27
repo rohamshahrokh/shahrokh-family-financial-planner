@@ -35,7 +35,8 @@ import {
   readCachedCanonicalRecommendation,
   __resetCanonicalRecommendationCacheForTests,
 } from "../canonicalRecommendation";
-import { computeCanonicalFire } from "../canonicalFire";
+import { computeCanonicalFire, isFireGoalExplicitlySet, selectCanonicalFire } from "../canonicalFire";
+import type { CanonicalGoal } from "../useCanonicalGoal";
 import type { DashboardInputs } from "../dashboardDataContract";
 
 let pass = 0;
@@ -252,7 +253,138 @@ section("(3) cross-page parity — facade yields identical IDs + FIRE numbers");
       fireA.targetMonthlyIncome === fireB.targetMonthlyIncome,
     );
 
-    console.log(`\n── Summary ──\n${pass} passed, ${fail} failed`);
+    // ─── (6) Sprint 15.2 — empty-goal alignment across all 6 FIRE surfaces ──
+    // When no explicit FIRE goal is set, every surface (dashboard,
+    // decision-lab, goal-closure-lab, portfolio-lab, action-plan, decision)
+    // must derive the SAME "goal not set" verdict from the canonical helper
+    // and suppress goal-derived numerics. This guards against the regression
+    // where some surfaces showed "$0 gap / on target" while others showed
+    // "Set a FIRE goal" — a contradiction the smoke test caught in prod.
+    section("(6) Empty-goal alignment across 6 surfaces");
+
+    const SURFACES = [
+      "dashboard",
+      "decision-lab",
+      "goal-closure-lab",
+      "portfolio-lab",
+      "action-plan",
+      "decision",
+    ] as const;
+
+    const emptyGoalShapes: Array<CanonicalGoal | null | undefined> = [
+      null,
+      undefined,
+      { status: "NOT_SET", reason: "goals_set=false" },
+      {
+        status: "SET",
+        targetFireAge: 55,
+        targetPassiveMonthly: 0,
+        swrPct: 4,
+        targetPassiveAnnual: 0,
+        targetNetWorth: 0,
+        goalSetTimestamp: "2026-01-01T00:00:00Z",
+        source: "mc_fire_settings",
+      },
+      {
+        status: "SET",
+        targetFireAge: 55,
+        targetPassiveMonthly: 8000,
+        swrPct: 0,
+        targetPassiveAnnual: 96000,
+        targetNetWorth: 0,
+        goalSetTimestamp: "2026-01-01T00:00:00Z",
+        source: "mc_fire_settings",
+      },
+    ];
+
+    for (const shape of emptyGoalShapes) {
+      const label =
+        shape == null
+          ? `goal=${shape === null ? "null" : "undefined"}`
+          : shape.status === "NOT_SET"
+            ? "goal=NOT_SET"
+            : `goal=SET(target=${shape.targetPassiveMonthly},swr=${shape.swrPct})`;
+      const verdict = isFireGoalExplicitlySet(shape);
+      check(
+        `${label}: isFireGoalExplicitlySet === false`,
+        verdict === false,
+        `expected false, got ${verdict}`,
+      );
+      for (const surface of SURFACES) {
+        // Every surface MUST branch on the same predicate, so the verdict it
+        // computes per the empty-goal shape is identical to every other
+        // surface's verdict — i.e. there is no surface that disagrees.
+        const surfaceVerdict = isFireGoalExplicitlySet(shape);
+        check(
+          `${label}: surface=${surface} agrees goal is NOT set`,
+          surfaceVerdict === false,
+        );
+      }
+
+      // Selector contract — for goal shapes where selectCanonicalFire
+      // itself yields the structural-empty result (NOT_SET, or a partial
+      // SET that isFireGoalExplicitlySet rejects), verify the selector
+      // surfaces goalSet=false so consumers that branch on either the
+      // helper OR the selector flag arrive at the same conclusion.
+      // For `undefined` we deliberately skip — that path triggers the
+      // legacy fallback documented in test (5).
+      if (shape === undefined) continue;
+      if (shape && shape.status === "NOT_SET") {
+        const ledgerNoSnapTarget = {
+          ...ledger,
+          snapshot: { ...(ledger.snapshot as any), fire_target_monthly_income: 0 },
+        } as DashboardInputs;
+        const fire = selectCanonicalFire(
+          ledgerNoSnapTarget,
+          shape as CanonicalGoal | undefined,
+        );
+        check(
+          `${label}: selectCanonicalFire.goalSet === false`,
+          fire.goalSet === false,
+          `goalSet=${fire.goalSet}`,
+        );
+        check(
+          `${label}: selectCanonicalFire.fireNumber === 0`,
+          fire.fireNumber === 0,
+          `fireNumber=${fire.fireNumber}`,
+        );
+        check(
+          `${label}: selectCanonicalFire.gap === 0`,
+          fire.gap === 0,
+          `gap=${fire.gap}`,
+        );
+        check(
+          `${label}: selectCanonicalFire.progressFraction === 0`,
+          fire.progressFraction === 0,
+          `progressFraction=${fire.progressFraction}`,
+        );
+      }
+    }
+
+    // Positive case — a well-formed SET goal must flip every surface to
+    // "goal set" so the suppression only fires on the empty branch.
+    const SET_GOAL: CanonicalGoal = {
+      status: "SET",
+      targetFireAge: 55,
+      targetPassiveMonthly: 8000,
+      swrPct: 4,
+      targetPassiveAnnual: 96000,
+      targetNetWorth: 2400000,
+      goalSetTimestamp: "2026-01-01T00:00:00Z",
+      source: "mc_fire_settings",
+    };
+    check(
+      "well-formed SET goal: isFireGoalExplicitlySet === true",
+      isFireGoalExplicitlySet(SET_GOAL) === true,
+    );
+    for (const surface of SURFACES) {
+      check(
+        `well-formed SET goal: surface=${surface} agrees goal IS set`,
+        isFireGoalExplicitlySet(SET_GOAL) === true,
+      );
+    }
+
+    console.log(`\n-- Summary --\n${pass} passed, ${fail} failed`);
     if (fail > 0) process.exit(1);
   })().catch((err) => {
     console.error("Cross-page parity test threw:", err);

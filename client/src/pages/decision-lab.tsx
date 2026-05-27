@@ -39,8 +39,9 @@ import {
   selectCashToday,
   selectSuperCombined,
 } from "@/lib/dashboardDataContract";
-import { selectCanonicalFire } from "@/lib/canonicalFire";
+import { selectCanonicalFire, isFireGoalExplicitlySet } from "@/lib/canonicalFire";
 import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
+import { FireGoalEmptyState } from "@/components/FireGoalEmptyState";
 import { formatCurrency } from "@/lib/finance";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import { Button } from "@/components/ui/button";
@@ -162,6 +163,7 @@ function GoalClosureSummary({ ledger }: { ledger: DashboardInputs | null }) {
     fire && typeof fire.progressFraction === "number" && Number.isFinite(fire.progressFraction)
       ? Math.round(fire.progressFraction * 100)
       : null;
+  const goalSet = isFireGoalExplicitlySet(goal);
 
   return (
     <SummaryCard
@@ -173,7 +175,9 @@ function GoalClosureSummary({ ledger }: { ledger: DashboardInputs | null }) {
       ctaLabel="Open Goal Closure"
       ctaHref="/goal-closure-lab"
     >
-      {fire && gap !== null ? (
+      {!goalSet ? (
+        <FireGoalEmptyState surface="decision-lab" />
+      ) : fire && gap !== null ? (
         <ul className="space-y-1">
           <li data-testid="dl-goal-closure-gap">
             <span className="font-semibold text-foreground">FIRE gap: </span>

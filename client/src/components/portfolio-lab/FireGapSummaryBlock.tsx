@@ -19,6 +19,7 @@ import { formatCurrency } from "@/lib/finance";
 import { isEmptyValue } from "@/lib/uiEmptyField";
 import type { FireGapSummary } from "@/lib/goalSolverView.types";
 import { SourceTag, type SourceVariant } from "@/components/portfolio-lab/SourceTag";
+import { FireGoalEmptyState } from "@/components/FireGoalEmptyState";
 
 interface Props {
   summary: FireGapSummary;
@@ -118,41 +119,26 @@ export function FireGapSummaryBlock({ summary, monteCarloRunDate, forecastStale,
     isEmptyValue(summary.targetFireYear);
 
   if (noTarget) {
-    // REMEDIATION B-1: even when no FIRE goal is set, surface the ledger-
-    // derived Current NW so the user always sees their actual position.
-    // Only the target/gap cells should show as "Goal not set".
+    // Sprint 15.2 — unified empty-state CTA shared across all 6 FIRE surfaces.
+    // Ledger-derived Current NW is still surfaced beneath the CTA so the
+    // user sees their actual position even when no goal is set.
     const currentNwFmt = fmt$(summary.currentNetWorth);
     return (
-      <Card
-        className="p-4 sm:p-5 border-dashed border-muted-foreground/40 bg-muted/20"
-        data-testid="pl-fire-gap-empty"
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">Set a FIRE goal to see your gap</h3>
-            <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
-              Enter your target net worth and FIRE year on the Dashboard. Once set, this block shows your
-              current position, target, and gap — calculated from the canonical engines.
-            </p>
-            {currentNwFmt ? (
-              <div className="mt-3 flex flex-col gap-1" data-testid="pl-fire-gap-empty-current-nw">
-                <div className="inline-flex items-baseline gap-2">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Current Net Worth</span>
-                  <span className="text-base font-semibold tabular-nums text-foreground">{currentNwFmt}</span>
-                </div>
-                <SourceTag variant="ledger" testid="pl-fire-gap-empty-current-nw-source" />
-              </div>
-            ) : null}
-          </div>
-          <a href="/" data-testid="pl-fire-gap-empty-cta">
-            <Button variant="default" className="gap-1">
-              <Target className="h-3 w-3" />
-              Set FIRE goal
-              <ArrowRight className="h-3 w-3" />
-            </Button>
-          </a>
-        </div>
-      </Card>
+      <div data-testid="pl-fire-gap-empty" className="space-y-2">
+        <FireGoalEmptyState
+          surface="portfolio-lab"
+          subtitle="Enter your target net worth and FIRE year on the Dashboard. Once set, this block shows your current position, target, and gap — calculated from the canonical engines."
+        />
+        {currentNwFmt ? (
+          <Card className="p-3 sm:p-4" data-testid="pl-fire-gap-empty-current-nw">
+            <div className="inline-flex items-baseline gap-2">
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Current Net Worth</span>
+              <span className="text-base font-semibold tabular-nums text-foreground">{currentNwFmt}</span>
+            </div>
+            <SourceTag variant="ledger" testid="pl-fire-gap-empty-current-nw-source" />
+          </Card>
+        ) : null}
+      </div>
     );
   }
 

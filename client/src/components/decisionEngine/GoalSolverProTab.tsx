@@ -39,7 +39,9 @@ import { GoalSolverProSection } from "@/components/GoalSolverProSection";
 import { buildTruePortfolioOptimizer } from "@/lib/truePortfolioOptimizer";
 import { buildProbabilisticWealthEngine } from "@/lib/probabilisticWealthEngine";
 import { buildPathSimulationEngine } from "@/lib/pathSimulationEngine";
-import { computeCanonicalFire } from "@/lib/canonicalFire";
+import { computeCanonicalFire, isFireGoalExplicitlySet } from "@/lib/canonicalFire";
+import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
+import { FireGoalEmptyState } from "@/components/FireGoalEmptyState";
 import { formatCurrency } from "@/lib/finance";
 import {
   selectTop3Actions,
@@ -296,8 +298,22 @@ export function GoalSolverProTab() {
     return `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.round(Math.abs(v) * 100)}%`;
   }
 
+  // Sprint 15.2 — surface the unified empty-state CTA when no FIRE goal
+  // is explicitly set. The deep analysis tabs below still render with
+  // derived defaults; the banner makes the "no goal" state explicit so
+  // /decision matches the other 5 surfaces instead of silently using
+  // derived "Probability of FIRE" / "Target FIRE Year" panels.
+  const { data: canonicalGoal } = useCanonicalGoal();
+  const goalSet = isFireGoalExplicitlySet(canonicalGoal ?? null);
+
   return (
     <div className="flex flex-col gap-4" data-testid="decision-goal-solver-tab">
+      {!goalSet && (
+        <FireGoalEmptyState
+          surface="decision"
+          subtitle="The /decision surface uses derived defaults until you set a FIRE goal. Configure your target monthly income and SWR to anchor the probability and timeline panels to your own plan."
+        />
+      )}
       {/* Sprint 12 — 5-card decision system. Action / Impact / Risk / Alternative / Do-Nothing. */}
       <section data-testid="decision-five-card-system">
         <header className="mb-3">

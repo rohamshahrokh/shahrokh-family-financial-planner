@@ -26,15 +26,15 @@ let fail = 0;
 function check(name: string, cond: boolean, detail?: string): void {
   if (cond) {
     pass++;
-    console.log(`  \u2714 ${name}`);
+    console.log(`  PASS  ${name}`);
   } else {
     fail++;
-    console.log(`  \u2718 ${name}${detail ? `  \u2014 ${detail}` : ""}`);
+    console.log(`  FAIL  ${name}${detail ? `  --  ${detail}` : ""}`);
   }
 }
 
 function section(title: string): void {
-  console.log(`\n\u2500\u2500 ${title} \u2500\u2500`);
+  console.log(`\n-- ${title} --`);
 }
 
 // ─── Fixture: ledger carries the SQLite-20k hazard ─────────────────────────
@@ -253,7 +253,7 @@ section("(5) Snapshot 20k bleed regression guard — SET branch cannot leak");
 }
 
 // ─── Summary ───────────────────────────────────────────────────────────────
-console.log(`\n\u2500\u2500 Summary \u2500\u2500`);
+console.log(`\n-- Summary --`);
 console.log(`  pass: ${pass}`);
 console.log(`  fail: ${fail}`);
 if (fail > 0) {
