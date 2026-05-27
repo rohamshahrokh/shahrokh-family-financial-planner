@@ -104,7 +104,7 @@ const NAV_STEPS: Array<{
     items: [
       { href: "/timeline",                    label: "Net Worth Timeline", icon: TrendingUp,   adminOnly: false },
       { href: "/ai-forecast-engine",          label: "Forecast Engine",    icon: Sigma,        adminOnly: false },
-      { href: "/scenario-compare-v2",         label: "Scenario Compare",   icon: FlaskConical, adminOnly: false, depth: 1 },
+      { href: "/scenario-compare",            label: "Scenario Compare",   icon: FlaskConical, adminOnly: false, depth: 1 },
     ],
   },
   {
@@ -254,26 +254,39 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const seeItem = (item: { adminOnly: boolean; requiredPermission?: Permission }) =>
     canSeeItem(item, isAdmin, hasPermission);
 
-  // Track which accordion sections are open — all open by default for discoverability
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    snapshot: true,
-    strategy: true,
-    forecast: false,
-    action: false,
+  // Sprint 20 PR-D — Default sidebar state: only TODAY (snapshot) expanded on
+  // first load. PLAN / FUTURE / MOVE all collapsed. Persisted to localStorage
+  // so the user's manual toggles survive refresh. A never-visited user always
+  // starts with only TODAY open.
+  const SECTION_NAV_KEY = "fwl.nav.sections.open";
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    const initial = { snapshot: true, strategy: false, forecast: false, action: false };
+    if (typeof window === "undefined") return initial;
+    try {
+      const raw = window.localStorage.getItem(SECTION_NAV_KEY);
+      if (raw === null) return initial;
+      const parsed = JSON.parse(raw) as Record<string, boolean>;
+      return { ...initial, ...parsed };
+    } catch {
+      return initial;
+    }
   });
 
   // Sprint 14.1 — Wealth Strategy acts as an expandable parent for its
-  // depth>=1 children (Property/Stocks/Crypto/Debt/Tax/CGT). Default expanded,
-  // persisted to localStorage so refresh restores the user's last choice.
+  // depth>=1 children (Property/Stocks/Crypto/Debt/Tax/CGT).
+  // Sprint 20 PR-D — Default collapsed. Persisted to localStorage; auto-expand
+  // when the active route is one of its children so the highlight is visible.
   const WEALTH_NAV_KEY = "fwl.nav.wealthStrategy.expanded";
+  const WEALTH_CHILD_HREFS = ["/property", "/stocks", "/crypto", "/debt-strategy", "/tax", "/cgt-simulator"];
+  const isWealthChildRoute = WEALTH_CHILD_HREFS.some(h => isPathActive(h, location));
   const [wealthExpanded, setWealthExpanded] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
+    if (typeof window === "undefined") return false;
     try {
       const raw = window.localStorage.getItem(WEALTH_NAV_KEY);
-      if (raw === null) return true;
+      if (raw === null) return false;
       return raw === "true";
     } catch {
-      return true;
+      return false;
     }
   });
   const toggleWealthExpanded = () => {
@@ -286,14 +299,43 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     });
   };
 
-  // Auto-open the section that contains the active route
-  useEffect(() => {
-    const activeStep = getActiveStep(location, isAdmin, hasPermission);
-    setOpenSections(prev => ({ ...prev, [activeStep]: true }));
-  }, [location, isAdmin]);
+  // Sprint 20 PR-D — Forecast Engine acts as an expandable parent for Scenario
+  // Compare. Default collapsed; auto-expand when on /scenario-compare so the
+  // child highlight is visible.
+  const FORECAST_NAV_KEY = "fwl.nav.forecastEngine.expanded";
+  const isForecastChildRoute = isPathActive("/scenario-compare", location);
+  const [forecastExpanded, setForecastExpanded] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const raw = window.localStorage.getItem(FORECAST_NAV_KEY);
+      if (raw === null) return false;
+      return raw === "true";
+    } catch {
+      return false;
+    }
+  });
+  const toggleForecastExpanded = () => {
+    setForecastExpanded(prev => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        try { window.localStorage.setItem(FORECAST_NAV_KEY, String(next)); } catch { /* no-op */ }
+      }
+      return next;
+    });
+  };
+
+  // Sprint 20 PR-D — Removed route-driven auto-expand. Section open state is
+  // user-controlled only; visiting a route inside a section no longer pops it
+  // open. The state still persists across reloads via localStorage.
 
   const toggleSection = (id: string) => {
-    setOpenSections(prev => ({ ...prev, [id]: !prev[id] }));
+    setOpenSections(prev => {
+      const next = { ...prev, [id]: !prev[id] };
+      if (typeof window !== "undefined") {
+        try { window.localStorage.setItem(SECTION_NAV_KEY, JSON.stringify(next)); } catch { /* no-op */ }
+      }
+      return next;
+    });
   };
 
   const handleLogout = () => {
@@ -472,6 +514,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       on desktop and mobile (the sidebar is one component). */}
                   {(() => {
                     const WEALTH_HREF = "/wealth-strategy";
+                    const FORECAST_HREF = "/ai-forecast-engine";
+                    // Sprint 20 PR-D — Effective expansion = persisted toggle
+                    // OR active-child route, so the active child highlight is
+                    // always visible. The persisted state still drives the
+                    // chevron orientation users see when they're elsewhere.
+                    const wealthEffectiveOpen = wealthExpanded || isWealthChildRoute;
+                    const forecastEffectiveOpen = forecastExpanded || isForecastChildRoute;
                     const renderItem = (item: NavItem) => {
                       const { href, label, icon: Icon } = item;
                       const depth = item.depth ?? 0;
@@ -479,6 +528,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       const isChild = depth > 0;
                       const isWealthParent =
                         depth === 0 && href === WEALTH_HREF && stepDef.id === "strategy";
+                      const isForecastParent =
+                        depth === 0 && href === FORECAST_HREF && stepDef.id === "forecast";
+                      const isExpandableParent = isWealthParent || isForecastParent;
+                      const parentExpanded = isWealthParent ? wealthEffectiveOpen : forecastEffectiveOpen;
+                      const toggleParent = isWealthParent ? toggleWealthExpanded : toggleForecastExpanded;
+                      const parentAriaControls = isWealthParent
+                        ? "nav-wealth-strategy-children"
+                        : "nav-forecast-engine-children";
+                      const parentTestId = isWealthParent
+                        ? "nav-wealth-strategy-toggle"
+                        : "nav-forecast-engine-toggle";
+                      const parentAriaLabel = isWealthParent
+                        ? (parentExpanded ? "Collapse Wealth Strategy" : "Expand Wealth Strategy")
+                        : (parentExpanded ? "Collapse Forecast Engine" : "Expand Forecast Engine");
                       // Sprint 14.1 — inactive child labels use muted text so
                       // the active child remains the strongest visual anchor.
                       const childTextClass =
@@ -502,33 +565,35 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           <span className={`${isChild ? "text-[12px]" : "text-[13px]"}${childTextClass}`}>
                             {label}
                           </span>
-                          {/* Sprint 14.1 — chevron toggle button is nested
-                              inside the <Link>; preventDefault + stopPropagation
-                              ensure clicking the chevron does NOT navigate. */}
-                          {isWealthParent && (
+                          {/* Sprint 14.1 / 20 PR-D — chevron toggle button is
+                              nested inside the <Link>; preventDefault +
+                              stopPropagation ensure clicking the chevron does
+                              NOT navigate. Applies to expandable parents
+                              (Wealth Strategy, Forecast Engine). */}
+                          {isExpandableParent && (
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                toggleWealthExpanded();
+                                toggleParent();
                               }}
-                              aria-expanded={wealthExpanded}
-                              aria-controls="nav-wealth-strategy-children"
-                              aria-label={wealthExpanded ? "Collapse Wealth Strategy" : "Expand Wealth Strategy"}
-                              data-testid="nav-wealth-strategy-toggle"
+                              aria-expanded={parentExpanded}
+                              aria-controls={parentAriaControls}
+                              aria-label={parentAriaLabel}
+                              data-testid={parentTestId}
                               className="ml-auto inline-flex items-center justify-center w-8 h-8 p-1.5 rounded hover:bg-muted/40 -mr-1.5 shrink-0"
                             >
                               <ChevronDown
                                 className="w-3.5 h-3.5 transition-transform duration-200"
                                 style={{
-                                  transform: wealthExpanded ? "rotate(0deg)" : "rotate(-90deg)",
+                                  transform: parentExpanded ? "rotate(0deg)" : "rotate(-90deg)",
                                   color: active ? accentColor : "hsl(var(--muted-foreground))",
                                 }}
                               />
                             </button>
                           )}
-                          {active && !isWealthParent && (
+                          {active && !isExpandableParent && (
                             <ChevronRight
                               className="w-3 h-3 ml-auto shrink-0"
                               style={{ color: accentColor }}
@@ -540,9 +605,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
                     // Walk visibleItems and emit either a parent <Link> or a
                     // wrapped child-group <div> for each contiguous run of
-                    // depth>=1 items. Sprint 14.1: when the depth-0 item that
-                    // precedes a child run is Wealth Strategy, the child run
-                    // is gated on wealthExpanded.
+                    // depth>=1 items. Sprint 14.1 / 20 PR-D: when the depth-0
+                    // item that precedes a child run is an expandable parent
+                    // (Wealth Strategy or Forecast Engine), the child run is
+                    // gated on that parent's effective expansion state.
                     const out: React.ReactNode[] = [];
                     let i = 0;
                     let lastParentHref: string | null = null;
@@ -564,14 +630,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           i++;
                         }
                         const isWealthGroup = lastParentHref === WEALTH_HREF;
-                        if (isWealthGroup && !wealthExpanded) {
-                          // Collapsed — skip rendering this child run entirely.
-                          continue;
-                        }
+                        const isForecastGroup = lastParentHref === FORECAST_HREF;
+                        if (isWealthGroup && !wealthEffectiveOpen) continue;
+                        if (isForecastGroup && !forecastEffectiveOpen) continue;
+                        const groupId = isWealthGroup
+                          ? "nav-wealth-strategy-children"
+                          : isForecastGroup
+                            ? "nav-forecast-engine-children"
+                            : undefined;
                         out.push(
                           <div
                             key={`child-group-${group[0].href}`}
-                            id={isWealthGroup ? "nav-wealth-strategy-children" : undefined}
+                            id={groupId}
                             className="my-2 ml-4 pl-1 py-1.5 space-y-0.5 rounded-r-md bg-muted/30"
                             style={{
                               borderLeft: `1px solid ${

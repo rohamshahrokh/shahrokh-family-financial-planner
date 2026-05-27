@@ -293,14 +293,15 @@ function AppRouter() {
         <Route path="/decision">
           <ProtectedRoute component={DecisionPage} title="Decision Engine" />
         </Route>
+        {/* Sprint 20 PR-D — /scenario-compare maps to the real Scenario Compare
+            page. The V2 advanced builder remains reachable in two places:
+            the legacy /scenario-compare-v2 URL and inside Decision Engine's
+            advanced tab (/decision#advanced). */}
         <Route path="/scenario-compare">
-          <ProtectedRoute component={ScenarioCompareV2Page} title="Scenario Lab" />
+          <ProtectedRoute component={ScenarioComparePage} title="Scenario Compare" />
         </Route>
         <Route path="/scenario-compare-v2">
           <ProtectedRoute component={ScenarioCompareV2Page} title="Scenario Lab" />
-        </Route>
-        <Route path="/scenario-compare-legacy">
-          <ProtectedRoute component={ScenarioComparePage} title="Scenario Compare (Legacy)" />
         </Route>
         <Route path="/what-if-scenarios">
           <ProtectedRoute component={WhatIfScenariosPage} title="What-If Scenarios" />
