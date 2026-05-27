@@ -109,11 +109,14 @@ export const RULE_REGISTRY: Record<string, RuleMetadata> = {
     actionType: "increase_super",
     applicableStates: ACCUMULATION_STATES,
     notSuitableIf: (ctx) =>
-      // Suppress when MC success already very high AND user is in last 2 years before FIRE
+      // Suppress when last 2 years before FIRE OR when FIRE target is before
+      // super preservation age (60) — pre-60 FIRE plans can't rely on super.
+      // Sprint 18 hard rule (assertion #3): super cannot rank top when FIRE
+      // target is before access age.
       Boolean(
         ctx.plan.targetFireAge != null &&
-          ctx.today.age != null &&
-          ctx.plan.targetFireAge - ctx.today.age <= 2,
+          ((ctx.today.age != null && ctx.plan.targetFireAge - ctx.today.age <= 2) ||
+            ctx.plan.targetFireAge < 60),
       ),
     reversible: false,
     evidence: ["superCapRemaining", "marginalTaxRate", "monthlySurplus"],

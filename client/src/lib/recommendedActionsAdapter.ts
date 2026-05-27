@@ -36,6 +36,21 @@ export interface RecommendedAction {
   whenLabel?: string;
   /** Which engines fed this action — used for transparency badges. */
   sourceEngines: string[];
+  // ─── Sprint 18 additive fields (optional) ─────────────────────────────
+  /** Feasibility summary string — "Not currently feasible", "Feasible after X months", etc. */
+  feasibilityStatus?: string;
+  /** Stress test summary — "Survives 8 of 8 scenarios". */
+  stressTestResult?: string;
+  /** Behavioural note — plain-English execution risk. */
+  behaviouralNote?: string;
+  /** Confidence explanation — human-readable rationale. */
+  confidenceExplanation?: string;
+  /** Best multi-step path title + score, if available. */
+  bestPathLabel?: string;
+  /** Impact vs do-nothing baseline. */
+  baselineComparison?: string;
+  /** Next practical step. */
+  nextPracticalStep?: string;
 }
 
 export interface PlannedAcquisition {
@@ -197,6 +212,11 @@ export function buildRecommendedActions(
       const impactYear = r.netWorthImpact?.horizonYears
         ? new Date().getFullYear() + r.netWorthImpact.horizonYears
         : horizonYear;
+      const ae = (r as any).advisorExplanation;
+      const fea = (r as any).feasibility;
+      const beh = (r as any).behaviouralRisk;
+      const stress = (r as any).stressTest;
+      const bestPath = (unified as any).bestPath;
       actions.push({
         id,
         title: r.title,
@@ -209,6 +229,16 @@ export function buildRecommendedActions(
         risk: recommendationRiskToActionRisk(r),
         confidencePct: clampConfidence(r.confidenceScore),
         sourceEngines: r.sourceSignalsUsed.map(humanSignal),
+        // Sprint 18 additive surface fields
+        feasibilityStatus: ae?.feasibilityStatus ?? fea?.summary,
+        stressTestResult: ae?.stressTestResult ?? (stress
+          ? `Survives ${stress.scenariosSurvived} of ${stress.scenariosTested} stress scenarios`
+          : undefined),
+        behaviouralNote: ae?.behaviouralNote ?? beh?.note,
+        confidenceExplanation: ae?.confidenceExplanation,
+        bestPathLabel: bestPath ? `${bestPath.title} (${bestPath.score}/100)` : undefined,
+        baselineComparison: ae?.baselineComparison,
+        nextPracticalStep: ae?.nextPracticalStep,
       });
     }
   }

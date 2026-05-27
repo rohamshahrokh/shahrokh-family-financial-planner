@@ -145,6 +145,79 @@ function ActionCard({ action, showReasoning }: { action: RecommendedAction; show
           ))}
         </footer>
       )}
+
+      <AdvisorDetails action={action} />
     </article>
+  );
+}
+
+/**
+ * Sprint 18 Phase 18.6 — Advisor details panel.
+ *
+ * Uses native <details>/<summary> (an existing browser primitive — no new
+ * components, no nav change, no layout redesign). Surfaces feasibility,
+ * stress test, behavioural note, best path, baseline comparison, and the
+ * next practical step when the engine produced them.
+ */
+function AdvisorDetails({ action }: { action: RecommendedAction }) {
+  const has =
+    action.feasibilityStatus ||
+    action.stressTestResult ||
+    action.behaviouralNote ||
+    action.bestPathLabel ||
+    action.baselineComparison ||
+    action.confidenceExplanation ||
+    action.nextPracticalStep;
+  if (!has) return null;
+  return (
+    <details className="mt-2 text-[11px] leading-relaxed" data-testid={`recommended-actions-details-${action.id}`}>
+      <summary className="cursor-pointer text-[10px] uppercase tracking-widest font-semibold opacity-80 hover:opacity-100">
+        Show advisor details
+      </summary>
+      <div className="mt-2 space-y-1 text-muted-foreground">
+        {action.feasibilityStatus && (
+          <p data-testid={`recommended-actions-feasibility-${action.id}`}>
+            <span className="font-semibold text-foreground">Feasibility — </span>
+            {action.feasibilityStatus}
+          </p>
+        )}
+        {action.baselineComparison && (
+          <p data-testid={`recommended-actions-baseline-${action.id}`}>
+            <span className="font-semibold text-foreground">Baseline (do nothing) — </span>
+            {action.baselineComparison}
+          </p>
+        )}
+        {action.stressTestResult && (
+          <p data-testid={`recommended-actions-stress-${action.id}`}>
+            <span className="font-semibold text-foreground">Stress test — </span>
+            {action.stressTestResult}
+          </p>
+        )}
+        {action.behaviouralNote && (
+          <p data-testid={`recommended-actions-behavioural-${action.id}`}>
+            <span className="font-semibold text-foreground">Behavioural — </span>
+            {action.behaviouralNote}
+          </p>
+        )}
+        {action.bestPathLabel && (
+          <p data-testid={`recommended-actions-bestpath-${action.id}`}>
+            <span className="font-semibold text-foreground">Best path — </span>
+            {action.bestPathLabel}
+          </p>
+        )}
+        {action.confidenceExplanation && (
+          <p data-testid={`recommended-actions-confidence-${action.id}`}>
+            <span className="font-semibold text-foreground">Confidence — </span>
+            {action.confidenceExplanation}
+          </p>
+        )}
+        {action.nextPracticalStep && (
+          <p data-testid={`recommended-actions-next-${action.id}`}>
+            <span className="font-semibold text-foreground">Next step — </span>
+            {action.nextPracticalStep}
+          </p>
+        )}
+      </div>
+    </details>
   );
 }

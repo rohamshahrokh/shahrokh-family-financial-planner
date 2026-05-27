@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "id": "21_family_childcare_pressure",
+    "profile": "Young family with severe childcare pressure",
+    "age": 36,
+    "household": "2 kids under 5, dual income but childcare $3500/mo, mortgage $720k, surplus thin",
+    "net_worth_aud": 410000,
+    "annual_income_aud": 210000,
+    "key_features": ["high childcare costs", "thin surplus", "dependents", "mortgage stress"]
+  },
+  "signals": {
+    "cashOutsideOffset": 28000,
+    "offsetBalance": 42000,
+    "mortgage": 720000,
+    "otherDebts": 8500,
+    "ppor": 1050000,
+    "monthlyIncome": 17500,
+    "monthlyExpenses": 15200,
+    "monthlySurplus": 2300,
+    "rohamGrossAnnual": 210000,
+    "superCapRemaining": 12000,
+    "emergencyBufferTarget": 91200,
+    "upcomingBills12mo": 8400,
+    "marginalTaxRate": 0.37,
+    "etfExpectedReturn": 0.095,
+    "mortgageRate": 0.0625,
+    "expensesIncludeDebt": true,
+    "mcSurvivalProbability": 0.55
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 8500,
+    "fireAge": 60
+  }
+}

@@ -57,6 +57,7 @@
     "test:projection-consistency": "tsx script/test-projection-consistency.ts",
     "test:settings-input-consolidation": "tsx script/test-settings-input-consolidation.ts",
     "test:audit": "tsx client/src/lib/__tests__/recommendationAudit.test.ts",
+    "test:audit:sprint18": "tsx client/src/lib/__tests__/recommendationAudit/runSprint18Audit.ts",
     "test:monte-carlo-canonical": "tsx script/test-monte-carlo-canonical.ts",
     "test:monte-carlo-v4": "tsx script/test-monte-carlo-v4.ts",
     "test:monte-carlo-v5": "tsx script/test-monte-carlo-v5.ts",

@@ -1,0 +1,36 @@
+{
+  "meta": {
+    "id": "25_property_feasible_etf_best",
+    "profile": "Property feasible but ETF DCA is the better path",
+    "age": 35,
+    "household": "Strong income, $280k cash, no debt, eligible for property — but ETF + super tax wedge wins",
+    "net_worth_aud": 580000,
+    "annual_income_aud": 240000,
+    "key_features": ["property_feasible", "etf_likely_optimal", "high marginal tax"]
+  },
+  "signals": {
+    "cashOutsideOffset": 280000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 0,
+    "monthlyIncome": 20000,
+    "monthlyExpenses": 9000,
+    "monthlySurplus": 11000,
+    "rohamGrossAnnual": 240000,
+    "rohamSuperBalance": 220000,
+    "superCapRemaining": 22000,
+    "emergencyBufferTarget": 54000,
+    "upcomingBills12mo": 3000,
+    "marginalTaxRate": 0.39,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true,
+    "fireProgressPct": 25,
+    "mcSurvivalProbability": 0.78
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 10000,
+    "fireAge": 52
+  }
+}

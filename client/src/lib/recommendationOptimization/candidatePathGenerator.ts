@@ -65,7 +65,7 @@ function emptyPath(
 export function generateCandidatePaths(ctx: RecommendationContext): OptimisedPath[] {
   const t = ctx.today;
   const lifeStage = ctx.lifeStage ?? "STATE_A_ACCUMULATION";
-  const hasMortgage = (t.netWorth.debt ?? 0) > 0 || (t.ledger?.snapshot?.mortgage ?? 0) > 0;
+  const hasMortgage = (t.ledger?.snapshot?.mortgage ?? 0) > 0;
   const hasCrypto = t.netWorth.crypto > 0;
   const cashRunwayMonths = t.cashflow.monthlyExpenses > 0
     ? t.netWorth.cash / t.cashflow.monthlyExpenses

@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "id": "23_strong_super_low_liquid",
+    "profile": "Strong super, low accessible wealth",
+    "age": 48,
+    "household": "Super $820k, cash $18k, no PPOR, FIRE target age 55 — super inaccessible before 60",
+    "net_worth_aud": 838000,
+    "annual_income_aud": 165000,
+    "key_features": ["super-heavy", "low liquid", "preservation age gap"]
+  },
+  "signals": {
+    "cashOutsideOffset": 18000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 0,
+    "monthlyIncome": 13750,
+    "monthlyExpenses": 8200,
+    "monthlySurplus": 5550,
+    "rohamGrossAnnual": 165000,
+    "rohamSuperBalance": 520000,
+    "faraSuperBalance": 300000,
+    "superCapRemaining": 24000,
+    "emergencyBufferTarget": 49200,
+    "upcomingBills12mo": 3600,
+    "marginalTaxRate": 0.345,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true,
+    "fireProgressPct": 60,
+    "fireYearsToTarget": 7,
+    "mcSurvivalProbability": 0.62
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 7000,
+    "fireAge": 55
+  }
+}

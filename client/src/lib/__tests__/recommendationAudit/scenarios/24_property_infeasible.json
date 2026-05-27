@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "24_property_infeasible",
+    "profile": "Property purchase clearly infeasible",
+    "age": 30,
+    "household": "Renting, $22k cash, $85k income, wants $700k purchase — deposit + costs way out of reach",
+    "net_worth_aud": 65000,
+    "annual_income_aud": 85000,
+    "key_features": ["property_target", "deposit shortfall", "borrowing capacity short"]
+  },
+  "signals": {
+    "cashOutsideOffset": 22000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 4500,
+    "ppor": 0,
+    "monthlyIncome": 7100,
+    "monthlyExpenses": 5400,
+    "monthlySurplus": 1700,
+    "rohamGrossAnnual": 85000,
+    "superCapRemaining": 22500,
+    "emergencyBufferTarget": 32400,
+    "upcomingBills12mo": 2400,
+    "marginalTaxRate": 0.325,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true,
+    "fireProgressPct": 5
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 5500,
+    "fireAge": 65
+  }
+}

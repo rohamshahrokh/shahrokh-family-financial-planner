@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "id": "22_high_mortgage_rate_sensitive",
+    "profile": "Mortgage-rate sensitive household",
+    "age": 41,
+    "household": "Variable-rate mortgage $940k, just survives current rate, +2% would break surplus",
+    "net_worth_aud": 380000,
+    "annual_income_aud": 175000,
+    "key_features": ["rate sensitivity", "leverage stress", "thin buffer"]
+  },
+  "signals": {
+    "cashOutsideOffset": 18000,
+    "offsetBalance": 32000,
+    "mortgage": 940000,
+    "otherDebts": 6500,
+    "ppor": 1230000,
+    "monthlyIncome": 14500,
+    "monthlyExpenses": 11800,
+    "monthlySurplus": 2700,
+    "rohamGrossAnnual": 175000,
+    "superCapRemaining": 14000,
+    "emergencyBufferTarget": 70800,
+    "upcomingBills12mo": 4200,
+    "marginalTaxRate": 0.345,
+    "etfExpectedReturn": 0.095,
+    "mortgageRate": 0.063,
+    "expensesIncludeDebt": true,
+    "mcSurvivalProbability": 0.40
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 7800,
+    "fireAge": 60
+  }
+}
