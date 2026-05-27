@@ -36,7 +36,7 @@ export interface FireGoalEmptyStateProps {
 }
 
 const DEFAULT_SUBTITLE =
-  "Pick a FIRE age and target monthly income so every surface can size projections, gaps and recommendations to your goal.";
+  "Pick a target year and monthly passive income so every surface can size projections, gaps and recommendations to your goal.";
 
 const GOAL_HREF = "/financial-plan#fire-goal";
 

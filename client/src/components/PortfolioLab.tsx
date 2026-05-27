@@ -131,8 +131,9 @@ function MetricBlock({ metric, testidPrefix, compact }: MetricBlockProps) {
         <span
           className="text-[10px] text-amber-500 italic"
           data-testid={`${testidPrefix}-incomplete`}
+          title="Some inputs for this metric are missing — open the explainer panel below for what's needed."
         >
-          incomplete data
+          inputs missing
         </span>
       ) : null}
     </div>
@@ -152,7 +153,7 @@ function CurrentPositionCard({ section }: { section: ReturnType<typeof buildPort
           Current Position
         </h2>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Today's wealth snapshot — every number is a canonical engine pass-through.
+          Today's wealth snapshot — every number is a verified pass-through of the live planner.
         </p>
       </header>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">

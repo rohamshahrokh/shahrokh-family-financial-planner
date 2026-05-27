@@ -144,6 +144,9 @@ section("(2) snapshot.fire_target_monthly_income reads — allowlist guard");
     // Persistence-layer column lists (not UI reads).
     "lib/localStore.ts",
     "lib/supabaseClient.ts",
+    // Sprint 20 PR-A — canonical migration shim reads the legacy column
+    // exactly so it can convert it to the new year-based canonical shape.
+    "lib/fireGoalCanonical.migration.ts",
   ]);
 
   const readers: string[] = [];

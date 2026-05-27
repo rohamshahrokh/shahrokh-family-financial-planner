@@ -127,7 +127,7 @@ export function FireGapSummaryBlock({ summary, monteCarloRunDate, forecastStale,
       <div data-testid="pl-fire-gap-empty" className="space-y-2">
         <FireGoalEmptyState
           surface="portfolio-lab"
-          subtitle="Enter your target net worth and FIRE year on the Dashboard. Once set, this block shows your current position, target, and gap — calculated from the canonical engines."
+          subtitle="Enter your target net worth and FIRE year on the Dashboard. Once set, this block shows your current position, target, and gap — calculated from the live planner."
         />
         {currentNwFmt ? (
           <Card className="p-3 sm:p-4" data-testid="pl-fire-gap-empty-current-nw">
@@ -147,7 +147,7 @@ export function FireGapSummaryBlock({ summary, monteCarloRunDate, forecastStale,
       <header className="mb-3">
         <h2 className="text-base sm:text-lg font-semibold text-foreground">FIRE Gap Summary</h2>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Where you are, where you're going, and how big the gap is — every number from the canonical engines.
+          Where you are, where you're going, and how big the gap is — every number is a verified pass-through of the live planner.
         </p>
       </header>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

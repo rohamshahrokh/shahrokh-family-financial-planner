@@ -3669,7 +3669,7 @@ export default function WealthStrategyPage() {
 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
               <SignalTile label="Current age"          value="36"                              tone="neutral" />
-              <SignalTile label="Target FIRE age"      value="55"                              tone="neutral" />
+              <SignalTile label="Target FIRE year"     value={String(new Date().getFullYear() + 19)} tone="neutral" />
               <SignalTile label="Desired passive / mo" value={fmtAUD0(derived.monthlyExpenses)} tone="neutral" />
               <SignalTile label="FIRE target capital"  value={fmtAUD0(derived.requiredFIRE)}    tone="neutral" />
               <SignalTile label="Capital gap"          value={fmtAUD0(derived.fireGap)}         tone={fireStatus} />

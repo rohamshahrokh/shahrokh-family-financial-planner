@@ -95,10 +95,10 @@ export default function ScenarioCompareWorkspacePage() {
           data-testid="scenario-compare-workspace-page-subtitle"
         >
           Six parallel strategies (Baseline, Buy IP 2027, Buy IP 2028, ETF
-          Focus, Offset Focus, Hybrid) ranked side-by-side. All metrics are
-          sourced from the canonical engines — Net Worth, Passive Income,
-          FIRE Date, Monthly Surplus, Liquidity, Risk Score, Monte Carlo
-          confidence, and the engine-recommended action.
+          Focus, Offset Focus, Hybrid) ranked side-by-side. Every metric is a
+          verified pass-through of the live planner — Net Worth, Passive
+          Income, FIRE Date, Monthly Surplus, Liquidity, Risk Score, Monte
+          Carlo confidence, and the recommended action.
         </p>
       </div>
 

@@ -291,7 +291,7 @@ function CompareTable({ result, mode }: CompareTableProps) {
                   <span
                     className="ml-2 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400"
                     data-testid={`scenario-builder-compare-table-engine-limited-${r.scenario.id}`}
-                    title="Some edits are not yet recomputed by the canonical engines."
+                    title="Some edits are not yet recomputed by the live planner."
                   >
                     ENGINE-LIMITED
                   </span>
@@ -458,7 +458,7 @@ export function ScenarioBuilderWorkspace(props: ScenarioBuilderWorkspaceProps) {
             Scenario Builder — What-If
           </h2>
           <p className="text-xs text-muted-foreground" data-testid="scenario-builder-workspace-subtitle">
-            Create, clone, rename, or delete scenarios. Edit assumptions on the left; every metric on the right is sourced from the canonical engines. Switch to "Compare vs Baseline" to see deltas.
+            Create, clone, rename, or delete scenarios. Edit assumptions on the left; every metric on the right is a verified pass-through of the live planner. Switch to "Compare vs Baseline" to see deltas.
           </p>
         </div>
         <div className="flex items-center gap-2" data-testid="scenario-builder-workspace-actions">
@@ -498,8 +498,8 @@ export function ScenarioBuilderWorkspace(props: ScenarioBuilderWorkspaceProps) {
           className="rounded-lg border border-dashed border-border bg-card p-6 text-center"
           data-testid="scenario-builder-workspace-empty"
         >
-          <div className="text-sm font-medium text-foreground">Scenario Builder is waiting on the canonical ledger.</div>
-          <div className="text-xs text-muted-foreground mt-2">Once the household snapshot is loaded, every scenario row will render canonical engine outputs.</div>
+          <div className="text-sm font-medium text-foreground">Scenario Builder is waiting on the household ledger.</div>
+          <div className="text-xs text-muted-foreground mt-2">Once the household snapshot is loaded, every scenario row will render live planner outputs.</div>
           <div className="text-[10px] text-muted-foreground mt-2 font-mono" data-testid="scenario-builder-workspace-empty-reason">{result.emptyReason ?? "no-ledger"}</div>
         </div>
       ) : null}

@@ -80,8 +80,9 @@ function MetricCell({ metric, testidPrefix }: MetricCellProps) {
         <span
           className="text-[10px] text-amber-500"
           data-testid={`${testidPrefix}-incomplete`}
+          title="Some inputs for this metric are missing — open the explainer panel below for what's needed."
         >
-          incomplete data
+          inputs missing
         </span>
       ) : null}
     </div>

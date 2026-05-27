@@ -300,6 +300,15 @@ const GOAL_CARD_DISMISSED_KEY = "fwl.action_centre.goal_card_dismissed.v1";
 function FireGoalSection() {
   const { auditMode } = useAuditMode();
   const { data: goal, isLoading } = useCanonicalGoal();
+  // Read current_age off mc_fire_settings so the "by 2035" chip uses the
+  // household's real reference age rather than a hardcoded default.
+  const { data: mcSettings } = useQuery<any>({
+    queryKey: ["/api/mc-fire-settings"],
+    queryFn: () => apiRequest("GET", "/api/mc-fire-settings").then(r => r.json()),
+  });
+  const currentAge = Number.isFinite((mcSettings as any)?.current_age)
+    ? Number((mcSettings as any).current_age)
+    : 40;
 
   // Per-session dismissal of the "Goal not set" nudge. Reappears on a new
   // browser session. Only consulted in the NOT_SET branch.
@@ -331,8 +340,8 @@ function FireGoalSection() {
           <div className="flex-1 pr-6">
             <div className="text-sm font-semibold">Pick your FIRE goal</div>
             <div className="text-xs text-muted-foreground mt-1">
-              Pick a FIRE age and target monthly income so the Action Centre
-              can size recommendations to your goal.
+              Pick a target year and monthly passive income so the Action
+              Centre can size recommendations to your goal.
             </div>
           </div>
           <Link href="/financial-plan#fire-goal">
@@ -361,8 +370,10 @@ function FireGoalSection() {
           <span className="num-display font-medium">
             {formatCurrency(goal.targetPassiveMonthly)}
           </span>
-          <span className="text-muted-foreground">/mo passive by age </span>
-          <span className="font-medium">{goal.targetFireAge}</span>
+          <span className="text-muted-foreground">/mo passive by </span>
+          <span className="font-medium">
+            {new Date().getFullYear() + Math.max(0, goal.targetFireAge - currentAge)}
+          </span>
           <span className="text-muted-foreground">.</span>
         </span>
         <Link href="/financial-plan#fire-goal">
