@@ -43,7 +43,7 @@ import { ProbabilisticWealthSection } from "@/components/ProbabilisticWealthSect
 import { buildPathSimulationEngine } from "@/lib/pathSimulationEngine";
 import { PathSimulationSection } from "@/components/PathSimulationSection";
 import { buildGoalSolverPro, EMPTY_GOAL_TARGETS } from "@/lib/goalSolverPro";
-import { computeCanonicalFire } from "@/lib/canonicalFire";
+import { selectCanonicalFire } from "@/lib/canonicalFire";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 import { Button } from "@/components/ui/button";
@@ -734,7 +734,10 @@ function PortfolioLabHero({
   whyWinsLabel,
   netWorthFan,
 }: HeroProps) {
-  const canonical = canonicalLedger ? computeCanonicalFire(canonicalLedger) : null;
+  // Sprint 15 Phase 2: route FIRE through selectCanonicalFire wired with the
+  // canonical goal so mc_fire_settings overrides the snapshot 20k default.
+  const { data: goal } = useCanonicalGoal();
+  const canonical = canonicalLedger ? selectCanonicalFire(canonicalLedger, goal) : null;
   const featured = recommendations.find(r => r.category === "hybrid") ?? recommendations[0] ?? null;
 
   // Slot 2 — feasibility status / probability bar
@@ -969,8 +972,10 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
   // outputs. Used here (Sprint 11) only to feed the Hero's feasibility slot;
   // user-driven target editing now lives on /decision (Sprint 11 #6).
   const goalSolverResult = useMemo(() => {
+    // Sprint 15 Phase 2: thread canonical goal into FIRE compute so Goal
+    // Solver Pro consumes the user-set swrPct + targetPassiveMonthly.
     const canonicalFire = props.canonicalLedger
-      ? computeCanonicalFire(props.canonicalLedger)
+      ? selectCanonicalFire(props.canonicalLedger, canonicalGoal ?? undefined)
       : {
           swrPct: 4,
           targetAnnualIncome: 0,
@@ -1102,8 +1107,11 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
   const top3 = useMemo(() => selectTop3Actions(goalSolverResult), [goalSolverResult]);
   const doNothing = useMemo(() => selectDoNothingComparison(goalSolverResult), [goalSolverResult]);
   const canonicalFire = useMemo(
-    () => (props.canonicalLedger ? computeCanonicalFire(props.canonicalLedger) : null),
-    [props.canonicalLedger],
+    () =>
+      props.canonicalLedger
+        ? selectCanonicalFire(props.canonicalLedger, canonicalGoal ?? undefined)
+        : null,
+    [props.canonicalLedger, canonicalGoal],
   );
   const baselineNW = canonicalFire?.netWorthNow ?? null;
 

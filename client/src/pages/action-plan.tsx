@@ -50,7 +50,7 @@ import {
   selectSuperCombined,
 } from "@/lib/dashboardDataContract";
 import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics";
-import { computeCanonicalFire } from "@/lib/canonicalFire";
+import { selectCanonicalFire } from "@/lib/canonicalFire";
 import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
 import { computeUnifiedBestMove, readLatestQuickDecisionGeneratedAt, type UnifiedBestMoveResult } from "@/lib/recommendationEngine/bestMoveBridge";
 import type { Recommendation } from "@/lib/recommendationEngine/types";
@@ -162,9 +162,13 @@ function CurrentPositionSection(props: {
 }) {
   const { ledger, goalTargetNetWorth, unified } = props;
   const { auditMode } = useAuditMode();
+  // Sprint 15 Phase 2: route through selectCanonicalFire so the user's saved
+  // mc_fire_settings overrides snapshot.fire_target_monthly_income (the SQLite
+  // 20k default hazard).
+  const { data: goal } = useCanonicalGoal();
 
   const head = ledger ? computeCanonicalHeadlineMetrics(ledger) : null;
-  const fire = ledger ? computeCanonicalFire(ledger) : null;
+  const fire = ledger ? selectCanonicalFire(ledger, goal) : null;
 
   const nw = head?.netWorth ?? null;
   // Prefer the goal-derived target NW when the user has set a goal;
@@ -211,7 +215,7 @@ function CurrentPositionSection(props: {
     <section data-testid="action-centre-current-position" className="space-y-2">
       <header className="flex items-baseline justify-between">
         <h2 className="text-base sm:text-lg font-semibold">Where you are today</h2>
-        {auditMode && <SourceChip>computeCanonicalHeadlineMetrics · computeCanonicalFire</SourceChip>}
+        {auditMode && <SourceChip>computeCanonicalHeadlineMetrics · selectCanonicalFire</SourceChip>}
       </header>
 
       {/* Verdict-first hero — single line above the tile grid. */}
@@ -684,8 +688,10 @@ function DoNothingSection(props: {
 /* ────────────────────────────────────────────────────────────────────────── */
 function LabSummaryCards({ ledger }: { ledger: DashboardInputs | null }) {
   const { auditMode } = useAuditMode();
+  // Sprint 15 Phase 2: thread canonical goal through the FIRE selector.
+  const { data: goal } = useCanonicalGoal();
   const head = ledger ? computeCanonicalHeadlineMetrics(ledger) : null;
-  const fire = ledger ? computeCanonicalFire(ledger) : null;
+  const fire = ledger ? selectCanonicalFire(ledger, goal) : null;
 
   // Goal Closure: gap-to-goal headline from the canonical FIRE selector.
   const gap = fire?.gap ?? null;

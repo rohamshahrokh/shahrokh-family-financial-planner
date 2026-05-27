@@ -35,6 +35,7 @@ import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
+import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
 import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 import { GclSixOutputGrid } from "@/components/goal-closure/GclSixOutputGrid";
 
@@ -497,15 +498,20 @@ function StrategicIdeasCard({ section }: { section: ReturnType<typeof buildGoalC
 /* ─── Root ─────────────────────────────────────────────────────────────── */
 
 export function GoalClosureLab(props: GoalClosureLabProps) {
+  // Sprint 15 Phase 2: thread canonical goal so buildGoalClosureLab routes
+  // through selectCanonicalFire wired with mc_fire_settings (not the SQLite
+  // 20k snapshot default).
+  const { data: goal } = useCanonicalGoal();
   const result = useMemo(() => {
     const inputs: GoalClosureLabInputs = {
       canonicalLedger: props.canonicalLedger,
       goalSolverInputs: props.goalSolverInputs,
       riskOutputs: props.riskOutputs ?? null,
       monteCarloOutputs: props.monteCarloOutputs ?? null,
+      goal: goal ?? null,
     };
     return buildGoalClosureLab(inputs);
-  }, [props.canonicalLedger, props.goalSolverInputs, props.riskOutputs, props.monteCarloOutputs]);
+  }, [props.canonicalLedger, props.goalSolverInputs, props.riskOutputs, props.monteCarloOutputs, goal]);
 
   if (result.empty) {
     return (

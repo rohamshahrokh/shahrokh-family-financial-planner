@@ -39,7 +39,8 @@ import {
   selectCashToday,
   selectSuperCombined,
 } from "@/lib/dashboardDataContract";
-import { computeCanonicalFire } from "@/lib/canonicalFire";
+import { selectCanonicalFire } from "@/lib/canonicalFire";
+import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
 import { formatCurrency } from "@/lib/finance";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import { Button } from "@/components/ui/button";
@@ -149,9 +150,12 @@ function DecisionEngineSummary() {
 /* NOT invoked here — the top-lever line therefore stays in the fallback.    */
 /* ────────────────────────────────────────────────────────────────────────── */
 function GoalClosureSummary({ ledger }: { ledger: DashboardInputs | null }) {
+  // Sprint 15 Phase 2: route through selectCanonicalFire so mc_fire_settings
+  // (swrPct + targetPassiveMonthly) override snapshot.fire_target_monthly_income.
+  const { data: goal } = useCanonicalGoal();
   const fire = useMemo(
-    () => (ledger ? computeCanonicalFire(ledger) : null),
-    [ledger],
+    () => (ledger ? selectCanonicalFire(ledger, goal) : null),
+    [ledger, goal],
   );
   const gap = fire?.gap ?? null;
   const progressPct =
