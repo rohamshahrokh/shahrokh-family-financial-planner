@@ -733,7 +733,9 @@ function evaluateScenario(
         ? `Target action year: ${d.propertyYear}.`
         : (d.targetFireYear ? `Aligned to FIRE target ${d.targetFireYear}.` : "Begin as soon as the household has surplus capacity."),
       why: `${cand.rationale} This action is expected to ${direction} FIRE progress.`,
-      doNothing: `Without this action the household stays on the canonical projection (${projectedYear ?? "—"}).`,
+      doNothing: Number.isFinite(projectedYear)
+        ? `Without this action the household stays on the canonical projection (${projectedYear}).`
+        : `Without this action the household stays on the canonical projection.`,
     };
   })();
 

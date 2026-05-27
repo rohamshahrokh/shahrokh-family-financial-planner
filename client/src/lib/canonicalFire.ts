@@ -269,6 +269,27 @@ function emptyCanonicalFire(
   };
 }
 
+/**
+ * Sprint 15.2 — canonical "is FIRE goal explicitly set?" predicate.
+ *
+ * Returns true ONLY when the user has actually saved a FIRE goal via
+ * mc_fire_settings (status === "SET" AND targetPassiveMonthly > 0 AND
+ * swrPct > 0). Returns false for null/undefined, NOT_SET, or partial/zero
+ * SET shapes that would otherwise let derived defaults leak through.
+ *
+ * Every surface that conditionally renders FIRE numerics MUST branch on
+ * this single predicate so the "goal not set" CTA is shown uniformly.
+ */
+export function isFireGoalExplicitlySet(
+  goal: CanonicalGoal | null | undefined,
+): boolean {
+  if (!goal) return false;
+  if (goal.status !== "SET") return false;
+  if (!Number.isFinite(goal.targetPassiveMonthly) || goal.targetPassiveMonthly <= 0) return false;
+  if (!Number.isFinite(goal.swrPct) || goal.swrPct <= 0) return false;
+  return true;
+}
+
 export function selectCanonicalFire(
   ledger: DashboardInputs,
   goal: CanonicalGoal | undefined,

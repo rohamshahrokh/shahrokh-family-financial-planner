@@ -36,6 +36,8 @@ import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
+import { isFireGoalExplicitlySet } from "@/lib/canonicalFire";
+import { FireGoalEmptyState } from "@/components/FireGoalEmptyState";
 import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 import { GclSixOutputGrid } from "@/components/goal-closure/GclSixOutputGrid";
 
@@ -520,6 +522,24 @@ export function GoalClosureLab(props: GoalClosureLabProps) {
         data-testid="closure-lab-empty-state"
       >
         Goal Closure Lab is waiting for canonical ledger data. {result.emptyReason ?? ""}
+      </div>
+    );
+  }
+
+  // Sprint 15.2 — when no FIRE goal is explicitly set, the 6-output advisor
+  // grid would render "Current Gap $0" (treating absence as achievement).
+  // Surface the unified empty-state CTA instead. Path comparison and audit
+  // sections remain accessible via the advanced disclosure below.
+  if (!isFireGoalExplicitlySet(goal ?? null)) {
+    return (
+      <div
+        className={`flex flex-col gap-4 sm:gap-6 ${props.className ?? ""}`}
+        data-testid="closure-lab-root"
+      >
+        <FireGoalEmptyState
+          surface="goal-closure-lab"
+          subtitle="The Goal Closure Lab quantifies how far you are from your FIRE target and which levers close the gap fastest. Set a target monthly income and SWR to unlock the 6-output advisor grid."
+        />
       </div>
     );
   }

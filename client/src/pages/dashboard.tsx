@@ -97,7 +97,10 @@ import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics"
 import {
   computeCanonicalFire,
   resolveFireTargetFromSnapshot,
+  isFireGoalExplicitlySet,
 } from "@/lib/canonicalFire";
+import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
+import { FireGoalEmptyState } from "@/components/FireGoalEmptyState";
 import { aggregateIncome } from "@/lib/incomeClassificationEngine";
 import { maskValue } from "@/components/PrivacyMask";
 import SaveButton, { useSaveOnEnter } from "@/components/SaveButton";
@@ -578,6 +581,9 @@ export default function DashboardPage() {
   // outputs; the policy decision (current_law vs reform) lives in the
   // engine — never duplicated here.
   const qc = useQueryClient();
+  // Sprint 15.2 — canonical goal threaded for the unified empty-state CTA.
+  const { data: canonicalGoalData } = useCanonicalGoal();
+  const fireGoalSet = isFireGoalExplicitlySet(canonicalGoalData ?? null);
   const { selector: activeRegimeSelector } = useActiveRegime();
   const activeScenario = selectorToScenario(activeRegimeSelector);
   const { chartView, setChartView, privacyMode, togglePrivacy, currentUser } = useAppStore();
@@ -2629,6 +2635,16 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Sprint 15.2 — unified empty-state CTA when no explicit FIRE goal is set. */}
+      {!fireGoalSet && (
+        <div className="px-4 pt-2 pb-1" data-testid="dashboard-fire-goal-empty-wrap">
+          <FireGoalEmptyState
+            surface="dashboard"
+            subtitle="The dashboard timeline and FIRE progress tiles currently use derived defaults. Set a target monthly income and SWR so every surface anchors to your own plan."
+          />
+        </div>
+      )}
 
       {/* Executive Overview cockpit — primary content surface on the homepage. */}
       <div

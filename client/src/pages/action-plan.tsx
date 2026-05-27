@@ -50,8 +50,9 @@ import {
   selectSuperCombined,
 } from "@/lib/dashboardDataContract";
 import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics";
-import { selectCanonicalFire } from "@/lib/canonicalFire";
+import { selectCanonicalFire, isFireGoalExplicitlySet } from "@/lib/canonicalFire";
 import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
+import { FireGoalEmptyState } from "@/components/FireGoalEmptyState";
 import { readLatestQuickDecisionGeneratedAt, type UnifiedBestMoveResult } from "@/lib/recommendationEngine/bestMoveBridge";
 import type { Recommendation } from "@/lib/recommendationEngine/types";
 import { formatConfidence } from "@/lib/confidenceLabels";
@@ -170,15 +171,19 @@ function CurrentPositionSection(props: {
   const head = ledger ? computeCanonicalHeadlineMetrics(ledger) : null;
   const fire = ledger ? selectCanonicalFire(ledger, goal) : null;
 
+  const goalSet = isFireGoalExplicitlySet(goal);
   const nw = head?.netWorth ?? null;
-  // Prefer the goal-derived target NW when the user has set a goal;
-  // otherwise fall back to the canonical FIRE number.
-  const targetNW = goalTargetNetWorth ?? (fire?.fireNumber && fire.fireNumber > 0 ? fire.fireNumber : null);
+  // Sprint 15.2: when the FIRE goal is not explicitly set, suppress all
+  // goal-derived numerics (FIRE %, passive coverage). Ledger-only figures
+  // such as net worth continue to render.
+  const targetNW = goalSet
+    ? (goalTargetNetWorth ?? (fire?.fireNumber && fire.fireNumber > 0 ? fire.fireNumber : null))
+    : null;
   const fireProgressPct = nw !== null && targetNW && targetNW > 0
     ? Math.max(0, Math.min(100, (nw / targetNW) * 100))
     : null;
 
-  const passiveCoveragePct = fire?.passiveCoverage != null
+  const passiveCoveragePct = goalSet && fire?.passiveCoverage != null
     ? Math.round(fire.passiveCoverage * 100)
     : null;
 
@@ -695,9 +700,11 @@ function LabSummaryCards({ ledger }: { ledger: DashboardInputs | null }) {
   const { data: goal } = useCanonicalGoal();
   const head = ledger ? computeCanonicalHeadlineMetrics(ledger) : null;
   const fire = ledger ? selectCanonicalFire(ledger, goal) : null;
+  const goalSet = isFireGoalExplicitlySet(goal);
 
   // Goal Closure: gap-to-goal headline from the canonical FIRE selector.
-  const gap = fire?.gap ?? null;
+  // Sprint 15.2: suppress the gap headline when no goal is explicitly set.
+  const gap = goalSet ? (fire?.gap ?? null) : null;
 
   // Portfolio Lab: 4-bucket snapshot from existing selectors. We don't
   // recompute allocation here — only sum the canonical bucket values and let
@@ -719,11 +726,13 @@ function LabSummaryCards({ ledger }: { ledger: DashboardInputs | null }) {
           <div className="min-w-0 flex-1">
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Goal Closure Lab</div>
             <div className="text-base sm:text-lg font-bold num-display mt-1">
-              {gap !== null
-                ? gap > 0
-                  ? `${formatCurrency(gap)} to go`
-                  : "On target"
-                : "Not available"}
+              {!goalSet
+                ? "Set your FIRE goal"
+                : gap !== null
+                  ? gap > 0
+                    ? `${formatCurrency(gap)} to go`
+                    : "On target"
+                  : "Not available"}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               How far you are from your FIRE number, and what closes the gap.
