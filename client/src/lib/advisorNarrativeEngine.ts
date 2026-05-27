@@ -16,20 +16,44 @@
  *      NOT `allocations[0]`.
  */
 
-import type { ConcentrationFlag } from "./concentration/types";
+import type { ConcentrationFlag, ConcentrationKind } from "./concentration/types";
 import type { HouseholdLifeStage } from "./householdState/types";
 
 export type AdvisorConfidenceBand = 'low' | 'medium' | 'high';
+
+const CONCENTRATION_HUMAN_LABEL: Record<ConcentrationKind, { trimAction: string; assetWord: string }> = {
+  property_over_80: { trimAction: 'Trim property allocation', assetWord: 'property' },
+  crypto_over_30: { trimAction: 'Trim crypto allocation', assetWord: 'crypto' },
+  single_asset_over_70: { trimAction: 'Trim concentrated single-asset position', assetWord: 'concentrated asset' },
+  cash_too_low: { trimAction: 'Raise cash reserve', assetWord: 'cash' },
+  debt_too_high: { trimAction: 'Reduce debt load', assetWord: 'debt' },
+};
+
+const LIFE_STAGE_HUMAN_LABEL: Record<HouseholdLifeStage, string> = {
+  STATE_A_ACCUMULATION: 'Accumulation phase',
+  STATE_B_ACCELERATING: 'Accelerating accumulation',
+  STATE_C_NEAR_FIRE: 'Near FIRE',
+  STATE_D_FIRE_ACHIEVED: 'FIRE achieved',
+  STATE_E_DECUMULATION: 'Decumulation',
+};
+
+export function humaniseConcentrationKind(kind: ConcentrationKind): { trimAction: string; assetWord: string } {
+  return CONCENTRATION_HUMAN_LABEL[kind] ?? { trimAction: 'Trim concentrated position', assetWord: 'concentrated asset' };
+}
+
+export function humaniseLifeStage(stage: HouseholdLifeStage): string {
+  return LIFE_STAGE_HUMAN_LABEL[stage] ?? 'Accumulation phase';
+}
 
 export interface AdvisorRecommendation {
   what: { action: string; concreteDetails: string };
   why: string;
   when: { year: number; quarter?: 1 | 2 | 3 | 4; reason: string };
   improves: {
-    fireYearDelta?: number;
-    successDelta?: number;
-    nwDelta?: number;
-    monthlyPassiveDelta?: number;
+    fireYearDelta: number;
+    successDelta: number;
+    nwDelta: number;
+    monthlyPassiveDelta: number;
   };
   risks: { label: string; severity: 'low' | 'medium' | 'high'; mitigation: string }[];
   doNothing: {
@@ -121,9 +145,10 @@ function whatFor(action: AdvisorActionInput, signals: HouseholdSignals): Advisor
     case 'rebalance_concentration': {
       const flag = pickPrimaryConcentration(signals.concentrationRisks);
       if (flag) {
+        const human = humaniseConcentrationKind(flag.kind);
         return {
-          action: `Reduce ${flag.kind.replace('_over_', ' exposure above ').replace('_', ' ')} below ${flag.thresholdPct}%`,
-          concreteDetails: `Current observed exposure ${flag.observedPct.toFixed(1)}%, ${flag.severity} severity — ${flag.remediation}`,
+          action: `${human.trimAction} to under ${flag.thresholdPct}%`,
+          concreteDetails: `Current exposure ${flag.observedPct.toFixed(1)}% (${human.assetWord}-dominated, ${flag.severity} severity). Reduce to under ${flag.thresholdPct}% by trimming the ${human.assetWord} sleeve. Stage over 3–6 months.`,
         };
       }
       return { action: 'Rebalance concentration', concreteDetails: 'No active concentration breach detected — monitor.' };
@@ -268,7 +293,7 @@ function risksFor(action: AdvisorActionInput, signals: HouseholdSignals): Adviso
       const f = pickPrimaryConcentration(signals.concentrationRisks);
       r.push({
         label: f
-          ? `Re-entry timing risk after trimming ${f.kind.replace(/_/g, ' ')}`
+          ? `Re-entry timing risk after trimming ${humaniseConcentrationKind(f.kind).assetWord}`
           : 'Re-entry timing risk',
         severity: 'medium',
         mitigation: 'Stage the rebalance over 3–6 months; reinvest into diversified sleeves only.',
@@ -371,11 +396,27 @@ function doNothingFor(signals: HouseholdSignals): AdvisorRecommendation['doNothi
   };
 }
 
-function confidenceFor(action: AdvisorActionInput, signals: HouseholdSignals, executionFit?: { likelyAdherence: number }): AdvisorRecommendation['confidence'] {
+function downgradeBand(band: AdvisorConfidenceBand): AdvisorConfidenceBand {
+  if (band === 'high') return 'medium';
+  if (band === 'medium') return 'low';
+  return 'low';
+}
+
+interface ConfidencePenaltyInputs {
+  endingShortfallPct?: number;
+  containsContradiction?: boolean;
+}
+
+function confidenceFor(
+  action: AdvisorActionInput,
+  signals: HouseholdSignals,
+  executionFit?: { likelyAdherence: number },
+  penalties?: ConfidencePenaltyInputs,
+): AdvisorRecommendation['confidence'] {
   let value = Math.max(0, Math.min(1, action.baseConfidence));
   let band: AdvisorConfidenceBand = value >= 0.75 ? 'high' : value >= 0.5 ? 'medium' : 'low';
-  let basisParts: string[] = [];
-  basisParts.push(`base confidence ${(action.baseConfidence * 100).toFixed(0)}%`);
+  const basisParts: string[] = [];
+  basisParts.push(`${(action.baseConfidence * 100).toFixed(0)}% base confidence (${humaniseLifeStage(signals.lifeStage)})`);
   if (executionFit) {
     if (executionFit.likelyAdherence < 0.6 && band === 'high') {
       band = 'medium';
@@ -384,7 +425,23 @@ function confidenceFor(action: AdvisorActionInput, signals: HouseholdSignals, ex
       basisParts.push(`execution fit ${(executionFit.likelyAdherence * 100).toFixed(0)}%`);
     }
   }
-  basisParts.push(`life stage ${signals.lifeStage.replace('STATE_', '').replace('_', ' ').toLowerCase()}`);
+
+  let anyPenaltyTriggered = false;
+  const shortfallPct = penalties?.endingShortfallPct ?? 0;
+  if (shortfallPct >= 0.3) {
+    band = downgradeBand(band);
+    anyPenaltyTriggered = true;
+    basisParts.push(`plan ends ${Math.round(shortfallPct * 100)}% short of target — band downgraded`);
+  }
+  if (penalties?.containsContradiction) {
+    band = downgradeBand(band);
+    anyPenaltyTriggered = true;
+    basisParts.push('path contains a contradiction — band downgraded');
+  }
+
+  const cap = anyPenaltyTriggered ? 0.65 : 0.80;
+  if (value > cap) value = cap;
+
   return { value, band, basis: basisParts.join('; ') };
 }
 
@@ -403,10 +460,31 @@ function assumptionsFor(action: AdvisorActionInput, signals: HouseholdSignals, e
 function sensitivityFor(action: AdvisorActionInput, signals: HouseholdSignals): AdvisorRecommendation['sensitivity'] {
   if (action.actionKind === 'operational_stabilisation') return undefined;
   const drivers: string[] = [];
-  if (signals.equitySharePct >= 30) drivers.push('equity real return');
-  if (signals.propertyExposurePct >= 30) drivers.push('property yield');
+  const equityEligible = signals.equitySharePct >= 10;
+  const propertyEligible = signals.propertyExposurePct >= 10;
+  const debtEligible = signals.debtServiceRatio >= 0.10;
+  const savingsEligible = signals.netWorth > 0
+    && signals.monthlySurplus * 12 / Math.max(1, signals.netWorth) >= 0.05;
+
+  if (equityEligible) drivers.push('equity real return');
+  if (propertyEligible) drivers.push('property yield');
+  if (debtEligible) drivers.push('debt service ratio');
+  if (savingsEligible && drivers.length < 2) drivers.push('savings rate');
+  if (drivers.length === 0) drivers.push('savings rate');
   drivers.push('inflation rate');
-  const line = `Outcome shifts ±${formatDollars(Math.max(50_000, signals.netWorth * 0.08))} over 10y if equity return moves ±1%.`;
+
+  const magnitude = Math.max(50_000, signals.netWorth * 0.08);
+  let line: string;
+  const leadDriver = drivers[0];
+  if (leadDriver === 'equity real return') {
+    line = `Outcome shifts ±${formatDollars(magnitude)} over 10y if equity return moves ±1%.`;
+  } else if (leadDriver === 'property yield') {
+    line = `Outcome shifts ±${formatDollars(magnitude)} over 10y if property yield moves ±1%.`;
+  } else if (leadDriver === 'debt service ratio') {
+    line = `Outcome shifts ±${formatDollars(magnitude)} over 10y if debt service ratio moves ±2 percentage points.`;
+  } else {
+    line = `Outcome shifts ±${formatDollars(magnitude)} over 10y if monthly savings rate moves ±${formatDollars(Math.max(200, signals.monthlySurplus * 0.2))}/mo.`;
+  }
   return { line, drivers: drivers.slice(0, 3) };
 }
 
@@ -415,26 +493,28 @@ export interface BuildRecommendationInputs {
   signals: HouseholdSignals;
   executionFit?: { likelyAdherence: number };
   stressRisks?: Array<{ label: string; severity: 'low' | 'medium' | 'high'; mitigation: string }>;
+  /** Realised real-path penalties used to calibrate confidence. */
+  pathPenalties?: { endingShortfallPct?: number; containsContradiction?: boolean };
 }
 
 export function buildAdvisorRecommendation(
   inputs: BuildRecommendationInputs,
 ): AdvisorRecommendation {
-  const { action, signals, executionFit, stressRisks } = inputs;
+  const { action, signals, executionFit, stressRisks, pathPenalties } = inputs;
   const what = whatFor(action, signals);
   const why = whyFor(action, signals);
   const when = whenFor(action, signals);
   const improves = {
-    fireYearDelta: action.fireYearDelta,
-    successDelta: action.successDelta,
-    nwDelta: action.nwDelta,
-    monthlyPassiveDelta: action.monthlyPassiveDelta,
+    fireYearDelta: Number.isFinite(action.fireYearDelta as number) ? (action.fireYearDelta as number) : 0,
+    successDelta: Number.isFinite(action.successDelta as number) ? (action.successDelta as number) : 0,
+    nwDelta: Number.isFinite(action.nwDelta as number) ? (action.nwDelta as number) : 0,
+    monthlyPassiveDelta: Number.isFinite(action.monthlyPassiveDelta as number) ? (action.monthlyPassiveDelta as number) : 0,
   };
   const baseRisks = risksFor(action, signals);
   const risks = [...baseRisks, ...(stressRisks ?? []).slice(0, 2)];
   const alternatives = alternativesFor(action, signals);
   const doNothing = doNothingFor(signals);
-  const confidence = confidenceFor(action, signals, executionFit);
+  const confidence = confidenceFor(action, signals, executionFit, pathPenalties);
   const assumptions = assumptionsFor(action, signals, executionFit);
   const sensitivity = sensitivityFor(action, signals);
   return {

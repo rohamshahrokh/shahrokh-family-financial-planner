@@ -21,6 +21,7 @@ import type { ConcentrationFlag } from "./concentration/types";
 import type { HouseholdLifeStage } from "./householdState/types";
 import {
   buildAdvisorRecommendation,
+  humaniseConcentrationKind,
   type AdvisorActionInput,
   type AdvisorRecommendation,
   type HouseholdSignals,
@@ -34,6 +35,8 @@ export interface AdvisorBuildInputs {
   monthlyCashflow: number;
   executionFit?: { likelyAdherence: number };
   stressTopRisks?: Array<{ label: string; severity: 'low' | 'medium' | 'high'; mitigation: string }>;
+  /** Optional realised real-path penalties used to calibrate confidence (Sprint 20 PR-B fix-up). */
+  pathPenalties?: { endingShortfallPct?: number; containsContradiction?: boolean };
 }
 
 interface CandidateAction {
@@ -52,7 +55,7 @@ function defaultProposedYear(signals: HouseholdSignals, offsetYears: number): nu
 export function generateAdvisorRecommendations(
   inputs: AdvisorBuildInputs,
 ): AdvisorRecommendation[] {
-  const { signals, borrowingCapacity, liquidityBufferMonths, monthlyCashflow, executionFit, stressTopRisks } = inputs;
+  const { signals, borrowingCapacity, liquidityBufferMonths, monthlyCashflow, executionFit, stressTopRisks, pathPenalties } = inputs;
   const breached = signals.concentrationRisks.find((r) => r.breached);
   const candidates: CandidateAction[] = [];
 
@@ -71,12 +74,13 @@ export function generateAdvisorRecommendations(
   }
 
   if (breached) {
+    const human = humaniseConcentrationKind(breached.kind);
     candidates.push({
       input: {
         id: `rebalance_${breached.kind}`,
         actionKind: 'rebalance_concentration',
         proposedYear: new Date().getFullYear() + 1,
-        conciseLabel: `Reduce ${breached.kind.replace(/_/g, ' ')}`,
+        conciseLabel: `${human.trimAction} to under ${breached.thresholdPct}%`,
         baseConfidence: 0.82,
         successDelta: 0.05,
       },
@@ -215,6 +219,7 @@ export function generateAdvisorRecommendations(
         signals,
         executionFit,
         stressRisks: stressTopRisks,
+        pathPenalties,
       }),
     );
 }
