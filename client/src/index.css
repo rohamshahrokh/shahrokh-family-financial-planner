@@ -286,6 +286,35 @@
     color: hsl(var(--foreground));
   }
 
+  /* ── SIDEBAR: Parent group header (Sprint 20 PR-E) ──
+     Pure expandable folder headers (Wealth Strategy, Forecast Engine, Tax
+     Strategy). The whole row toggles expand/collapse — there is no href and
+     no active-page highlight. Visually reads as a folder/group, NOT a
+     selected page button: no pill background, no left bar, lighter weight.
+     Active-child context is communicated only by chevron orientation +
+     subtle foreground colour bump. */
+  .nav-group-header {
+    @apply flex items-center gap-2.5 pl-8 pr-3 py-2 w-full rounded-lg
+           text-sm text-muted-foreground
+           hover:text-foreground hover:bg-muted/30
+           transition-all duration-150 cursor-pointer select-none
+           bg-transparent;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    border: none;
+  }
+  .nav-group-header.has-active-child {
+    color: hsl(var(--foreground));
+    background: transparent;
+    font-weight: 600;
+  }
+  .nav-group-header .nav-item-icon {
+    opacity: 0.6;
+  }
+  .nav-group-header.has-active-child .nav-item-icon {
+    opacity: 0.85;
+  }
+
   /* ── DASHBOARD HERO CARDS ── */
   .hero-stat-card {
     @apply rounded-xl p-5 flex flex-col gap-1;

@@ -47,6 +47,9 @@ import {
 // Sprint 14 — IA reorganisation. Nav items now carry a `depth` (0 | 1 | 2)
 // for visual indent so the renderer at L346+ can show nested hierarchy
 // without restructuring its iteration shape (smallest-diff extension).
+// Sprint 20 PR-E — A NavItem can also be a pure expandable group header
+// (kind: "group"): no href, the whole row toggles expand/collapse, no
+// active-page highlight. groupId binds it to the open-state map.
 type NavItem = {
   href: string;
   label: string;
@@ -55,6 +58,10 @@ type NavItem = {
   requiredPermission?: Permission;
   /** 0 = top-level, 1 = child, 2 = grandchild (visual indent only) */
   depth?: 0 | 1 | 2;
+  /** "link" (default) renders <Link>; "group" renders a non-routing expandable header */
+  kind?: "link" | "group";
+  /** Identifier used to look up expanded state for "group" items */
+  groupId?: string;
 };
 
 const NAV_STEPS: Array<{
@@ -86,12 +93,18 @@ const NAV_STEPS: Array<{
     badgeClass: "step-2",
     items: [
       { href: "/financial-plan",  label: "Family Plan",         icon: ClipboardList,   adminOnly: false },
-      { href: "/wealth-strategy", label: "Wealth Strategy",     icon: Briefcase,       adminOnly: false },
+      // Sprint 20 PR-E — Wealth Strategy is a pure expandable group header
+      // (no route, whole row toggles). The previous /wealth-strategy page is
+      // preserved as a redirect to /property in App.tsx.
+      { href: "",                 label: "Wealth Strategy",     icon: Briefcase,       adminOnly: false, kind: "group", groupId: "wealthStrategy" },
       { href: "/property",        label: "Property",            icon: Home,            adminOnly: false, depth: 1 },
       { href: "/stocks",          label: "Stocks",              icon: BarChart2,       adminOnly: false, depth: 1 },
       { href: "/crypto",          label: "Crypto",              icon: Bitcoin,         adminOnly: false, depth: 1 },
       { href: "/debt-strategy",   label: "Debt Strategy",       icon: CreditCard,      adminOnly: false, depth: 1 },
-      { href: "/tax",             label: "Tax Strategy",        icon: Calculator,      adminOnly: false, depth: 1 },
+      // Sprint 20 PR-E — Tax Strategy is a pure expandable group header
+      // sitting at depth 1 (nested under Wealth Strategy). Itself parents
+      // CGT Simulator at depth 2. /tax-strategy redirects to /cgt-simulator.
+      { href: "",                 label: "Tax Strategy",        icon: Calculator,      adminOnly: false, depth: 1, kind: "group", groupId: "taxStrategy" },
       { href: "/cgt-simulator",   label: "CGT Simulator",       icon: BarChart2,       adminOnly: false, depth: 2 },
     ],
   },
@@ -103,7 +116,9 @@ const NAV_STEPS: Array<{
     badgeClass: "step-3",
     items: [
       { href: "/timeline",                    label: "Net Worth Timeline", icon: TrendingUp,   adminOnly: false },
-      { href: "/ai-forecast-engine",          label: "Forecast Engine",    icon: Sigma,        adminOnly: false },
+      // Sprint 20 PR-E — Forecast Engine is a pure expandable group header.
+      // /ai-forecast-engine redirects to /scenario-compare in App.tsx.
+      { href: "",                             label: "Forecast Engine",    icon: Sigma,        adminOnly: false, kind: "group", groupId: "forecastEngine" },
       { href: "/scenario-compare",            label: "Scenario Compare",   icon: FlaskConical, adminOnly: false, depth: 1 },
     ],
   },
@@ -153,6 +168,9 @@ const SUPPORT_LINKS: NavItem[] = [...SECONDARY_LINKS, ...SYSTEM_LINKS];
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function isPathActive(href: string, location: string): boolean {
+  // Sprint 20 PR-E — pure group-header nav items carry href: "". They are
+  // not routes and must never match the current location.
+  if (!href) return false;
   if (href === "/" || href === "/dashboard") return location === "/" || location === "/dashboard";
   return location.startsWith(href);
 }
@@ -272,57 +290,56 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     }
   });
 
-  // Sprint 14.1 — Wealth Strategy acts as an expandable parent for its
-  // depth>=1 children (Property/Stocks/Crypto/Debt/Tax/CGT).
-  // Sprint 20 PR-D — Default collapsed. Persisted to localStorage; auto-expand
-  // when the active route is one of its children so the highlight is visible.
-  const WEALTH_NAV_KEY = "fwl.nav.wealthStrategy.expanded";
-  const WEALTH_CHILD_HREFS = ["/property", "/stocks", "/crypto", "/debt-strategy", "/tax", "/cgt-simulator"];
+  // Sprint 20 PR-E — Unified expansion state for the three pure parent group
+  // headers (Wealth Strategy, Forecast Engine, Tax Strategy). Each is keyed
+  // by `groupId`. Persisted to localStorage. Default collapsed; the renderer
+  // auto-reveals a group when one of its children is the active route, but
+  // a user's explicit collapse still takes precedence for the current route
+  // (effective open = persisted toggle OR active-child).
+  const GROUPS_NAV_KEY = "fwl.nav.groups.open";
+  const WEALTH_CHILD_HREFS = ["/property", "/stocks", "/crypto", "/debt-strategy", "/cgt-simulator"];
+  const TAX_CHILD_HREFS = ["/cgt-simulator"];
+  const FORECAST_CHILD_HREFS = ["/scenario-compare"];
   const isWealthChildRoute = WEALTH_CHILD_HREFS.some(h => isPathActive(h, location));
-  const [wealthExpanded, setWealthExpanded] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
+  const isTaxChildRoute = TAX_CHILD_HREFS.some(h => isPathActive(h, location));
+  const isForecastChildRoute = FORECAST_CHILD_HREFS.some(h => isPathActive(h, location));
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {
+      wealthStrategy: false,
+      forecastEngine: false,
+      taxStrategy: false,
+    };
+    if (typeof window === "undefined") return initial;
     try {
-      const raw = window.localStorage.getItem(WEALTH_NAV_KEY);
-      if (raw === null) return false;
-      return raw === "true";
+      const raw = window.localStorage.getItem(GROUPS_NAV_KEY);
+      if (raw === null) return initial;
+      const parsed = JSON.parse(raw) as Record<string, boolean>;
+      return { ...initial, ...parsed };
     } catch {
-      return false;
+      return initial;
     }
   });
-  const toggleWealthExpanded = () => {
-    setWealthExpanded(prev => {
-      const next = !prev;
+  const toggleGroup = (id: string) => {
+    setOpenGroups(prev => {
+      const next = { ...prev, [id]: !prev[id] };
       if (typeof window !== "undefined") {
-        try { window.localStorage.setItem(WEALTH_NAV_KEY, String(next)); } catch { /* no-op */ }
+        try { window.localStorage.setItem(GROUPS_NAV_KEY, JSON.stringify(next)); } catch { /* no-op */ }
       }
       return next;
     });
   };
 
-  // Sprint 20 PR-D — Forecast Engine acts as an expandable parent for Scenario
-  // Compare. Default collapsed; auto-expand when on /scenario-compare so the
-  // child highlight is visible.
-  const FORECAST_NAV_KEY = "fwl.nav.forecastEngine.expanded";
-  const isForecastChildRoute = isPathActive("/scenario-compare", location);
-  const [forecastExpanded, setForecastExpanded] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      const raw = window.localStorage.getItem(FORECAST_NAV_KEY);
-      if (raw === null) return false;
-      return raw === "true";
-    } catch {
-      return false;
-    }
-  });
-  const toggleForecastExpanded = () => {
-    setForecastExpanded(prev => {
-      const next = !prev;
-      if (typeof window !== "undefined") {
-        try { window.localStorage.setItem(FORECAST_NAV_KEY, String(next)); } catch { /* no-op */ }
-      }
-      return next;
-    });
-  };
+  // Effective expansion = explicit toggle OR active-child route. This
+  // mirrors PR-D's pattern so the active child highlight is always visible
+  // on a fresh tab, while still letting the user collapse the group
+  // explicitly (the toggle simply flips the persisted boolean — the
+  // active-child OR overrides it for the active route, which is desirable:
+  // collapsing a group whose child you're standing on doesn't hide your
+  // current location).
+  const wealthEffectiveOpen = openGroups.wealthStrategy || isWealthChildRoute;
+  const taxEffectiveOpen = openGroups.taxStrategy || isTaxChildRoute;
+  const forecastEffectiveOpen = openGroups.forecastEngine || isForecastChildRoute;
 
   // Sprint 20 PR-D — Removed route-driven auto-expand. Section open state is
   // user-controlled only; visiting a route inside a section no longer pops it
@@ -513,37 +530,64 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       the preceding depth=0 parent. Same render path is used
                       on desktop and mobile (the sidebar is one component). */}
                   {(() => {
-                    const WEALTH_HREF = "/wealth-strategy";
-                    const FORECAST_HREF = "/ai-forecast-engine";
-                    // Sprint 20 PR-D — Effective expansion = persisted toggle
-                    // OR active-child route, so the active child highlight is
-                    // always visible. The persisted state still drives the
-                    // chevron orientation users see when they're elsewhere.
-                    const wealthEffectiveOpen = wealthExpanded || isWealthChildRoute;
-                    const forecastEffectiveOpen = forecastExpanded || isForecastChildRoute;
-                    const renderItem = (item: NavItem) => {
+                    // Sprint 20 PR-E — Three group-header IDs.
+                    const groupEffectiveOpen: Record<string, boolean> = {
+                      wealthStrategy: wealthEffectiveOpen,
+                      taxStrategy: taxEffectiveOpen,
+                      forecastEngine: forecastEffectiveOpen,
+                    };
+                    const groupHasActiveChild: Record<string, boolean> = {
+                      wealthStrategy: isWealthChildRoute,
+                      taxStrategy: isTaxChildRoute,
+                      forecastEngine: isForecastChildRoute,
+                    };
+
+                    // Sprint 20 PR-E — Pure group header row. NOT a route, no
+                    // `href`, no active-page highlight. The whole row toggles
+                    // expand/collapse (button covers the full row width).
+                    const renderGroupHeader = (item: NavItem) => {
+                      const { label, icon: Icon, groupId } = item;
+                      const depth = item.depth ?? 0;
+                      if (!groupId) return null;
+                      const expanded = !!groupEffectiveOpen[groupId];
+                      const hasActiveChild = !!groupHasActiveChild[groupId];
+                      const slug = label.toLowerCase().replace(/\s+/g, "-");
+                      return (
+                        <button
+                          key={`group-${groupId}`}
+                          type="button"
+                          onClick={() => toggleGroup(groupId)}
+                          aria-expanded={expanded}
+                          aria-controls={`nav-${slug}-children`}
+                          aria-label={
+                            expanded ? `Collapse ${label}` : `Expand ${label}`
+                          }
+                          data-testid={`nav-${slug}-toggle`}
+                          className={`nav-group-header${hasActiveChild ? " has-active-child" : ""}`}
+                          style={depth > 0 ? { paddingLeft: `${0.75 + depth * 1.5}rem` } : undefined}
+                        >
+                          <Icon className="nav-item-icon" />
+                          <span className={depth > 0 ? "text-[12px]" : "text-[13px]"}>
+                            {label}
+                          </span>
+                          <ChevronDown
+                            className="w-3.5 h-3.5 ml-auto shrink-0 transition-transform duration-200"
+                            style={{
+                              transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
+                              color: hasActiveChild
+                                ? "hsl(var(--foreground))"
+                                : "hsl(var(--muted-foreground))",
+                            }}
+                          />
+                        </button>
+                      );
+                    };
+
+                    const renderLinkItem = (item: NavItem) => {
                       const { href, label, icon: Icon } = item;
                       const depth = item.depth ?? 0;
                       const active = isPathActive(href, location);
                       const isChild = depth > 0;
-                      const isWealthParent =
-                        depth === 0 && href === WEALTH_HREF && stepDef.id === "strategy";
-                      const isForecastParent =
-                        depth === 0 && href === FORECAST_HREF && stepDef.id === "forecast";
-                      const isExpandableParent = isWealthParent || isForecastParent;
-                      const parentExpanded = isWealthParent ? wealthEffectiveOpen : forecastEffectiveOpen;
-                      const toggleParent = isWealthParent ? toggleWealthExpanded : toggleForecastExpanded;
-                      const parentAriaControls = isWealthParent
-                        ? "nav-wealth-strategy-children"
-                        : "nav-forecast-engine-children";
-                      const parentTestId = isWealthParent
-                        ? "nav-wealth-strategy-toggle"
-                        : "nav-forecast-engine-toggle";
-                      const parentAriaLabel = isWealthParent
-                        ? (parentExpanded ? "Collapse Wealth Strategy" : "Expand Wealth Strategy")
-                        : (parentExpanded ? "Collapse Forecast Engine" : "Expand Forecast Engine");
-                      // Sprint 14.1 — inactive child labels use muted text so
-                      // the active child remains the strongest visual anchor.
                       const childTextClass =
                         isChild && !active ? " text-muted-foreground" : "";
                       return (
@@ -565,35 +609,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           <span className={`${isChild ? "text-[12px]" : "text-[13px]"}${childTextClass}`}>
                             {label}
                           </span>
-                          {/* Sprint 14.1 / 20 PR-D — chevron toggle button is
-                              nested inside the <Link>; preventDefault +
-                              stopPropagation ensure clicking the chevron does
-                              NOT navigate. Applies to expandable parents
-                              (Wealth Strategy, Forecast Engine). */}
-                          {isExpandableParent && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                toggleParent();
-                              }}
-                              aria-expanded={parentExpanded}
-                              aria-controls={parentAriaControls}
-                              aria-label={parentAriaLabel}
-                              data-testid={parentTestId}
-                              className="ml-auto inline-flex items-center justify-center w-8 h-8 p-1.5 rounded hover:bg-muted/40 -mr-1.5 shrink-0"
-                            >
-                              <ChevronDown
-                                className="w-3.5 h-3.5 transition-transform duration-200"
-                                style={{
-                                  transform: parentExpanded ? "rotate(0deg)" : "rotate(-90deg)",
-                                  color: active ? accentColor : "hsl(var(--muted-foreground))",
-                                }}
-                              />
-                            </button>
-                          )}
-                          {active && !isExpandableParent && (
+                          {active && (
                             <ChevronRight
                               className="w-3 h-3 ml-auto shrink-0"
                               style={{ color: accentColor }}
@@ -603,24 +619,32 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       );
                     };
 
-                    // Walk visibleItems and emit either a parent <Link> or a
-                    // wrapped child-group <div> for each contiguous run of
-                    // depth>=1 items. Sprint 14.1 / 20 PR-D: when the depth-0
-                    // item that precedes a child run is an expandable parent
-                    // (Wealth Strategy or Forecast Engine), the child run is
-                    // gated on that parent's effective expansion state.
+                    const renderItem = (item: NavItem) =>
+                      item.kind === "group" ? renderGroupHeader(item) : renderLinkItem(item);
+
+                    // Sprint 20 PR-E — Walk visibleItems and emit:
+                    //   • depth-0 link → flat in `out`
+                    //   • depth-0 group header → flat; the following depth>=1
+                    //     contiguous run becomes its child-group div, gated
+                    //     on its effective-open state.
+                    //   • depth-1 group header (Tax Strategy) → rendered as
+                    //     part of its parent's depth>=1 child run; its
+                    //     depth-2 children form a nested child-group div.
+                    const groupForItem = (it: NavItem | undefined): string | null =>
+                      it && it.kind === "group" && it.groupId ? it.groupId : null;
+
                     const out: React.ReactNode[] = [];
                     let i = 0;
-                    let lastParentHref: string | null = null;
+                    let lastDepth0Group: string | null = null;
                     while (i < visibleItems.length) {
                       const item = visibleItems[i];
                       const depth = item.depth ?? 0;
                       if (depth === 0) {
                         out.push(renderItem(item));
-                        lastParentHref = item.href;
+                        lastDepth0Group = groupForItem(item);
                         i++;
                       } else {
-                        // Collect contiguous children
+                        // Collect contiguous depth>=1 items.
                         const group: NavItem[] = [];
                         while (
                           i < visibleItems.length &&
@@ -629,19 +653,69 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           group.push(visibleItems[i]);
                           i++;
                         }
-                        const isWealthGroup = lastParentHref === WEALTH_HREF;
-                        const isForecastGroup = lastParentHref === FORECAST_HREF;
-                        if (isWealthGroup && !wealthEffectiveOpen) continue;
-                        if (isForecastGroup && !forecastEffectiveOpen) continue;
-                        const groupId = isWealthGroup
-                          ? "nav-wealth-strategy-children"
-                          : isForecastGroup
-                            ? "nav-forecast-engine-children"
-                            : undefined;
+                        // Gate this child run on the preceding depth-0
+                        // parent's expansion (only meaningful when the
+                        // depth-0 sibling is a group header).
+                        if (lastDepth0Group && !groupEffectiveOpen[lastDepth0Group]) {
+                          continue;
+                        }
+                        const wrapperId = lastDepth0Group
+                          ? `nav-${lastDepth0Group
+                              .replace(/([A-Z])/g, "-$1")
+                              .toLowerCase()}-children`
+                          : undefined;
+                        // Inside this child run, render items sequentially.
+                        // If an item is itself a depth-1 group header (Tax
+                        // Strategy), the subsequent depth-2 run is wrapped
+                        // in a nested child-group div gated on that group's
+                        // expansion state.
+                        const children: React.ReactNode[] = [];
+                        let j = 0;
+                        let lastDepth1Group: string | null = null;
+                        while (j < group.length) {
+                          const g = group[j];
+                          const gDepth = g.depth ?? 0;
+                          if (gDepth === 1) {
+                            children.push(renderItem(g));
+                            lastDepth1Group = groupForItem(g);
+                            j++;
+                          } else {
+                            // depth === 2 — collect contiguous depth-2 run
+                            const sub: NavItem[] = [];
+                            while (j < group.length && (group[j].depth ?? 0) >= 2) {
+                              sub.push(group[j]);
+                              j++;
+                            }
+                            if (lastDepth1Group && !groupEffectiveOpen[lastDepth1Group]) {
+                              continue;
+                            }
+                            const subId = lastDepth1Group
+                              ? `nav-${lastDepth1Group
+                                  .replace(/([A-Z])/g, "-$1")
+                                  .toLowerCase()}-children`
+                              : undefined;
+                            children.push(
+                              <div
+                                key={`child-group-${sub[0].href || sub[0].label}`}
+                                id={subId}
+                                className="my-1 ml-4 pl-1 py-1 space-y-0.5 rounded-r-md bg-muted/20"
+                                style={{
+                                  borderLeft: `1px solid ${
+                                    isActiveSection
+                                      ? `${borderColor}40`
+                                      : "hsl(var(--border) / 0.7)"
+                                  }`,
+                                }}
+                              >
+                                {sub.map(renderItem)}
+                              </div>,
+                            );
+                          }
+                        }
                         out.push(
                           <div
-                            key={`child-group-${group[0].href}`}
-                            id={groupId}
+                            key={`child-group-${group[0].href || group[0].label}`}
+                            id={wrapperId}
                             className="my-2 ml-4 pl-1 py-1.5 space-y-0.5 rounded-r-md bg-muted/30"
                             style={{
                               borderLeft: `1px solid ${
@@ -651,7 +725,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                               }`,
                             }}
                           >
-                            {group.map(renderItem)}
+                            {children}
                           </div>,
                         );
                       }
