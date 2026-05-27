@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "07_crypto_concentrated",
+    "profile": "Crypto-concentrated",
+    "age": 32,
+    "household": "70% NW in crypto (~$420k BTC/ETH), $50k cash, $130k super — single-asset concentration",
+    "net_worth_aud": 600000,
+    "annual_income_aud": 130000,
+    "key_features": ["concentration risk", "high volatility", "tax-inefficient gains"]
+  },
+  "signals": {
+    "cashOutsideOffset": 50000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 0,
+    "monthlyIncome": 9000,
+    "monthlyExpenses": 5200,
+    "monthlySurplus": 3800,
+    "rohamGrossAnnual": 130000,
+    "superCapRemaining": 20000,
+    "emergencyBufferTarget": 31200,
+    "upcomingBills12mo": 2400,
+    "marginalTaxRate": 0.325,
+    "etfExpectedReturn": 0.095,
+    "cryptoExpectedReturn": 0.25,
+    "expensesIncludeDebt": true
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 6000,
+    "fireAge": 50
+  }
+}

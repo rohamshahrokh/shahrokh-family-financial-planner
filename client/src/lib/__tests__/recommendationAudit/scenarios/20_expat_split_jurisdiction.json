@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "20_expat_split_jurisdiction",
+    "profile": "Expat — split-jurisdiction tax (AU resident, UK assets)",
+    "age": 40,
+    "household": "Australian tax resident with substantial UK-domiciled assets; planning return to Australia.",
+    "net_worth_aud": 1300000,
+    "annual_income_aud": 220000,
+    "key_features": ["international assets", "complex tax", "moderate super", "high income"]
+  },
+  "signals": {
+    "cashOutsideOffset": 75000,
+    "offsetBalance": 50000,
+    "mortgage": 480000,
+    "otherDebts": 6000,
+    "ppor": 1100000,
+    "monthlyIncome": 18300,
+    "monthlyExpenses": 11000,
+    "monthlySurplus": 7300,
+    "rohamGrossAnnual": 220000,
+    "superCapRemaining": 28000,
+    "emergencyBufferTarget": 66000,
+    "upcomingBills12mo": 6500,
+    "marginalTaxRate": 0.47,
+    "etfExpectedReturn": 0.085,
+    "mortgageRate": 0.0582,
+    "expensesIncludeDebt": true
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 10000,
+    "fireAge": 58
+  }
+}

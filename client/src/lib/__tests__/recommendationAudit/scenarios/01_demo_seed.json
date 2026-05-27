@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "01_demo_seed",
+    "profile": "Demo seed (control)",
+    "age": 42,
+    "household": "Demo family (Alex & Sara, Brisbane). Same as Sprint 15 audit baseline.",
+    "net_worth_aud": 678500,
+    "annual_income_aud": 216000,
+    "key_features": ["PPOR + mortgage", "young family", "ETF + crypto", "planned IP 2027"]
+  },
+  "signals": {
+    "cashOutsideOffset": 20000,
+    "offsetBalance": 95000,
+    "mortgage": 850000,
+    "otherDebts": 14500,
+    "ppor": 1200000,
+    "monthlyIncome": 18000,
+    "monthlyExpenses": 11200,
+    "monthlySurplus": 6800,
+    "rohamGrossAnnual": 216000,
+    "superCapRemaining": 18000,
+    "emergencyBufferTarget": 67200,
+    "upcomingBills12mo": 4800,
+    "marginalTaxRate": 0.39,
+    "etfExpectedReturn": 0.095,
+    "mortgageRate": 0.0582,
+    "expensesIncludeDebt": true
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 9000,
+    "fireAge": 55
+  }
+}

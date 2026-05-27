@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "16_divorced_split_assets",
+    "profile": "Divorced with 50/50 split, child-support obligations",
+    "age": 45,
+    "household": "Recently divorced; child support reduces effective surplus; two minor children.",
+    "net_worth_aud": 540000,
+    "annual_income_aud": 138000,
+    "key_features": ["child support", "single income", "rebuilding finances", "moderate super"]
+  },
+  "signals": {
+    "cashOutsideOffset": 30000,
+    "offsetBalance": 15000,
+    "mortgage": 380000,
+    "otherDebts": 12000,
+    "ppor": 620000,
+    "monthlyIncome": 11500,
+    "monthlyExpenses": 8800,
+    "monthlySurplus": 2700,
+    "rohamGrossAnnual": 138000,
+    "superCapRemaining": 22000,
+    "emergencyBufferTarget": 52000,
+    "upcomingBills12mo": 4000,
+    "marginalTaxRate": 0.39,
+    "etfExpectedReturn": 0.095,
+    "mortgageRate": 0.0582,
+    "expensesIncludeDebt": true
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 8500,
+    "fireAge": 62
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "meta": {
+    "id": "04_pre_retiree_ahead",
+    "profile": "Pre-retiree, ahead of plan",
+    "age": 58,
+    "household": "$3M NW, target $60k/yr — already FIRE-ready, mostly equities + super",
+    "net_worth_aud": 3000000,
+    "annual_income_aud": 180000,
+    "key_features": ["fully funded", "sequence-risk window", "needs de-risking glidepath"]
+  },
+  "signals": {
+    "cashOutsideOffset": 150000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 1100000,
+    "monthlyIncome": 14000,
+    "monthlyExpenses": 6500,
+    "monthlySurplus": 7500,
+    "rohamGrossAnnual": 180000,
+    "superCapRemaining": 8000,
+    "emergencyBufferTarget": 39000,
+    "upcomingBills12mo": 4200,
+    "marginalTaxRate": 0.39,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true,
+    "fireYearsToTarget": 0,
+    "fireProgressPct": 167,
+    "mcSurvivalProbability": 0.92,
+    "mcStressFlag": "none"
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 5000,
+    "fireAge": 60
+  }
+}

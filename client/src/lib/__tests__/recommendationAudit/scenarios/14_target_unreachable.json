@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "id": "14_target_unreachable",
+    "profile": "Edge case: target unreachable",
+    "age": 62,
+    "household": "Age 62, $100k NW, wants $150k/yr passive at 65 — needs $3.75M in 3yr. Unreachable.",
+    "net_worth_aud": 100000,
+    "annual_income_aud": 95000,
+    "key_features": ["target unreachable", "engine must be honest, not optimistic"]
+  },
+  "signals": {
+    "cashOutsideOffset": 30000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 0,
+    "monthlyIncome": 7800,
+    "monthlyExpenses": 5500,
+    "monthlySurplus": 2300,
+    "rohamGrossAnnual": 95000,
+    "superCapRemaining": 18000,
+    "emergencyBufferTarget": 33000,
+    "upcomingBills12mo": 3600,
+    "marginalTaxRate": 0.325,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true,
+    "fireYearsToTarget": 3,
+    "fireProgressPct": 3,
+    "fireMonthlyInvestmentRequired": 75000,
+    "mcSurvivalProbability": 0.05,
+    "mcStressFlag": "severe"
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 12500,
+    "fireAge": 65
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "17_late_starter_aggressive",
+    "profile": "Two-income couple, both 55, late-starter aggressive accumulation",
+    "age": 55,
+    "household": "Dual-income professionals; started saving late; aggressive 15-year FIRE plan.",
+    "net_worth_aud": 950000,
+    "annual_income_aud": 320000,
+    "key_features": ["dual income", "high marginal tax", "low super", "aggressive plan"]
+  },
+  "signals": {
+    "cashOutsideOffset": 80000,
+    "offsetBalance": 0,
+    "mortgage": 220000,
+    "otherDebts": 0,
+    "ppor": 950000,
+    "monthlyIncome": 26700,
+    "monthlyExpenses": 14000,
+    "monthlySurplus": 12700,
+    "rohamGrossAnnual": 320000,
+    "superCapRemaining": 25000,
+    "emergencyBufferTarget": 84000,
+    "upcomingBills12mo": 8000,
+    "marginalTaxRate": 0.47,
+    "etfExpectedReturn": 0.095,
+    "mortgageRate": 0.0582,
+    "expensesIncludeDebt": true
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 12000,
+    "fireAge": 70
+  }
+}

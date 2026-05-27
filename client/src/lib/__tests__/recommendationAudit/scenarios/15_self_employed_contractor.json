@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "id": "15_self_employed_contractor",
+    "profile": "Self-employed contractor with irregular income",
+    "age": 36,
+    "household": "Sole trader contractor; income swings 60-120k/yr; one dependent.",
+    "net_worth_aud": 285000,
+    "annual_income_aud": 95000,
+    "key_features": ["irregular income", "no employer super", "moderate cash buffer", "no investments"]
+  },
+  "signals": {
+    "cashOutsideOffset": 45000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 8000,
+    "ppor": 0,
+    "monthlyIncome": 7900,
+    "monthlyExpenses": 5800,
+    "monthlySurplus": 2100,
+    "rohamGrossAnnual": 95000,
+    "superCapRemaining": 30000,
+    "emergencyBufferTarget": 35000,
+    "upcomingBills12mo": 6000,
+    "marginalTaxRate": 0.325,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 7000,
+    "fireAge": 60
+  }
+}

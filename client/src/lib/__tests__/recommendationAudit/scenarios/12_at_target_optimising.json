@@ -1,0 +1,36 @@
+{
+  "meta": {
+    "id": "12_at_target_optimising",
+    "profile": "At-target, optimising",
+    "age": 55,
+    "household": "Already at FIRE number ($2.5M, target $5k/mo = $1.5M required) — needs withdrawal/tax/estate optimisation",
+    "net_worth_aud": 2500000,
+    "annual_income_aud": 140000,
+    "key_features": ["already FIRE-able", "needs withdrawal plan", "estate/CGT planning"]
+  },
+  "signals": {
+    "cashOutsideOffset": 120000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 950000,
+    "monthlyIncome": 11500,
+    "monthlyExpenses": 5000,
+    "monthlySurplus": 6500,
+    "rohamGrossAnnual": 140000,
+    "superCapRemaining": 14000,
+    "emergencyBufferTarget": 30000,
+    "upcomingBills12mo": 3000,
+    "marginalTaxRate": 0.325,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true,
+    "fireYearsToTarget": 0,
+    "fireProgressPct": 167,
+    "mcSurvivalProbability": 0.93
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 5000,
+    "fireAge": 55
+  }
+}

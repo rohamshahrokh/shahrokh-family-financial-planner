@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "06_cash_hoarder",
+    "profile": "Cash-heavy hoarder",
+    "age": 40,
+    "household": "$800k cash, $200k super, age 40, no debt, no PPOR — chronically under-invested",
+    "net_worth_aud": 1000000,
+    "annual_income_aud": 150000,
+    "key_features": ["massive cash drag", "no leverage", "long horizon wasted"]
+  },
+  "signals": {
+    "cashOutsideOffset": 800000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 0,
+    "monthlyIncome": 9500,
+    "monthlyExpenses": 5800,
+    "monthlySurplus": 3700,
+    "rohamGrossAnnual": 150000,
+    "superCapRemaining": 22000,
+    "emergencyBufferTarget": 34800,
+    "upcomingBills12mo": 3600,
+    "marginalTaxRate": 0.325,
+    "etfExpectedReturn": 0.095,
+    "cashHisaReturn": 0.05,
+    "expensesIncludeDebt": true
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 7000,
+    "fireAge": 55
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "19_retired_longevity_risk",
+    "profile": "Already retired; longevity risk; 40-year horizon target",
+    "age": 67,
+    "household": "Retired couple; portfolio supports current expenses; concerned about 100-year longevity scenario.",
+    "net_worth_aud": 2200000,
+    "annual_income_aud": 0,
+    "key_features": ["retired", "longevity risk", "moderate cash reserve", "no debt"]
+  },
+  "signals": {
+    "cashOutsideOffset": 180000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 1100000,
+    "monthlyIncome": 0,
+    "monthlyExpenses": 7000,
+    "monthlySurplus": -7000,
+    "rohamGrossAnnual": 0,
+    "superCapRemaining": 0,
+    "emergencyBufferTarget": 84000,
+    "upcomingBills12mo": 6000,
+    "marginalTaxRate": 0.19,
+    "etfExpectedReturn": 0.08,
+    "expensesIncludeDebt": true,
+    "lifeStage": "STATE_E_DECUMULATION"
+  },
+  "goal": {
+    "swrPct": 3.5,
+    "targetMonthlyIncome": 7000,
+    "fireAge": 65
+  }
+}
