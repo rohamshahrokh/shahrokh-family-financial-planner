@@ -74,6 +74,7 @@ import type { BestMoveResult } from "./bestMoveEngineSprint5";
 import type { CFOAdvisorResult } from "./cfoAdvisor";
 import type { RiskRadarResult } from "./riskEngine";
 import type { MonteCarloResult } from "./forecastStore";
+import { formatConfidence } from "./confidenceLabels";
 
 /* ─── Display-contract primitives ──────────────────────────────────────── */
 
@@ -779,8 +780,20 @@ function evaluateScenario(
       ? makeScenarioMetric("Risk Score", riskScoreVal, "score", overallRisk != null ? "riskEngine.overall_score / candidate.risk.executionRisk" : "candidate.risk.executionRisk", { notEngineModelled })
       : emptyScenarioMetric("Risk Score", "score", "riskEngine"),
     confidenceScore: confidenceVal != null && Number.isFinite(confidenceVal)
-      ? makeScenarioMetric("Confidence", confidenceVal, "percent", "bestMoveEngineSprint5.confidenceScore / candidate.risk.mcConfidence", { notEngineModelled })
-      : emptyScenarioMetric("Confidence", "percent", "bestMoveEngineSprint5"),
+      /* Sprint 15 Phase 3 — format chosen by source provenance. Real MC
+         (candidateMc or mcPff) keeps `percent`; bestMoveEngineSprint5 heuristic
+         routes through `band`. The format-token branch mirrors the source
+         provenance ternary used at lines 749–751 and 760–762. */
+      ? makeScenarioMetric(
+          "Confidence",
+          confidenceVal,
+          (candidateMc != null || mcPff != null) ? "percent" : "band",
+          (candidateMc != null || mcPff != null)
+            ? "decisionCandidates.risk.mcConfidence / monteCarloEngine.prob_ff"
+            : "bestMoveEngineSprint5.confidenceScore",
+          { notEngineModelled },
+        )
+      : emptyScenarioMetric("Confidence", "band", "bestMoveEngineSprint5"),
     rankingScore: rankingScoreVal != null && Number.isFinite(rankingScoreVal)
       ? makeScenarioMetric("Ranking Score", rankingScoreVal, "score", "decisionRanking.score", { notEngineModelled })
       : emptyScenarioMetric("Ranking Score", "score", "decisionRanking"),
@@ -1516,6 +1529,19 @@ export function buildTruePortfolioOptimizer(
 
 export function formatScenarioMetric(m: ScenarioMetric): string {
   if (m.textOverride) return m.textOverride;
+  if (m.format === "band") {
+    /* Sprint 15 Phase 3 — banded confidence display. */
+    const kind = m.value == null || !Number.isFinite(m.value)
+      ? "absent"
+      : /montecarlo|monte_carlo|prob_ff/i.test(m.source)
+        ? "mc"
+        : /decision|sprint5|bestmove/i.test(m.source)
+          ? "composite"
+          : /rule|engine\.ts/i.test(m.source)
+            ? "rule"
+            : "heuristic";
+    return formatConfidence({ kind, value: m.value }).label;
+  }
   if (m.value == null || !Number.isFinite(m.value)) return "—";
   switch (m.format) {
     case "currency": {

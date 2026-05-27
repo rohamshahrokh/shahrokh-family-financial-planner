@@ -21,6 +21,8 @@ import {
 import { maskValue } from '@/components/PrivacyMask';
 import { useAppStore } from '@/lib/store';
 import { MetricExplainer } from '@/components/intelligence/MetricExplainer';
+/* Sprint 15 Phase 3 — participate in the RecommendationFacade cache. */
+import { useCanonicalRecommendation } from '@/hooks/useCanonicalRecommendation';
 
 interface RiskFactorLike {
   id: string;
@@ -45,6 +47,7 @@ export default function UnifiedRiskPanel({ overallScore, topRisks }: Props) {
 
   const [result, setResult] = useState<UnifiedBestMoveResult | null>(null);
   const [loading, setLoading] = useState(true);
+  useCanonicalRecommendation();
 
   useEffect(() => {
     let cancelled = false;

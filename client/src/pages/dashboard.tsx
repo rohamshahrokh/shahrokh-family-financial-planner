@@ -167,7 +167,6 @@ import AIInsightsCard from "@/components/AIInsightsCard";
 import PortfolioLiveReturn from "@/components/PortfolioLiveReturn";
 import CFODashboardWidget from "@/components/CFODashboardWidget";
 import BestMoveCard from "@/components/BestMoveCard";
-import ActionCentre from "@/components/ActionCentre";
 import FinancialOSCentre from "@/components/FinancialOSCentre";
 import FamilyOfficeMode from "@/components/FamilyOfficeMode";
 import FutureWorldsPanel from "@/components/FutureWorldsPanel";

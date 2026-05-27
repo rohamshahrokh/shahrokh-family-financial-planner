@@ -114,12 +114,10 @@ function ActionCard({ action, showReasoning }: { action: RecommendedAction; show
             <AlertCircle className="w-3 h-3" />
             Risk: {action.risk}
           </span>
-          <span
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border border-border bg-card text-muted-foreground"
-            data-testid={`recommended-actions-confidence-${action.id}`}
-          >
-            Confidence: {action.confidencePct}%
-          </span>
+          {/* Sprint 15 Phase 3 — Confidence chip removed (plan §3.1.7). The
+              underlying value is a per-rule literal (e.g. 0.6 default), so
+              rendering it as "60%" implied calibrated probability we don't have.
+              Confidence lineage is now surfaced via Audit Mode chips elsewhere. */}
         </div>
       </header>
 

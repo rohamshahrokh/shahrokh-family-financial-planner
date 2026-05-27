@@ -60,6 +60,7 @@ import {
 } from "./cfoAdvisor";
 import type { RiskRadarResult } from "./riskEngine";
 import type { MonteCarloResult } from "./forecastStore";
+import { formatConfidence, type ConfidenceKind } from "./confidenceLabels";
 
 /* ─── Display contract primitives ──────────────────────────────────────── */
 
@@ -79,6 +80,7 @@ export interface ClosureMetric {
     | "currency-per-year"
     | "currency-per-month"
     | "percent"
+    | "band"
     | "score"
     | "years"
     | "months"
@@ -711,11 +713,15 @@ function buildGoalStatus(
       );
 
   const confidenceVal = bestMove.confidenceScore?.value ?? null;
+  /* Sprint 15 Phase 3 — confidence cells are banded via the `band` format token
+     because the underlying value is a Sprint 5 heuristic blend, not a raw MC
+     probability. The display layer routes value=null → "Monte Carlo not yet
+     run", value present → "HIGH/MEDIUM/LOW" per unified thresholds. */
   const confidence = confidenceVal == null
-    ? makeMetric("Confidence", null, "percent", "bestMoveEngineSprint5.confidenceScore", {
+    ? makeMetric("Confidence", null, "band", "bestMoveEngineSprint5.confidenceScore", {
         incomplete: true,
       })
-    : makeMetric("Confidence", confidenceVal, "percent", "bestMoveEngineSprint5.confidenceScore");
+    : makeMetric("Confidence", confidenceVal, "band", "bestMoveEngineSprint5.confidenceScore");
 
   const status: ClosureStatus = goal.fireFeasibility ?? "UNKNOWN";
   const statusLabel = (() => {
@@ -900,7 +906,7 @@ function buildPathComparison(
         row.metrics.confidence = makeMetric(
           "Confidence",
           bestMove.confidenceScore.value,
-          "percent",
+          "band",
           "bestMoveEngineSprint5.confidenceScore",
         );
         row.isRecommended = true;
@@ -981,14 +987,17 @@ function buildPathComparison(
         monteCarloProbability: makeMetric(
           "Monte Carlo",
           mcOut.value,
-          "percent",
+          /* Sprint 15 Phase 3 — percent is meaningful only for real MC
+             (monteCarloEngine.prob_ff). Otherwise the value is the Sprint5
+             heuristic mcConfidence that needs banding. */
+          mcOut.source === "monteCarloEngine.prob_ff" ? "percent" : "band",
           mcOut.source,
           { incomplete: mcOut.incomplete || additionalPropertyIncomplete },
         ),
         confidence: makeMetric(
           "Confidence",
           conf.value,
-          "percent",
+          "band",
           conf.source,
           { incomplete: conf.incomplete || additionalPropertyIncomplete },
         ),
@@ -1057,7 +1066,7 @@ function buildBestPath(
   const confidence = makeMetric(
     "Confidence",
     bestMove.confidenceScore.value,
-    "percent",
+    "band",
     "bestMoveEngineSprint5.confidenceScore",
   );
 
@@ -1380,8 +1389,36 @@ export function buildGoalClosureLab(
 
 /* ─── Formatting helpers (pure presentation) ───────────────────────────── */
 
+/**
+ * Best-guess confidence kind derived from a metric's source string. The
+ * orchestrator does not know whether the underlying value is rule, heuristic,
+ * MC, etc., but the source provenance string is enough to pick the right
+ * banded display. Order matters — more specific patterns first.
+ */
+function inferKindFromSource(source: string): ConfidenceKind {
+  const s = source.toLowerCase();
+  if (s.includes("montecarlo") || s.includes("monte_carlo") || s.includes("prob_ff")) {
+    return "mc";
+  }
+  if (s.includes("decision") || s.includes("sprint5") || s.includes("bestmove")) {
+    return "composite";
+  }
+  if (s.includes("heuristic") || s.includes("bridge")) return "heuristic";
+  if (s.includes("rule") || s.includes("engine.ts")) return "rule";
+  return "composite";
+}
+
 export function formatClosureMetric(m: ClosureMetric): string {
   if (m.textOverride) return m.textOverride;
+  if (m.format === "band") {
+    /* Sprint 15 Phase 3 — banded confidence display. Always returns a label
+       (never "—") so the surface communicates "Monte Carlo not yet run" when
+       the value is absent rather than blank. */
+    const kind: ConfidenceKind = m.value == null || !Number.isFinite(m.value)
+      ? "absent"
+      : inferKindFromSource(m.source);
+    return formatConfidence({ kind, value: m.value }).label;
+  }
   if (m.value == null || !Number.isFinite(m.value)) return "—";
   switch (m.format) {
     case "currency": {

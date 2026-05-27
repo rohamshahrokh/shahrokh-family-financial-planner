@@ -49,6 +49,8 @@ import {
 import { useForecastStore } from '@/lib/forecastStore';
 import { useAppStore } from '@/lib/store';
 import { computeUnifiedBestMove, type UnifiedBestMoveResult } from '@/lib/recommendationEngine';
+/* Sprint 15 Phase 3 — participate in the RecommendationFacade cache. */
+import { useCanonicalRecommendation } from '@/hooks/useCanonicalRecommendation';
 import { formatCurrency } from '@/lib/finance';
 import { maskValue } from '@/components/PrivacyMask';
 import { MetricExplainer } from '@/components/intelligence/MetricExplainer';
@@ -2655,6 +2657,7 @@ export default function ExecutiveDashboard(props: ExecutiveDashboardProps) {
   const simulations = props.monteCarloSimulations ?? liveMC?.simulations ?? null;
 
   const [result, setResult] = useState<UnifiedBestMoveResult | null>(null);
+  useCanonicalRecommendation();
 
   useEffect(() => {
     let cancelled = false;

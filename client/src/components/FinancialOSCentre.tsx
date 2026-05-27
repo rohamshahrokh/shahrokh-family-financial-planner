@@ -19,6 +19,8 @@ import { inferBehaviouralProfile, type BehaviouralProfile } from '@/lib/behaviou
 import { runAutonomousOS, type OSReport } from '@/lib/autonomousOS';
 import { buildScenarioTree, type ScenarioTreeResult } from '@/lib/scenarioTree';
 import { computeUnifiedBestMove, type UnifiedBestMoveResult } from '@/lib/recommendationEngine';
+/* Sprint 15 Phase 3 — participate in the RecommendationFacade cache. */
+import { useCanonicalRecommendation } from '@/hooks/useCanonicalRecommendation';
 
 function fmtMoney(n?: number): string {
   if (n == null || !Number.isFinite(n)) return '—';
@@ -40,6 +42,7 @@ export default function FinancialOSCentre() {
   const mcSig = liveMC ? `${liveMC.ran_at}-${liveMC.simulations}` : 'none';
 
   const [result, setResult] = useState<UnifiedBestMoveResult | null>(null);
+  useCanonicalRecommendation();
 
   // Behavioural profile inferred from in-memory observations only — no DB.
   const behavioural: BehaviouralProfile = useMemo(() => inferBehaviouralProfile({}), []);

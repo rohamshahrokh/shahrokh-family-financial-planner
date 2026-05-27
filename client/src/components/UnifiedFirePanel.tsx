@@ -20,6 +20,12 @@ import {
 import { maskValue } from '@/components/PrivacyMask';
 import { useAppStore } from '@/lib/store';
 import { MetricExplainer } from '@/components/intelligence/MetricExplainer';
+/* Sprint 15 Phase 3 — participate in the RecommendationFacade cache so this
+   FIRE-pillar surface stays consistent with Action Plan / Decision Lab /
+   dashboard. We still need the raw `UnifiedRecommendationResult` to call
+   `fireSurfaceFrom()`, so we keep the engine call alongside the hook —
+   the facade wraps the same engine, so they share state via React Query. */
+import { useCanonicalRecommendation } from '@/hooks/useCanonicalRecommendation';
 
 export default function UnifiedFirePanel() {
   const { privacyMode } = useAppStore();
@@ -31,6 +37,9 @@ export default function UnifiedFirePanel() {
 
   const [result, setResult] = useState<UnifiedBestMoveResult | null>(null);
   const [loading, setLoading] = useState(true);
+  /* Keep the facade hook live so this widget participates in the shared
+     canonical query cache (warm reads on cross-page navigation). */
+  useCanonicalRecommendation();
 
   useEffect(() => {
     let cancelled = false;

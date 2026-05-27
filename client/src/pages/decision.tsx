@@ -124,7 +124,7 @@ import {
 import { buildStrategyIntelligence } from "@/lib/scenarioV2/decisionEngine/strategyIntelligence";
 
 // P1 — publish the latest quick-decision result to the session-scoped store
-// so dashboard recommendation surfaces (BestMoveCard, ActionCentre, etc.)
+// so dashboard recommendation surfaces (BestMoveCard, FinancialOSCentre, etc.)
 // can consume it via computeUnifiedBestMove. The store is in-memory only;
 // no persistence, no new generation path.
 import { writeLatestQuickDecision } from "@/lib/recommendationEngine";

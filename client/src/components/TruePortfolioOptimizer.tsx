@@ -1186,9 +1186,23 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
           value: top3[0]?.netWorthDelta != null && Number.isFinite(top3[0].netWorthDelta) && top3[0].netWorthDelta !== 0
             ? `+ ${formatCurrency(Math.abs(top3[0].netWorthDelta), true)} NW`
             : undefined,
-          subtitle: top3[0]?.probabilityDelta != null && Number.isFinite(top3[0].probabilityDelta) && top3[0].probabilityDelta !== 0
-            ? `${top3[0].probabilityDelta > 0 ? "+" : "−"} ${Math.round(Math.abs(top3[0].probabilityDelta) * 100)}% success probability`
-            : undefined,
+          /* Sprint 15 Phase 3 — qualify the subtitle with scenario name +
+             horizon + MC paths if available so the probability number is
+             traceable to a specific run. */
+          subtitle: (() => {
+            const base = top3[0]?.probabilityDelta != null && Number.isFinite(top3[0].probabilityDelta) && top3[0].probabilityDelta !== 0
+              ? `${top3[0].probabilityDelta > 0 ? "+" : "−"} ${Math.round(Math.abs(top3[0].probabilityDelta) * 100)}% success probability`
+              : undefined;
+            if (!base) return undefined;
+            const qualifiers: string[] = [];
+            const scenarioName = (props.goalSolverInputs as { scenarioName?: string } | null | undefined)?.scenarioName;
+            if (scenarioName) qualifiers.push(scenarioName);
+            const horizon = (props.goalSolverInputs as { targetFireDate?: string } | null | undefined)?.targetFireDate;
+            if (horizon) qualifiers.push(`to ${String(horizon).slice(0, 4)}`);
+            const paths = (props.monteCarloOutputs as { simulations?: number } | null | undefined)?.simulations;
+            if (typeof paths === "number" && Number.isFinite(paths)) qualifiers.push(`${paths} MC paths`);
+            return qualifiers.length ? `${base} · ${qualifiers.join(" · ")}` : base;
+          })(),
         }}
         doNothingOutcome={{
           label: "Do Nothing Outcome",

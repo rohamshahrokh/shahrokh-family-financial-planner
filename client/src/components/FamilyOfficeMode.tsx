@@ -34,6 +34,8 @@ import {
   type UnifiedBestMoveResult,
 } from '@/lib/recommendationEngine';
 import { useEffect } from 'react';
+/* Sprint 15 Phase 3 — participate in the RecommendationFacade cache. */
+import { useCanonicalRecommendation } from '@/hooks/useCanonicalRecommendation';
 
 function fmtMoney(n?: number): string {
   if (n == null || !Number.isFinite(n)) return '—';
@@ -169,6 +171,8 @@ export default function FamilyOfficeMode() {
 
   // Adaptive — baseline state for now (no persistence). UI can be extended later.
   const adaptive: AdaptiveLearningResult = useMemo(() => applyAdaptiveLearning(emptyAdaptiveState(), []), []);
+
+  useCanonicalRecommendation();
 
   // Compute unified recommendation with all Phase 6 overlays.
   useEffect(() => {

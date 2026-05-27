@@ -52,8 +52,10 @@ import {
 import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics";
 import { computeCanonicalFire } from "@/lib/canonicalFire";
 import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
-import { computeUnifiedBestMove, readLatestQuickDecisionGeneratedAt, type UnifiedBestMoveResult } from "@/lib/recommendationEngine/bestMoveBridge";
+import { readLatestQuickDecisionGeneratedAt, type UnifiedBestMoveResult } from "@/lib/recommendationEngine/bestMoveBridge";
 import type { Recommendation } from "@/lib/recommendationEngine/types";
+import { formatConfidence } from "@/lib/confidenceLabels";
+import { useCanonicalRecommendation } from "@/hooks/useCanonicalRecommendation";
 import { evaluateFreshness } from "@shared/forecastFreshness";
 import { formatCurrency } from "@/lib/finance";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
@@ -129,10 +131,11 @@ function VerdictLine({ unified }: { unified: UnifiedBestMoveResult | null }) {
   }
 
   const plain = labelize(rec.title);
-  const confPct =
-    typeof rec.confidenceScore === "number" && Number.isFinite(rec.confidenceScore)
-      ? Math.round(rec.confidenceScore * 100)
-      : null;
+  // Sprint 15 Phase 3 — verdict parenthetical removed. The headline confidence
+  // value here was a per-rule literal (e.g. 0.6 from engine.ts:128) being shown
+  // as "60% confidence" which misleads the user. Band-only chips below carry
+  // the calibrated lineage via formatConfidence().
+  const confAudit = formatConfidence({ kind: "rule", value: rec.confidenceScore }).audit;
 
   return (
     <div
@@ -140,12 +143,9 @@ function VerdictLine({ unified }: { unified: UnifiedBestMoveResult | null }) {
       className="text-sm sm:text-base font-semibold leading-snug"
     >
       <span className="text-foreground">{plain}</span>
-      {confPct !== null && (
-        <span className="text-muted-foreground font-normal"> ({confPct}% confidence)</span>
-      )}
       {auditMode && (
         <span className="ml-2 text-[10px] text-muted-foreground/80 font-normal">
-          engine: "{rec.title}"
+          engine: "{rec.title}" · {confAudit}
         </span>
       )}
     </div>
@@ -423,9 +423,11 @@ function RecommendedNextMoveSection({ unified }: { unified: UnifiedBestMoveResul
       default: return null;
     }
   })();
-  const confPct =
+  // Sprint 15 Phase 3 — band-only confidence chip. Rule-class lineage is now
+  // surfaced as `MEDIUM (rule-based)` etc., not as a raw percent.
+  const confInfo =
     typeof rec.confidenceScore === "number" && Number.isFinite(rec.confidenceScore)
-      ? Math.round(rec.confidenceScore * 100)
+      ? formatConfidence({ kind: "rule", value: rec.confidenceScore })
       : null;
   const { head: whyHead, tail: whyTail } = splitReasoning(rec.reasoning);
 
@@ -433,7 +435,7 @@ function RecommendedNextMoveSection({ unified }: { unified: UnifiedBestMoveResul
   const chipPieces: React.ReactNode[] = [];
   if (whenLabel) chipPieces.push(<span key="when">{whenLabel}</span>);
   if (rec.riskLevel) chipPieces.push(<span key="risk" className="capitalize">{rec.riskLevel} risk</span>);
-  if (confPct !== null) chipPieces.push(<span key="conf">{confPct}% confident</span>);
+  if (confInfo) chipPieces.push(<span key="conf">{confInfo.label}</span>);
   if (impactLabel) chipPieces.push(<span key="impact" className="num-display">{impactLabel}</span>);
 
   return (
@@ -549,9 +551,10 @@ function TopActionsSection({ unified }: { unified: UnifiedBestMoveResult | null 
             typeof dollars === "number" && Number.isFinite(dollars)
               ? `${formatCurrency(dollars)}/yr`
               : (rec.benefitLabel ?? null);
-          const confPct =
+          // Sprint 15 Phase 3 — band-only label for top action confidence.
+          const confInfo =
             typeof rec.confidenceScore === "number" && Number.isFinite(rec.confidenceScore)
-              ? Math.round(rec.confidenceScore * 100)
+              ? formatConfidence({ kind: "rule", value: rec.confidenceScore })
               : null;
           const riskLabel = rec.riskLevel
             ? `${rec.riskLevel.charAt(0).toUpperCase()}${rec.riskLevel.slice(1)} risk`
@@ -574,11 +577,11 @@ function TopActionsSection({ unified }: { unified: UnifiedBestMoveResult | null 
                     )}
                     <span className="font-medium">{plain}.</span>
                   </p>
-                  {(riskLabel || confPct !== null) && (
+                  {(riskLabel || confInfo) && (
                     <p className="text-[11px] text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-1.5">
                       {riskLabel && <span>{riskLabel}</span>}
-                      {riskLabel && confPct !== null && <span aria-hidden className="text-muted-foreground/50">·</span>}
-                      {confPct !== null && <span>{confPct}% confident</span>}
+                      {riskLabel && confInfo && <span aria-hidden className="text-muted-foreground/50">·</span>}
+                      {confInfo && <span>{confInfo.label}</span>}
                     </p>
                   )}
                   {auditMode && (
@@ -965,14 +968,30 @@ export default function ActionPlanPage() {
     return { snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses };
   }, [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses]);
 
-  /* Unified engine — same orchestrator as Dashboard's BestMoveCard. */
-  const [unified, setUnified] = useState<UnifiedBestMoveResult | null>(null);
-  const refreshKey = snapshot?.id ?? "no-snapshot";
-  useEffect(() => {
-    let cancelled = false;
-    computeUnifiedBestMove().then(r => { if (!cancelled) setUnified(r); }).catch(() => { /* ignore */ });
-    return () => { cancelled = true; };
-  }, [refreshKey]);
+  /* Sprint 15 Phase 3 — flipped to RecommendationFacade via
+     useCanonicalRecommendation. The facade wraps the same orchestrator under
+     a unified contract, so this page reads from the same React Query cache
+     as Decision Lab, /decision, Goal Closure Lab, and the dashboard widgets.
+     The downstream components still consume the legacy `UnifiedBestMoveResult`
+     shape, so we synthesise it from the canonical result. */
+  const { data: canonical } = useCanonicalRecommendation();
+  const unified: UnifiedBestMoveResult | null = useMemo(() => {
+    if (!canonical) return null;
+    return {
+      /* `legacy` and `unified` are downstream-facing facets. The page only
+         reads from `unified.{bestMove, topPriorities, all, blockers}`, so we
+         project the canonical shape into that slot. */
+      legacy: undefined as unknown as UnifiedBestMoveResult["legacy"],
+      unified: {
+        bestMove: canonical.bestMove,
+        topPriorities: canonical.top3,
+        all: canonical.all,
+        riskBeingReduced: canonical.riskBeingReduced,
+        generatedAt: canonical.generatedAt,
+      } as unknown as UnifiedBestMoveResult["unified"],
+      changes: [] as unknown as UnifiedBestMoveResult["changes"],
+    };
+  }, [canonical]);
 
   /* Goal-derived target NW (so Section A and B agree). */
   const { data: goal } = useCanonicalGoal();

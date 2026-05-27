@@ -1,20 +1,18 @@
 /**
  * RecommendedDecisionsSection — Section D of the Action Plan page.
  *
- * Reads `computeUnifiedBestMove` — the SAME orchestrator the dashboard's
- * Best Move card and the Action Centre already consume. We render the top
- * 5 from `unified.all` (already ranked by the engine). No re-ranking, no
- * new narrative.
+ * Sprint 15 Phase 3 — flipped to RecommendationFacade
+ * (useCanonicalRecommendation). Same orchestrator under the hood, but now
+ * routed through the shared React Query cache so this surface reads the
+ * identical recommendation list as every other consumer.
  */
 
 import * as React from "react";
-import { useEffect, useState } from "react";
-import {
-  computeUnifiedBestMove,
-  type UnifiedBestMoveResult,
-} from "@/lib/recommendationEngine/bestMoveBridge";
+import { useEffect } from "react";
 import type { Recommendation } from "@/lib/recommendationEngine/types";
 import { formatCurrency } from "@/lib/finance";
+import { useCanonicalRecommendation } from "@/hooks/useCanonicalRecommendation";
+import { formatConfidence } from "@/lib/confidenceLabels";
 
 export interface RecommendedDecisionsSectionProps {
   /** Drives recomputation when the ledger changes (cheap; orchestrator is cached server-side). */
@@ -39,41 +37,30 @@ function ImpactBadge({ rec }: { rec: Recommendation }) {
 }
 
 function ConfidenceBadge({ rec }: { rec: Recommendation }) {
-  const pct = Math.round((rec.confidenceScore ?? 0) * 100);
+  /* Sprint 15 Phase 3 — band-only label (rule-class confidence). */
+  const info = formatConfidence({ kind: "rule", value: rec.confidenceScore });
   return (
     <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-      {pct}% conf
+      {info.label}
     </span>
   );
 }
 
 export function RecommendedDecisionsSection({ refreshKey, onDecisionsChange }: RecommendedDecisionsSectionProps) {
-  const [result, setResult] = useState<UnifiedBestMoveResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // `refreshKey` is preserved on the props for backward compatibility — the
+  // facade hook owns invalidation now, so the value is no longer threaded
+  // through any local effect.
+  void refreshKey;
+  const { data: canonical, isLoading: loading, error } = useCanonicalRecommendation();
+
+  const top: Recommendation[] = React.useMemo(
+    () => (canonical?.all ?? []).slice(0, 5),
+    [canonical],
+  );
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    computeUnifiedBestMove()
-      .then(r => {
-        if (cancelled) return;
-        setResult(r);
-        const top = r.unified.all.slice(0, 5);
-        onDecisionsChange?.(top);
-      })
-      .catch(err => {
-        if (cancelled) return;
-        setError(err?.message ?? String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [refreshKey, onDecisionsChange]);
-
-  const top = result?.unified?.all?.slice(0, 5) ?? [];
+    if (canonical) onDecisionsChange?.(top);
+  }, [canonical, top, onDecisionsChange]);
 
   return (
     <section data-testid="action-plan-recommended-decisions">
@@ -93,7 +80,7 @@ export function RecommendedDecisionsSection({ refreshKey, onDecisionsChange }: R
       {!loading && error && (
         <div className="rounded-lg border bg-card px-4 py-4 text-sm" style={{ borderColor: "hsl(var(--danger) / 0.4)" }}>
           <p className="font-semibold" style={{ color: "hsl(var(--danger))" }}>Could not load recommendations.</p>
-          <p className="text-xs text-muted-foreground mt-1">{error}</p>
+          <p className="text-xs text-muted-foreground mt-1">{error instanceof Error ? error.message : String(error)}</p>
         </div>
       )}
 

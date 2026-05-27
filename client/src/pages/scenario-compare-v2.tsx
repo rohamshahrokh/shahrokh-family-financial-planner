@@ -279,7 +279,9 @@ function ConfidenceRibbon({ value, label }: { value: number; label?: string }) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-muted-foreground">{label ?? "Confidence"}</span>
+        {/* Sprint 15 Phase 3 — rename: this value is a heuristic engine-fit
+            blend, not a calibrated confidence probability. */}
+        <span className="text-muted-foreground">{label ?? "Engine Fit"}</span>
         <span className={`font-semibold tabular-nums ${textTone}`}>{value}%</span>
       </div>
       <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
@@ -513,7 +515,9 @@ function NarrativeCard({
           {result.defaultProbability > 0.05 && (
             <Badge variant="outline" className="border-rose-500 text-rose-700 dark:text-rose-300">
               <XCircle className="h-3 w-3 mr-1" />
-              Default {mPct(result.defaultProbability, 0)}
+              {/* Sprint 15 Phase 3 — annotate as MC so the user knows this is
+                  a calibrated probability, not a heuristic engine-fit score. */}
+              Default {mPct(result.defaultProbability, 0)} (Monte Carlo)
             </Badge>
           )}
           {result.serviceability?.band ? (
