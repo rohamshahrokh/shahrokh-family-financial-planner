@@ -99,7 +99,7 @@ console.log("\n── Scenario 07 fix (concentration: crypto > 30%) ──");
     monthlyCashflow: signals.monthlySurplus,
   });
   check("recommendations generated", recs.length > 0);
-  const concentrationRec = recs.find((r) => /reduce crypto|crypto over 30|crypto_over_30/i.test(r.what.action));
+  const concentrationRec = recs.find((r) => /reduce crypto|crypto over 30|crypto_over_30|trim crypto/i.test(r.what.action));
   check("concentration rec uses breached flag (not allocations[0])", !!concentrationRec, recs[0]?.what.action);
   if (concentrationRec) {
     check("narrative references crypto (case-insensitive)", /crypto/i.test(concentrationRec.what.action + " " + concentrationRec.why + " " + concentrationRec.what.concreteDetails));
@@ -211,6 +211,112 @@ console.log("\n── Execution-fit downgrades 'high' to 'medium' ──");
   const rec = buildAdvisorRecommendation({ action, signals: baseSignals, executionFit: { likelyAdherence: 0.4 } });
   check("execution-fit downgrades band to medium", rec.confidence.band === 'medium', rec.confidence.basis);
   check("assumptions note behavioural commitment", rec.assumptions.some(a => /behavioural commitment/i.test(a)));
+}
+
+console.log("\n── Sprint 20 PR-B fix-up Defect 1: human concentration + life-stage labels ──");
+{
+  const propertyFlag: ConcentrationFlag = {
+    kind: 'property_over_80',
+    severity: 'critical',
+    observedPct: 82.9,
+    thresholdPct: 80,
+    affectedAssets: ['PPOR'],
+    remediation: 'Trim property allocation below 80%',
+  };
+  const signals: HouseholdSignals = {
+    ...baseSignals,
+    propertyExposurePct: 82.9,
+    concentrationRisks: [{ ...propertyFlag, breached: true }],
+  };
+  const recs = generateAdvisorRecommendations({
+    signals,
+    borrowingCapacity: 600_000,
+    liquidityBufferMonths: signals.liquidityMonths,
+    monthlyCashflow: signals.monthlySurplus,
+  });
+  const top = recs[0];
+  check("demo top-1 action is 'Trim property allocation to under 80%'", /trim property allocation to under 80%/i.test(top.what.action), top.what.action);
+  check("demo top-1 confidence.basis uses 'Accumulation phase' (not 'life stage a accumulation')", /accumulation phase/i.test(top.confidence.basis) && !/life stage [a-e]\b/i.test(top.confidence.basis), top.confidence.basis);
+  check("demo top-1 has no 'exposure above N below N%' broken phrase", !/exposure above \d+ below \d+%/i.test(top.what.action + top.what.concreteDetails));
+}
+
+console.log("\n── Sprint 20 PR-B fix-up Defect 1: scenario-07 crypto label ──");
+{
+  const cryptoFlag: ConcentrationFlag = {
+    kind: 'crypto_over_30',
+    severity: 'critical',
+    observedPct: 45,
+    thresholdPct: 30,
+    affectedAssets: ['BTC', 'ETH'],
+    remediation: 'Reduce crypto exposure below 30%',
+  };
+  const signals: HouseholdSignals = {
+    ...baseSignals,
+    cryptoExposurePct: 45,
+    concentrationRisks: [{ ...cryptoFlag, breached: true }],
+  };
+  const recs = generateAdvisorRecommendations({
+    signals,
+    borrowingCapacity: 0,
+    liquidityBufferMonths: signals.liquidityMonths,
+    monthlyCashflow: signals.monthlySurplus,
+  });
+  const top = recs[0];
+  check("scenario 07 top-1 action is 'Trim crypto allocation to under 30%'", /trim crypto allocation to under 30%/i.test(top.what.action), top.what.action);
+  check("scenario 07 no 'exposure above 30 below 30%' broken phrase", !/exposure above \d+ below \d+%/i.test(top.what.action));
+}
+
+console.log("\n── Sprint 20 PR-B fix-up Defect 3: confidence penalty when plan ends ≥30% short ──");
+{
+  const action: AdvisorActionInput = {
+    id: 'etf_dca',
+    actionKind: 'etf_dca',
+    proposedYear: 2027,
+    proposedDollarAmount: 4500,
+    conciseLabel: 'ETF DCA',
+    baseConfidence: 0.82,
+  };
+  const rec = buildAdvisorRecommendation({
+    action,
+    signals: baseSignals,
+    pathPenalties: { endingShortfallPct: 0.56, containsContradiction: false },
+  });
+  check("confidence band downgraded to medium when shortfall >= 30%", rec.confidence.band === 'medium' || rec.confidence.band === 'low', rec.confidence.basis);
+  check("confidence value capped at 0.65 when penalty triggered", rec.confidence.value <= 0.65 + 1e-9, `value=${rec.confidence.value}`);
+  check("basis cites the shortfall in the explanation", /short/i.test(rec.confidence.basis), rec.confidence.basis);
+}
+
+console.log("\n── Sprint 20 PR-B fix-up Defect 3: improves fields always present ──");
+{
+  const action: AdvisorActionInput = {
+    id: 'etf_dca',
+    actionKind: 'etf_dca',
+    proposedYear: 2027,
+    proposedDollarAmount: 4500,
+    conciseLabel: 'ETF DCA',
+    baseConfidence: 0.72,
+    // Deliberately leave all four delta fields undefined to assert defaults
+  };
+  const rec = buildAdvisorRecommendation({ action, signals: baseSignals });
+  check("improves.fireYearDelta present (=0 when absent)", rec.improves.fireYearDelta === 0);
+  check("improves.successDelta present (=0 when absent)", rec.improves.successDelta === 0);
+  check("improves.nwDelta present (=0 when absent)", rec.improves.nwDelta === 0);
+  check("improves.monthlyPassiveDelta present (=0 when absent)", rec.improves.monthlyPassiveDelta === 0);
+}
+
+console.log("\n── Sprint 20 PR-B fix-up Defect 3: sensitivity gating ──");
+{
+  const zeroEquitySignals: HouseholdSignals = {
+    ...baseSignals,
+    equitySharePct: 0,
+    propertyExposurePct: 82.9,
+  };
+  const rec = buildAdvisorRecommendation({
+    action: { id: 'etf_dca', actionKind: 'etf_dca', proposedYear: 2027, proposedDollarAmount: 3000, conciseLabel: 'ETF DCA', baseConfidence: 0.7 },
+    signals: zeroEquitySignals,
+  });
+  check("sensitivity drivers do NOT cite equity real return when equitySharePct < 10", !(rec.sensitivity?.drivers ?? []).includes('equity real return'), (rec.sensitivity?.drivers ?? []).join(','));
+  check("sensitivity line does NOT mention equity when equitySharePct < 10", !/equity return/i.test(rec.sensitivity?.line ?? ''), rec.sensitivity?.line);
 }
 
 console.log(`\n── Summary ──\n  pass: ${pass}\n  fail: ${fail}`);

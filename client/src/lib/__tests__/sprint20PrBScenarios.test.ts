@@ -24,6 +24,21 @@ import { buildAdvisorSignals } from "../advisorContextBuilder";
 import type { ConcentrationFlag } from "../concentration/types";
 import type { HouseholdLifeStage } from "../householdState/types";
 import { containsBoilerplate } from "../advisorNarrativeEngine";
+import { buildRealPath } from "../recommendationOptimization/realPathOutput";
+
+const BANNED_PATTERN_BROKEN_EXPOSURE = /exposure above \d+ below \d+%/i;
+const BANNED_PATTERN_RAW_LIFESTAGE = /life stage [a-e]\b/i;
+
+function flattenRec(rec: any): string {
+  const parts: string[] = [];
+  parts.push(rec.what.action, rec.what.concreteDetails, rec.why);
+  parts.push(rec.confidence?.basis ?? '');
+  parts.push(rec.sensitivity?.line ?? '');
+  for (const a of rec.alternatives ?? []) parts.push(a.label, a.tradeoff);
+  for (const r of rec.risks ?? []) parts.push(r.label, r.mitigation);
+  for (const a of rec.assumptions ?? []) parts.push(a);
+  return parts.join(' | ');
+}
 
 let pass = 0;
 let fail = 0;
@@ -186,11 +201,33 @@ const results: Array<{ id: string; topAction: string; topRecCount: number; allPa
 
 for (const sc of scenarios) {
   const { signals, monthlyCashflow, liquidityBufferMonths } = buildSignals(sc);
+  const targetFireYear = signals.targetFireYear;
+  const realPath = buildRealPath({
+    currentYear: new Date().getFullYear(),
+    targetFireYear,
+    startingNetWorth: sc.netWorth,
+    startingMonthlySurplus: sc.monthlySurplus,
+    startingMonthlyExpenses: sc.monthlyExpenses,
+    startingMonthlyPassiveIncome: 0,
+    liquidityBufferMonths,
+    monthlyCashflow,
+    leverageRatio: sc.netWorth > 0 ? Math.max(0, sc.mortgage) / Math.max(1, sc.netWorth + sc.mortgage) : 0,
+    hasInvestmentProperty: false,
+    borrowingCapacity: sc.annualIncome * 6 * 0.4,
+    lifeStage: signals.lifeStage,
+    targetMonthlyPassiveIncome: sc.targetMonthlyIncome,
+    propertyExposurePct: signals.propertyExposurePct,
+    cryptoExposurePct: signals.cryptoExposurePct,
+  });
   const recs = generateAdvisorRecommendations({
     signals,
     borrowingCapacity: sc.annualIncome * 6 * 0.4,
     liquidityBufferMonths,
     monthlyCashflow,
+    pathPenalties: {
+      endingShortfallPct: realPath.endingShortfallPct,
+      containsContradiction: realPath.containsContradiction,
+    },
   });
   const localNotes: string[] = [];
   const top = recs[0];
@@ -199,6 +236,40 @@ for (const sc of scenarios) {
   if (recs.length === 0) {
     results.push({ id: sc.id, topAction: '(none)', topRecCount: 0, allPass: false, notes: ['no recs generated'] });
     continue;
+  }
+
+  // Defect 1: banned-language regex checks across all recommendations
+  for (const r of recs) {
+    const flat = flattenRec(r);
+    check(`[${sc.id}] no broken "exposure above X below Y%" pattern`, !BANNED_PATTERN_BROKEN_EXPOSURE.test(flat), flat.slice(0, 160));
+    check(`[${sc.id}] no raw "life stage a/b/c/d/e" token`, !BANNED_PATTERN_RAW_LIFESTAGE.test(flat), flat.slice(0, 160));
+  }
+
+  // Defect 2: contradictory real-path output suppression
+  if (signals.propertyExposurePct > 80) {
+    const hasBuyIP = realPath.steps.some((s) => s.kind === 'buy_investment_property');
+    check(`[${sc.id}] property > 80% → real path has zero buy_investment_property steps`, !hasBuyIP);
+  }
+  if (signals.cryptoExposurePct > 30) {
+    const hasCryptoAdd = realPath.steps.some((s) => /crypto/i.test(s.detail) && (s.kind === 'reallocate_into_etfs' || s.kind === 'buy_investment_property'));
+    check(`[${sc.id}] crypto > 30% → real path has zero crypto-additive steps`, !hasCryptoAdd);
+  }
+
+  // Defect 3: improves keys all present
+  const improves = top.improves as Record<string, unknown>;
+  for (const key of ['fireYearDelta', 'successDelta', 'nwDelta', 'monthlyPassiveDelta']) {
+    check(`[${sc.id}] improves.${key} present`, key in improves && typeof improves[key] === 'number');
+  }
+
+  // Defect 3: sensitivity drivers gated to actual exposures
+  if (top.sensitivity && top.sensitivity.drivers.includes('equity real return')) {
+    check(`[${sc.id}] sensitivity cites equity-return only when equitySharePct >= 10`, signals.equitySharePct >= 10, `equitySharePct=${signals.equitySharePct.toFixed(1)}`);
+  }
+
+  // Defect 3: confidence calibration — if path ends >= 30% short, band <= medium and value <= 0.65
+  if (realPath.endingShortfallPct >= 0.3) {
+    check(`[${sc.id}] confidence band ≤ medium when plan ends ≥ 30% short`, top.confidence.band !== 'high', `band=${top.confidence.band} shortfall=${(realPath.endingShortfallPct * 100).toFixed(0)}%`);
+    check(`[${sc.id}] confidence value ≤ 0.65 when plan ends ≥ 30% short`, top.confidence.value <= 0.65 + 1e-9, `value=${top.confidence.value}`);
   }
   check(`[${sc.id}] top concreteDetails matches numeric token`, /(\d+%|\$\d|\d+\s*months?|\d+\s*years?)/.test(top.what.concreteDetails), top.what.concreteDetails);
   check(`[${sc.id}] alternatives.length >= 2`, top.alternatives.length >= 2);

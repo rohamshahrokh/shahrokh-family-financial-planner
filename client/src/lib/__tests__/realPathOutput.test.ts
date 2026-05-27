@@ -73,5 +73,36 @@ console.log("\n── Shortfall reporting ──");
   }
 }
 
+console.log("\n── Sprint 20 PR-B fix-up Defect 2: suppress buy_investment_property when propertyExposurePct > 80 ──");
+{
+  const propertyHeavy = buildRealPath({ ...baseInputs, propertyExposurePct: 82.9, hasInvestmentProperty: true });
+  check("no buy_investment_property step when property > 80%", !propertyHeavy.steps.some(s => s.kind === 'buy_investment_property'));
+  check("notes mention the property-concentration suppression", propertyHeavy.notes.some(n => /property exposure .* > 80%/i.test(n)), propertyHeavy.notes.join(' | '));
+  check("path contains a sell_investment_property trim step instead", propertyHeavy.steps.some(s => s.kind === 'sell_investment_property' && /under 80%/i.test(s.title + s.detail)));
+  check("containsContradiction stays false because we suppressed the contradictory candidate", propertyHeavy.containsContradiction === false);
+}
+
+console.log("\n── Sprint 20 PR-B fix-up Defect 2: suppress crypto-additive steps when cryptoExposurePct > 30 ──");
+{
+  const cryptoHeavy = buildRealPath({ ...baseInputs, cryptoExposurePct: 45, propertyExposurePct: 10 });
+  check("no reallocate_into_etfs step (crypto suppression includes additive ETFs)", !cryptoHeavy.steps.some(s => s.kind === 'reallocate_into_etfs'));
+  check("notes mention crypto suppression", cryptoHeavy.notes.some(n => /crypto exposure .* > 30%/i.test(n)));
+}
+
+console.log("\n── Sprint 20 PR-B fix-up Defect 2: realistic reallocation amount ──");
+{
+  const path = buildRealPath(baseInputs);
+  const reallocStep = path.steps.find(s => s.kind === 'reallocate_into_etfs');
+  // For baseInputs: annualSurplus 90K * 9 years * 0.4 = 324K floor 50K
+  check("reallocation amount scales with surplus * yearsToTarget (>= 200K for baseInputs)", !!reallocStep && /\$3\d\dK|\$[2-9]\d\dK/.test(reallocStep.title), reallocStep?.title);
+}
+
+console.log("\n── Sprint 20 PR-B fix-up Defect 2: endingShortfallPct + containsContradiction exposed ──");
+{
+  const path = buildRealPath(baseInputs);
+  check("endingShortfallPct is a finite number in [0,1]", Number.isFinite(path.endingShortfallPct) && path.endingShortfallPct >= 0 && path.endingShortfallPct <= 1);
+  check("containsContradiction is a boolean", typeof path.containsContradiction === 'boolean');
+}
+
 console.log(`\n── Summary ──\n  pass: ${pass}\n  fail: ${fail}`);
 if (fail > 0) process.exit(1);
