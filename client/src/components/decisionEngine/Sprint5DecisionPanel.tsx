@@ -49,6 +49,7 @@ import {
 } from "@/lib/cfoAdvisor";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
+import { formatConfidence } from "@/lib/confidenceLabels";
 
 /* ─── Props ─────────────────────────────────────────────────────────────── */
 
@@ -400,10 +401,13 @@ function BestMoveSprint5Card({ bestMove }: { bestMove: BestMoveResult }) {
         label="Liquidity risk"
         value={`${Math.round(riskImpact.liquidityRisk)} / 100`}
       />
+      {/* Sprint 15 Phase 3 — Sprint5 confidence value is a heuristic blend
+          (margin × coverage × MC partial), not a calibrated probability.
+          Render band-only via formatConfidence(kind:"heuristic"). */}
       <MetricRow
         testid="sprint5-best-move-confidence"
         label="Confidence"
-        value={`${fmtPct(confidenceScore.value, 0)} (${confidenceScore.band})`}
+        value={formatConfidence({ kind: "heuristic", value: confidenceScore.value }).label}
         hint={whyThisBeatsAlternatives.confidenceSource}
       />
 

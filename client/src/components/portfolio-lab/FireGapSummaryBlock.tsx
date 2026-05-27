@@ -26,6 +26,8 @@ interface Props {
   monteCarloRunDate?: string | null;
   /** True when the MC run is stale relative to the snapshot. */
   forecastStale?: boolean;
+  /** Sprint 15 Phase 3 — MC path count for audit visibility on the P(FF) tile. */
+  monteCarloPathCount?: number | null;
 }
 
 function fmt$(v: number | null): string | null {
@@ -109,7 +111,7 @@ function Tile({
   );
 }
 
-export function FireGapSummaryBlock({ summary, monteCarloRunDate, forecastStale }: Props) {
+export function FireGapSummaryBlock({ summary, monteCarloRunDate, forecastStale, monteCarloPathCount }: Props) {
   const noTarget =
     isEmptyValue(summary.targetNetWorth) &&
     isEmptyValue(summary.targetPassiveIncome) &&
@@ -219,7 +221,12 @@ export function FireGapSummaryBlock({ summary, monteCarloRunDate, forecastStale 
           value={fmtPct(summary.currentProbability)}
           testid="pl-fire-gap-current-prob"
           emphasis="current"
-          subtitle="probability of FIRE by target"
+          subtitle={
+            /* Sprint 15 Phase 3 — surface MC path count for audit visibility. */
+            typeof monteCarloPathCount === "number" && Number.isFinite(monteCarloPathCount)
+              ? `probability of FIRE by target · ${monteCarloPathCount} MC paths`
+              : "probability of FIRE by target"
+          }
           source="mc"
           sourceRunDate={monteCarloRunDate ?? null}
           sourceStale={forecastStale}
@@ -231,9 +238,11 @@ export function FireGapSummaryBlock({ summary, monteCarloRunDate, forecastStale 
           testid="pl-fire-gap-required-prob"
           emphasis="target"
           subtitle={
+            /* Sprint 15 Phase 3 — promote `(default)` annotation so users can
+               tell the 70% bar wasn't chosen by them. */
             summary.requiredProbabilitySource === "default"
-              ? "default 70% bar (no goal-config override)"
-              : "from goal config"
+              ? "70% default bar (no goal config override) · system-set"
+              : "from goal config · user-set"
           }
           source="fire"
         />
