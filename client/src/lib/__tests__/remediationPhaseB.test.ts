@@ -151,15 +151,17 @@ section("(a) selectFireGapSummary uses ledger NW exclusively");
 }
 {
   // Even when result has a "best.netWorthP50" set, no ledger ⇒ currentNetWorth
-  // must be null (never fall back to the forecast).
+  // must be null. The selector must not infer Current NW from any engine output
+  // when the canonical ledger was not threaded through.
   const r = makeResult({ targetNetWorth: 5_000_000 });
+  const gap = r.gap.entries.find((entry) => entry.field === "netWorth");
+  if (gap) {
+    gap.actual = LEDGER_NW;
+  }
   const v = selectFireGapSummary(r);
-  // The gap-row "actual" can populate currentNetWorth, but it must NEVER
-  // resolve to the future-year forecast P50. If actual is also null/missing,
-  // the value is null.
   check(
-    "no ledger supplied ⇒ currentNetWorth never falls back to forecast P50",
-    v.currentNetWorth !== FORECAST_P50,
+    "no ledger supplied ⇒ currentNetWorth stays null even when gap.actual exists",
+    v.currentNetWorth === null,
     `got ${v.currentNetWorth}`,
   );
 }
