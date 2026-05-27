@@ -1,5 +1,5 @@
 /**
- * uiCopy.test.tsx — Sprint 20 PR-A banned-strings guard.
+ * uiCopy.test.tsx — Sprint 20 PR-A + PR-B banned-strings guard.
  *
  * Static-scan guard: parses every .tsx file under client/src and looks for
  * banned strings inside JSX text content + UI string attributes (title,
@@ -13,12 +13,16 @@
  *   - "undefined"           → user-visible undefined is a bug
  *   - "NaN"                 → user-visible NaN is a bug
  *   - "canonical engine"    → say "live planner" or "verified pass-through"
+ *   - "canonical engines"   → say "live planner"
  *   - "decisionCandidates"  → engineering noun; never user-visible
  *   - "scenario ids"        → engineering noun
  *   - "audit traces"        → engineering noun
  *   - "search exhausted"    → say what was searched + why
  *   - "engine-backed scenarios" → say "simulated paths"
- *   - "closed-form estimate"   → engineering noun
+ *   - "closed-form estimate"   → engineering noun; use "deterministic estimate"
+ *   - "probability" — when used for heuristic confidence (user constraint:
+ *     don't call heuristic confidence "probability"). Allowed only when paired
+ *     with "Monte Carlo" / "MC" within ~40 chars (a true MC probability).
  *
  * Run with:
  *   npx tsx client/src/__tests__/uiCopy.test.tsx
@@ -100,7 +104,7 @@ function extractVisibleSpans(src: string): string[] {
 
 const BANNED: { pattern: RegExp; label: string }[] = [
   { pattern: /\bincomplete data\b/i, label: "incomplete data" },
-  { pattern: /\bcanonical engine\b/i, label: "canonical engine" },
+  { pattern: /\bcanonical engines?\b/i, label: "canonical engine(s)" },
   { pattern: /\bdecisionCandidates\b/, label: "decisionCandidates" },
   { pattern: /\bscenario ids\b/i, label: "scenario ids" },
   { pattern: /\baudit traces\b/i, label: "audit traces" },
@@ -113,6 +117,31 @@ const BANNED: { pattern: RegExp; label: string }[] = [
   { pattern: /\bNaN\b/, label: "NaN" },
   { pattern: /\bundefined\b/, label: "undefined" },
 ];
+
+/**
+ * Heuristic-confidence "probability" guard (user constraint).
+ *
+ * A user-visible span is flagged when it uses the word "probability" /
+ * "probabilities" outside of a Monte-Carlo context. The check is file-aware:
+ * pages/components whose source clearly hosts Monte-Carlo (imports MC
+ * engines or shows "Monte Carlo" copy) are allowed because those probabilities
+ * are calibrated, not heuristic.
+ *
+ * Spans that explicitly mention "FIRE", "monte carlo", "MC ", "simulation"
+ * inside the same span are also allowed.
+ */
+function isFileMcContext(src: string): boolean {
+  return (
+    /Monte\s*Carlo|monteCarlo|forecastStore|MonteCarloDashboard|MonteCarloChart|MonteCarloOverlay/.test(src)
+  );
+}
+function spanHasHeuristicProbability(span: string, fileSrc: string): boolean {
+  const lower = span.toLowerCase();
+  if (!/\bprobabilit(y|ies)\b/.test(lower)) return false;
+  if (/\b(monte\s*carlo|\bmc[-\s]|simulation|simulated|\bfire\b)\b/.test(lower)) return false;
+  if (isFileMcContext(fileSrc)) return false;
+  return true;
+}
 
 console.log("\n── Scan: banned strings in user-visible JSX text + attrs ──");
 {
@@ -131,6 +160,13 @@ console.log("\n── Scan: banned strings in user-visible JSX text + attrs ─�
         if (rule.pattern.test(span)) {
           violations.push({ file: rel, banned: rule.label, sample: span.trim().slice(0, 80) });
         }
+      }
+      if (spanHasHeuristicProbability(span, src)) {
+        violations.push({
+          file: rel,
+          banned: "probability (heuristic confidence — Sprint 20 PR-B)",
+          sample: span.trim().slice(0, 80),
+        });
       }
     }
   }

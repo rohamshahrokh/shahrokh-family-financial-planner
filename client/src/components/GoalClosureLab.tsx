@@ -40,6 +40,10 @@ import { isFireGoalExplicitlySet } from "@/lib/canonicalFire";
 import { FireGoalEmptyState } from "@/components/FireGoalEmptyState";
 import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 import { GclSixOutputGrid } from "@/components/goal-closure/GclSixOutputGrid";
+import { AdvisorRecommendationCard } from "@/components/advisor/AdvisorRecommendationCard";
+import { RetirementTransitionPanel } from "@/components/retirementTransition/RetirementTransitionPanel";
+import type { AdvisorRecommendation } from "@/lib/advisorNarrativeEngine";
+import type { TransitionNarrative } from "@/lib/retirementTransition/types";
 
 export interface GoalClosureLabProps {
   canonicalLedger: DashboardInputs | null | undefined;
@@ -47,6 +51,12 @@ export interface GoalClosureLabProps {
   riskOutputs?: RiskRadarResult | null;
   monteCarloOutputs?: MonteCarloResult | null;
   className?: string;
+  /** Sprint 20 PR-B P1-2 — advisor recommendations from advisorNarrativeEngine. */
+  advisorRecommendations?: AdvisorRecommendation[];
+  /** Sprint 20 PR-B P1-1 — retirement transition narrative. */
+  retirementTransition?: TransitionNarrative | null;
+  /** Sprint 20 PR-B P1-1 — expand transition by default (STATE_C/D/E). */
+  retirementTransitionDefaultOpen?: boolean;
 }
 
 /* ─── Helpers ──────────────────────────────────────────────────────────── */
@@ -550,6 +560,27 @@ export function GoalClosureLab(props: GoalClosureLabProps) {
       className={`flex flex-col gap-4 sm:gap-6 ${props.className ?? ""}`}
       data-testid="closure-lab-root"
     >
+      {(props.advisorRecommendations?.length || props.retirementTransition) && (
+        <div className="flex flex-col gap-3" data-testid="closure-lab-advisor-block">
+          {(props.advisorRecommendations ?? []).map((rec, i) => (
+            <AdvisorRecommendationCard
+              key={i}
+              rec={rec}
+              isTopOnSurface={i === 0}
+              surface="goal-closure-lab"
+              index={i}
+            />
+          ))}
+          {props.retirementTransition && (
+            <RetirementTransitionPanel
+              narrative={props.retirementTransition}
+              surface="goal-closure-lab"
+              defaultOpen={props.retirementTransitionDefaultOpen}
+            />
+          )}
+        </div>
+      )}
+
       {/* Sprint 12 — 6-output advisor grid (Progress %, Current Gap, Required Change,
           Fastest / Safest / Highest-Probability paths). Sits above the engine
           surfaces so users see the decision-shaped answer first. */}

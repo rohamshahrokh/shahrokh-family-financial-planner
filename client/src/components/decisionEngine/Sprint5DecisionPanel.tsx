@@ -50,6 +50,10 @@ import {
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
 import { formatConfidence } from "@/lib/confidenceLabels";
+import { AdvisorRecommendationCard } from "@/components/advisor/AdvisorRecommendationCard";
+import { RetirementTransitionPanel } from "@/components/retirementTransition/RetirementTransitionPanel";
+import type { AdvisorRecommendation } from "@/lib/advisorNarrativeEngine";
+import type { TransitionNarrative } from "@/lib/retirementTransition/types";
 
 /* ─── Props ─────────────────────────────────────────────────────────────── */
 
@@ -64,6 +68,12 @@ export interface Sprint5DecisionPanelProps {
   monteCarloOutputs?: MonteCarloResult | null;
   /** Optional className passthrough for the root container. */
   className?: string;
+  /** Sprint 20 PR-B P1-2 — advisor recommendations from advisorNarrativeEngine. */
+  advisorRecommendations?: AdvisorRecommendation[];
+  /** Sprint 20 PR-B P1-1 — retirement transition narrative. */
+  retirementTransition?: TransitionNarrative | null;
+  /** Sprint 20 PR-B P1-1 — expand transition by default (STATE_C/D/E). */
+  retirementTransitionDefaultOpen?: boolean;
 }
 
 /* ─── Engine bundle ─────────────────────────────────────────────────────── */
@@ -688,17 +698,46 @@ export function Sprint5DecisionPanel(props: Sprint5DecisionPanelProps) {
     );
   }
 
+  const advisorRecs = props.advisorRecommendations ?? [];
+  const retirement = props.retirementTransition ?? null;
+
   return (
-    <div
-      data-testid="sprint5-decision-panel"
-      className={`grid grid-cols-1 lg:grid-cols-2 gap-4 ${props.className ?? ""}`}
-    >
-      <GoalSolverResultsPanel goal={bundle.goal} />
-      <BestMoveSprint5Card bestMove={bundle.bestMove} />
-      <Top3RankedOptions ranking={bundle.ranking} />
-      <ScenarioComparisonSection candidates={bundle.candidates} />
-      <CFOAdvisorInsightsPanel cfo={bundle.cfo} />
-      <WatchItemsPanel cfo={bundle.cfo} />
+    <div className={`flex flex-col gap-4 ${props.className ?? ""}`}>
+      {(advisorRecs.length > 0 || retirement) && (
+        <div className="flex flex-col gap-3" data-testid="sprint5-decision-advisor-block">
+          {advisorRecs.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {advisorRecs.map((rec, i) => (
+                <AdvisorRecommendationCard
+                  key={i}
+                  rec={rec}
+                  isTopOnSurface={i === 0}
+                  surface="decision-lab"
+                  index={i}
+                />
+              ))}
+            </div>
+          )}
+          {retirement && (
+            <RetirementTransitionPanel
+              narrative={retirement}
+              surface="decision-lab"
+              defaultOpen={props.retirementTransitionDefaultOpen}
+            />
+          )}
+        </div>
+      )}
+      <div
+        data-testid="sprint5-decision-panel"
+        className="grid grid-cols-1 lg:grid-cols-2 gap-4"
+      >
+        <GoalSolverResultsPanel goal={bundle.goal} />
+        <BestMoveSprint5Card bestMove={bundle.bestMove} />
+        <Top3RankedOptions ranking={bundle.ranking} />
+        <ScenarioComparisonSection candidates={bundle.candidates} />
+        <CFOAdvisorInsightsPanel cfo={bundle.cfo} />
+        <WatchItemsPanel cfo={bundle.cfo} />
+      </div>
     </div>
   );
 }

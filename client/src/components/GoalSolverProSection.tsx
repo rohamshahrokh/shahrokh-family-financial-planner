@@ -450,7 +450,7 @@ function AuditTrailCard({ result }: { result: GoalSolverProResult }) {
                 <div><span className="text-muted-foreground">Engines:</span> {a.enginesUsed.join(", ")}</div>
                 <div><span className="text-muted-foreground">Inputs:</span> {a.inputsUsed.join(", ")}</div>
                 <div><span className="text-muted-foreground">Assumptions:</span> {a.assumptionsUsed.join("; ")}</div>
-                <div><span className="text-muted-foreground">Probability source:</span> {a.probabilitySource}</div>
+                <div><span className="text-muted-foreground">Monte Carlo probability source:</span> {a.probabilitySource}</div>
                 <div><span className="text-muted-foreground">Path source:</span> {a.pathSource}</div>
                 <div><span className="text-muted-foreground">Constraint source:</span> {a.constraintSource}</div>
                 <div><span className="text-muted-foreground">Confidence source:</span> {a.confidenceSource}</div>

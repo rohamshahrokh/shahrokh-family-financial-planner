@@ -21,6 +21,10 @@ import {
   type BuildRecommendedActionsInputs,
 } from '@/lib/recommendedActionsAdapter';
 import { Sparkles, Layers, AlertCircle } from 'lucide-react';
+import { AdvisorRecommendationCard } from '@/components/advisor/AdvisorRecommendationCard';
+import { RetirementTransitionPanel } from '@/components/retirementTransition/RetirementTransitionPanel';
+import type { AdvisorRecommendation } from '@/lib/advisorNarrativeEngine';
+import type { TransitionNarrative } from '@/lib/retirementTransition/types';
 
 interface Props extends BuildRecommendedActionsInputs {
   /** Show full reason text? Defaults true; false renders a compact list. */
@@ -29,14 +33,24 @@ interface Props extends BuildRecommendedActionsInputs {
   limit?: number;
   /** Test/storybook override — render the supplied list directly. */
   preComputedActions?: RecommendedAction[];
+  /** Sprint 20 PR-B P1-2 — advisor recommendations (AdvisorRecommendation[]). */
+  advisorRecommendations?: AdvisorRecommendation[];
+  /** Sprint 20 PR-B P1-1 — retirement transition narrative. */
+  retirementTransition?: TransitionNarrative | null;
+  /** Sprint 20 PR-B P1-1 — expand transition by default (STATE_C/D/E). */
+  retirementTransitionDefaultOpen?: boolean;
 }
 
 export default function RecommendedActionsPanel(props: Props) {
   const actions = props.preComputedActions ?? buildRecommendedActions(props);
   const limit = props.limit ?? actions.length;
   const visible = actions.slice(0, limit);
+  const advisorRecs = props.advisorRecommendations ?? [];
+  const retirement = props.retirementTransition ?? null;
 
-  if (visible.length === 0) {
+  const hasAdvisor = advisorRecs.length > 0;
+
+  if (visible.length === 0 && !hasAdvisor && !retirement) {
     return (
       <section
         className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground"
@@ -58,10 +72,32 @@ export default function RecommendedActionsPanel(props: Props) {
             Recommended Actions
           </h3>
           <p className="text-[11px] text-muted-foreground">
-            Curated from existing Forecast, Goal Solver, Risk and Monte Carlo engine outputs — no new math. Each item shows expected impact, risk, confidence and the engines that contributed.
+            Advisor narratives, retirement transition and engine actions — every number is computed from your live snapshot.
           </p>
         </div>
       </header>
+
+      {hasAdvisor && (
+        <div className="space-y-2" data-testid="recommended-actions-advisor-block">
+          {advisorRecs.map((rec, i) => (
+            <AdvisorRecommendationCard
+              key={i}
+              rec={rec}
+              isTopOnSurface={i === 0}
+              surface="recommended-actions"
+              index={i}
+            />
+          ))}
+        </div>
+      )}
+
+      {retirement && (
+        <RetirementTransitionPanel
+          narrative={retirement}
+          surface="recommended-actions"
+          defaultOpen={props.retirementTransitionDefaultOpen}
+        />
+      )}
 
       <div className="space-y-2">
         {visible.map(a => (

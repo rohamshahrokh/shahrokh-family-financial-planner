@@ -62,7 +62,7 @@ function ActionCard({ action, index }: { action: Top3Action; index: number }) {
         ) : null}
         {!isEmptyValue(probDelta) ? (
           <li className="flex justify-between" data-testid={`${testid}-prob-delta`}>
-            <span className="text-muted-foreground">Success Probability</span>
+            <span className="text-muted-foreground">Monte Carlo Success Probability</span>
             <span className="font-semibold tabular-nums">{probDelta}</span>
           </li>
         ) : null}

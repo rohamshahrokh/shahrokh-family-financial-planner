@@ -52,6 +52,14 @@ import {
 import { DecisionCard } from "@/components/decision/DecisionCard";
 import { BlockerAnalysisBlock } from "@/components/decision/BlockerAnalysisBlock";
 import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
+import { GoalSolverThreeStep } from "@/components/decisionEngine/GoalSolverThreeStep";
+import { buildRecommendationContext } from "@/lib/recommendationContext/buildContext";
+import { classifyHouseholdLifeStage } from "@/lib/householdState/classifier";
+import { detectConcentration } from "@/lib/concentration/detector";
+import { buildAdvisorSignals } from "@/lib/advisorContextBuilder";
+import { generateAdvisorRecommendations } from "@/lib/advisorRecommendationsBuilder";
+import { computeBorrowingCapacity } from "@/lib/feasibility/borrowingCapacity";
+import { buildRetirementTransition } from "@/lib/retirementTransition";
 
 /* ─── Helpers ───────────────────────────────────────────────────────── */
 
@@ -306,6 +314,95 @@ export function GoalSolverProTab() {
   const { data: canonicalGoal } = useCanonicalGoal();
   const goalSet = isFireGoalExplicitlySet(canonicalGoal ?? null);
 
+  /* Sprint 20 PR-B P1-2/P1-3/P1-5 — build advisor recommendations + retirement
+     transition from the live snapshot. Wired into <GoalSolverThreeStep>. */
+  const advisorBundle = useMemo(() => {
+    if (!canonicalLedger) return null;
+    const ctx = buildRecommendationContext(canonicalLedger, canonicalGoal ?? null);
+    const lifeStage = classifyHouseholdLifeStage(ctx).primary;
+    const concentrationFlags = detectConcentration(ctx);
+    const fireNumber = ctx.plan.targetPassiveMonthly && ctx.plan.swrPct
+      ? (ctx.plan.targetPassiveMonthly * 12) / ctx.plan.swrPct
+      : 0;
+    const baselineFireProgressPct = fireNumber > 0
+      ? Math.max(0, (ctx.today.netWorth.total / fireNumber) * 100)
+      : 0;
+    const baselineFireYear = ctx.forecast.fireDateBaseline
+      ? new Date(ctx.forecast.fireDateBaseline).getFullYear()
+      : (ctx.plan.targetFireAge && ctx.today.age
+          ? new Date().getFullYear() + Math.max(0, ctx.plan.targetFireAge - ctx.today.age)
+          : new Date().getFullYear() + 10);
+    const targetFireYear = ctx.plan.targetFireAge && ctx.today.age
+      ? new Date().getFullYear() + Math.max(0, ctx.plan.targetFireAge - ctx.today.age)
+      : new Date().getFullYear() + 10;
+    const signals = buildAdvisorSignals({
+      monthlyIncome: ctx.today.cashflow.monthlyIncome,
+      monthlyExpenses: ctx.today.cashflow.monthlyExpenses,
+      monthlySurplus: ctx.today.cashflow.monthlySurplus,
+      netWorth: ctx.today.netWorth.total,
+      totalDebt: ctx.today.netWorth.debt,
+      totalAssets: ctx.today.netWorth.total + ctx.today.netWorth.debt,
+      propertyValue: ctx.today.netWorth.propertyEquity,
+      cryptoValue: ctx.today.netWorth.crypto,
+      equityValue: ctx.today.netWorth.investments,
+      liquidCash: ctx.today.netWorth.cash,
+      targetFireYear,
+      targetMonthlyPassive: ctx.plan.targetPassiveMonthly ?? 0,
+      baselineFireYear,
+      baselineMonthlyPassive: (ctx.forecast.passiveIncomePathAtTargetAge ?? 0) / 12,
+      baselineFireProgressPct,
+      lifeStage,
+      concentrationFlags,
+    });
+    const borrow = computeBorrowingCapacity({
+      grossAnnualIncome: ctx.today.cashflow.monthlyIncome * 12,
+      monthlyDebtRepayments: 0,
+      monthlyLivingExpenses: ctx.today.cashflow.monthlyExpenses,
+      dependents: ctx.today.householdProfile.hasDependents ? 1 : 0,
+    });
+    const recommendations = generateAdvisorRecommendations({
+      signals,
+      borrowingCapacity: borrow.maxBorrowAud,
+      liquidityBufferMonths: signals.liquidityMonths,
+      monthlyCashflow: ctx.today.cashflow.monthlySurplus,
+    });
+    const transition = (() => {
+      const liquidPortfolio =
+        ctx.today.netWorth.cash + ctx.today.netWorth.investments + ctx.today.netWorth.superBalance;
+      const ip = (properties ?? []).filter((p: any) => !p?.is_primary);
+      const propsList = (properties ?? []).map((p: any) => ({
+        id: p?.id ?? String(p?.address ?? Math.random()),
+        label: p?.address ?? p?.label ?? `Property ${p?.id ?? ''}`,
+        purchaseYear: Number(p?.purchase_year ?? new Date().getFullYear() - 5),
+        currentValue: Number(p?.current_value ?? 0),
+        debt: Number(p?.current_loan_balance ?? p?.loan_balance ?? 0),
+        annualGrossYieldPct: Number(p?.rental_yield_pct ?? 4),
+        annualHoldingCostsPct: 1.2,
+        isPPOR: !!p?.is_primary,
+      }));
+      const household = {
+        currentAge: ctx.today.age ?? 35,
+        dependents: ctx.today.householdProfile.hasDependents ? 1 : 0,
+        targetFireYear,
+        targetMonthlyPassiveIncome: ctx.plan.targetPassiveMonthly ?? 0,
+        effectiveTaxRate: 0.32,
+        expectedInflationPct: 2.5,
+      };
+      if (!household.targetMonthlyPassiveIncome) return null;
+      return buildRetirementTransition({
+        properties: propsList,
+        household,
+        lifeStage,
+        liquidPortfolioValue: liquidPortfolio,
+        hasInvestmentProperty: ip.length > 0,
+        liquidityBufferMonths: signals.liquidityMonths,
+      });
+    })();
+    return { recommendations, transition, lifeStage, ctx };
+  }, [canonicalLedger, canonicalGoal, properties]);
+
+  const currentAgeForGoal = advisorBundle?.ctx.today.age ?? null;
+
   return (
     <div className="flex flex-col gap-4" data-testid="decision-goal-solver-tab">
       {!goalSet && (
@@ -314,6 +411,24 @@ export function GoalSolverProTab() {
           subtitle="The /decision surface uses derived defaults until you set a FIRE goal. Configure your target monthly income and SWR to anchor the probability and timeline panels to your own plan."
         />
       )}
+      <GoalSolverThreeStep
+        currentAge={currentAgeForGoal}
+        recommendations={advisorBundle?.recommendations ?? []}
+        retirementTransition={advisorBundle?.transition ?? null}
+        isComputing={!canonicalLedger}
+        recommendationsHeading={
+          advisorBundle?.lifeStage === 'STATE_C_NEAR_FIRE' ||
+          advisorBundle?.lifeStage === 'STATE_D_FIRE_ACHIEVED' ||
+          advisorBundle?.lifeStage === 'STATE_E_DECUMULATION'
+            ? 'Decumulation-priority recommendations'
+            : 'Engine recommendations'
+        }
+      />
+      <AdvancedDisclosure
+        title="Detailed engine analysis"
+        subtitle="Five-card decision system, feasibility hero, required-vs-current strip, full Goal Solver Pro audit"
+        data-testid="decision-detailed-analysis-disclosure"
+      >
       {/* Sprint 12 — 5-card decision system. Action / Impact / Risk / Alternative / Do-Nothing. */}
       <section data-testid="decision-five-card-system">
         <header className="mb-3">
@@ -496,6 +611,7 @@ export function GoalSolverProTab() {
         targets={goalTargets}
         onTargetsChange={setGoalTargets}
       />
+      </AdvancedDisclosure>
     </div>
   );
 }
