@@ -245,6 +245,17 @@ export async function computeUnifiedBestMove(args: {
     }
   }
 
+  // Sprint 17 Phase 17.5 — auto-detect concentration flags when none supplied.
+  let concentrationFlags = args.concentrationFlags;
+  if (!concentrationFlags && context) {
+    try {
+      const { detectConcentration } = await import('../concentration/detector');
+      concentrationFlags = detectConcentration(context);
+    } catch {
+      concentrationFlags = undefined;
+    }
+  }
+
   const signals = mergeSignals(
     baseSignals,
     fromRiskRadar(args.riskRadar),
@@ -263,7 +274,7 @@ export async function computeUnifiedBestMove(args: {
     fromQuickDecision(quickDecision),
     fromContext(context),
     fromHouseholdState(args.householdState),
-    fromConcentration(args.concentrationFlags),
+    fromConcentration(concentrationFlags),
   );
   const unified = computeUnifiedRecommendations(signals);
   const changes = snapshotHistory(unified);

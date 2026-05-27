@@ -30,8 +30,13 @@ export type ConfidenceKind =
   | "composite"
   | "absent";
 
-/** Unified band — same thresholds across every surface. */
-export type ConfidenceBand = "HIGH" | "MEDIUM" | "LOW" | "ABSENT";
+/**
+ * Unified band — same thresholds across every surface.
+ * Sprint 17 Phase 17.6 added VERY_HIGH (additive) for calibrated confidences
+ * ≥ 0.80. Older surfaces that only handle HIGH/MEDIUM/LOW continue to map
+ * VERY_HIGH down to HIGH via {@link bandFor} backward-compat branch.
+ */
+export type ConfidenceBand = "VERY_HIGH" | "HIGH" | "MEDIUM" | "LOW" | "ABSENT";
 
 /** Optional MC annotations (path count, ranAt). */
 export interface FormatConfidenceOpts {
@@ -65,6 +70,11 @@ export interface FormatConfidenceResult {
  *           >= 0.5  → MEDIUM
  *           >= 0    → LOW
  *   null/undefined/NaN → ABSENT
+ *
+ * Sprint 17 Phase 17.6 added {@link bandForCalibrated} for the 4-band
+ * (VERY_HIGH/HIGH/MODERATE/LOW) calibrated values. The legacy {@link bandFor}
+ * here is preserved so every existing consumer continues to see the
+ * unchanged 3-band classification.
  */
 export function bandFor(value: number | null | undefined): ConfidenceBand {
   if (value == null || !Number.isFinite(value)) return "ABSENT";
@@ -72,6 +82,20 @@ export function bandFor(value: number | null | undefined): ConfidenceBand {
   if (value >= 0.5) return "MEDIUM";
   if (value >= 0) return "LOW";
   return "ABSENT";
+}
+
+/**
+ * Sprint 17 Phase 17.6 — 4-band classifier for calibrated values.
+ * Used by surfaces that consume Recommendation.calibratedConfidence.
+ * Returns VERY_HIGH at ≥ 0.80, HIGH at ≥ 0.60, MEDIUM (renamed from
+ * MODERATE for backwards-compat) at ≥ 0.40, else LOW.
+ */
+export function bandForCalibrated(value: number | null | undefined): ConfidenceBand {
+  if (value == null || !Number.isFinite(value)) return "ABSENT";
+  if (value >= 0.80) return "VERY_HIGH";
+  if (value >= 0.60) return "HIGH";
+  if (value >= 0.40) return "MEDIUM";
+  return "LOW";
 }
 
 function rawString(value: number | null | undefined): string {
