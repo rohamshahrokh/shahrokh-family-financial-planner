@@ -42,8 +42,10 @@ import {
 import {
   computeCanonicalFire,
   resolveFireTargetFromSnapshot,
+  selectCanonicalFire,
   type CanonicalFire,
 } from "./canonicalFire";
+import type { CanonicalGoal } from "./useCanonicalGoal";
 import {
   computeCanonicalDebtService,
   type CanonicalDebtServiceFigures,
@@ -202,6 +204,14 @@ export interface CandidateGeneratorInputs {
   /** Optional override: cash reserve target ($). Defaults to 6× monthly
    *  expenses (canonical emergency-buffer rule shared with riskEngine). */
   proposedCashReserveTarget?: number;
+  /**
+   * Sprint 15 Phase 2 — canonical FIRE goal. When provided AND `canonicalFire`
+   * is omitted, the generator routes through `selectCanonicalFire` so the
+   * computed FIRE pipeline honours mc_fire_settings (not the snapshot 20k
+   * default). Optional for back-compat — omitting it preserves legacy
+   * `computeCanonicalFire` + snapshot precedence.
+   */
+  canonicalGoal?: CanonicalGoal | null;
 }
 
 export interface CandidateGeneratorOutputs {
@@ -273,11 +283,18 @@ export function generateDecisionCandidates(
   const ledger = inputs.canonicalLedger;
   const head: CanonicalHeadlineMetrics =
     inputs.canonicalHead ?? computeCanonicalHeadlineMetrics(ledger);
+  // Sprint 15 Phase 2: when a canonical FIRE was not pre-computed, prefer
+  // selectCanonicalFire (wired with the canonical goal) over the legacy
+  // computeCanonicalFire(+resolveFireTargetFromSnapshot) precedence. Falls
+  // back to legacy when no goal is provided so existing pipelines do not
+  // regress.
   const fire: CanonicalFire =
     inputs.canonicalFire ??
-    computeCanonicalFire(ledger, {
-      targetMonthlyIncome: resolveFireTargetFromSnapshot(ledger),
-    });
+    (inputs.canonicalGoal
+      ? selectCanonicalFire(ledger, inputs.canonicalGoal)
+      : computeCanonicalFire(ledger, {
+          targetMonthlyIncome: resolveFireTargetFromSnapshot(ledger),
+        }));
   const debt: CanonicalDebtServiceFigures =
     inputs.canonicalDebtService ?? computeCanonicalDebtService(ledger);
   const goal: GoalSolverOutputs =

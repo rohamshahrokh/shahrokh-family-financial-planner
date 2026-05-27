@@ -29,6 +29,7 @@ import {
   selectCanonicalNetWorth,
   type DashboardInputs,
 } from "./dashboardDataContract";
+import type { CanonicalGoal } from "./useCanonicalGoal";
 
 export interface CanonicalFireInputs {
   /**
@@ -187,3 +188,136 @@ export function selectFireMonthlyContribution(ledger: DashboardInputs): number {
   }
   return Math.round(income - expenses - selectMonthlyDebtService(ledger));
 }
+
+/**
+ * Sprint 15 Phase 2 — single FIRE selector wired through the canonical goal.
+ *
+ * Wraps `computeCanonicalFire` and forces the canonical goal (`mc_fire_settings`,
+ * surfaced by `useCanonicalGoal()` on the client and `getCanonicalGoal()` on
+ * the server) to be the authoritative source of `swrPct` and
+ * `targetMonthlyIncome`. The legacy `computeCanonicalFire` precedence — which
+ * silently reads `snapshot.fire_target_monthly_income` (still a SQLite default
+ * of 20000 in dev fixtures) and clamp-defaults to 4% SWR — is bypassed.
+ *
+ * When the goal is `"NOT_SET"` the selector returns a structured incomplete
+ * result with `targetSource: "absent"` and `swrSource: "absent"`, with all
+ * derived figures zeroed so callers can render "Set FIRE goal" instead of
+ * silently falling through to a 4%/20k default.
+ *
+ * @param ledger DashboardInputs canonical ledger snapshot (same as today)
+ * @param goal   CanonicalGoal from `useCanonicalGoal()`. When omitted (e.g.
+ *               isolated unit tests or lib callers that intentionally bypass
+ *               the goal) the function falls back to the legacy
+ *               `computeCanonicalFire` precedence — preserving today's
+ *               behavior so we never regress in-flight pipelines.
+ */
+export interface SelectedCanonicalFire extends CanonicalFire {
+  /**
+   * Where the SWR used to compute fireNumber came from.
+   *   - "user":   from mc_fire_settings (canonical goal SET)
+   *   - "default": fell back to clampSwr default (4%) because no goal/no opts
+   *   - "absent":  goal was explicitly NOT_SET → no SWR surfaced
+   */
+  swrSource: "user" | "default" | "absent";
+  /**
+   * Where targetMonthlyIncome came from.
+   *   - "mc_fire_settings": canonical goal (SET)
+   *   - "snapshot-legacy":  ledger.snapshot.fire_target_monthly_income (the bug)
+   *   - "fallback":         monthly expenses fallback (no target set anywhere)
+   *   - "absent":           goal NOT_SET → no target surfaced
+   */
+  targetSource: "mc_fire_settings" | "snapshot-legacy" | "fallback" | "absent";
+  /** True iff the canonical goal exists and is SET. */
+  goalSet: boolean;
+  /** ISO timestamp from mc_fire_settings.goal_set_timestamp, when SET. */
+  goalSetTimestamp: string | null;
+  /** Free-form reason when goal is NOT_SET / partial — UI may surface this. */
+  reason: string | null;
+}
+
+/**
+ * Empty / NOT_SET sentinel — same numeric shape as CanonicalFire so callers
+ * don't need to null-check every field. UI should branch on `goalSet=false`
+ * (or `targetSource==="absent"`) to render "Set FIRE goal" copy.
+ */
+function emptyCanonicalFire(
+  ledger: DashboardInputs,
+  reason: string,
+): SelectedCanonicalFire {
+  const annualPassive = Math.max(0, selectPassiveIncome(ledger));
+  const monthlyExpenses = Math.max(0, selectMonthlyExpensesLedger(ledger));
+  const nw = selectCanonicalNetWorth(ledger).netWorth;
+  return {
+    swrPct: 0,
+    targetAnnualIncome: 0,
+    targetMonthlyIncome: 0,
+    fireNumber: 0,
+    netWorthNow: Math.round(nw),
+    progressFraction: 0,
+    annualPassiveIncome: Math.round(annualPassive),
+    monthlyPassiveIncome: Math.round(annualPassive / 12),
+    monthlyExpenses: Math.round(monthlyExpenses),
+    passiveCoverage:
+      monthlyExpenses > 0 ? annualPassive / 12 / monthlyExpenses : null,
+    gap: 0,
+    source: "empty",
+    swrSource: "absent",
+    targetSource: "absent",
+    goalSet: false,
+    goalSetTimestamp: null,
+    reason,
+  };
+}
+
+export function selectCanonicalFire(
+  ledger: DashboardInputs,
+  goal: CanonicalGoal | undefined,
+): SelectedCanonicalFire {
+  // No goal provided (lib transitive caller without access to the hook):
+  //   fall back to legacy computeCanonicalFire — preserves today's behavior so
+  //   nothing regresses in-flight. Mark sources as "default"/"snapshot-legacy"
+  //   so audit consumers can see the fallback occurred.
+  if (!goal) {
+    const fire = computeCanonicalFire(ledger);
+    const snapTarget = Number(ledger.snapshot?.fire_target_monthly_income);
+    const usedSnap =
+      Number.isFinite(snapTarget) && snapTarget > 0 && fire.targetMonthlyIncome === snapTarget;
+    return {
+      ...fire,
+      swrSource: "default",
+      targetSource: usedSnap
+        ? "snapshot-legacy"
+        : fire.source === "monthly_expenses_fallback"
+          ? "fallback"
+          : fire.source === "user_target"
+            ? "snapshot-legacy"
+            : "absent",
+      goalSet: false,
+      goalSetTimestamp: null,
+      reason: "selectCanonicalFire called without canonical goal — using legacy precedence",
+    };
+  }
+
+  if (goal.status === "NOT_SET") {
+    return emptyCanonicalFire(ledger, goal.reason);
+  }
+
+  // goal.status === "SET": wire the user's saved swrPct + targetPassiveMonthly
+  // through computeCanonicalFire. Note: by passing both opts.swrPct AND
+  // opts.targetMonthlyIncome, we short-circuit the snapshot fire_target read
+  // path at canonicalFire.ts:121 — the SQLite 20000 default cannot leak in.
+  const fire = computeCanonicalFire(ledger, {
+    swrPct: goal.swrPct,
+    targetMonthlyIncome: goal.targetPassiveMonthly,
+  });
+
+  return {
+    ...fire,
+    swrSource: "user",
+    targetSource: "mc_fire_settings",
+    goalSet: true,
+    goalSetTimestamp: goal.goalSetTimestamp,
+    reason: null,
+  };
+}
+

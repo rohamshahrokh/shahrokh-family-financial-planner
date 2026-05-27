@@ -33,7 +33,8 @@ import {
   computeCanonicalHeadlineMetrics,
   type CanonicalHeadlineMetrics,
 } from "./canonicalHeadlineMetrics";
-import { computeCanonicalFire, type CanonicalFire } from "./canonicalFire";
+import { computeCanonicalFire, selectCanonicalFire, type CanonicalFire } from "./canonicalFire";
+import type { CanonicalGoal } from "./useCanonicalGoal";
 import {
   solveGoalGap,
   type GoalSolverInputs,
@@ -382,6 +383,15 @@ export interface GoalClosureLabInputs {
   goalSolverInputs?: Omit<GoalSolverInputs, "canonicalLedger">;
   riskOutputs?: RiskRadarResult | null;
   monteCarloOutputs?: MonteCarloResult | null;
+  /**
+   * Sprint 15 Phase 2 — canonical FIRE goal from `useCanonicalGoal()` /
+   * `getCanonicalGoal()`. Optional for back-compat; when omitted,
+   * `selectCanonicalFire` falls back to legacy precedence (snapshot-target +
+   * 4% SWR default). Callers that have access to the canonical goal (page
+   * components, server orchestrators) MUST provide it so the SQLite-20k
+   * default cannot leak into the FIRE pipeline.
+   */
+  goal?: CanonicalGoal | null;
 }
 
 export interface GoalClosureLabResult {
@@ -1305,7 +1315,10 @@ export function buildGoalClosureLab(
   const ledger = inputs.canonicalLedger;
 
   const head = computeCanonicalHeadlineMetrics(ledger);
-  const fire = computeCanonicalFire(ledger);
+  // Sprint 15 Phase 2: route through selectCanonicalFire so mc_fire_settings
+  // wins over snapshot.fire_target_monthly_income. When `inputs.goal` is
+  // omitted the selector falls back to legacy precedence (back-compat).
+  const fire = selectCanonicalFire(ledger, inputs.goal ?? undefined);
   const goal = solveGoalGap({
     canonicalLedger: ledger,
     riskOutputs: inputs.riskOutputs ?? null,

@@ -36,7 +36,8 @@ import {
 } from "./dashboardDataContract";
 import { computeCanonicalNetWorth } from "./canonicalNetWorth";
 import { computeCanonicalCashflow } from "./canonicalCashflow";
-import { computeCanonicalFire, resolveFireTargetFromSnapshot } from "./canonicalFire";
+import { computeCanonicalFire, resolveFireTargetFromSnapshot, selectCanonicalFire } from "./canonicalFire";
+import type { CanonicalGoal } from "./useCanonicalGoal";
 import { computeCanonicalDebtService } from "./canonicalDebtService";
 
 /**
@@ -74,9 +75,17 @@ export interface CanonicalHeadlineFigures {
   };
 }
 
-/** Build the canonical headline figures from a single DashboardInputs payload. */
+/**
+ * Build the canonical headline figures from a single DashboardInputs payload.
+ *
+ * Sprint 15 Phase 2: optionally accept a CanonicalGoal so the FIRE pipeline
+ * is routed through `selectCanonicalFire`. When omitted, the legacy snapshot-
+ * target precedence is preserved (back-compat for callers that have not been
+ * threaded yet, including server-side audit traces).
+ */
 export function computeCanonicalHeadlineFigures(
   ledger: DashboardInputs,
+  goal?: CanonicalGoal | null,
 ): CanonicalHeadlineFigures {
   const nw = selectCanonicalNetWorth(ledger);
   const monthlyIncome = selectMonthlyIncome(ledger);
@@ -85,9 +94,11 @@ export function computeCanonicalHeadlineFigures(
   const monthlyDebtService = selectMonthlyDebtService(ledger);
   const mortgageState = selectMortgageInputState(ledger);
   const passiveIncome = selectPassiveIncome(ledger);
-  const fire = computeCanonicalFire(ledger, {
-    targetMonthlyIncome: resolveFireTargetFromSnapshot(ledger),
-  });
+  const fire = goal
+    ? selectCanonicalFire(ledger, goal)
+    : computeCanonicalFire(ledger, {
+        targetMonthlyIncome: resolveFireTargetFromSnapshot(ledger),
+      });
 
   return {
     netWorth: nw.netWorth,
@@ -169,11 +180,19 @@ export function reconcileCanonicalLedger(
  * same inputs. Throws via canonicalCashflow's identity check if surplus
  * arithmetic drifts.
  */
-export function buildCanonicalAuditTrace(ledger: DashboardInputs) {
-  const head = computeCanonicalHeadlineFigures(ledger);
+export function buildCanonicalAuditTrace(
+  ledger: DashboardInputs,
+  goal?: CanonicalGoal | null,
+) {
+  const head = computeCanonicalHeadlineFigures(ledger, goal);
   const nw = computeCanonicalNetWorth(ledger);
   const cashflow = computeCanonicalCashflow(ledger);
   const debtService = computeCanonicalDebtService(ledger);
+  // Audit trace intentionally renders BOTH the legacy snapshot-based FIRE
+  // (for diff comparison against historic outputs) and — when the goal is
+  // provided — the canonical-goal-routed FIRE. The `fire` field below is the
+  // snapshot-based legacy output so audit consumers can detect when the
+  // SQLite 20k default leaks through.
   const fire = computeCanonicalFire(ledger, {
     targetMonthlyIncome: resolveFireTargetFromSnapshot(ledger),
   });
