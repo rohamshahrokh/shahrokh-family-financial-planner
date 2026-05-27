@@ -46,6 +46,51 @@ registerUserDefaultsTraces();
 // #FWL_Persistent_UserDefaults_ScenarioOverride — server tier
 hydrateUserDefaultsFromServer().catch(() => { /* surfaced via getServerSyncState */ });
 
+// Sprint 20 PR-A — one-time canonical FIRE goal migration.
+// Reads any legacy persisted FIRE goal fields and writes the canonical
+// (year-based) shape via the existing /api/mc-fire-settings PUT path. The
+// shim is idempotent (flagged in sessionStorage) and is a no-op when no
+// legacy fields are present.
+// // REMOVE in Sprint 21 after one production cycle.
+import { runFireGoalMigration, MIGRATED_FLAG_KEY } from "@/lib/fireGoalCanonical.migration";
+import { apiRequest } from "@/lib/queryClient";
+async function bootFireGoalMigration(): Promise<void> {
+  try {
+    const [snapshotRes, mcSettingsRes] = await Promise.allSettled([
+      apiRequest("GET", "/api/snapshot").then(r => r.json()),
+      apiRequest("GET", "/api/mc-fire-settings").then(r => r.json()),
+    ]);
+    const snapshot = snapshotRes.status === "fulfilled" ? snapshotRes.value : null;
+    const mcSettings = mcSettingsRes.status === "fulfilled" ? mcSettingsRes.value : null;
+    // If goals_set is already true on the canonical row, no migration is
+    // needed — flag immediately so we don't re-check on every boot.
+    if (mcSettings && (mcSettings as any).goals_set === true) {
+      try { window.sessionStorage.setItem(MIGRATED_FLAG_KEY, new Date().toISOString()); } catch { /* ignore */ }
+      return;
+    }
+    const currentAge = typeof (mcSettings as any)?.current_age === "number"
+      ? Number((mcSettings as any).current_age)
+      : 40;
+    await runFireGoalMigration({
+      source: { snapshot: { ...(mcSettings ?? {}), ...(snapshot ?? {}) }, currentAge },
+      readFlag: () => {
+        try { return window.sessionStorage.getItem(MIGRATED_FLAG_KEY); }
+        catch { return null; }
+      },
+      writeFlag: (iso) => {
+        try { window.sessionStorage.setItem(MIGRATED_FLAG_KEY, iso); }
+        catch { /* ignore */ }
+      },
+      writeCanonical: async (body) => {
+        await apiRequest("PUT", "/api/mc-fire-settings", body);
+      },
+    });
+  } catch {
+    /* migration is best-effort; failures fall back to the existing NOT_SET path */
+  }
+}
+bootFireGoalMigration();
+
 import LoginPage          from "./pages/login";
 import DashboardPage      from "./pages/dashboard";
 import PropertyPage       from "./pages/property";

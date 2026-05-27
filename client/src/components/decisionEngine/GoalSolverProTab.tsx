@@ -319,7 +319,7 @@ export function GoalSolverProTab() {
         <header className="mb-3">
           <h2 className="text-lg sm:text-xl font-semibold text-foreground">Your decision, in five cards</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Every card answers one question. Click each for details — every value traces to a Sprint 10 canonical engine field.
+            Every card answers one question. Click each for details — every value is a verified pass-through of the live planner.
           </p>
         </header>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">

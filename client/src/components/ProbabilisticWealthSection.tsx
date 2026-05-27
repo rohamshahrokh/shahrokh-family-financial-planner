@@ -32,6 +32,7 @@ import {
   type ConfidenceBand,
 } from "@/lib/probabilisticWealthEngine";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
+import { EmptyStateExplainer } from "@/components/EmptyStateExplainer";
 
 export interface ProbabilisticWealthSectionProps {
   result: ProbabilisticWealthEngineResult;
@@ -421,7 +422,7 @@ function RobustRanking({ result }: { result: ProbabilisticWealthEngineResult }) 
             data-testid="prob-engine-robust-ranking-transient"
             data-variant="scenario"
             data-transient="true"
-            title="Transient — these rankings live in memory only. They are recomputed every render from the canonical engines until per-strategy → scenario-id persistence is wired."
+            title="Transient — these rankings live in memory only. They are recomputed every render from the live planner until per-strategy persistence is wired."
           >
             <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
             Transient — not saved
@@ -633,13 +634,21 @@ export function ProbabilisticWealthSection(props: ProbabilisticWealthSectionProp
   if (result.empty) {
     return (
       <section
-        className={`rounded-lg border border-border bg-card p-4 sm:p-5 shadow-sm ${props.className ?? ""}`}
+        className={`flex flex-col gap-3 ${props.className ?? ""}`}
         data-testid="prob-engine-empty"
       >
         <h2 className="text-base font-semibold text-foreground">Assumption Uncertainty Engine</h2>
-        <p className="text-xs text-muted-foreground mt-1" data-testid="prob-engine-empty-reason">
-          {result.emptyReason ?? "Sprint 7 produced no candidates — nothing to simulate."}
-        </p>
+        <EmptyStateExplainer
+          surface="probabilistic-wealth"
+          reason={result.emptyReason ?? "No candidate strategies available to simulate yet."}
+          missingFields={[
+            "At least one engine-modelled strategy candidate",
+            "Household ledger snapshot",
+          ]}
+          howToFix="Run the planner from the Dashboard so the strategy candidates can be regenerated, then return here."
+          fixLinkLabel="Open Dashboard"
+          fixHref="/dashboard"
+        />
       </section>
     );
   }

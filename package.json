@@ -85,6 +85,11 @@
     "test:select-canonical-fire": "tsx client/src/lib/__tests__/selectCanonicalFire.test.ts",
     "test:confidence-labels": "tsx client/src/lib/__tests__/confidenceLabels.test.ts",
     "test:decision-consistency": "tsx client/src/lib/__tests__/decisionConsistency.test.ts",
+    "test:fire-goal-canonical-single-source": "tsx client/src/lib/__tests__/fireGoalCanonicalSingleSource.test.ts",
+    "test:fire-goal-canonical-migration": "tsx client/src/lib/__tests__/fireGoalCanonicalMigration.test.ts",
+    "test:swr-band-selector": "tsx client/src/lib/__tests__/swrBandSelector.test.ts",
+    "test:ui-copy": "tsx client/src/__tests__/uiCopy.test.tsx",
+    "test:sprint20-pr-a": "npm run test:fire-goal-canonical-single-source && npm run test:fire-goal-canonical-migration && npm run test:swr-band-selector && npm run test:ui-copy",
     "test:dashboard-reconciliation": "tsx script/test-dashboard-reconciliation.ts",
     "test:phase5": "tsx script/test-phase5-behavioural-os-scenario.ts",
     "db:push": "drizzle-kit push"

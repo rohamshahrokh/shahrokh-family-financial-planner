@@ -912,8 +912,8 @@ function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
             </div>
             <div className="ml-auto text-[10px] text-muted-foreground">
               {p.monteCarloSimulations
-                ? `${p.monteCarloSimulations.toLocaleString()} sims · canonical engine`
-                : 'Canonical engine'}
+                ? `${p.monteCarloSimulations.toLocaleString()} sims · live planner`
+                : 'Live planner'}
             </div>
           </div>
           </>

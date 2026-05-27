@@ -67,8 +67,18 @@ import {
   ClipboardList, Home, TrendingUp, Bitcoin, Calendar, CheckCircle, AlertCircle,
   ArrowRight, DollarSign, RefreshCw, Wallet, Building, Car, CreditCard,
   Briefcase, PiggyBank, Globe, ChevronDown, ChevronRight, Edit3, Target,
-  ShieldCheck, BarChart2, Lock, Unlock, Info,
+  ShieldCheck, BarChart2, Lock, Unlock, Info, Settings,
 } from "lucide-react";
+import {
+  useSetFireGoal,
+  defaultTargetFireYear,
+  deriveTargetAge,
+} from "@/lib/fireGoalCanonical";
+import {
+  selectSwrBand,
+  resolveEffectiveSwr,
+  type SwrInputs,
+} from "@/lib/recommendationEngine/swrBandSelector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -330,67 +340,121 @@ function IncomeEngineTraceButton({
 // calculation logic. It only mutates the four input fields on mc_fire_settings.
 //
 function FireGoalPanel() {
-  const qc = useQueryClient();
   const { auditMode } = useAuditMode();
   const { toast } = useToast();
+  const setGoalMutation = useSetFireGoal();
 
+  // We still GET the row directly (read-only) so we can hydrate the form with
+  // any previously saved values and surface the "already saved" state. Writes
+  // route through the canonical writer hook.
   const { data: mcSettings, isLoading } = useQuery<any>({
     queryKey: ["/api/mc-fire-settings"],
     queryFn: () => apiRequest("GET", "/api/mc-fire-settings").then(r => r.json()),
   });
 
-  // Local form state hydrated from the canonical row.
-  const [targetAge,     setTargetAge]     = useState<string>("");
-  const [passiveMonth,  setPassiveMonth]  = useState<string>("");
-  const [swrPct,        setSwrPct]        = useState<string>("");
-  const [hydrated,      setHydrated]      = useState(false);
+  // Year-based primary inputs (Sprint 20 PR-A). Current age is read off
+  // mc_fire_settings.current_age (already persisted by the Monte Carlo
+  // dashboard); when missing we default to 40 so age ↔ year derivation
+  // doesn't throw on a fresh household. The household profile feature in
+  // PR-B will supersede this read with a DOB-based currentAge.
+  const currentAge: number = Number.isFinite((mcSettings as any)?.current_age)
+    ? Number((mcSettings as any).current_age)
+    : 40;
+
+  const [targetYear, setTargetYear] = useState<string>("");
+  const [passiveMonth, setPassiveMonth] = useState<string>("");
+  const [swrOverride, setSwrOverride] = useState<string>("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     if (hydrated || !mcSettings) return;
-    if (typeof mcSettings === "object") {
-      const r = mcSettings as any;
-      if (typeof r.target_fire_age === "number")        setTargetAge(String(r.target_fire_age));
-      if (typeof r.target_passive_monthly === "number") setPassiveMonth(String(r.target_passive_monthly));
-      if (typeof r.swr_pct === "number")                setSwrPct(String(r.swr_pct));
-      setHydrated(true);
+    const r = mcSettings as any;
+    if (typeof r.target_fire_age === "number" && Number.isFinite(r.target_fire_age)) {
+      const yearsToGoal = (r.target_fire_age as number) - currentAge;
+      const inferredYear = new Date().getFullYear() + yearsToGoal;
+      setTargetYear(String(inferredYear));
+    } else {
+      setTargetYear(String(defaultTargetFireYear()));
     }
-  }, [mcSettings, hydrated]);
+    if (typeof r.target_passive_monthly === "number") {
+      setPassiveMonth(String(r.target_passive_monthly));
+    }
+    if (typeof r.swr_pct === "number") {
+      setSwrOverride(String(r.swr_pct));
+    }
+    setHydrated(true);
+  }, [mcSettings, hydrated, currentAge]);
 
-  const ageNum     = Number(targetAge);
+  const yearNum = Number(targetYear);
   const passiveNum = Number(passiveMonth);
-  const swrNum     = Number(swrPct);
-  const ageValid     = Number.isFinite(ageNum) && ageNum >= 18 && ageNum <= 80;
-  const passiveValid = Number.isFinite(passiveNum) && passiveNum > 0;
-  const swrValid     = Number.isFinite(swrNum) && swrNum >= 1 && swrNum <= 10;
-  const allValid     = ageValid && passiveValid && swrValid;
+  const swrNum = swrOverride === "" ? undefined : Number(swrOverride);
 
-  // Already-saved flag drives the Action Centre's "Goal set" summary.
+  const minYear = new Date().getFullYear() + 1;
+  const maxYear = new Date().getFullYear() + 60;
+  const yearValid = Number.isFinite(yearNum) && yearNum >= minYear && yearNum <= maxYear;
+  const passiveValid = Number.isFinite(passiveNum) && passiveNum > 0;
+  const swrValid = swrNum === undefined
+    ? true
+    : Number.isFinite(swrNum) && (swrNum as number) >= 1 && (swrNum as number) <= 10;
+  const allValid = yearValid && passiveValid && swrValid;
+
+  // Engine-selected SWR band — uses the household's broad-strokes shape from
+  // the persisted MC settings (or sensible defaults if not yet hydrated).
+  const swrInputs: SwrInputs = useMemo(() => {
+    const r = (mcSettings ?? {}) as any;
+    const startPpor = Number(r.start_ppor) || 0;
+    const startStocks = Number(r.start_stocks) || 0;
+    const startCrypto = Number(r.start_crypto) || 0;
+    const startSuper = Number(r.start_super) || 0;
+    const startMortgage = Number(r.start_mortgage) || 0;
+    const startOther = Number(r.start_other_debts) || 0;
+    const startCash = Number(r.start_cash) || 0;
+    const startOffset = Number(r.start_offset) || 0;
+    const monthlyExpenses = Number(r.start_monthly_expenses) || 0;
+    const totalInvestable = startStocks + startCrypto + startSuper;
+    const totalAssets = totalInvestable + startPpor + startCash + startOffset;
+    const totalDebts = startMortgage + startOther;
+    return {
+      retirementHorizonYears: Math.max(0, yearNum - new Date().getFullYear()),
+      equityShare: totalInvestable > 0 ? (startStocks + startSuper) / totalInvestable : 0.6,
+      propertyShare: totalAssets > 0 ? startPpor / totalAssets : 0.3,
+      leverageRatio: totalAssets > 0 ? totalDebts / totalAssets : 0.3,
+      currentAge,
+      liquidityMonths: monthlyExpenses > 0 ? (startCash + startOffset) / monthlyExpenses : 6,
+      incomeReliability: "medium",
+    };
+  }, [mcSettings, yearNum, currentAge]);
+
+  const engineBand = useMemo(() => selectSwrBand(swrInputs), [swrInputs]);
+  const effective = useMemo(
+    () => resolveEffectiveSwr(engineBand, swrNum),
+    [engineBand, swrNum],
+  );
+
+  const derivedAge = deriveTargetAge(yearNum, currentAge);
   const alreadyGoalsSet = !!(mcSettings as any)?.goals_set;
 
   const onSave = async () => {
     if (!allValid) {
       toast({
         title: "Check your FIRE goal inputs",
-        description: "Age 18–80, passive income > 0, SWR 1–10%.",
+        description: `Year ${minYear}–${maxYear}, passive income > 0, optional SWR 1–10%.`,
         variant: "destructive",
       });
       return;
     }
     try {
-      await apiRequest("PUT", "/api/mc-fire-settings", {
-        target_fire_age: ageNum,
-        target_passive_monthly: passiveNum,
-        swr_pct: swrNum,
-        goals_set: true,
-        goal_set_timestamp: new Date().toISOString(),
+      await setGoalMutation.mutateAsync({
+        targetFireYear: yearNum,
+        targetMonthlyPassiveIncome: passiveNum,
+        swrOverride: swrNum,
+        currentAge,
       });
-      // Invalidate so Action Centre's `useCanonicalGoal` re-fetches and Section B
-      // flips from "Goal not set" to the summary card without a hard reload.
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["/api/mc-fire-settings"] }),
-        qc.invalidateQueries({ queryKey: ["/api/canonical-goal"] }),
-      ]);
-      toast({ title: "FIRE goal saved", description: "Your Action Centre is now using these targets." });
+      toast({
+        title: "FIRE goal saved",
+        description: `Target financial freedom by ${yearNum}.`,
+      });
     } catch (err: any) {
       toast({
         title: "Could not save FIRE goal",
@@ -408,14 +472,17 @@ function FireGoalPanel() {
             <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <div>
               <p>
-                Set the retirement target the Action Centre and the unified
-                recommendation engine read from.
+                Pick the calendar year you want to be financially independent
+                and the monthly passive income you want it to cover. The
+                planner picks a safe withdrawal band for you — open Advanced
+                if you want to override it.
               </p>
               {auditMode && (
                 <p className="mt-1 text-[10px]">
-                  Writes to <code>mc_fire_settings</code>{" "}
+                  Writes via canonical writer hook → <code>mc_fire_settings</code>{" "}
                   (target_fire_age, target_passive_monthly, swr_pct,
-                  goals_set, goal_set_timestamp).
+                  goals_set, goal_set_timestamp). Target year is converted to
+                  age at write boundary using current_age={currentAge}.
                 </p>
               )}
             </div>
@@ -426,12 +493,12 @@ function FireGoalPanel() {
           ) : (
             <>
               <FieldRow
-                label="Target FIRE age"
-                value={targetAge}
-                onChange={setTargetAge}
+                label="Target FIRE year"
+                value={targetYear}
+                onChange={setTargetYear}
                 prefix=""
-                suffix="yrs"
-                hint="When you want to be financially independent (18–80)"
+                suffix=""
+                hint={`Pick the calendar year (${minYear}–${maxYear})`}
               />
               <FieldRow
                 label="Target passive income (monthly)"
@@ -439,14 +506,60 @@ function FireGoalPanel() {
                 onChange={setPassiveMonth}
                 hint="The monthly spending you want passive income to cover"
               />
-              <FieldRow
-                label="Safe withdrawal rate (SWR)"
-                value={swrPct}
-                onChange={setSwrPct}
-                prefix=""
-                suffix="%"
-                hint="Typical range 3–5%. The Action Centre uses this to size the FIRE number."
-              />
+
+              {yearValid && (
+                <div className="rounded border border-border/60 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground">
+                  Target financial freedom by{" "}
+                  <span className="font-semibold text-foreground">{yearNum}</span>
+                  {derivedAge !== undefined && (
+                    <span className="text-[10px] text-muted-foreground/70">
+                      {" "}· you'd be {derivedAge} that year
+                    </span>
+                  )}
+                  . Planner-selected safe withdrawal band:{" "}
+                  <span className="font-semibold text-foreground">
+                    {engineBand.band} ({engineBand.rate.toFixed(2)}%)
+                  </span>
+                  .
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen(o => !o)}
+                className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                data-testid="fp-fire-goal-advanced-toggle"
+              >
+                <Settings className="w-3 h-3" />
+                Advanced settings
+                {advancedOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+              </button>
+
+              {advancedOpen && (
+                <div className="rounded border border-dashed border-border/60 bg-secondary/10 p-3 space-y-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    Override the safe withdrawal rate if you have a specific
+                    rate you want the planner to use. Leave blank to use the
+                    engine-selected band.
+                  </p>
+                  <FieldRow
+                    label="Safe withdrawal rate (override)"
+                    value={swrOverride}
+                    onChange={setSwrOverride}
+                    prefix=""
+                    suffix="%"
+                    hint="Optional. Typical range 3–5%."
+                  />
+                  {effective.overrideNotice && (
+                    <p className="text-[11px] text-amber-300" data-testid="fp-fire-swr-override-notice">
+                      {effective.overrideNotice}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground/80">
+                    Engine rationale: {engineBand.rationale}
+                  </p>
+                </div>
+              )}
 
               <div className="mt-2 pt-3 border-t border-border/60 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs text-muted-foreground">
@@ -457,7 +570,7 @@ function FireGoalPanel() {
                 <Button
                   size="sm"
                   onClick={onSave}
-                  disabled={!allValid}
+                  disabled={!allValid || setGoalMutation.isPending}
                   data-testid="fp-fire-goal-save"
                   className="gap-1.5"
                 >
@@ -468,9 +581,9 @@ function FireGoalPanel() {
 
               {!allValid && (
                 <p className="text-[10px] text-amber-400">
-                  {!ageValid && "Age must be between 18 and 80. "}
+                  {!yearValid && `Year must be between ${minYear} and ${maxYear}. `}
                   {!passiveValid && "Passive income must be positive. "}
-                  {!swrValid && "SWR must be between 1 and 10%."}
+                  {!swrValid && "SWR override must be between 1 and 10%."}
                 </p>
               )}
             </>
@@ -1125,25 +1238,21 @@ export default function MyFinancialPlan() {
       <FireGoalPanel />
 
       {/* ═══════════════════════════════════════════════════════════════════
-          SECTION 5 — Investing & FIRE Goals
+          SECTION 5 — Property Deposit Savings
+          Sprint 20 PR-A: the duplicate "Investing & FIRE Goals" sub-section
+          (Target FIRE Age + Target Monthly Income + Save Goals button) was
+          deleted. The canonical FireGoalPanel above is the single source of
+          truth for FIRE goal inputs / writes.
       ═══════════════════════════════════════════════════════════════════ */}
-      <SectionCard title="Investing & FIRE Goals" icon={<Target className="w-4 h-4 text-purple-400" />}>
+      <SectionCard title="Property Deposit Savings" icon={<PiggyBank className="w-4 h-4 text-purple-400" />}>
         <div className="pt-3">
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2">Property Savings</p>
           <FieldRow label="Property Deposit Savings (monthly)" value={draft.property_savings_monthly} onChange={upd("property_savings_monthly")} hint="Earmarked monthly savings for next IP deposit" />
 
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2 mt-4">FIRE Target</p>
-          <FieldRow label="Target FIRE Age" value={draft.fire_target_age} onChange={upd("fire_target_age")} prefix="" suffix="yrs" hint="Age at financial independence" />
-          <FieldRow label="Target Monthly Income (FIRE)" value={draft.fire_target_monthly_income} onChange={upd("fire_target_monthly_income")} hint="Monthly spending needed at retirement" />
-
-          <div className="mt-4 pt-3 border-t border-border/60 flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">FIRE: Age {draft.fire_target_age} · {formatCurrency(safeNum(String(draft.fire_target_monthly_income)))}/mo</p>
+          <div className="mt-4 pt-3 border-t border-border/60 flex items-center justify-end">
             <SaveButton
-              label="Save Goals"
+              label="Save"
               onSave={() => saveSnapshot({
                 property_savings_monthly: draft.property_savings_monthly,
-                fire_target_age: draft.fire_target_age,
-                fire_target_monthly_income: draft.fire_target_monthly_income,
               })}
             />
           </div>

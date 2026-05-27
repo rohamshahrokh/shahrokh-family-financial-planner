@@ -136,8 +136,9 @@ function ScenarioMetricBlock({
         <span
           className="text-[10px] text-amber-500 italic"
           data-testid={`${testidPrefix}-incomplete`}
+          title="Some inputs for this metric are missing — open the explainer panel below for what's needed."
         >
-          incomplete data
+          inputs missing
         </span>
       ) : null}
     </div>
@@ -170,7 +171,7 @@ function ExecutiveSummary({
             Recommended Path
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5 max-w-2xl">
-            The fastest realistic path to your FIRE target — generated from {searchMetrics.generated.toLocaleString()} engine-backed scenarios.
+            The fastest realistic path to your FIRE target — generated from {searchMetrics.generated.toLocaleString()} simulated paths.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -254,7 +255,7 @@ function GoalReverseEngineeringCard({
           Goal Reverse Engineering
         </h2>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Working backwards from your FIRE date — every figure is a canonical engine pass-through.
+          Working backwards from your FIRE date — every figure is a verified pass-through of the live planner.
         </p>
       </header>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -775,7 +776,7 @@ function PortfolioLabHero({
             Your fastest path to FIRE
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5 max-w-2xl">
-            Five things to know in 30 seconds — every number pulled from the canonical engines.
+            Five things to know in 30 seconds — every number is a verified pass-through of the live planner.
           </p>
         </div>
       </header>
@@ -1148,7 +1149,7 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
       <DecisionFrame
         testidPrefix="portfolio-lab-decision-frame"
         title="Your decision in one frame"
-        subtitle="Six questions, one answer — every number pulled from canonical engines."
+        subtitle="Six questions, one answer — every number is a verified pass-through of the live planner."
         currentPosition={{
           label: "Current Position",
           value: fireGap.currentNetWorth != null && Number.isFinite(fireGap.currentNetWorth)
