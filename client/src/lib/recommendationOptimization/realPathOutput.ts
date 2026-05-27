@@ -44,6 +44,10 @@ export interface RealPathOutput {
   shortfallVsTargetPct: number;
   livesUpToTarget: boolean;
   notes: string[];
+  /** True if the candidate generator suppressed a candidate that would contradict an active concentration breach. */
+  containsContradiction: boolean;
+  /** Mirrors shortfallVsTargetPct as a discoverable field for downstream calibration. */
+  endingShortfallPct: number;
 }
 
 export interface RealPathInputs {
@@ -60,6 +64,12 @@ export interface RealPathInputs {
   borrowingCapacity: number;
   lifeStage: HouseholdLifeStage;
   targetMonthlyPassiveIncome: number;
+  /** Optional concentration signals — when present, candidate generation honours active breaches. */
+  propertyExposurePct?: number;
+  cryptoExposurePct?: number;
+  singleAssetSharePct?: number;
+  /** Optional pool of equity freed by trimming property (used to scale reallocation realistically). */
+  freedPropertyEquity?: number;
 }
 
 const SUSTAINABILITY_CAP = 0.97;
@@ -106,6 +116,11 @@ export function buildRealPath(inp: RealPathInputs): RealPathOutput {
   const steps: RealPathStep[] = [];
   let order = 1;
 
+  const propertyOver80 = (inp.propertyExposurePct ?? 0) > 80;
+  const cryptoOver30 = (inp.cryptoExposurePct ?? 0) > 30;
+  const singleAssetOver70 = (inp.singleAssetSharePct ?? 0) > 70;
+  let containsContradiction = false;
+
   const needsOperationalGuard = inp.monthlyCashflow < 0 || inp.liquidityBufferMonths < 1;
   if (needsOperationalGuard) {
     steps.push(buildOperationalStabilisationStep(inp, order++));
@@ -147,38 +162,70 @@ export function buildRealPath(inp: RealPathInputs): RealPathOutput {
     });
   }
 
-  const buyPropertyFeasible = inp.borrowingCapacity > 50_000 && yearsToTarget >= 7 && !needsOperationalGuard;
-  if (buyPropertyFeasible) {
-    const year = inp.currentYear + 2;
+  if (propertyOver80) {
+    notes.push(`Suppressed "Buy IP" — property exposure ${(inp.propertyExposurePct ?? 0).toFixed(1)}% > 80% (would contradict the concentration diagnosis).`);
+    const sellYearForTrim = Math.max(inp.currentYear + 1, inp.targetFireYear - 2);
     steps.push({
       order: order++,
-      year,
-      kind: 'buy_investment_property',
-      title: `Buy investment property in ${year}`,
-      detail: `Borrowing capacity ~$${Math.round(inp.borrowingCapacity / 1000)}K cleared by income×6 stress + serviceability — deploy as next IP if buffer ≥ 3 months at settlement.`,
-      expectedPassiveIncome: inp.startingMonthlyPassiveIncome + 1_200,
-      expectedNetWorth: inp.startingNetWorth + Math.max(0, inp.startingMonthlySurplus) * 24 + 80_000,
-      retirementSustainabilityScore: 0.65,
-      downsideRiskAt95thPercentile: 0.5,
-      priority: 70,
+      year: inp.currentYear + 1,
+      kind: 'sell_investment_property',
+      title: `Trim property allocation to under 80%`,
+      detail: `Stage a partial sell-down of the weakest IP sleeve over 3–6 months to bring property exposure from ${(inp.propertyExposurePct ?? 0).toFixed(1)}% to under 80%. Reinvest proceeds into diversified income/equity sleeves.`,
+      expectedPassiveIncome: inp.startingMonthlyPassiveIncome,
+      expectedNetWorth: inp.startingNetWorth + Math.max(0, inp.startingMonthlySurplus) * 12,
+      retirementSustainabilityScore: 0.6,
+      downsideRiskAt95thPercentile: 0.42,
+      priority: 88,
     });
-  } else if (inp.borrowingCapacity <= 0) {
-    notes.push('Suppressed "Buy IP" — borrowingCapacity ≤ 0.');
+  } else {
+    const buyPropertyFeasible = inp.borrowingCapacity > 50_000 && yearsToTarget >= 7 && !needsOperationalGuard;
+    if (buyPropertyFeasible) {
+      const year = inp.currentYear + 2;
+      steps.push({
+        order: order++,
+        year,
+        kind: 'buy_investment_property',
+        title: `Buy investment property in ${year}`,
+        detail: `Borrowing capacity ~$${Math.round(inp.borrowingCapacity / 1000)}K cleared by income×6 stress + serviceability — deploy as next IP if buffer ≥ 3 months at settlement.`,
+        expectedPassiveIncome: inp.startingMonthlyPassiveIncome + 1_200,
+        expectedNetWorth: inp.startingNetWorth + Math.max(0, inp.startingMonthlySurplus) * 24 + 80_000,
+        retirementSustainabilityScore: 0.65,
+        downsideRiskAt95thPercentile: 0.5,
+        priority: 70,
+      });
+    } else if (inp.borrowingCapacity <= 0) {
+      notes.push('Suppressed "Buy IP" — borrowingCapacity ≤ 0.');
+    }
   }
 
-  const reallocAmount = Math.max(50_000, inp.startingNetWorth * 0.10);
-  steps.push({
-    order: order++,
-    year: inp.currentYear + 3,
-    kind: 'reallocate_into_etfs',
-    title: `Reallocate $${Math.round(reallocAmount / 1000)}K into ETFs in ${inp.currentYear + 3}`,
-    detail: `Diversify into low-cost equity ETFs (VAS/VGS-style) to balance property concentration and lift expected real return to ~4.5%.`,
-    expectedPassiveIncome: inp.startingMonthlyPassiveIncome + 350,
-    expectedNetWorth: projectFromStep(inp.startingNetWorth, inp.startingMonthlySurplus, 0.045, 3),
-    retirementSustainabilityScore: 0.7,
-    downsideRiskAt95thPercentile: 0.42,
-    priority: 60,
-  });
+  if (cryptoOver30) {
+    notes.push(`Suppressed crypto-additive candidates — crypto exposure ${(inp.cryptoExposurePct ?? 0).toFixed(1)}% > 30%.`);
+  }
+  if (singleAssetOver70) {
+    notes.push(`Suppressed concentrated-asset-additive candidates — single asset share ${(inp.singleAssetSharePct ?? 0).toFixed(1)}% > 70%.`);
+  }
+
+  const annualSurplus = Math.max(0, inp.startingMonthlySurplus) * 12;
+  const surplusBased = annualSurplus * yearsToTarget * 0.4;
+  const freed = Math.max(0, inp.freedPropertyEquity ?? 0);
+  const freedBased = freed * 0.7;
+  const reallocAmount = Math.max(50_000, surplusBased, freedBased);
+  if (!cryptoOver30) {
+    steps.push({
+      order: order++,
+      year: inp.currentYear + 3,
+      kind: 'reallocate_into_etfs',
+      title: `Reallocate $${Math.round(reallocAmount / 1000)}K into ETFs in ${inp.currentYear + 3}`,
+      detail: `Diversify into low-cost equity ETFs (VAS/VGS-style) to balance ${propertyOver80 ? 'property concentration' : 'asset mix'} and lift expected real return to ~4.5%.`,
+      expectedPassiveIncome: inp.startingMonthlyPassiveIncome + Math.max(350, Math.round(reallocAmount * 0.045 / 12)),
+      expectedNetWorth: projectFromStep(inp.startingNetWorth, inp.startingMonthlySurplus, 0.045, 3),
+      retirementSustainabilityScore: 0.7,
+      downsideRiskAt95thPercentile: 0.42,
+      priority: 60,
+    });
+  } else {
+    notes.push('Reallocation into ETFs deferred until crypto exposure is trimmed below 30%.');
+  }
 
   if (yearsToTarget >= 4 && inp.hasInvestmentProperty) {
     const sellYear = inp.targetFireYear - 1;
@@ -228,6 +275,13 @@ export function buildRealPath(inp: RealPathInputs): RealPathOutput {
   steps.sort((a, b) => (b.priority - a.priority) || (a.year - b.year));
   steps.forEach((s, i) => { s.order = i + 1; });
 
+  if (propertyOver80 && steps.some((s) => s.kind === 'buy_investment_property')) {
+    containsContradiction = true;
+  }
+  if (cryptoOver30 && steps.some((s) => s.kind === 'reallocate_into_etfs' && /crypto/i.test(s.detail))) {
+    containsContradiction = true;
+  }
+
   const last = steps[steps.length - 1];
   const endMonthlyPassive = last?.expectedPassiveIncome ?? inp.startingMonthlyPassiveIncome;
   const endNetWorth = last?.expectedNetWorth ?? inp.startingNetWorth;
@@ -246,5 +300,7 @@ export function buildRealPath(inp: RealPathInputs): RealPathOutput {
     shortfallVsTargetPct: shortfallPct,
     livesUpToTarget: shortfallPct <= 0.1,
     notes,
+    containsContradiction,
+    endingShortfallPct: shortfallPct,
   };
 }

@@ -41,11 +41,34 @@ const demoSignals = buildAdvisorSignals({
   ],
 });
 
+const path = buildRealPath({
+  currentYear: 2026,
+  targetFireYear: 2040,
+  startingNetWorth: 758_000,
+  startingMonthlySurplus: 7_500,
+  startingMonthlyExpenses: 15_000,
+  startingMonthlyPassiveIncome: 0,
+  liquidityBufferMonths: demoSignals.liquidityMonths,
+  monthlyCashflow: 7_500,
+  leverageRatio: 0.58,
+  hasInvestmentProperty: false,
+  borrowingCapacity: 600_000,
+  lifeStage: 'STATE_A_ACCUMULATION',
+  targetMonthlyPassiveIncome: 9_000,
+  propertyExposurePct: demoSignals.propertyExposurePct,
+  cryptoExposurePct: demoSignals.cryptoExposurePct,
+  freedPropertyEquity: 1_510_000 - 850_000,
+});
+
 const advisorRecs = generateAdvisorRecommendations({
   signals: demoSignals,
   borrowingCapacity: 600_000,
   liquidityBufferMonths: demoSignals.liquidityMonths,
   monthlyCashflow: demoSignals.monthlySurplus,
+  pathPenalties: {
+    endingShortfallPct: path.endingShortfallPct,
+    containsContradiction: path.containsContradiction,
+  },
 });
 
 const transition = buildRetirementTransition({
@@ -64,22 +87,6 @@ const transition = buildRetirementTransition({
   liquidPortfolioValue: 135_000,
   hasInvestmentProperty: false,
   liquidityBufferMonths: demoSignals.liquidityMonths,
-});
-
-const path = buildRealPath({
-  currentYear: 2026,
-  targetFireYear: 2040,
-  startingNetWorth: 758_000,
-  startingMonthlySurplus: 7_500,
-  startingMonthlyExpenses: 15_000,
-  startingMonthlyPassiveIncome: 0,
-  liquidityBufferMonths: demoSignals.liquidityMonths,
-  monthlyCashflow: 7_500,
-  leverageRatio: 0.58,
-  hasInvestmentProperty: false,
-  borrowingCapacity: 600_000,
-  lifeStage: 'STATE_A_ACCUMULATION',
-  targetMonthlyPassiveIncome: 9_000,
 });
 
 console.log("DEMO HOUSEHOLD SIGNALS:");
