@@ -338,6 +338,40 @@ export function fromQuickDecision(out: any): Partial<UnifiedSignals> {
   };
 }
 
+// ─── Sprint 17 Phase 17.0 — RecommendationContext → signal overlay ───────────
+/**
+ * Project a Sprint 17 `RecommendationContext` (built from CanonicalLedger +
+ * CanonicalGoal + baselineForecast) into UnifiedSignals additive fields.
+ * Existing code paths read identical fields; new code reads the additive
+ * `recommendationContext` handle and life-stage / feasibility fields.
+ */
+export function fromContext(ctx: any): Partial<UnifiedSignals> {
+  if (!ctx || !ctx.forecast) return {};
+  return {
+    lifeStage: ctx.lifeStage,
+    baselineFireDate: ctx.forecast.fireDateBaseline ?? null,
+    baselineSuccessProb:
+      typeof ctx.forecast.fireSuccessProbabilityBaseline === 'number'
+        ? ctx.forecast.fireSuccessProbabilityBaseline
+        : undefined,
+    feasibility: ctx.forecast.feasibility,
+    horizonYears: ctx?.meta?.horizonYears,
+    recommendationContext: ctx,
+  };
+}
+
+// ─── Sprint 17 Phase 17.2 — HouseholdLifeStage classification overlay ────────
+export function fromHouseholdState(classification: any): Partial<UnifiedSignals> {
+  if (!classification || !classification.primary) return {};
+  return { lifeStage: classification.primary };
+}
+
+// ─── Sprint 17 Phase 17.5 — Concentration detector overlay ───────────────────
+export function fromConcentration(flags: any[] | undefined | null): Partial<UnifiedSignals> {
+  if (!Array.isArray(flags) || flags.length === 0) return {};
+  return { concentrationFlags: flags };
+}
+
 // ─── Merge helper ────────────────────────────────────────────────────────────
 export function mergeSignals(...parts: Array<Partial<UnifiedSignals> | undefined>): UnifiedSignals {
   const merged: UnifiedSignals = {};

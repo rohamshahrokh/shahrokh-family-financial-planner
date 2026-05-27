@@ -43,6 +43,10 @@ const PILLAR_RANK: Record<StrategicPillar, number> = {
   protect_liquidity: 2,
   reduce_high_interest_debt: 3,
   stabilise_leverage: 4,
+  // Sprint 17 Phase 17.7 — decumulate_safely sits between stabilise_leverage
+  // and preserve_tax_efficiency (rank 4.5). Numeric 4.5 keeps the existing
+  // pillar tier semantics intact: protect/reduce-debt/leverage still win.
+  decumulate_safely: 4.5,
   preserve_tax_efficiency: 5,
   maintain_investing_discipline: 6,
   improve_fire_timeline: 7,
@@ -1285,6 +1289,7 @@ function deriveRiskBeingReduced(rec?: Recommendation): string {
     case 'protect_liquidity':         return 'Income shock / cashflow shortfall';
     case 'reduce_high_interest_debt': return 'Wealth erosion from high APR debt';
     case 'stabilise_leverage':        return 'Tail-risk from over-leveraged downturn';
+    case 'decumulate_safely':         return 'Sequence-of-returns risk during decumulation';
     case 'preserve_tax_efficiency':   return 'Avoidable tax leakage';
     case 'maintain_investing_discipline': return 'Idle-cash drag';
     case 'improve_fire_timeline':     return 'Risk of missing FIRE date';

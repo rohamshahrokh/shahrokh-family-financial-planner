@@ -16,7 +16,7 @@ import {
   fromBestMoveLedger, mergeSignals, fromRiskRadar, fromFirePath, fromMonteCarloV5,
   fromBehaviouralProfile, fromAutonomousOS, fromScenarioTree,
   fromPortfolioConstruction, fromLifePlan, fromTaxIntelligence, fromExecutionOS, fromAdaptiveLearning,
-  fromDebtPrefsDebts, fromQuickDecision,
+  fromDebtPrefsDebts, fromQuickDecision, fromContext, fromHouseholdState, fromConcentration,
 } from './adapters';
 import type { UnifiedRecommendationResult, UnifiedSignals, Recommendation } from './types';
 import { snapshotHistory, type RecommendationChange } from './history';
@@ -164,6 +164,22 @@ export async function computeUnifiedBestMove(args: {
    * logic is untouched — this is a read-only consume.
    */
   quickDecision?: any;
+  /**
+   * Sprint 17 Phase 17.0 — pre-built RecommendationContext (TODAY + PLAN +
+   * FORECAST). When provided, the engine has access to baseline forecast,
+   * life-stage, and feasibility verdict for marginal-impact calculations.
+   * When omitted, downstream callers fall back to legacy behaviour.
+   */
+  context?: any;
+  /**
+   * Sprint 17 Phase 17.2 — life-stage classification result. Optional;
+   * inferred from `context` when not supplied separately.
+   */
+  householdState?: any;
+  /**
+   * Sprint 17 Phase 17.5 — concentration detector flags.
+   */
+  concentrationFlags?: any[];
 } = {}): Promise<UnifiedBestMoveResult> {
   const legacy = await computeBestMoveV2(args.cfg ?? {});
   const partial = ledgerFromInputs(legacy);
@@ -195,6 +211,40 @@ export async function computeUnifiedBestMove(args: {
   // session — the engine then behaves exactly as before (legacy fallback).
   // This is read-only consumption — no scenarioV2 generation is invoked.
   const quickDecision = args.quickDecision ?? readLatestQuickDecision();
+
+  // Sprint 17 Phase 17.0 — build RecommendationContext when not supplied.
+  // Uses the legacy ledger from computeBestMoveV2 as the substrate so we
+  // don't double-fetch. Goal stays nullable; downstream forecast handles
+  // both NOT_SET and SET branches.
+  let context = args.context;
+  if (!context) {
+    try {
+      const { buildRecommendationContext } = await import('../recommendationContext/buildContext');
+      const li = legacy.ledgerInputs;
+      const syntheticInputs = {
+        snapshot: {
+          cash: li.cashOutsideOffset,
+          offset_balance: li.offsetBalance,
+          mortgage: li.mortgage,
+          other_debts: li.otherDebts,
+          monthly_income: li.monthlyIncome,
+          monthly_expenses: li.monthlyExpenses,
+          roham_gross_annual: li.monthlyIncome * 12,
+        },
+        properties: undefined,
+        stocks: undefined,
+        cryptos: undefined,
+        holdingsRaw: undefined,
+        incomeRecords: undefined,
+        expenses: undefined,
+      };
+      context = buildRecommendationContext(syntheticInputs, null, undefined);
+    } catch {
+      // Best-effort: continue without context if module load fails (test envs)
+      context = undefined;
+    }
+  }
+
   const signals = mergeSignals(
     baseSignals,
     fromRiskRadar(args.riskRadar),
@@ -211,6 +261,9 @@ export async function computeUnifiedBestMove(args: {
     fromAdaptiveLearning(args.adaptive),
     fromDebtPrefsDebts(debtPrefsDebts),
     fromQuickDecision(quickDecision),
+    fromContext(context),
+    fromHouseholdState(args.householdState),
+    fromConcentration(args.concentrationFlags),
   );
   const unified = computeUnifiedRecommendations(signals);
   const changes = snapshotHistory(unified);
