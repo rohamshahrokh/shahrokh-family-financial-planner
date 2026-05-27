@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "11_inherited_windfall",
+    "profile": "Inherited windfall",
+    "age": 50,
+    "household": "Age 50, just inherited $1M cash, mid-career, $200k existing NW + $400k mortgage on $750k PPOR",
+    "net_worth_aud": 1550000,
+    "annual_income_aud": 160000,
+    "key_features": ["lump-sum decision", "DCA-vs-lumpsum question", "regret-risk", "windfall behavioural"]
+  },
+  "signals": {
+    "cashOutsideOffset": 1050000,
+    "offsetBalance": 35000,
+    "mortgage": 400000,
+    "otherDebts": 0,
+    "ppor": 750000,
+    "monthlyIncome": 12000,
+    "monthlyExpenses": 7000,
+    "monthlySurplus": 5000,
+    "rohamGrossAnnual": 160000,
+    "superCapRemaining": 12000,
+    "emergencyBufferTarget": 42000,
+    "upcomingBills12mo": 4200,
+    "marginalTaxRate": 0.39,
+    "etfExpectedReturn": 0.095,
+    "mortgageRate": 0.062,
+    "expensesIncludeDebt": true
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 8000,
+    "fireAge": 60
+  }
+}

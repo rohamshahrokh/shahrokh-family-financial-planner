@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "id": "08_negative_cashflow",
+    "profile": "Negative cashflow",
+    "age": 38,
+    "household": "$9k/mo expenses, $7k/mo income, drawing on savings, $40k cash, $300k super",
+    "net_worth_aud": 340000,
+    "annual_income_aud": 84000,
+    "key_features": ["negative surplus", "savings depletion", "lifestyle creep risk"]
+  },
+  "signals": {
+    "cashOutsideOffset": 40000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 6000,
+    "ppor": 0,
+    "monthlyIncome": 7000,
+    "monthlyExpenses": 9000,
+    "monthlySurplus": -2000,
+    "rohamGrossAnnual": 84000,
+    "superCapRemaining": 22000,
+    "emergencyBufferTarget": 54000,
+    "upcomingBills12mo": 4800,
+    "marginalTaxRate": 0.325,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true,
+    "mcStressFlag": "severe",
+    "mcSurvivalProbability": 0.22
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 5000,
+    "fireAge": 60
+  }
+}

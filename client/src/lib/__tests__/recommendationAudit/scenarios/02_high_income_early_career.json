@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "02_high_income_early_career",
+    "profile": "High-income early-career",
+    "age": 28,
+    "household": "Single, $250k/yr, $50k net worth, no kids, aggressive saver",
+    "net_worth_aud": 50000,
+    "annual_income_aud": 250000,
+    "key_features": ["young", "high marginal tax", "no debt", "huge runway"]
+  },
+  "signals": {
+    "cashOutsideOffset": 35000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 0,
+    "monthlyIncome": 14500,
+    "monthlyExpenses": 5500,
+    "monthlySurplus": 9000,
+    "rohamGrossAnnual": 250000,
+    "superCapRemaining": 26000,
+    "emergencyBufferTarget": 33000,
+    "upcomingBills12mo": 2400,
+    "marginalTaxRate": 0.47,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true,
+    "preference": { "riskTolerance": 0.8, "fireUrgency": 0.7, "taxOptimisation": 0.6 }
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 8000,
+    "fireAge": 50
+  }
+}

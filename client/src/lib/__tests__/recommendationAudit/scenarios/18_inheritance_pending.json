@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "18_inheritance_pending",
+    "profile": "Inheritance pending in 12 months — staging vs deploy decision",
+    "age": 48,
+    "household": "Modest accumulator; expecting $400k inheritance in ~12 months; debating deployment strategy.",
+    "net_worth_aud": 720000,
+    "annual_income_aud": 180000,
+    "key_features": ["pending inheritance", "moderate debt", "deploy decision", "stable income"]
+  },
+  "signals": {
+    "cashOutsideOffset": 40000,
+    "offsetBalance": 60000,
+    "mortgage": 350000,
+    "otherDebts": 5000,
+    "ppor": 920000,
+    "monthlyIncome": 15000,
+    "monthlyExpenses": 9500,
+    "monthlySurplus": 5500,
+    "rohamGrossAnnual": 180000,
+    "superCapRemaining": 12000,
+    "emergencyBufferTarget": 57000,
+    "upcomingBills12mo": 5000,
+    "marginalTaxRate": 0.39,
+    "etfExpectedReturn": 0.095,
+    "mortgageRate": 0.0582,
+    "expensesIncludeDebt": true
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 9500,
+    "fireAge": 62
+  }
+}

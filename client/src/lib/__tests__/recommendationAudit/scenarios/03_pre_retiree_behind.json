@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "id": "03_pre_retiree_behind",
+    "profile": "Pre-retiree, behind plan",
+    "age": 58,
+    "household": "Married, $400k NW (mostly super), target FIRE at 65 with $80k/yr passive — underfunded",
+    "net_worth_aud": 400000,
+    "annual_income_aud": 140000,
+    "key_features": ["short horizon (7yr)", "underfunded", "sequence risk imminent"]
+  },
+  "signals": {
+    "cashOutsideOffset": 25000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 850000,
+    "monthlyIncome": 11000,
+    "monthlyExpenses": 7500,
+    "monthlySurplus": 3500,
+    "rohamGrossAnnual": 140000,
+    "superCapRemaining": 12000,
+    "emergencyBufferTarget": 45000,
+    "upcomingBills12mo": 3000,
+    "marginalTaxRate": 0.325,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true,
+    "fireYearsToTarget": 7,
+    "fireProgressPct": 25,
+    "fireMonthlyInvestmentRequired": 8500,
+    "mcSurvivalProbability": 0.38,
+    "mcStressFlag": "severe"
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 6666,
+    "fireAge": 65
+  }
+}

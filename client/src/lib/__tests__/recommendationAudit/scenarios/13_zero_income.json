@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "13_zero_income",
+    "profile": "Edge case: zero income (retired)",
+    "age": 67,
+    "household": "Retired with paid-off PPOR + $2M super, no other income — undefined savings rate",
+    "net_worth_aud": 3000000,
+    "annual_income_aud": 0,
+    "key_features": ["zero earned income", "drawdown phase", "savings rate undefined"]
+  },
+  "signals": {
+    "cashOutsideOffset": 60000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 1000000,
+    "monthlyIncome": 0,
+    "monthlyExpenses": 5500,
+    "monthlySurplus": -5500,
+    "rohamGrossAnnual": 0,
+    "superCapRemaining": 0,
+    "emergencyBufferTarget": 33000,
+    "upcomingBills12mo": 3000,
+    "marginalTaxRate": 0,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true,
+    "mcSurvivalProbability": 0.85
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 5500,
+    "fireAge": 67
+  }
+}

@@ -213,6 +213,12 @@ function classifyConfidenceSource(
   unified: UnifiedRecommendationResult,
   hadQuickDecision: boolean,
 ): CanonicalConfidenceSource {
+  // Sprint 17 Phase 17.6 — when calibratedConfidence was MC-driven, prefer
+  // "mc". When non-MC, fall through to the legacy classifier so headless
+  // runs (no signal coverage) keep classifying as "rule" or "absent".
+  const cc = unified.bestMove?.calibratedConfidence;
+  if (cc?.mcDriven) return "mc";
+
   const sig = unified.signalCoverage ?? [];
   const mcWired =
     sig.includes("monte_carlo_v4") || sig.includes("monte_carlo_v5");
@@ -334,6 +340,10 @@ export async function computeCanonicalRecommendation(
       ? quickDecisionAt
       : generatedAt;
 
+  // Sprint 17 Phase 17.6 — facade `confidence` remains the legacy
+  // `bestMove.confidenceScore` for backward compat with surfaces that snapshot
+  // the value directly. The calibrated value lives on `bestMove.calibratedConfidence`
+  // for any consumer that wants the new band/label/components.
   const canonical: CanonicalRecommendation = {
     bestMove: unified.bestMove,
     top3: unified.topPriorities.slice(0, 3),

@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "id": "10_young_family_single_income",
+    "profile": "Young family, single income",
+    "age": 35,
+    "household": "Age 35, $120k income, partner not working, 2 kids in daycare, $250k NW, $620k PPOR @ $470k mort",
+    "net_worth_aud": 250000,
+    "annual_income_aud": 120000,
+    "key_features": ["dependants", "insurance gaps", "spousal super co-contrib opportunity"]
+  },
+  "signals": {
+    "cashOutsideOffset": 18000,
+    "offsetBalance": 22000,
+    "mortgage": 470000,
+    "otherDebts": 5500,
+    "ppor": 620000,
+    "monthlyIncome": 8500,
+    "monthlyExpenses": 7600,
+    "monthlySurplus": 900,
+    "rohamGrossAnnual": 120000,
+    "superCapRemaining": 22000,
+    "emergencyBufferTarget": 45600,
+    "upcomingBills12mo": 6200,
+    "marginalTaxRate": 0.325,
+    "etfExpectedReturn": 0.095,
+    "mortgageRate": 0.062,
+    "expensesIncludeDebt": true
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 7000,
+    "fireAge": 55
+  }
+}

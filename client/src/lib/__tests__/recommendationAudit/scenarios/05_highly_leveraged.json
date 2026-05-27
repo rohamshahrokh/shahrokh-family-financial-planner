@@ -1,0 +1,43 @@
+{
+  "meta": {
+    "id": "05_highly_leveraged",
+    "profile": "Highly leveraged investor",
+    "age": 45,
+    "household": "$1.5M IP value, $1.2M IP debt + $850k PPOR debt, $100k cash, age 45 — LVR ~84%",
+    "net_worth_aud": 700000,
+    "annual_income_aud": 220000,
+    "key_features": ["high LVR", "IO loans rolling", "rate sensitivity", "thin equity"]
+  },
+  "signals": {
+    "cashOutsideOffset": 100000,
+    "offsetBalance": 30000,
+    "mortgage": 850000,
+    "otherDebts": 0,
+    "ppor": 1300000,
+    "monthlyIncome": 18500,
+    "monthlyExpenses": 11000,
+    "monthlySurplus": 1500,
+    "monthlyDebtService": 6000,
+    "expensesIncludeDebt": false,
+    "rohamGrossAnnual": 220000,
+    "superCapRemaining": 8000,
+    "emergencyBufferTarget": 66000,
+    "upcomingBills12mo": 4800,
+    "marginalTaxRate": 0.39,
+    "etfExpectedReturn": 0.095,
+    "mortgageRate": 0.065,
+    "debtPortfolio": [
+      { "id": "ppor_mort", "name": "PPOR Mortgage", "balance": 850000, "ratePct": 6.5, "type": "mortgage", "taxDeductible": false },
+      { "id": "ip1_loan", "name": "IP1 Loan (IO)", "balance": 700000, "ratePct": 7.1, "type": "investment_loan", "taxDeductible": true },
+      { "id": "ip2_loan", "name": "IP2 Loan (IO)", "balance": 500000, "ratePct": 7.1, "type": "investment_loan", "taxDeductible": true }
+    ],
+    "mcSurvivalProbability": 0.55,
+    "mcStressFlag": "severe",
+    "mcRateStressActive": true
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 7000,
+    "fireAge": 60
+  }
+}

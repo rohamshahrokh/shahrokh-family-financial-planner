@@ -1,0 +1,37 @@
+{
+  "meta": {
+    "id": "09_approaching_fire_seq_risk",
+    "profile": "Approaching FIRE with sequence-risk",
+    "age": 60,
+    "household": "Age 60, $1.5M NW (80% equities), target FIRE at 62 — entering decumulation window",
+    "net_worth_aud": 1500000,
+    "annual_income_aud": 160000,
+    "key_features": ["2 years to drawdown", "high equity beta", "no bond glidepath"]
+  },
+  "signals": {
+    "cashOutsideOffset": 80000,
+    "offsetBalance": 0,
+    "mortgage": 0,
+    "otherDebts": 0,
+    "ppor": 900000,
+    "monthlyIncome": 12500,
+    "monthlyExpenses": 6800,
+    "monthlySurplus": 5700,
+    "rohamGrossAnnual": 160000,
+    "superCapRemaining": 8000,
+    "emergencyBufferTarget": 40800,
+    "upcomingBills12mo": 3600,
+    "marginalTaxRate": 0.39,
+    "etfExpectedReturn": 0.095,
+    "expensesIncludeDebt": true,
+    "fireYearsToTarget": 2,
+    "fireProgressPct": 95,
+    "mcSurvivalProbability": 0.68,
+    "mcStressFlag": "moderate"
+  },
+  "goal": {
+    "swrPct": 4,
+    "targetMonthlyIncome": 6000,
+    "fireAge": 62
+  }
+}

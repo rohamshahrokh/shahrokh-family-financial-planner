@@ -37,17 +37,57 @@ import {
   type DebtRecord,
   type DebtPortfolioSummary,
 } from './debtClassification';
+import { computeQualityScore } from './qualityScore';
+import { applyFatiguePenalty, recordTopRecommendation } from './fatiguePenalty';
+import { isApplicableInState, metadataFor } from './rules/registry';
+import { simulateMarginalImpact } from './marginalImpact';
+import { buildRebalanceConcentration } from './rules/rebalanceConcentration';
+import { calibrateConfidence } from './calibratedConfidence';
+import { buildExplanation } from './explanation';
+import { buildGlidepathShift } from './decumulation/glidepathShift';
+import { buildReduceLeverageAtTarget } from './decumulation/reduceLeverageAtTarget';
+import { buildIncreaseCashReserve } from './decumulation/increaseCashReserve';
+import { buildSwrReview } from './decumulation/swrReview';
+import { buildIncomeProtection } from './decumulation/incomeProtection';
+import { buildUnreachableHonesty } from './decumulation/unreachableHonesty';
 
 const PILLAR_RANK: Record<StrategicPillar, number> = {
   prevent_failure: 1,
   protect_liquidity: 2,
   reduce_high_interest_debt: 3,
   stabilise_leverage: 4,
+  // Sprint 17 Phase 17.7 — decumulate_safely sits between stabilise_leverage
+  // and preserve_tax_efficiency (rank 4.5). Numeric 4.5 keeps the existing
+  // pillar tier semantics intact: protect/reduce-debt/leverage still win.
+  decumulate_safely: 4.5,
   preserve_tax_efficiency: 5,
   maintain_investing_discipline: 6,
   improve_fire_timeline: 7,
   maximise_wealth: 8,
 };
+
+/**
+ * Sprint 17 Phase 17.4 feature flag — when true, qualityScore drives the
+ * intra-pillar ranking. Default ON; users can opt out by setting env var
+ * SPRINT_17_QUALITY_RANKING=off (case-insensitive) or globalThis flag.
+ */
+function qualityRankingEnabled(): boolean {
+  try {
+    // Node / tsx env
+    const envVal = typeof process !== 'undefined' && process?.env
+      ? (process.env.SPRINT_17_QUALITY_RANKING ?? '').toString().toLowerCase()
+      : '';
+    if (envVal === 'off' || envVal === 'false' || envVal === '0') return false;
+    // Browser global override (audit harness can flip)
+    const g: any = globalThis as any;
+    if (g?.SPRINT_17_QUALITY_RANKING === 'off' || g?.SPRINT_17_QUALITY_RANKING === false) {
+      return false;
+    }
+    return true;
+  } catch {
+    return true;
+  }
+}
 
 function fmt(n: number): string {
   if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
@@ -1025,17 +1065,84 @@ export function computeUnifiedRecommendations(s: UnifiedSignals): UnifiedRecomme
   push(fireAccelerate(s, signals));
   push(etfDCA(s, signals, portfolio));
   push(rebalanceIfNeeded(s, signals));
+  // Sprint 17 Phase 17.5 — concentration rebalance candidate
+  push(buildRebalanceConcentration(s, signals));
+  // Sprint 17 Phase 17.7 — decumulation candidates
+  push(buildGlidepathShift(s, signals));
+  push(buildReduceLeverageAtTarget(s, signals));
+  push(buildIncreaseCashReserve(s, signals));
+  push(buildSwrReview(s, signals));
+  push(buildIncomeProtection(s, signals));
+  push(buildUnreachableHonesty(s, signals));
 
   if (candidates.length === 0) {
     candidates.push(holdCashFallback(s, signals));
   }
 
+  // ─── Sprint 17 Phase 17.3 — state gating ───────────────────────────────────
+  // Suppress rules whose metadata `applicableStates` excludes the current
+  // life stage, OR whose `notSuitableIf` predicate fires.
+  const ctxForGate = (s as any).recommendationContext;
+  const lifeStage = (s as any).lifeStage;
+  const gated = candidates.filter((c) => {
+    if (lifeStage && !isApplicableInState(c.id, lifeStage)) return false;
+    const meta = metadataFor(c.id);
+    if (meta?.notSuitableIf && ctxForGate) {
+      try {
+        if (meta.notSuitableIf(ctxForGate)) return false;
+      } catch {
+        // ignore
+      }
+    }
+    return true;
+  });
+  const survivingCandidates = gated.length > 0 ? gated : [holdCashFallback(s, signals)];
+
   // ─── Hard-priority sort by pillar, then by confidence × magnitude ──────────
-  const scored = candidates.map(c => {
+  // Phase 17.1 — every candidate also gets a quality score 0..100 attached.
+  // Phase 17.4 — when SPRINT_17_QUALITY_RANKING=on, qualityScore drives the
+  // intra-pillar sort instead of the legacy dollar × confidence baseScore.
+  const useQualityRanking = qualityRankingEnabled();
+  const ctxHandle = (s as any).recommendationContext;
+
+  // Sprint 17 Phase 17.4 — populate marginalImpact on every candidate BEFORE
+  // qualityScore so the impact axis sees real Δ-fire-date and Δ-success-prob.
+  if (ctxHandle) {
+    for (const c of survivingCandidates) {
+      const mi = simulateMarginalImpact(c, ctxHandle);
+      if (mi) c.marginalImpact = mi;
+    }
+  }
+  // Sprint 17 Phase 17.6 — calibrated confidence + explanation for every cand.
+  for (const c of survivingCandidates) {
+    const cc = calibrateConfidence(c, s, ctxHandle);
+    c.calibratedConfidence = cc;
+    c.explanation = buildExplanation(c, s, ctxHandle);
+  }
+
+  const scored = survivingCandidates.map(c => {
     const { score, breakdown } = scoreCandidateWithBreakdown(c, s);
-    // Attach the breakdown so every consumer can render score transparency.
+    const qBreakdown = computeQualityScore(c, s, ctxHandle);
+    c.qualityScore = qBreakdown.total;
+    breakdown.modifiers.push({
+      id: 'quality_score',
+      source: 'quality',
+      multiplier: 1,
+      reason: `qualityScore=${qBreakdown.total.toFixed(1)} | ${qBreakdown.reasons.join(' | ')}`,
+    });
+    // Sprint 17 Phase 17.3 — fatigue penalty
+    const fatigue = applyFatiguePenalty(qBreakdown.total, c);
+    if (fatigue.multiplier !== 1) {
+      breakdown.modifiers.push({
+        id: 'fatigue',
+        source: 'fatigue',
+        multiplier: fatigue.multiplier,
+        reason: fatigue.reason,
+      });
+    }
     c.scoreBreakdown = breakdown;
-    return { rec: c, score };
+    const rankScore = useQualityRanking ? fatigue.score : score;
+    return { rec: c, score: rankScore };
   });
 
   const sorted = scored
@@ -1056,6 +1163,15 @@ export function computeUnifiedRecommendations(s: UnifiedSignals): UnifiedRecomme
 
   const top = dedup.slice(0, 3);
   const best = top[0];
+
+  // Sprint 17 Phase 17.3 — record winner for fatigue tracking
+  if (best) {
+    try {
+      recordTopRecommendation(best);
+    } catch {
+      // Tolerate sessionStorage failures
+    }
+  }
 
   return {
     bestMove: best,
@@ -1285,6 +1401,7 @@ function deriveRiskBeingReduced(rec?: Recommendation): string {
     case 'protect_liquidity':         return 'Income shock / cashflow shortfall';
     case 'reduce_high_interest_debt': return 'Wealth erosion from high APR debt';
     case 'stabilise_leverage':        return 'Tail-risk from over-leveraged downturn';
+    case 'decumulate_safely':         return 'Sequence-of-returns risk during decumulation';
     case 'preserve_tax_efficiency':   return 'Avoidable tax leakage';
     case 'maintain_investing_discipline': return 'Idle-cash drag';
     case 'improve_fire_timeline':     return 'Risk of missing FIRE date';

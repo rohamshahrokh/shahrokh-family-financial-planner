@@ -32,7 +32,14 @@ export type ActionType =
   | 'pause_investing'
   | 'improve_cashflow'
   | 'tax_optimisation'
-  | 'fire_acceleration';
+  | 'fire_acceleration'
+  // ─── Sprint 17 additive action types ────────────────────────────────────
+  | 'rebalance_concentration'  // Phase 17.5 — concentration rebalance
+  | 'glidepath_shift'          // Phase 17.7 — decumulation glidepath
+  | 'increase_cash_reserve'    // Phase 17.7 — retirement cash buffer
+  | 'swr_review'               // Phase 17.7 — SWR review
+  | 'income_protection'        // Phase 17.7 — income protection
+  | 'unreachable_plan_review'; // Phase 17.7 — honest unreachable flag
 
 export type Urgency = 'immediate' | 'this_quarter' | 'this_year' | 'monitor';
 
@@ -43,6 +50,7 @@ export type StrategicPillar =
   | 'protect_liquidity'      // emergency buffer, cash runway
   | 'reduce_high_interest_debt'
   | 'stabilise_leverage'     // serviceability, LVR
+  | 'decumulate_safely'      // Sprint 17 Phase 17.7 — retirement glidepath / SWR
   | 'preserve_tax_efficiency'
   | 'maintain_investing_discipline'
   | 'improve_fire_timeline'
@@ -63,7 +71,13 @@ export type SourceSignal =
   | 'investor_preference'
   | 'behavioural_profile'
   | 'autonomous_os'
-  | 'scenario_tree';
+  | 'scenario_tree'
+  // Sprint 17 additive signal sources
+  | 'recommendation_context'
+  | 'household_state'
+  | 'concentration_detector'
+  | 'baseline_forecast'
+  | 'marginal_impact';
 
 export interface QuantifiedImpact {
   /** Expected annual $ benefit (positive) or $ cost (negative). */
@@ -171,7 +185,7 @@ export interface Recommendation {
     pillarRank: number;
     modifiers: Array<{
       id: string;
-      source: SourceSignal | 'pillar' | 'stress' | 'preference' | 'behavioural' | 'scenario' | 'portfolio' | 'life' | 'tax' | 'execution' | 'adaptive' | 'autonomous_os';
+      source: SourceSignal | 'pillar' | 'stress' | 'preference' | 'behavioural' | 'scenario' | 'portfolio' | 'life' | 'tax' | 'execution' | 'adaptive' | 'autonomous_os' | 'fatigue' | 'state_gating' | 'concentration' | 'quality' | 'context';
       multiplier: number;
       reason: string;
     }>;
@@ -218,6 +232,50 @@ export interface Recommendation {
     };
     /** Plain-English "what would change this advice". */
     whatChangesThis?: string[];
+  };
+
+  // ─── Sprint 17 additive fields ───────────────────────────────────────────
+  /** Phase 17.4 — measurable Δ-impact vs baseline forecast. */
+  marginalImpact?: {
+    deltaFireDateMonths: number | null;
+    deltaSuccessProbability: number | null;
+    deltaNetWorthAtTargetAge: number | null;
+    deltaPassiveAnnualIncome: number | null;
+    deltaMonthlySurplus?: number | null;
+    deltaLiquidityRisk?: number | null;
+    deltaDebtStress?: number | null;
+    derivation: 'monte_carlo' | 'deterministic' | 'ruleOfThumb';
+    evidence: string[];
+  };
+  /** Phase 17.6 — calibrated confidence band + components. */
+  calibratedConfidence?: {
+    value: number;
+    band: 'LOW' | 'MODERATE' | 'HIGH' | 'VERY_HIGH';
+    components: {
+      mcSuccessProb: number | null;
+      dataCompleteness: number;
+      modelCertainty: number;
+      inputStability: number;
+    };
+    weights: { mc: number; coverage: number; certainty: number; stability: number };
+    rationale: string;
+    /** Display-only label per user §7. Non-MC must NOT say "probability". */
+    displayLabel: string;
+    /** True when MC actually drove the value. */
+    mcDriven: boolean;
+  };
+  /** Phase 17.1 — composite quality score 0..100. */
+  qualityScore?: number;
+  /** Phase 17.6 — explanation layer (user §9). */
+  explanation?: {
+    plainEnglish: string;
+    whyBeatsAlternatives: string;
+    expectedImpact: string;
+    riskWarning: string;
+    confidenceExplanation: string;
+    sourceEnginesUsed: string[];
+    doNothingComparison: string;
+    assumptions: string[];
   };
 }
 
@@ -451,6 +509,34 @@ export interface UnifiedSignals {
 
   /** Diagnostic: which signal groups were available. */
   availableSignals?: SourceSignal[];
+
+  // ─── Sprint 17 — additive context-derived fields ─────────────────────────
+  /** Phase 17.0 — life-stage classification from householdState/classifier. */
+  lifeStage?:
+    | 'STATE_A_ACCUMULATION'
+    | 'STATE_B_ACCELERATING'
+    | 'STATE_C_NEAR_FIRE'
+    | 'STATE_D_FIRE_ACHIEVED'
+    | 'STATE_E_DECUMULATION';
+  /** Phase 17.0 — baseline "do-nothing" FIRE date in ISO format, or null. */
+  baselineFireDate?: string | null;
+  /** Phase 17.0 — baseline MC success probability 0..1. */
+  baselineSuccessProb?: number;
+  /** Phase 17.0 — feasibility verdict. */
+  feasibility?: 'ACHIEVABLE' | 'TIGHT' | 'UNREACHABLE';
+  /** Phase 17.0 — projection horizon used by baseline. */
+  horizonYears?: number;
+  /** Phase 17.0 — full context handle so engines can drill deeper. */
+  recommendationContext?: any;
+  /** Phase 17.5 — concentration flags discovered for this household. */
+  concentrationFlags?: Array<{
+    kind: string;
+    severity: 'warning' | 'critical';
+    observedPct: number;
+    thresholdPct: number;
+    affectedAssets: string[];
+    remediation: string;
+  }>;
 }
 
 export interface UnifiedRecommendationResult {
