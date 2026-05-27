@@ -188,7 +188,6 @@ import { useForecastStore } from "@/lib/forecastStore";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
 import { buildCanonicalMonteCarloInput } from "@/lib/monteCarloCanonical";
 import { runMonteCarloV4 } from "@/lib/monteCarloV4/engineV4";
-import familyImg from "@assets/family.jpeg";
 
 // ─── Chart tooltips ───────────────────────────────────────────────────────────
 const CustomTooltip = ({ active, payload, label }: any) => {
