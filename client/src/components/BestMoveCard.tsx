@@ -28,6 +28,9 @@ import {
   type LedgerInputs,
 } from '@/lib/bestMoveEngine';
 import { computeUnifiedBestMove, type UnifiedBestMoveResult, type Recommendation } from '@/lib/recommendationEngine';
+/* Sprint 15 Phase 3 — participate in the RecommendationFacade cache so this
+   widget shares state with Action Plan / Decision Lab / dashboard surfaces. */
+import { useCanonicalRecommendation } from '@/hooks/useCanonicalRecommendation';
 import { AuditableMetric } from '@/components/auditMode/AuditableMetric';
 import { registerTrace } from '@/lib/auditMode/auditRegistry';
 import { buildAllBestMoveTraces } from '@/lib/auditMode/engineTraces';
@@ -235,6 +238,7 @@ export default function BestMoveCard() {
   const maxLvr = useForecastStore(s => s.maxLvr);
   // Pull live MC result so stress flag flows through into the unified engine
   const liveMC = useForecastStore(s => s.monteCarloResult);
+  useCanonicalRecommendation();
 
   const load = useCallback(async (force = false) => {
     if (!force) {

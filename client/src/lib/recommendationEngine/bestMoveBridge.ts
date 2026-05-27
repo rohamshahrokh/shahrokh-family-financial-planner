@@ -33,7 +33,7 @@ import { snapshotHistory, type RecommendationChange } from './history';
  *   is expensive to run, and P1 scope forbids invoking or modifying scenario
  *   generation. /decision already produces a `QuickDecisionOutput` whenever
  *   the user runs a quick decision — we capture it here and let downstream
- *   consumers (BestMoveCard, ActionCentre, etc.) read it via
+ *   consumers (BestMoveCard, FinancialOSCentre, etc.) read it via
  *   `computeUnifiedBestMove`. When no run has happened, the engine falls
  *   back to legacy behaviour.
  *

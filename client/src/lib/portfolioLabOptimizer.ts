@@ -71,6 +71,7 @@ import {
 } from "./cfoAdvisor";
 import type { RiskRadarResult } from "./riskEngine";
 import type { MonteCarloResult } from "./forecastStore";
+import { formatConfidence } from "./confidenceLabels";
 
 /* ─── Display contract primitives ──────────────────────────────────────── */
 
@@ -87,6 +88,7 @@ export interface OptimizerMetric {
     | "currency-per-year"
     | "currency-per-month"
     | "percent"
+    | "band"
     | "score"
     | "years"
     | "months"
@@ -97,6 +99,15 @@ export interface OptimizerMetric {
   source: string;
   /** True when the supporting engine output is missing or flagged incomplete. */
   incomplete: boolean;
+}
+
+/**
+ * Sprint 15 Phase 3 — pick a format token for a Confidence metric based on
+ * source provenance. Real MC stays as `"percent"`; everything else routes
+ * through the banded display.
+ */
+function formatForConfidenceSource(source: string): OptimizerMetric["format"] {
+  return /montecarlo|monte_carlo|prob_ff/i.test(source) ? "percent" : "band";
 }
 
 function makeMetric(
@@ -995,10 +1006,22 @@ function buildOptimization(
           ? makeMetric("Monte Carlo", risk.mcConfidence, "percent", "decisionCandidates.risk.mcConfidence", { incomplete })
           : emptyMetric("Monte Carlo", "percent", "decisionCandidates.risk.mcConfidence"),
         confidence: candidate && bestMove.bestNextAction.id === candidate.id
-          ? makeMetric("Confidence", bestMove.confidenceScore.value, "percent", "bestMoveEngineSprint5.confidenceScore", { incomplete })
+          ? makeMetric(
+              "Confidence",
+              bestMove.confidenceScore.value,
+              formatForConfidenceSource("bestMoveEngineSprint5.confidenceScore"),
+              "bestMoveEngineSprint5.confidenceScore",
+              { incomplete },
+            )
           : (risk && risk.mcConfidence != null
-              ? makeMetric("Confidence", risk.mcConfidence, "percent", "decisionCandidates.risk.mcConfidence", { incomplete })
-              : emptyMetric("Confidence", "percent", "bestMoveEngineSprint5.confidenceScore")),
+              ? makeMetric(
+                  "Confidence",
+                  risk.mcConfidence,
+                  formatForConfidenceSource("decisionCandidates.risk.mcConfidence"),
+                  "decisionCandidates.risk.mcConfidence",
+                  { incomplete },
+                )
+              : emptyMetric("Confidence", "band", "bestMoveEngineSprint5.confidenceScore")),
       },
     };
   });
@@ -1095,9 +1118,16 @@ function buildProbabilityOfSuccess(
   ranking: RankingOutput,
   mc: MonteCarloResult | null | undefined,
 ): ProbabilityOfSuccessSection {
+  /* Sprint 15 Phase 3 — Best Move confidence is the Sprint 5 heuristic blend,
+     not a calibrated MC probability. Route through the `band` format token. */
   const bestMoveConfidence = bestMove.confidenceScore.value != null && Number.isFinite(bestMove.confidenceScore.value)
-    ? makeMetric("Best Move Confidence", bestMove.confidenceScore.value, "percent", "bestMoveEngineSprint5.confidenceScore")
-    : emptyMetric("Best Move Confidence", "percent", "bestMoveEngineSprint5.confidenceScore");
+    ? makeMetric(
+        "Best Move Confidence",
+        bestMove.confidenceScore.value,
+        formatForConfidenceSource("bestMoveEngineSprint5.confidenceScore"),
+        "bestMoveEngineSprint5.confidenceScore",
+      )
+    : emptyMetric("Best Move Confidence", "band", "bestMoveEngineSprint5.confidenceScore");
 
   const monteCarloProbability = mc && typeof (mc as any).prob_ff === "number"
     ? makeMetric("Monte Carlo P(success)", (mc as any).prob_ff / 100, "percent", "monteCarloEngine.prob_ff")
@@ -1108,8 +1138,13 @@ function buildProbabilityOfSuccess(
 
   const topRanked = ranking.recommended;
   const recommendedStrategyMc = topRanked && topRanked.candidate.risk.mcConfidence != null
-    ? makeMetric("Top Strategy MC", topRanked.candidate.risk.mcConfidence, "percent", "decisionCandidates.risk.mcConfidence")
-    : emptyMetric("Top Strategy MC", "percent", "decisionCandidates.risk.mcConfidence");
+    ? makeMetric(
+        "Top Strategy MC",
+        topRanked.candidate.risk.mcConfidence,
+        formatForConfidenceSource("decisionCandidates.risk.mcConfidence"),
+        "decisionCandidates.risk.mcConfidence",
+      )
+    : emptyMetric("Top Strategy MC", "band", "decisionCandidates.risk.mcConfidence");
 
   const summary = (() => {
     const bits: string[] = [];
@@ -1890,6 +1925,20 @@ export function buildPortfolioLabOptimizer(
 
 export function formatOptimizerMetric(m: OptimizerMetric): string {
   if (m.textOverride) return m.textOverride;
+  if (m.format === "band") {
+    /* Sprint 15 Phase 3 — banded confidence display. Always produces a label
+       even when value is null (renders "Monte Carlo not yet run"). */
+    const kind = m.value == null || !Number.isFinite(m.value)
+      ? "absent"
+      : /montecarlo|monte_carlo|prob_ff/i.test(m.source)
+        ? "mc"
+        : /decision|sprint5|bestmove/i.test(m.source)
+          ? "composite"
+          : /rule|engine\.ts/i.test(m.source)
+            ? "rule"
+            : "heuristic";
+    return formatConfidence({ kind, value: m.value }).label;
+  }
   if (m.value == null || !Number.isFinite(m.value)) return "—";
   switch (m.format) {
     case "currency": {

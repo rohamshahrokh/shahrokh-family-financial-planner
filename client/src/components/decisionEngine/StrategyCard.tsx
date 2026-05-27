@@ -157,6 +157,17 @@ export function StrategyCard({ rank, candidate, baseline, fmt, privacyMode }: St
             value={`${(survival * 100).toFixed(0)}%`}
             tone={survival >= 0.9 ? "good" : survival >= 0.75 ? "warn" : "bad"}
             infoTerm="Survival probability"
+            /* Sprint 15 Phase 3 — surface MC path count + ranAt so the user can
+               tell whether this survival value is backed by a real Monte Carlo
+               run or is a low-sample heuristic. */
+            subtitle={(() => {
+              const paths = (candidate.result as { simulationCount?: number } | null | undefined)?.simulationCount;
+              const ranAt = (candidate.result as { generatedAt?: string } | null | undefined)?.generatedAt;
+              const parts: string[] = [];
+              if (typeof paths === "number" && Number.isFinite(paths)) parts.push(`${paths} paths`);
+              if (ranAt) parts.push(`ran ${ranAt}`);
+              return parts.length ? parts.join(" · ") : undefined;
+            })()}
           />
           <MetricTile
             icon={<TrendingUp className="h-3 w-3" />}
@@ -319,7 +330,7 @@ export function StrategyCard({ rank, candidate, baseline, fmt, privacyMode }: St
 // ─── Subcomponents ───────────────────────────────────────────────────────────
 
 function MetricTile({
-  icon, label, value, tone = "neutral", infoTerm,
+  icon, label, value, tone = "neutral", infoTerm, subtitle,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -327,6 +338,8 @@ function MetricTile({
   tone?: "good" | "warn" | "bad" | "neutral";
   /** Glossary key for inline info tooltip. */
   infoTerm?: string;
+  /** Sprint 15 Phase 3 — optional small audit subtitle (paths, ranAt). */
+  subtitle?: string;
 }) {
   const toneClass =
     tone === "good" ? "text-[hsl(var(--success-light))]" :
@@ -343,6 +356,9 @@ function MetricTile({
       <div className={`mt-0.5 text-sm sm:text-base font-bold tabular-nums ${toneClass}`}>
         {value}
       </div>
+      {subtitle && (
+        <div className="mt-0.5 text-[10px] text-muted-foreground/80 truncate">{subtitle}</div>
+      )}
     </div>
   );
 }

@@ -43,7 +43,7 @@
     "test:audit-mode": "tsx script/test-audit-mode.ts",
     "test:scenario-v2": "tsx script/test-scenario-v2.ts",
     "test:registry": "tsx script/test-registry.ts",
-    "test:all": "npm run test:scenario-v2 && npm run test:registry && npm run test:decision-engine && npm run test:narrative-layer && npm run test:behavioural-priorities && npm run test:financial-intelligence && npm run test:autonomous-os && npm run test:decision-engine-cumulative && npm run test:audit-p1 && npm run test:monte-carlo-canonical && npm run test:monte-carlo-v4 && npm run test:monte-carlo-v5 && npm run test:projection-consistency && npm run test:recommendation-engine && npm run test:canonical-recommendation && npm run test:select-canonical-fire && npm run test:dashboard-reconciliation && npm run test:metric-explanations && npm run test:global-tooltip-system && npm run test:future-worlds-rebuild && npm run test:executive-overview-rebuild && npm run test:phase5 && npm run test:phase6",
+    "test:all": "npm run test:scenario-v2 && npm run test:registry && npm run test:decision-engine && npm run test:narrative-layer && npm run test:behavioural-priorities && npm run test:financial-intelligence && npm run test:autonomous-os && npm run test:decision-engine-cumulative && npm run test:audit-p1 && npm run test:monte-carlo-canonical && npm run test:monte-carlo-v4 && npm run test:monte-carlo-v5 && npm run test:projection-consistency && npm run test:recommendation-engine && npm run test:canonical-recommendation && npm run test:select-canonical-fire && npm run test:confidence-labels && npm run test:decision-consistency && npm run test:dashboard-reconciliation && npm run test:metric-explanations && npm run test:global-tooltip-system && npm run test:future-worlds-rebuild && npm run test:executive-overview-rebuild && npm run test:phase5 && npm run test:phase6",
     "test:metric-explanations": "tsx script/test-metric-explanations.ts",
     "test:global-tooltip-system": "tsx script/test-global-tooltip-system.ts",
     "test:future-worlds-rebuild": "tsx script/test-future-worlds-rebuild.ts",
@@ -82,6 +82,8 @@
     "test:recommendation-engine": "tsx script/test-recommendation-engine.ts",
     "test:canonical-recommendation": "tsx client/src/lib/__tests__/canonicalRecommendation.test.ts",
     "test:select-canonical-fire": "tsx client/src/lib/__tests__/selectCanonicalFire.test.ts",
+    "test:confidence-labels": "tsx client/src/lib/__tests__/confidenceLabels.test.ts",
+    "test:decision-consistency": "tsx client/src/lib/__tests__/decisionConsistency.test.ts",
     "test:dashboard-reconciliation": "tsx script/test-dashboard-reconciliation.ts",
     "test:phase5": "tsx script/test-phase5-behavioural-os-scenario.ts",
     "db:push": "drizzle-kit push"
