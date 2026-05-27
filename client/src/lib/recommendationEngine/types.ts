@@ -277,6 +277,61 @@ export interface Recommendation {
     doNothingComparison: string;
     assumptions: string[];
   };
+
+  // ─── Sprint 18 additive fields ───────────────────────────────────────────
+  /** Phase 18.2 — feasibility result for the recommendation. */
+  feasibility?: {
+    feasible: boolean;
+    verdict: 'feasible' | 'feasible_with_conditions' | 'not_currently_feasible' | 'feasible_after_saving';
+    feasibilityScore: number;
+    blockers: Array<{ id: string; reason: string; severity: 'critical' | 'warning'; estimatedMonthsToResolve?: number }>;
+    requiredConditions: string[];
+    estimatedMonthsUntilFeasible: number | null;
+    monthlySurplusImpact: number;
+    liquidityBufferImpact: number;
+    summary: string;
+    assumptions: Record<string, number | string | boolean>;
+  };
+  /** Phase 18.3 — behavioural risk + execution fit. */
+  behaviouralRisk?: {
+    behaviouralFitScore: number;
+    executionDifficulty: 'low' | 'medium' | 'high';
+    likelyAdherence: number;
+    behaviourWarnings: Array<{ kind: string; severity: 'info' | 'warning' | 'critical'; message: string }>;
+    note: string;
+  };
+  /** Phase 18.4 — stress test summary on this recommendation. */
+  stressTest?: {
+    scenariosTested: number;
+    scenariosSurvived: number;
+    primaryWeakness: string | null;
+    passes: boolean;
+    survivalRate: number;
+    results: Array<{
+      scenario: string;
+      scenarioLabel: string;
+      survives: boolean;
+      monthlySurplusAfter: number;
+      fireDelay: number;
+      note: string;
+    }>;
+  };
+  /** Phase 18.5 — 11-field advisor explanation. */
+  advisorExplanation?: {
+    recommendedAction: string;
+    whyThisAction: string;
+    whyNotAlternatives: string;
+    baselineComparison: string;
+    expectedImprovement: string;
+    feasibilityStatus: string;
+    keyRisk: string;
+    stressTestResult: string;
+    behaviouralNote: string;
+    confidenceExplanation: string;
+    nextPracticalStep: string;
+  };
+  /** Phase 18.4 — explicitly labelled aggressive (allows top-rank despite stress failures). */
+  aggressive?: boolean;
 }
 
 export interface InvestorPreference {
@@ -560,4 +615,9 @@ export interface UnifiedRecommendationResult {
    * UI behaviour change.
    */
   deprecatedActionTypes?: ActionType[];
+  // ─── Sprint 18 additive fields ───────────────────────────────────────────
+  /** Phase 18.1 — best multi-step path. */
+  bestPath?: any;
+  /** Phase 18.1 — ranked candidate paths. */
+  candidatePaths?: any[];
 }

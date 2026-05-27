@@ -50,6 +50,12 @@ import { buildIncreaseCashReserve } from './decumulation/increaseCashReserve';
 import { buildSwrReview } from './decumulation/swrReview';
 import { buildIncomeProtection } from './decumulation/incomeProtection';
 import { buildUnreachableHonesty } from './decumulation/unreachableHonesty';
+// Sprint 18 — additive imports for feasibility, behavioural, stress, advisor explanation, path optimisation
+import { evaluateRecommendationFeasibility } from '../feasibility/feasibilityEngine';
+import { evaluateRecommendationBehaviour } from '../behaviouralFinance/behaviouralRisk';
+import { stressTestRecommendation } from '../stressTesting/stressTestEngine';
+import { buildAdvisorExplanation } from './advisorExplanation';
+import { optimisePaths } from '../recommendationOptimization/pathOptimizer';
 
 const PILLAR_RANK: Record<StrategicPillar, number> = {
   prevent_failure: 1,
@@ -1119,6 +1125,39 @@ export function computeUnifiedRecommendations(s: UnifiedSignals): UnifiedRecomme
     c.calibratedConfidence = cc;
     c.explanation = buildExplanation(c, s, ctxHandle);
   }
+  // Sprint 18 Phase 18.2–18.5 — feasibility, behavioural risk, stress test, advisor explanation
+  if (ctxHandle) {
+    for (const c of survivingCandidates) {
+      try {
+        const feas = evaluateRecommendationFeasibility(c, ctxHandle);
+        c.feasibility = feas;
+      } catch {/* tolerate */}
+      try {
+        c.behaviouralRisk = evaluateRecommendationBehaviour(c, ctxHandle);
+      } catch {/* tolerate */}
+      try {
+        const stress = stressTestRecommendation(c, ctxHandle);
+        c.stressTest = {
+          scenariosTested: stress.totalCount,
+          scenariosSurvived: stress.survivedCount,
+          primaryWeakness: stress.primaryWeakness,
+          passes: stress.passes,
+          survivalRate: stress.totalCount > 0 ? stress.survivedCount / stress.totalCount : 1,
+          results: stress.results.map((r) => ({
+            scenario: r.scenario,
+            scenarioLabel: r.scenarioLabel,
+            survives: r.survives,
+            monthlySurplusAfter: r.monthlySurplusAfter,
+            fireDelay: r.fireDelay,
+            note: r.note,
+          })),
+        };
+      } catch {/* tolerate */}
+      try {
+        c.advisorExplanation = buildAdvisorExplanation(c, ctxHandle);
+      } catch {/* tolerate */}
+    }
+  }
 
   const scored = survivingCandidates.map(c => {
     const { score, breakdown } = scoreCandidateWithBreakdown(c, s);
@@ -1144,6 +1183,28 @@ export function computeUnifiedRecommendations(s: UnifiedSignals): UnifiedRecomme
     const rankScore = useQualityRanking ? fatigue.score : score;
     return { rec: c, score: rankScore };
   });
+
+  // Sprint 18 — feasibility + stress gates applied before sorting. The
+  // canonical user constraint: a recommendation that fails feasibility OR
+  // fails too many stress tests must not be top-ranked unless explicitly
+  // labelled aggressive=true (set on the recommendation by its builder).
+  for (const item of scored) {
+    const r = item.rec;
+    const feasInfeasible = r.feasibility && r.feasibility.feasible === false;
+    const stressWeak = r.stressTest && r.stressTest.scenariosTested > 0
+      && r.stressTest.scenariosSurvived < Math.ceil(r.stressTest.scenariosTested * 0.5);
+    if ((feasInfeasible || stressWeak) && !r.aggressive) {
+      // Heavy multiplicative penalty so it cannot win its pillar
+      item.score = item.score * 0.10;
+      if (!r.scoreBreakdown) r.scoreBreakdown = { baseScore: item.score, finalScore: item.score, pillarRank: PILLAR_RANK[r.pillar], modifiers: [] };
+      r.scoreBreakdown.modifiers.push({
+        id: 'sprint18_safety_gate',
+        source: 'quality',
+        multiplier: 0.10,
+        reason: `Sprint 18 safety gate — ${feasInfeasible ? 'infeasible' : ''}${feasInfeasible && stressWeak ? ' + ' : ''}${stressWeak ? 'stress-fragile' : ''}`,
+      });
+    }
+  }
 
   const sorted = scored
     .sort((a, b) => {
@@ -1173,6 +1234,19 @@ export function computeUnifiedRecommendations(s: UnifiedSignals): UnifiedRecomme
     }
   }
 
+  // Sprint 18 Phase 18.1 — path optimisation. Computed once per call when a
+  // RecommendationContext is available. Returned alongside the existing
+  // bestMove output; consumers can ignore it.
+  let bestPath: any = undefined;
+  let candidatePaths: any[] | undefined;
+  if (ctxHandle) {
+    try {
+      const result = optimisePaths(ctxHandle);
+      bestPath = result.bestPath;
+      candidatePaths = result.candidatePaths;
+    } catch {/* tolerate */}
+  }
+
   return {
     bestMove: best,
     topPriorities: top,
@@ -1181,6 +1255,8 @@ export function computeUnifiedRecommendations(s: UnifiedSignals): UnifiedRecomme
     signalCoverage: signals,
     generatedAt: new Date().toISOString(),
     deprecatedActionTypes: [...DEPRECATED_ACTION_TYPES],
+    bestPath,
+    candidatePaths,
   };
 }
 
