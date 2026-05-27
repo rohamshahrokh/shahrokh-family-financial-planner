@@ -104,12 +104,13 @@ import TimelinePage       from "./pages/timeline";
 import DataHealthPage     from "./pages/data-health";
 import HelpPage           from "./pages/help";
 import AIInsightsPage     from "./pages/ai-insights";
-import WealthStrategyPage   from "./pages/wealth-strategy";
+// Sprint 20 PR-E — /wealth-strategy and /ai-forecast-engine now redirect
+// (the parent rows became pure expandable sidebar groups). The page
+// components stay in the codebase but are no longer imported here.
 import DebtStrategyPage     from "./pages/debt-strategy";
 import RecurringBillsPage   from "./pages/recurring-bills";
 import BudgetPage           from "./pages/budget";
 import MarketNewsPage       from "./pages/market-news";
-import AIForecastEnginePage from "./pages/ai-forecast-engine";
 import AIWeeklyCFOPage         from "./pages/ai-weekly-cfo";
 import MyFinancialPlanPage     from "./pages/financial-plan";
 import LedgerAuditPage         from "./pages/ledger-audit";
@@ -260,8 +261,11 @@ function AppRouter() {
         <Route path="/ai-insights">
           <ProtectedRoute component={AIInsightsPage} title="AI Insights" />
         </Route>
+        {/* Sprint 20 PR-E — Wealth Strategy is now a pure expandable sidebar
+            group (no longer a page). Preserve the deep link by redirecting
+            to the first child route (/property). */}
         <Route path="/wealth-strategy">
-          <ProtectedRoute component={WealthStrategyPage} title="Wealth Strategy" />
+          <Redirect to="/property" />
         </Route>
         <Route path="/debt-strategy">
           <ProtectedRoute component={DebtStrategyPage} title="Debt Strategy" />
@@ -275,8 +279,11 @@ function AppRouter() {
         <Route path="/market-news">
           <ProtectedRoute component={MarketNewsPage} title="Market News" />
         </Route>
+        {/* Sprint 20 PR-E — Forecast Engine is now a pure expandable sidebar
+            group (no longer a page). Preserve the deep link by redirecting
+            to its only child route (/scenario-compare). */}
         <Route path="/ai-forecast-engine">
-          <ProtectedRoute component={AIForecastEnginePage} title="AI Forecast Engine" />
+          <Redirect to="/scenario-compare" />
         </Route>
         <Route path="/ai-weekly-cfo">
           <ProtectedRoute component={AIWeeklyCFOPage} title="AI Weekly CFO" />
@@ -345,8 +352,12 @@ function AppRouter() {
         <Route path="/tax-alpha">
           <ProtectedRoute component={TaxAlphaPage} title="Tax Strategy" />
         </Route>
+        {/* Sprint 20 PR-E — Tax Strategy is now a pure expandable sidebar
+            group (sibling of CGT Simulator parent). Preserve the deep link
+            by redirecting to /cgt-simulator. Tax Alpha analytics remain
+            reachable at /tax-alpha. */}
         <Route path="/tax-strategy">
-          <ProtectedRoute component={TaxAlphaPage} title="Tax Strategy" />
+          <Redirect to="/cgt-simulator" />
         </Route>
         {/* Audit Coverage — developer transparency surface for Audit Mode */}
         <Route path="/audit-coverage">
