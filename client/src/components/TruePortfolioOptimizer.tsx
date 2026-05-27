@@ -23,6 +23,8 @@ import { useMemo, useState } from "react";
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
 import { selectCanonicalNetWorth } from "@/lib/dashboardDataContract";
 import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
+import { useCanonicalRecommendation } from "@/hooks/useCanonicalRecommendation";
+import type { CanonicalRecommendation } from "@/lib/canonicalRecommendation";
 import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
@@ -151,13 +153,26 @@ function ExecutiveSummary({
   goal,
   searchMetrics,
   gapSolver,
+  canonicalRec,
 }: {
   recommendations: Recommendation[];
   goal: ReturnType<typeof buildTruePortfolioOptimizer>["goalReverseEngineering"];
   searchMetrics: ReturnType<typeof buildTruePortfolioOptimizer>["searchMetrics"];
   gapSolver: ReturnType<typeof buildTruePortfolioOptimizer>["gapSolver"];
+  /** Sprint 15.1 — RecommendationFacade payload. When present, the
+   *  user-facing "Recommended Path" headline (label + rationale) is sourced
+   *  from the facade. The scenario engine's `featured` record is still used
+   *  for the per-scenario metrics (FIRE year, NW, passive income, etc.)
+   *  because those are scenario-engine outputs the facade does not carry. */
+  canonicalRec?: CanonicalRecommendation | null;
 }) {
   const featured = recommendations.find(r => r.category === "hybrid") ?? recommendations[0];
+  const facadeMove = canonicalRec?.bestMove;
+  const headlineLabel = facadeMove?.title ?? featured?.label ?? "";
+  const headlineRationale = facadeMove?.reasoning ?? featured?.rationale ?? "";
+  const headlineSourceTag = canonicalRec
+    ? "RecommendationFacade"
+    : `Scenario ${featured?.scenarioId.slice(0, 24) ?? ""}${(featured?.scenarioId.length ?? 0) > 24 ? "…" : ""}`;
 
   return (
     <section
@@ -206,13 +221,13 @@ function ExecutiveSummary({
         >
           <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1">
             <h3 className="text-sm font-semibold text-foreground" data-testid="true-optimizer-featured-label">
-              {featured.label}
+              {headlineLabel}
             </h3>
             <span className="text-[11px] text-muted-foreground" data-testid="true-optimizer-featured-source">
-              Scenario {featured.scenarioId.slice(0, 24)}{featured.scenarioId.length > 24 ? "…" : ""}
+              {headlineSourceTag}
             </span>
           </div>
-          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{featured.rationale}</p>
+          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{headlineRationale}</p>
           <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
             <div data-testid="true-optimizer-featured-action-what">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">What</span>
@@ -724,6 +739,9 @@ interface HeroProps {
       ? NF
       : never
     : never;
+  /** Sprint 15.1 — RecommendationFacade payload; when present, the
+   *  "What should I do next?" hero slot is sourced from the facade. */
+  canonicalRec?: CanonicalRecommendation | null;
 }
 
 function PortfolioLabHero({
@@ -733,6 +751,7 @@ function PortfolioLabHero({
   whyWinsNarrative,
   whyWinsLabel,
   netWorthFan,
+  canonicalRec,
 }: HeroProps) {
   const canonical = canonicalLedger ? computeCanonicalFire(canonicalLedger) : null;
   const featured = recommendations.find(r => r.category === "hybrid") ?? recommendations[0] ?? null;
@@ -816,11 +835,14 @@ function PortfolioLabHero({
           )}
         </div>
 
-        {/* Slot 3: What should I do next? */}
+        {/* Slot 3: What should I do next?
+            Sprint 15.1 — sourced from RecommendationFacade when available. */}
         <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3" data-testid="hero-next-action">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">What should I do next?</div>
           <div className="text-sm font-medium text-foreground leading-snug" data-testid="hero-next-action-text">
-            {featured?.actionability?.what ?? "Complete your ledger to receive a recommendation."}
+            {canonicalRec?.bestMove?.title
+              ?? featured?.actionability?.what
+              ?? "Complete your ledger to receive a recommendation."}
           </div>
           {featured?.actionability?.when ? (
             <div className="text-[11px] text-muted-foreground mt-1">When: {featured.actionability.when}</div>
@@ -929,6 +951,12 @@ function GoalSolverProDeepLink() {
 
 export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
   const [constraints, setConstraints] = useState<OptimizerConstraints>({});
+  // Sprint 15.1 — single source of truth for the user-facing "Recommended
+  // Path" headline and the "What should I do next?" hero slot. The
+  // scenario engine (`buildTruePortfolioOptimizer`) continues to produce
+  // the full scenario grid, frontier, gap solver and audit trail; those
+  // are scenario outputs that the facade does not carry.
+  const canonicalRec = useCanonicalRecommendation();
   const result = useMemo(
     () => buildTruePortfolioOptimizer({
       canonicalLedger: props.canonicalLedger ?? null,
@@ -1243,6 +1271,7 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
         whyWinsNarrative={portfolioLabResult.whyThisWins?.narrative ?? null}
         whyWinsLabel={portfolioLabResult.whyThisWins?.strategyLabel ?? null}
         netWorthFan={heroFan as any}
+        canonicalRec={canonicalRec.data ?? null}
       />
 
       {/* Sprint 11 #5 — promote whyThisWins narrative just below the Hero. */}
@@ -1275,6 +1304,7 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
         goal={result.goalReverseEngineering}
         searchMetrics={result.searchMetrics}
         gapSolver={result.gapSolver}
+        canonicalRec={canonicalRec.data ?? null}
       />
       <GoalReverseEngineeringCard section={result.goalReverseEngineering} />
       <ConstraintsPanel constraints={constraints} onChange={setConstraints} />

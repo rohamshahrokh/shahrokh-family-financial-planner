@@ -1836,10 +1836,17 @@ export default function DashboardPage() {
   const _fireCanonical = computeCanonicalFire(_contractInputs, {
     targetMonthlyIncome: resolveFireTargetFromSnapshot(_contractInputs),
   });
-  const fireTargetAmt = headline.fireNumber || _fireCanonical.fireNumber;
-  const fireCurrentAmt = totalLiquidCash + _totalSuperNow + stocksTotal + cryptoTotal;
-  const fireProgressPct = Math.min(100, (fireCurrentAmt / fireTargetAmt) * 100);
-  const fireGap = Math.max(0, fireTargetAmt - fireCurrentAmt);
+  // Sprint 15.1 — consume canonical FIRE outputs directly (no local recompute).
+  // Previously this site used `liquidCash + super + stocks + crypto` as the
+  // numerator, excluding PPOR/IP equity, which produced a ~$500k gap vs every
+  // other surface. Cross-page parity audit fixed by deferring entirely to
+  // computeCanonicalFire(ledger, opts) — the same selector used by Decision Lab,
+  // Goal Closure Lab, Portfolio Lab and Action Plan.
+  const fireTargetAmt = _fireCanonical.fireNumber;
+  const fireCurrentAmt = _fireCanonical.netWorthNow;
+  const fireProgressPct = _fireCanonical.progressFraction * 100;
+  const fireGap = _fireCanonical.gap;
+  const targetPassiveIncome = _fireCanonical.targetAnnualIncome;
   const fireMonthlyNeeded = fireGap > 0 ? Math.round(fireGap * 0.07 / 12 / ((Math.pow(1.07 / 12 + 1, Math.max(1, (parseInt(fireCard?.value?.replace("~", "") ?? "55")) * 12 - 36 * 12)) - 1) / (0.07 / 12))) : 0;
 
   // ─── Year-by-year table ───────────────────────────────────────────────────

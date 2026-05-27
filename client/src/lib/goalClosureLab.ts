@@ -61,6 +61,7 @@ import {
 import type { RiskRadarResult } from "./riskEngine";
 import type { MonteCarloResult } from "./forecastStore";
 import { formatConfidence, type ConfidenceKind } from "./confidenceLabels";
+import type { CanonicalRecommendation } from "./canonicalRecommendation";
 
 /* ─── Display contract primitives ──────────────────────────────────────── */
 
@@ -384,6 +385,19 @@ export interface GoalClosureLabInputs {
   goalSolverInputs?: Omit<GoalSolverInputs, "canonicalLedger">;
   riskOutputs?: RiskRadarResult | null;
   monteCarloOutputs?: MonteCarloResult | null;
+  /**
+   * Sprint 15.1 — recommendation from the RecommendationFacade
+   * (`useCanonicalRecommendation()` in the React wrapper). When provided,
+   * the user-facing recommendation surfaced by the lab (best-path label,
+   * action plan first item, confidence band, audit-trail attribution) is
+   * sourced from the facade rather than from the internal
+   * `computeBestMoveSprint5` engine. This preserves the facade-as-single-
+   * source rule documented in Sprint 15 Phase 3. The internal best-move
+   * engine is retained as a scenario engine for the expected-impact,
+   * risk-impact and liquidity-impact metrics that the facade does not
+   * carry.
+   */
+  canonicalRecommendation?: CanonicalRecommendation | null;
 }
 
 export interface GoalClosureLabResult {
@@ -1302,6 +1316,43 @@ function buildAuditTrail(
 /* ─── Public API ───────────────────────────────────────────────────────── */
 
 /**
+ * Sprint 15.1 — Overlay the facade's canonical recommendation onto the
+ * engine-produced BestMoveResult. We keep the engine's expected/risk/
+ * liquidity impact computations (they answer "what does this move do to
+ * the canonical metrics?") and substitute the user-facing identifiers
+ * (id / label / rationale / confidence) for the facade values, so every
+ * surface that displays "the recommendation" ends up displaying the same
+ * single source of truth.
+ *
+ * `bestMove.expectedImpact`, `riskImpact`, `liquidityImpact`,
+ * `whyThisBeatsAlternatives` and `trace` are preserved untouched — these
+ * are scenario-engine outputs that the facade does not carry.
+ */
+function overlayFacadeRecommendation(
+  engineBestMove: BestMoveResult,
+  rec: CanonicalRecommendation,
+): BestMoveResult {
+  const move = rec.bestMove;
+  const confidence = Math.max(0, Math.min(1, rec.confidence));
+  const band: "low" | "moderate" | "high" =
+    confidence >= 0.66 ? "high" : confidence >= 0.33 ? "moderate" : "low";
+  return {
+    ...engineBestMove,
+    bestNextAction: {
+      ...engineBestMove.bestNextAction,
+      id: move.id || engineBestMove.bestNextAction.id,
+      label: move.title || engineBestMove.bestNextAction.label,
+      rationale: move.reasoning || engineBestMove.bestNextAction.rationale,
+    },
+    confidenceScore: {
+      ...engineBestMove.confidenceScore,
+      value: confidence,
+      band,
+    },
+  };
+}
+
+/**
  * Build the Goal Closure Lab payload from existing canonical and Sprint 5
  * engine outputs. Pure / deterministic. Never fabricates household values.
  */
@@ -1328,12 +1379,20 @@ export function buildGoalClosureLab(
     monteCarloOutputs: inputs.monteCarloOutputs ?? null,
   });
   const ranking = rankDecisionCandidates({ candidateOutputs: candidates });
-  const bestMove = computeBestMoveSprint5({
+  // Sprint 15.1 — Sprint 5 best-move is now used purely as an internal
+  // scenario engine: it produces expected-impact / risk-impact / liquidity
+  // metrics for the recommended path. The user-facing recommendation
+  // (label, action plan first item, headline confidence) is overlaid from
+  // the RecommendationFacade when one is supplied by the caller.
+  const engineBestMove = computeBestMoveSprint5({
     rankingOutputs: ranking,
     goalSolverOutputs: goal,
     riskOutputs: inputs.riskOutputs ?? null,
     monteCarloOutputs: inputs.monteCarloOutputs ?? null,
   });
+  const bestMove = inputs.canonicalRecommendation
+    ? overlayFacadeRecommendation(engineBestMove, inputs.canonicalRecommendation)
+    : engineBestMove;
   const cfo = generateCFOInsights({
     canonicalLedger: ledger,
     canonicalHead: head,

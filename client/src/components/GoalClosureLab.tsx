@@ -34,6 +34,7 @@ import {
 import type { GoalSolverInputs } from "@/lib/goalSolver";
 import type { RiskRadarResult } from "@/lib/riskEngine";
 import type { MonteCarloResult } from "@/lib/forecastStore";
+import { useCanonicalRecommendation } from "@/hooks/useCanonicalRecommendation";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 import { GclSixOutputGrid } from "@/components/goal-closure/GclSixOutputGrid";
@@ -497,15 +498,21 @@ function StrategicIdeasCard({ section }: { section: ReturnType<typeof buildGoalC
 /* ─── Root ─────────────────────────────────────────────────────────────── */
 
 export function GoalClosureLab(props: GoalClosureLabProps) {
+  // Sprint 15.1 — Goal Closure Lab now sources its user-facing best-move
+  // recommendation from the RecommendationFacade. The internal
+  // `computeBestMoveSprint5` engine still runs (for impact/risk/liquidity
+  // metrics) but its bestNextAction is overlaid with the facade output.
+  const canonicalRec = useCanonicalRecommendation();
   const result = useMemo(() => {
     const inputs: GoalClosureLabInputs = {
       canonicalLedger: props.canonicalLedger,
       goalSolverInputs: props.goalSolverInputs,
       riskOutputs: props.riskOutputs ?? null,
       monteCarloOutputs: props.monteCarloOutputs ?? null,
+      canonicalRecommendation: canonicalRec.data ?? null,
     };
     return buildGoalClosureLab(inputs);
-  }, [props.canonicalLedger, props.goalSolverInputs, props.riskOutputs, props.monteCarloOutputs]);
+  }, [props.canonicalLedger, props.goalSolverInputs, props.riskOutputs, props.monteCarloOutputs, canonicalRec.data]);
 
   if (result.empty) {
     return (

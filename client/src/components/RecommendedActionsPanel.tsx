@@ -20,6 +20,7 @@ import {
   type RecommendedAction,
   type BuildRecommendedActionsInputs,
 } from '@/lib/recommendedActionsAdapter';
+import { useCanonicalRecommendation } from '@/hooks/useCanonicalRecommendation';
 import { Sparkles, Layers, AlertCircle } from 'lucide-react';
 
 interface Props extends BuildRecommendedActionsInputs {
@@ -32,7 +33,14 @@ interface Props extends BuildRecommendedActionsInputs {
 }
 
 export default function RecommendedActionsPanel(props: Props) {
-  const actions = props.preComputedActions ?? buildRecommendedActions(props);
+  // Sprint 15.1 — Recommended Actions Panel now reads the canonical
+  // recommendation from the RecommendationFacade and passes it to the
+  // adapter, which is presentation-only (no scoring / no selection).
+  const canonicalRec = useCanonicalRecommendation();
+  const actions = props.preComputedActions ?? buildRecommendedActions({
+    ...props,
+    canonicalRecommendation: props.canonicalRecommendation ?? canonicalRec.data ?? null,
+  });
   const limit = props.limit ?? actions.length;
   const visible = actions.slice(0, limit);
 

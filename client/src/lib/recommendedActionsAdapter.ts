@@ -12,6 +12,7 @@
  */
 
 import type { Recommendation, UnifiedRecommendationResult } from './recommendationEngine/types';
+import type { CanonicalRecommendation } from './canonicalRecommendation';
 
 export type ActionTone = 'proceed' | 'delay' | 'optimise' | 'monitor';
 export type ActionRiskLevel = 'Low' | 'Medium' | 'High';
@@ -55,7 +56,18 @@ export interface PlannedAcquisition {
 }
 
 export interface BuildRecommendedActionsInputs {
-  /** Unified recommendation engine result (existing engine output). */
+  /**
+   * Sprint 15.1 — RecommendationFacade payload. When supplied, the adapter
+   * is **presentation-only**: it formats the facade's already-ranked
+   * `top3` + `all` into the panel's display shape without re-scoring or
+   * re-selecting. Acquisition-derived "Buy / Delay" actions are still
+   * computed from `plannedAcquisitions` because the facade does not carry
+   * planner outputs — but no recommendation-engine ranking is performed
+   * here when the canonical recommendation is present.
+   */
+  canonicalRecommendation?: CanonicalRecommendation | null;
+  /** Unified recommendation engine result (legacy input — ignored when
+   *  `canonicalRecommendation` is supplied). */
   unified?: UnifiedRecommendationResult | null;
   /** Planned acquisitions (from forecast / acquisition planner). */
   plannedAcquisitions?: PlannedAcquisition[];
@@ -178,14 +190,24 @@ export function buildRecommendedActions(
     }
   }
 
-  /* 2) Recommendation engine outputs (top priorities) — only those NOT
-        already mapped from acquisitions above. The recommendation engine
-        already ranks safety > liquidity > debt > investing → we preserve
-        that ordering. */
-  const unified = inputs.unified;
-  if (unified) {
+  /* 2) Recommendation source — Sprint 15.1.
+        When the facade payload is provided, treat it as the single source
+        of truth (no re-ranking, no re-selection). Otherwise fall back to
+        the legacy unified-engine input. */
+  const fromFacade: ReadonlyArray<Recommendation> | null = inputs.canonicalRecommendation
+    ? [inputs.canonicalRecommendation.bestMove, ...inputs.canonicalRecommendation.all]
+    : null;
+  const fromUnified: ReadonlyArray<Recommendation> | null = inputs.unified
+    ? inputs.unified.topPriorities
+    : null;
+  const recList: ReadonlyArray<Recommendation> | null = fromFacade ?? fromUnified;
+  if (recList) {
     const seen = new Set(actions.map(a => a.id));
-    for (const r of unified.topPriorities) {
+    // Dedup the facade's bestMove appearing again in `all`.
+    const seenRec = new Set<string>();
+    for (const r of recList) {
+      if (!r || !r.id || seenRec.has(r.id)) continue;
+      seenRec.add(r.id);
       const id = `rec:${r.id}`;
       if (seen.has(id)) continue;
       const tone: ActionTone =

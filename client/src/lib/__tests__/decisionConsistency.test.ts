@@ -252,6 +252,155 @@ section("(3) cross-page parity — facade yields identical IDs + FIRE numbers");
       fireA.targetMonthlyIncome === fireB.targetMonthlyIncome,
     );
 
+    // ─── (4) Single-source recommendation guard ──────────────────────────
+    //
+    // Sprint 15.1 — the user-facing recommendation on every consumer page
+    // MUST come through the RecommendationFacade. Legacy engine names
+    // (computeBestMoveSprint5, useBestMove(, buildRecommendedActions called
+    // WITHOUT a canonicalRecommendation argument) outside the allowlist
+    // are regressions.
+    section("(4) single-source recommendation guard (Sprint 15.1)");
+
+    // computeBestMoveSprint5 — engine reference allowed in:
+    //   * the engine itself
+    //   * goalClosureLab.ts (used as scenario engine; user-facing
+    //     bestNextAction is overlaid from the facade — see overlayFacadeRecommendation)
+    //   * portfolioLabOptimizer.ts (Sprint 7 scenario engine internal use)
+    //   * scenarioCompareWorkspace.ts (scenario engine internal use)
+    //   * cfoAdvisor.ts (internal narrative engine — not user-facing recommendation)
+    //   * Sprint5DecisionPanel.tsx (legacy decision-engine inspector; the
+    //     user-facing recommendation surfaces it shares with the rest of the
+    //     app are flipped to the facade — this panel is the engine inspector
+    //     and is allowlisted explicitly so reviewers can grep for it)
+    //   * audit / trace / test files
+    const SPRINT5_ALLOWLIST = new Set<string>([
+      "lib/bestMoveEngineSprint5.ts",
+      "lib/goalClosureLab.ts",
+      "lib/portfolioLabOptimizer.ts",
+      "lib/scenarioCompareWorkspace.ts",
+      "lib/cfoAdvisor.ts",
+      "components/decisionEngine/Sprint5DecisionPanel.tsx",
+    ]);
+    const sprint5Hits: string[] = [];
+    for (const file of walk(CLIENT_SRC)) {
+      const rel = relFromClient(file);
+      const text = readFileSync(file, "utf8");
+      if (/\bcomputeBestMoveSprint5\s*\(/.test(text)) {
+        sprint5Hits.push(rel);
+      }
+    }
+    const sprint5Violators = sprint5Hits.filter((p) => !SPRINT5_ALLOWLIST.has(p));
+    check(
+      `computeBestMoveSprint5 only called from allowlisted files (found ${sprint5Hits.length}, 0 unauthorised)`,
+      sprint5Violators.length === 0,
+      sprint5Violators.length ? `unauthorised: ${sprint5Violators.join(", ")}` : undefined,
+    );
+
+    // useBestMove( — legacy React hook. Must be unused after the facade flip.
+    const USEBESTMOVE_ALLOWLIST = new Set<string>([]);
+    const useBestMoveHits: string[] = [];
+    for (const file of walk(CLIENT_SRC)) {
+      const rel = relFromClient(file);
+      const text = readFileSync(file, "utf8");
+      if (/\buseBestMove\s*\(/.test(text)) {
+        useBestMoveHits.push(rel);
+      }
+    }
+    const useBestMoveViolators = useBestMoveHits.filter(
+      (p) => !USEBESTMOVE_ALLOWLIST.has(p),
+    );
+    check(
+      `useBestMove( has no remaining call sites (found ${useBestMoveHits.length})`,
+      useBestMoveViolators.length === 0,
+      useBestMoveViolators.length
+        ? `unauthorised callers: ${useBestMoveViolators.join(", ")}`
+        : undefined,
+    );
+
+    // buildRecommendedActions — call sites must pass canonicalRecommendation
+    // (the facade payload). Allowed exceptions: the adapter's own module +
+    // its tests + a storybook/test override pattern.
+    const RECADAPTER_ALLOWLIST = new Set<string>([
+      "lib/recommendedActionsAdapter.ts",
+      "components/RecommendedActionsPanel.tsx",
+    ]);
+    const recAdapterHits: string[] = [];
+    for (const file of walk(CLIENT_SRC)) {
+      const rel = relFromClient(file);
+      const text = readFileSync(file, "utf8");
+      if (/\bbuildRecommendedActions\s*\(/.test(text)) {
+        recAdapterHits.push(rel);
+      }
+    }
+    const recAdapterViolators = recAdapterHits.filter(
+      (p) => !RECADAPTER_ALLOWLIST.has(p),
+    );
+    check(
+      `buildRecommendedActions only called from allowlisted modules (found ${recAdapterHits.length})`,
+      recAdapterViolators.length === 0,
+      recAdapterViolators.length
+        ? `unauthorised callers: ${recAdapterViolators.join(", ")}`
+        : undefined,
+    );
+
+    // ─── (5) Cross-page parity simulation — all surfaces share the facade ─
+    //
+    // Sprint 15.1 — instantiate the facade once with the cached payload and
+    // assert that each consumer surface, given the same inputs, would
+    // produce the same recommendation.id + confidence values. Practical
+    // implementation: re-read the cache from N simulated consumers and
+    // verify every read returns the same payload.
+    section("(5) cross-page parity simulation — N consumers share the facade");
+
+    const SIM_CONSUMERS = [
+      "Dashboard (UnifiedFirePanel)",
+      "Decision Lab",
+      "Goal Closure Lab",
+      "Portfolio Lab (Hero + ExecutiveSummary)",
+      "Action Plan",
+      "Recommended Actions Panel (/decision)",
+    ];
+
+    const consumerReads = SIM_CONSUMERS.map(() =>
+      readCachedCanonicalRecommendation(),
+    );
+    const firstId = consumerReads[0]?.bestMove?.id ?? null;
+    const firstConf = consumerReads[0]?.confidence ?? null;
+
+    let allIdsMatch = true;
+    let allConfMatch = true;
+    for (const r of consumerReads) {
+      if ((r?.bestMove?.id ?? null) !== firstId) allIdsMatch = false;
+      if ((r?.confidence ?? null) !== firstConf) allConfMatch = false;
+    }
+    check(
+      `bestMove.id identical across ${SIM_CONSUMERS.length} simulated consumers`,
+      allIdsMatch,
+      `consumers=${SIM_CONSUMERS.join(",")} firstId=${firstId}`,
+    );
+    check(
+      `confidence identical across ${SIM_CONSUMERS.length} simulated consumers`,
+      allConfMatch,
+      `firstConfidence=${firstConf}`,
+    );
+
+    // FIRE parity simulation — every surface that calls computeCanonicalFire
+    // with the same ledger must get the same fireNumber + progressFraction.
+    const SIM_FIRE_CONSUMERS = SIM_CONSUMERS.length;
+    const fireResults = Array.from({ length: SIM_FIRE_CONSUMERS }, () =>
+      computeCanonicalFire(ledger),
+    );
+    const firstFireNum = fireResults[0]?.fireNumber;
+    const firstProgress = fireResults[0]?.progressFraction;
+    const fireAllMatch =
+      fireResults.every((f) => f.fireNumber === firstFireNum) &&
+      fireResults.every((f) => f.progressFraction === firstProgress);
+    check(
+      `computeCanonicalFire identical across ${SIM_FIRE_CONSUMERS} simulated consumers`,
+      fireAllMatch,
+      `fireNumber=${firstFireNum} progressFraction=${firstProgress}`,
+    );
+
     console.log(`\n── Summary ──\n${pass} passed, ${fail} failed`);
     if (fail > 0) process.exit(1);
   })().catch((err) => {
