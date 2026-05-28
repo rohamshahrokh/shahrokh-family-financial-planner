@@ -39,8 +39,9 @@ import { useToast } from "@/hooks/use-toast";
 
 import {
   Target, TrendingUp, PieChart, Rocket, Shield, Lock,
-  Check, Edit3, ArrowRight, Sparkles, Quote, CalendarClock,
+  Check, Edit3, ArrowRight, Sparkles, Quote,
   Loader2, AlertCircle,
+  Activity, Zap, Gauge, Flag,
 } from "lucide-react";
 
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
@@ -61,22 +62,25 @@ import {
 
 type CardTone = "violet" | "emerald" | "blue" | "amber" | "rose" | "teal";
 
+// Tone chips — flat, premium, dark-mode aware. Light-mode reads as a soft tinted
+// chip; dark-mode uses a desaturated tint at 15-18% alpha with a brighter foreground
+// so the chip still pops against the card surface without glowing.
 const TONE_CHIP: Record<CardTone, string> = {
-  violet:  "bg-violet-100 text-violet-700 ring-violet-200",
-  emerald: "bg-emerald-100 text-emerald-700 ring-emerald-200",
-  blue:    "bg-blue-100 text-blue-700 ring-blue-200",
-  amber:   "bg-amber-100 text-amber-700 ring-amber-200",
-  rose:    "bg-rose-100 text-rose-700 ring-rose-200",
-  teal:    "bg-teal-100 text-teal-700 ring-teal-200",
+  violet:  "bg-violet-100 text-violet-700 ring-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-violet-400/25",
+  emerald: "bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/25",
+  blue:    "bg-blue-100 text-blue-700 ring-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/25",
+  amber:   "bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/25",
+  rose:    "bg-rose-100 text-rose-700 ring-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-400/25",
+  teal:    "bg-teal-100 text-teal-700 ring-teal-200 dark:bg-teal-500/15 dark:text-teal-300 dark:ring-teal-400/25",
 };
 
 const TONE_EDIT_BUTTON: Record<CardTone, string> = {
-  violet:  "bg-violet-600 hover:bg-violet-700",
-  emerald: "bg-emerald-600 hover:bg-emerald-700",
-  blue:    "bg-blue-600 hover:bg-blue-700",
-  amber:   "bg-amber-500 hover:bg-amber-600",
-  rose:    "bg-rose-600 hover:bg-rose-700",
-  teal:    "bg-teal-600 hover:bg-teal-700",
+  violet:  "bg-violet-600 hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-400",
+  emerald: "bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-400",
+  blue:    "bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-400",
+  amber:   "bg-amber-500 hover:bg-amber-600 dark:bg-amber-500 dark:hover:bg-amber-400",
+  rose:    "bg-rose-600 hover:bg-rose-700 dark:bg-rose-500 dark:hover:bg-rose-400",
+  teal:    "bg-teal-600 hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-400",
 };
 
 type CardStatus = "inferred" | "missing" | "confirmed";
@@ -111,7 +115,7 @@ function GoalLabCard(props: GoalLabCardShellProps) {
   return (
     <div
       data-testid={testId}
-      className="relative flex flex-col rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-shadow hover:shadow-md"
+      className="relative flex flex-col rounded-2xl border border-border/70 bg-card shadow-sm transition-shadow hover:shadow-md"
     >
       <div className="flex items-start gap-3 p-5 pb-3">
         <span
@@ -121,24 +125,24 @@ function GoalLabCard(props: GoalLabCardShellProps) {
           {index}
         </span>
         <div className="flex-1">
-          <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-          <p className="mt-1 text-sm leading-relaxed text-slate-600">
+          <h3 className="text-base font-semibold text-foreground">{title}</h3>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
             {subtitle}
           </p>
         </div>
-        <span className="mt-1 text-slate-400" aria-hidden>
+        <span className="mt-1 text-muted-foreground/70" aria-hidden>
           {icon}
         </span>
       </div>
 
       <div className="px-5 pb-4">
-        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           {editing ? "Edit answer" : "Current answer"}
         </div>
         {editing ? editingBody : children}
       </div>
 
-      <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 px-5 py-3">
+      <div className="mt-auto flex items-center justify-between gap-2 border-t border-border/60 px-5 py-3">
         {editing ? (
           <>
             <Button
@@ -188,11 +192,11 @@ function GoalLabCard(props: GoalLabCardShellProps) {
               data-testid={`${testId}-looks-good`}
               className={
                 status === "confirmed"
-                  ? "text-emerald-700 hover:bg-emerald-50"
-                  : "text-slate-600 hover:bg-slate-50"
+                  ? "text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                  : "text-muted-foreground hover:bg-muted/50"
               }
             >
-              <Check className={`mr-1.5 h-3.5 w-3.5 ${status === "confirmed" ? "text-emerald-600" : ""}`} />
+              <Check className={`mr-1.5 h-3.5 w-3.5 ${status === "confirmed" ? "text-emerald-600 dark:text-emerald-300" : ""}`} />
               {status === "confirmed" ? "Confirmed" : "Looks good"}
             </Button>
           </>
@@ -207,12 +211,15 @@ function GoalLabCard(props: GoalLabCardShellProps) {
 function AnswerPanel({ children, tone = "slate" }: {
   children: React.ReactNode; tone?: "slate" | "amber" | "rose";
 }) {
+  // Neutral well — sits inside the card. In dark mode it reads as a slightly
+  // deeper surface (the --muted token) so the well is distinct from the card
+  // body without introducing a gradient.
   const bg =
-    tone === "amber" ? "bg-amber-50/70 border-amber-100" :
-    tone === "rose"  ? "bg-rose-50/70 border-rose-100" :
-    "bg-slate-50/70 border-slate-100";
+    tone === "amber" ? "bg-amber-50/70 border-amber-100 dark:bg-amber-500/8 dark:border-amber-400/15" :
+    tone === "rose"  ? "bg-rose-50/70 border-rose-100 dark:bg-rose-500/8 dark:border-rose-400/15" :
+    "bg-muted/40 border-border/40 dark:bg-muted/30";
   return (
-    <div className={`rounded-xl border p-3.5 text-sm leading-relaxed ${bg}`}>
+    <div className={`rounded-xl border p-3.5 text-sm leading-relaxed text-foreground ${bg}`}>
       {children}
     </div>
   );
@@ -220,7 +227,7 @@ function AnswerPanel({ children, tone = "slate" }: {
 
 function SourceTag({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200/70">
+    <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-card/80 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200/70 dark:text-emerald-300 dark:ring-emerald-400/25 dark:bg-emerald-500/10">
       <Check className="h-3 w-3" />
       {children}
     </div>
@@ -229,12 +236,12 @@ function SourceTag({ children }: { children: React.ReactNode }) {
 
 function MissingState({ message, cta }: { message: string; cta: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/40 p-3.5 text-sm text-slate-600">
+    <div className="rounded-xl border border-dashed border-border/60 bg-muted/30 p-3.5 text-sm text-muted-foreground">
       <div className="flex items-start gap-2">
-        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/70" />
         <div>
-          <div className="font-medium text-slate-700">{message}</div>
-          <div className="mt-0.5 text-xs text-slate-500">{cta}</div>
+          <div className="font-medium text-foreground">{message}</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">{cta}</div>
         </div>
       </div>
     </div>
@@ -400,7 +407,7 @@ export default function GoalLabPage() {
                     id="q1-lifestyle"
                     value={draftLifestyle}
                     onChange={(e) => setDraftLifestyle(e.target.value)}
-                    className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-md border border-border bg-background text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30"
                   >
                     <option value="lean">Lean — basic comfort</option>
                     <option value="comfortable">Comfortable — relaxed lifestyle</option>
@@ -429,16 +436,16 @@ export default function GoalLabPage() {
           >
             {goal?.status === "SET" ? (
               <AnswerPanel>
-                <div className="font-medium text-slate-900">
+                <div className="font-medium text-foreground">
                   FIRE at age {goal.targetFireAge}{" "}
-                  <span className="font-normal text-slate-500">
+                  <span className="font-normal text-muted-foreground">
                     ({new Date().getFullYear() + Math.max(0, goal.targetFireAge - 35)})
                   </span>
                 </div>
-                <div className="mt-1 text-slate-700">
+                <div className="mt-1 text-foreground/85">
                   Passive income: {formatCurrency(goal.targetPassiveAnnual)} / year
                 </div>
-                <div className="text-slate-700">
+                <div className="text-foreground/85">
                   Target net worth: {formatCurrency(goal.targetNetWorth)}
                 </div>
                 <SourceTag>Canonical FIRE settings</SourceTag>
@@ -466,12 +473,12 @@ export default function GoalLabPage() {
             testId="goal-lab-q2"
             editingBody={
               <div className="space-y-2">
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-muted-foreground">
                   Monthly surplus is read directly from your income + expense ledger.
                   To change it, update your income or recurring expenses in the ledger.
                 </p>
-                <div className="rounded-md bg-slate-50 p-2.5 text-xs text-slate-600">
-                  Current: <span className="font-semibold text-slate-900">
+                <div className="rounded-md bg-muted/40 p-2.5 text-xs text-muted-foreground">
+                  Current: <span className="font-semibold text-foreground">
                     {headline ? formatCurrency(headline.monthlySurplus) : "—"} / month
                   </span>
                 </div>
@@ -480,10 +487,10 @@ export default function GoalLabPage() {
           >
             {headline ? (
               <AnswerPanel>
-                <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Estimated surplus</div>
-                <div className="mt-1 text-xl font-semibold text-slate-900">
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Estimated surplus</div>
+                <div className="mt-1 text-xl font-semibold text-foreground">
                   {formatCurrency(headline.monthlySurplus)}{" "}
-                  <span className="text-sm font-normal text-slate-500">/ month</span>
+                  <span className="text-sm font-normal text-muted-foreground">/ month</span>
                 </div>
                 <SourceTag>From ledger</SourceTag>
               </AnswerPanel>
@@ -508,7 +515,7 @@ export default function GoalLabPage() {
             editing={editing === "Q3"}
             testId="goal-lab-q3"
             editingBody={
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted-foreground">
                 Capital structure is calculated from your ledger. To change it,
                 edit your snapshot, properties, stocks, or debts in the ledger.
               </p>
@@ -553,7 +560,7 @@ export default function GoalLabPage() {
             editing={editing === "Q4"}
             testId="goal-lab-q4"
             editingBody={
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted-foreground">
                 Wealth engine mix is derived from your ledger. Edit your income,
                 properties, or investments to shift the mix.
               </p>
@@ -561,18 +568,18 @@ export default function GoalLabPage() {
           >
             {wealthMix ? (
               <AnswerPanel tone="amber">
-                <div className="font-semibold capitalize text-slate-900">
+                <div className="font-semibold capitalize text-foreground">
                   {wealthMix.label.replace("-", " ")} engine
                 </div>
-                <ul className="mt-1.5 space-y-0.5 text-slate-700">
+                <ul className="mt-1.5 space-y-0.5 text-foreground/85">
                   <li>• Salary &amp; bonuses ({wealthMix.salaryAndBonusesPct.toFixed(0)}%)</li>
                   <li>• Property ({wealthMix.propertyPct.toFixed(0)}%)</li>
                   <li>• Investments ({wealthMix.investmentsPct.toFixed(0)}%)</li>
                 </ul>
                 <div className={`mt-2 text-xs font-semibold ${
-                  wealthMix.convictionTag === "high"   ? "text-amber-700" :
-                  wealthMix.convictionTag === "medium" ? "text-amber-600" :
-                  "text-slate-500"
+                  wealthMix.convictionTag === "high"   ? "text-amber-700 dark:text-amber-300" :
+                  wealthMix.convictionTag === "medium" ? "text-amber-600 dark:text-amber-400" :
+                  "text-muted-foreground"
                 }`}>
                   {wealthMix.convictionTag === "high"   ? "High conviction" :
                    wealthMix.convictionTag === "medium" ? "Medium conviction" :
@@ -600,7 +607,7 @@ export default function GoalLabPage() {
             editing={editing === "Q5"}
             testId="goal-lab-q5"
             editingBody={
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted-foreground">
                 Risk capacity is derived from your liquidity buffer, debt service,
                 and current asset mix. Override coming in the next phase.
               </p>
@@ -608,16 +615,16 @@ export default function GoalLabPage() {
           >
             {riskCapacity ? (
               <AnswerPanel>
-                <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Risk capacity</div>
-                <div className="mt-1 font-semibold text-violet-700">
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Risk capacity</div>
+                <div className="mt-1 font-semibold text-violet-700 dark:text-violet-300">
                   {bandLabel(riskCapacity.band)}
                 </div>
-                <p className="mt-1 text-slate-700">
+                <p className="mt-1 text-foreground/85">
                   Plan can survive a {(riskCapacity.drawdownToleranceP * 100).toFixed(0)}% portfolio
                   drawdown and {riskCapacity.incomeLossEnduranceMonths} months
                   income loss.
                 </p>
-                <p className="text-slate-700">
+                <p className="text-foreground/85">
                   Comfort with leverage: <span className="capitalize">{riskCapacity.leverageComfort}</span>.
                 </p>
                 <SourceTag>Derived from ledger</SourceTag>
@@ -643,7 +650,7 @@ export default function GoalLabPage() {
             editing={editing === "Q6"}
             testId="goal-lab-q6"
             editingBody={
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted-foreground">
                 The inferred answer is based on five signals from your ledger.
                 Manual override comes in the next phase.
               </p>
@@ -651,11 +658,11 @@ export default function GoalLabPage() {
           >
             {preferenceVec ? (
               <AnswerPanel tone="rose">
-                <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Biggest constraint</div>
-                <div className="mt-1 font-semibold text-rose-700">
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Biggest constraint</div>
+                <div className="mt-1 font-semibold text-rose-700 dark:text-rose-300">
                   {primaryDriverCopy(preferenceVec.primaryDriver)}
                 </div>
-                <p className="mt-1 text-slate-700">
+                <p className="mt-1 text-foreground/85">
                   Your plan currently weights{" "}
                   <span className="font-semibold">safety {Math.round(preferenceVec.safety * 100)}%</span>,
                   speed {Math.round(preferenceVec.speed * 100)}%,
@@ -679,16 +686,24 @@ export default function GoalLabPage() {
             completed={completed}
             confirmed={confirmed}
           />
+          <LiveSignalsPanel
+            completed={completed}
+            riskCapacity={riskCapacity}
+            preferenceVec={preferenceVec}
+            capital={capital}
+            wealthMix={wealthMix}
+            headline={headline}
+            goal={goal}
+          />
           <WhatHappensNext />
           <QuoteCard />
-          <BookACallPlaceholder />
         </aside>
       </div>
 
       {/* ── Footer CTA banner ─────────────────────────────────────────── */}
       <FooterCta allDone={allDone} />
 
-      <div className="mt-3 flex items-center gap-1.5 text-[11px] text-slate-500">
+      <div className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <Lock className="h-3 w-3" />
         Your data is private and secure.
       </div>
@@ -701,28 +716,34 @@ export default function GoalLabPage() {
 /* ────────────────────────────────────────────────────────────────────────── */
 
 function Header() {
+  // Flat, premium header. Light: very subtle violet tint. Dark: deep card surface
+  // with a faint violet wash on the top edge — no full gradient fog.
   return (
-    <header className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white via-slate-50 to-violet-50/40 p-6 sm:p-7">
-      <div className="flex items-start justify-between gap-6">
+    <header className="relative overflow-hidden rounded-2xl border border-border/70 bg-card p-6 sm:p-7">
+      {/* Subtle accent wash — tiny, anchored top-left, low opacity */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-12 -left-12 h-40 w-40 rounded-full bg-violet-500/10 blur-3xl dark:bg-violet-400/10"
+      />
+      <div className="relative flex items-start justify-between gap-6">
         <div className="max-w-2xl">
-          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-violet-700">
+          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-violet-700 dark:text-violet-300">
             Goals-Based Wealth Planning · Behavioural Finance · Monte Carlo Forecasting
           </div>
           <div className="mt-2 flex items-center gap-2.5">
-            <Target className="h-6 w-6 text-violet-600" />
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
+            <Target className="h-6 w-6 text-violet-600 dark:text-violet-300" />
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
               Goal Lab
             </h1>
           </div>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600">
-            Let's build your personalised path to <span className="font-semibold text-slate-800">Financial Independence</span>.
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Let's build your personalised path to <span className="font-semibold text-foreground">Financial Independence</span>.
             Answer 6 key questions. We'll do the heavy lifting.
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-muted-foreground/80">
             An institutional-style framework for understanding your path to financial independence.
           </p>
         </div>
-        <div className="hidden h-24 w-44 shrink-0 rounded-xl bg-gradient-to-br from-violet-100 via-sky-100 to-emerald-50 sm:block" aria-hidden />
       </div>
     </header>
   );
@@ -750,10 +771,10 @@ function SummaryPanel({ completed, confirmed }: {
   const offset = circumference * (1 - pct / 100);
 
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+    <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm">
       <div className="flex items-start justify-between">
-        <h3 className="text-base font-semibold text-slate-900">Your Summary</h3>
-        <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-500">
+        <h3 className="text-base font-semibold text-foreground">Your Summary</h3>
+        <span className="rounded-full border border-border/70 px-2 py-0.5 text-[11px] text-muted-foreground">
           Preview
         </span>
       </div>
@@ -761,7 +782,12 @@ function SummaryPanel({ completed, confirmed }: {
       <div className="my-4 flex justify-center">
         <div className="relative">
           <svg width="120" height="120" className="-rotate-90">
-            <circle cx="60" cy="60" r="42" stroke="#e2e8f0" strokeWidth="10" fill="none" />
+            <circle
+              cx="60" cy="60" r="42"
+              stroke="hsl(var(--border))"
+              strokeWidth="10"
+              fill="none"
+            />
             <circle
               cx="60" cy="60" r="42"
               stroke="#8b5cf6" strokeWidth="10" fill="none"
@@ -772,15 +798,15 @@ function SummaryPanel({ completed, confirmed }: {
             />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <div className="text-lg font-bold text-violet-700">{completed}/6</div>
-            <div className="text-[10px] uppercase tracking-wide text-slate-500">Completed</div>
+            <div className="text-lg font-bold text-violet-700 dark:text-violet-300">{completed}/6</div>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Completed</div>
           </div>
         </div>
       </div>
 
-      <p className="mb-3 text-center text-sm text-slate-600">
+      <p className="mb-3 text-center text-sm text-muted-foreground">
         {completed === 0 ? "Start with any card that feels easiest." :
-         completed === 6 ? <span><span className="font-semibold text-slate-900">Great job!</span> You've completed your Goal Lab.</span> :
+         completed === 6 ? <span><span className="font-semibold text-foreground">Great job!</span> You've completed your Goal Lab.</span> :
          "Keep going — confirm each card when it looks right."}
       </p>
 
@@ -789,14 +815,14 @@ function SummaryPanel({ completed, confirmed }: {
           const isDone = confirmed[d.key];
           return (
             <li key={d.key} className="flex items-center justify-between text-sm">
-              <span className="inline-flex items-center gap-2 text-slate-700">
-                <span className="text-slate-400">{d.icon}</span>
+              <span className="inline-flex items-center gap-2 text-foreground/85">
+                <span className="text-muted-foreground/70">{d.icon}</span>
                 {d.label}
               </span>
               <span className={
                 isDone
                   ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white"
-                  : "h-5 w-5 rounded-full border border-slate-200"
+                  : "h-5 w-5 rounded-full border border-border"
               }>
                 {isDone && <Check className="h-3 w-3" />}
               </span>
@@ -808,13 +834,134 @@ function SummaryPanel({ completed, confirmed }: {
   );
 }
 
+/* ── Live Signals (system-native panel replacing planner CTA) ───────────────
+ * Shows four real, derived signals that prove the engine is reading the
+ * ledger right now:
+ *   1. Confidence score   — derived from how many cards are confirmed AND
+ *                           how complete the underlying ledger reads are.
+ *   2. Strongest leverage — derived from wealthMix dominant engine.
+ *   3. Most likely blocker— from preferenceVec.primaryDriver.
+ *   4. Path stability     — from riskCapacity band.
+ *
+ * No fabricated numbers — every line falls back to a quiet placeholder when
+ * its source isn't computable yet. No CTA, no booking, no upsell.                                  */
+function LiveSignalsPanel(props: {
+  completed: number;
+  riskCapacity: import("@/lib/goalLab/inferences").RiskCapacityInference | null;
+  preferenceVec: import("@/lib/goalLab/inferences").PreferenceVectorInference | null;
+  capital: import("@/lib/goalLab/inferences").CapitalStructureSnapshot | null;
+  wealthMix: import("@/lib/goalLab/inferences").WealthEngineMix | null;
+  headline: ReturnType<typeof computeCanonicalHeadlineMetrics> | null;
+  goal: ReturnType<typeof useCanonicalGoal>["data"];
+}) {
+  const { completed, riskCapacity, preferenceVec, capital, wealthMix, headline, goal } = props;
+
+  // Confidence = blended ledger completeness + confirmation rate.
+  // Each of the six derived sources contributes; we weight ledger over confirms.
+  const ledgerScore =
+    (goal?.status === "SET" ? 1 : 0) +
+    (headline ? 1 : 0) +
+    (capital ? 1 : 0) +
+    (wealthMix ? 1 : 0) +
+    (riskCapacity ? 1 : 0) +
+    (preferenceVec ? 1 : 0);
+  const confidencePct = Math.round(((ledgerScore / 6) * 0.7 + (completed / 6) * 0.3) * 100);
+  const confidenceBand: "low" | "medium" | "high" =
+    confidencePct < 40 ? "low" : confidencePct < 75 ? "medium" : "high";
+
+  // Path stability — directly from risk capacity band.
+  const stabilityLabel = riskCapacity ? bandLabel(riskCapacity.band) : "—";
+  const stabilityTone: "green" | "amber" | "red" =
+    !riskCapacity ? "amber" :
+    riskCapacity.band === "high" || riskCapacity.band === "medium_high" ? "green" :
+    riskCapacity.band === "medium" ? "amber" :
+    "red";
+
+  // Strongest leverage — from wealth engine mix.
+  const leverageLabel = wealthMix
+    ? wealthMix.label === "income-led"     ? "Income & savings rate"
+    : wealthMix.label === "property-led"   ? "Property equity growth"
+    : wealthMix.label === "investment-led" ? "Investment compounding"
+    : wealthMix.label === "balanced"       ? "Balanced multi-engine"
+    : "Mixed engines"
+    : "—";
+
+  // Most likely blocker — from preference vector.
+  const blockerLabel = preferenceVec ? primaryDriverCopy(preferenceVec.primaryDriver) : "—";
+
+  return (
+    <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <h3 className="text-base font-semibold text-foreground">Live Signals</h3>
+        <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+          <span className="relative inline-flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-60" />
+          </span>
+          From ledger
+        </span>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        <SignalRow
+          icon={<Gauge className="h-4 w-4" />}
+          label="Confidence score"
+          value={`${confidencePct}%`}
+          valueTone={confidenceBand === "high" ? "green" : confidenceBand === "medium" ? "amber" : "red"}
+        />
+        <SignalRow
+          icon={<Zap className="h-4 w-4" />}
+          label="Strongest leverage"
+          value={leverageLabel}
+          valueTone="neutral"
+        />
+        <SignalRow
+          icon={<Flag className="h-4 w-4" />}
+          label="Most likely blocker"
+          value={blockerLabel}
+          valueTone="neutral"
+        />
+        <SignalRow
+          icon={<Activity className="h-4 w-4" />}
+          label="Path stability"
+          value={stabilityLabel}
+          valueTone={stabilityTone}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SignalRow({ icon, label, value, valueTone }: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  valueTone: "green" | "amber" | "red" | "neutral";
+}) {
+  const toneClass =
+    valueTone === "green"  ? "text-emerald-700 dark:text-emerald-300" :
+    valueTone === "amber"  ? "text-amber-700 dark:text-amber-300" :
+    valueTone === "red"    ? "text-rose-700 dark:text-rose-300" :
+    "text-foreground";
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+        <span className="text-muted-foreground/70">{icon}</span>
+        {label}
+      </span>
+      <span className={`text-sm font-semibold ${toneClass}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
 function WhatHappensNext() {
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
-      <h3 className="text-base font-semibold text-slate-900">What happens next?</h3>
+    <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm">
+      <h3 className="text-base font-semibold text-foreground">What happens next?</h3>
       <ol className="mt-3 space-y-3 text-sm">
         <NextStep n={1}>
-          We run thousands of scenarios using <span className="font-medium text-slate-800">Monte Carlo simulation</span>
+          We run thousands of scenarios using <span className="font-medium text-foreground">Monte Carlo simulation</span>
         </NextStep>
         <NextStep n={2}>
           We evaluate probability of success, risk, and timeline
@@ -830,48 +977,22 @@ function WhatHappensNext() {
 function NextStep({ n, children }: { n: number; children: React.ReactNode }) {
   return (
     <li className="flex items-start gap-2.5">
-      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[11px] font-semibold text-violet-700">
+      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[11px] font-semibold text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
         {n}
       </span>
-      <span className="text-slate-700">{children}</span>
+      <span className="text-foreground/85">{children}</span>
     </li>
   );
 }
 
 function QuoteCard() {
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-violet-50/50 to-slate-50 p-5 shadow-sm">
-      <Quote className="h-5 w-5 text-violet-400" />
-      <p className="mt-2 text-sm leading-relaxed text-slate-800">
+    <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm">
+      <Quote className="h-5 w-5 text-violet-400 dark:text-violet-300/80" />
+      <p className="mt-2 text-sm leading-relaxed text-foreground">
         The best plan is the one built around your life, not someone else's.
       </p>
-      <p className="mt-2 text-xs text-slate-500">— Family Wealth Lab</p>
-    </div>
-  );
-}
-
-function BookACallPlaceholder() {
-  return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
-      <h3 className="text-base font-semibold text-slate-900">Need help?</h3>
-      <div className="mt-3 flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400">
-          <CalendarClock className="h-5 w-5" />
-        </div>
-        <div>
-          <div className="text-sm font-medium text-slate-800">Talk to a planner</div>
-          <div className="text-xs text-slate-500">Coming soon</div>
-        </div>
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled
-        className="mt-3 w-full"
-        data-testid="goal-lab-book-a-call"
-      >
-        Book a call
-      </Button>
+      <p className="mt-2 text-xs text-muted-foreground">— Family Wealth Lab</p>
     </div>
   );
 }
@@ -880,12 +1001,12 @@ function FooterCta({ allDone }: { allDone: boolean }) {
   return (
     <div className={`mt-6 flex flex-col items-start justify-between gap-3 rounded-2xl border p-5 sm:flex-row sm:items-center ${
       allDone
-        ? "border-violet-200 bg-violet-50/50"
-        : "border-slate-200 bg-white"
+        ? "border-violet-200 bg-violet-50/50 dark:border-violet-400/30 dark:bg-violet-500/10"
+        : "border-border/70 bg-card"
     }`}>
       <div className="flex items-center gap-3">
-        <Sparkles className={`h-5 w-5 ${allDone ? "text-violet-600" : "text-slate-400"}`} />
-        <p className="text-sm text-slate-700">
+        <Sparkles className={`h-5 w-5 ${allDone ? "text-violet-600 dark:text-violet-300" : "text-muted-foreground/70"}`} />
+        <p className="text-sm text-foreground/90">
           {allDone
             ? "All set! We've captured your goals and constraints. Let's run the numbers and find your best paths."
             : "Confirm each card to unlock your ranked next moves in the Decision Lab."}
@@ -895,7 +1016,7 @@ function FooterCta({ allDone }: { allDone: boolean }) {
         asChild
         size="lg"
         disabled={!allDone}
-        className={allDone ? "bg-violet-600 text-white hover:bg-violet-700" : ""}
+        className={allDone ? "bg-violet-600 text-white hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-400" : ""}
         data-testid="goal-lab-go-to-decision-lab"
       >
         <Link href="/decision-lab">
@@ -913,9 +1034,9 @@ function FooterCta({ allDone }: { allDone: boolean }) {
 
 function KvRow({ k, v }: { k: string; v: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-100 py-1 text-sm last:border-0">
-      <span className="text-slate-600">{k}</span>
-      <span className="font-medium text-slate-900">{v}</span>
+    <div className="flex items-center justify-between border-b border-border/40 py-1 text-sm last:border-0">
+      <span className="text-muted-foreground">{k}</span>
+      <span className="font-medium text-foreground">{v}</span>
     </div>
   );
 }
@@ -924,11 +1045,11 @@ function leverageColour(band: ReturnType<typeof buildCapitalStructureSnapshot> e
   ? T extends { leverageBand: infer B } ? B : never
   : never): string {
   switch (band) {
-    case "conservative": return "text-emerald-700";
-    case "moderate":     return "text-blue-700";
-    case "elevated":     return "text-amber-700";
-    case "high":         return "text-rose-700";
-    default:             return "text-slate-700";
+    case "conservative": return "text-emerald-700 dark:text-emerald-300";
+    case "moderate":     return "text-blue-700 dark:text-blue-300";
+    case "elevated":     return "text-amber-700 dark:text-amber-300";
+    case "high":         return "text-rose-700 dark:text-rose-300";
+    default:             return "text-foreground/85";
   }
 }
 

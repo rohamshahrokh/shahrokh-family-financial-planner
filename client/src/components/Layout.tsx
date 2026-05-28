@@ -71,7 +71,6 @@ const NAV_STEPS: Array<{
     step: 2,
     label: "PLAN",
     items: [
-      { href: "/goal-lab",        label: "Goal Lab",            icon: Sparkles,        adminOnly: false },
       { href: "/financial-plan",  label: "Family Plan",         icon: ClipboardList,   adminOnly: false },
       { href: "/wealth-strategy", label: "Wealth Strategy",     icon: Briefcase,       adminOnly: false },
       { href: "/property",        label: "Property",            icon: Home,            adminOnly: false },
@@ -97,8 +96,9 @@ const NAV_STEPS: Array<{
     step: 4,
     label: "MOVE",
     items: [
-      { href: "/action-plan",  label: "Action Plan",  icon: ClipboardCheck, adminOnly: false },
-      { href: "/decision-lab", label: "Decision Lab", icon: Beaker,         adminOnly: false },
+      { href: "/goal-lab",     label: "Goal Lab",       icon: Sparkles,       adminOnly: false },
+      { href: "/decision-lab", label: "Decision Lab",   icon: Beaker,         adminOnly: false },
+      { href: "/action-plan",  label: "Action Roadmap", icon: ClipboardCheck, adminOnly: false },
     ],
   },
 ];
