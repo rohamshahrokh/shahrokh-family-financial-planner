@@ -134,9 +134,13 @@ const NAV_STEPS: Array<{
       //
       // Sprint 14.3 — Decision Lab is the summary-first hub over the three
       // deeper analytical pages (/decision, /goal-closure-lab, /portfolio-lab).
-      // The legacy routes stay registered AND reachable directly (power users,
-      // bookmarks, deep links); Decision Lab simply provides hierarchy and a
-      // single place to find them.
+      // Sprint 20 PR-F1 — those three pages no longer host any FIRE-target
+      // editor (the "Set Your Targets" and "Goal Reverse Engineering" duplicate
+      // surfaces were hard-deleted). They stay reachable for non-FIRE content
+      // (scenario compare, portfolio frontier, decision narrative); the
+      // canonical FIRE Goal editor is the panel on /financial-plan#fire-goal.
+      // Standalone legacy aliases (/fire-goal-reverse, /goal-solver-pro)
+      // redirect to that canonical surface — see App.tsx.
       { href: "/action-plan",    label: "Action Plan",         icon: ClipboardCheck,  adminOnly: false },
       { href: "/decision-lab",   label: "Decision Lab",        icon: Beaker,          adminOnly: false },
     ],

@@ -1,11 +1,13 @@
 /**
- * fireGoalCanonicalSingleSource.test.ts — Sprint 20 PR-A guard.
+ * fireGoalCanonicalSingleSource.test.ts — Sprint 20 PR-A guard (PR-F1 fix-up).
  *
  * Three guards keep the canonical FIRE goal model honest:
  *
- *   (1) Only ONE file may declare `interface CanonicalFireGoal` —
- *       `lib/fireGoalCanonical.ts`. Any other file shadowing this interface
- *       is a regression.
+ *   (1) Sprint 20 PR-F1 — `CanonicalFireGoal` must be defined exactly ONCE
+ *       across `client/src`, in `lib/fireGoalCanonical.ts`, and it must be a
+ *       TYPE ALIAS rather than an interface declaration. The single surviving
+ *       FIRE-target INTERFACE is `CanonicalFireTarget` in
+ *       `types/canonicalFire.ts`. Both halves of this rule are enforced.
  *
  *   (2) Only the canonical model file and the migration shim may define a
  *       `FireGoal`-shaped local interface/type. Other files must consume the
@@ -63,22 +65,52 @@ function relFromClient(absPath: string): string {
   return relative(CLIENT_SRC, absPath).split(sep).join("/");
 }
 
-section("(1) interface CanonicalFireGoal — single definition");
+section("(1) CanonicalFireGoal — single TYPE-alias definition; ZERO interface forms");
+{
+  const ifaceDefiners: string[] = [];
+  const typeDefiners: string[] = [];
+  for (const file of walk(CLIENT_SRC)) {
+    const rel = relFromClient(file);
+    const text = readFileSync(file, "utf8");
+    if (/\binterface\s+CanonicalFireGoal\b/.test(text)) {
+      ifaceDefiners.push(rel);
+    }
+    if (/\btype\s+CanonicalFireGoal\b\s*=/.test(text)) {
+      typeDefiners.push(rel);
+    }
+  }
+  check(
+    `zero "interface CanonicalFireGoal" declarations (found ${ifaceDefiners.length})`,
+    ifaceDefiners.length === 0,
+    ifaceDefiners.length ? `interface definers: ${ifaceDefiners.join(", ")}` : undefined,
+  );
+  check(
+    `exactly one "type CanonicalFireGoal = ..." declaration in lib/fireGoalCanonical.ts`,
+    typeDefiners.length === 1 && typeDefiners[0] === "lib/fireGoalCanonical.ts",
+    typeDefiners.length !== 1
+      ? `type definers: ${typeDefiners.join(", ")}`
+      : typeDefiners[0] !== "lib/fireGoalCanonical.ts"
+        ? `wrong file: ${typeDefiners[0]}`
+        : undefined,
+  );
+}
+
+section("(1b) CanonicalFireTarget — single surviving FIRE-target interface");
 {
   const definers: string[] = [];
   for (const file of walk(CLIENT_SRC)) {
     const rel = relFromClient(file);
     const text = readFileSync(file, "utf8");
-    if (/\binterface\s+CanonicalFireGoal\b/.test(text)) {
+    if (/\binterface\s+CanonicalFireTarget\b/.test(text)) {
       definers.push(rel);
     }
   }
   check(
-    `exactly one definition of interface CanonicalFireGoal (found ${definers.length})`,
-    definers.length === 1 && definers[0] === "lib/fireGoalCanonical.ts",
+    `exactly one interface CanonicalFireTarget declaration (found ${definers.length})`,
+    definers.length === 1 && definers[0] === "types/canonicalFire.ts",
     definers.length !== 1
       ? `definers: ${definers.join(", ")}`
-      : definers[0] !== "lib/fireGoalCanonical.ts"
+      : definers[0] !== "types/canonicalFire.ts"
         ? `wrong file: ${definers[0]}`
         : undefined,
   );

@@ -239,39 +239,11 @@ function ExecutiveSummary({
 }
 
 /* ─── Goal Reverse Engineering ─────────────────────────────────────────── */
-
-function GoalReverseEngineeringCard({
-  section,
-}: {
-  section: ReturnType<typeof buildTruePortfolioOptimizer>["goalReverseEngineering"];
-}) {
-  return (
-    <section
-      className="rounded-lg border border-border bg-card p-4 sm:p-5 shadow-sm"
-      data-testid="true-optimizer-goal-reverse-engineering"
-    >
-      <header className="mb-3">
-        <h2 className="text-base font-semibold text-foreground" data-testid="true-optimizer-goal-reverse-engineering-title">
-          Goal Reverse Engineering
-        </h2>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Working backwards from your FIRE date — every figure is a verified pass-through of the live planner.
-        </p>
-      </header>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        <ScenarioMetricBlock metric={section.targetFireDate}             testidPrefix="true-optimizer-gre-target-year" />
-        <ScenarioMetricBlock metric={section.requiredNetWorth}           testidPrefix="true-optimizer-gre-required-nw" />
-        <ScenarioMetricBlock metric={section.requiredPassiveIncome}      testidPrefix="true-optimizer-gre-required-pi" />
-        <ScenarioMetricBlock metric={section.requiredAssetBase}          testidPrefix="true-optimizer-gre-required-ab" />
-        <ScenarioMetricBlock metric={section.requiredMonthlySurplus}     testidPrefix="true-optimizer-gre-required-ms" />
-        <ScenarioMetricBlock metric={section.requiredMonthlyContribution} testidPrefix="true-optimizer-gre-required-mc" />
-      </div>
-      <p className="text-xs text-muted-foreground mt-3 leading-relaxed" data-testid="true-optimizer-goal-reverse-engineering-summary">
-        {section.summary}
-      </p>
-    </section>
-  );
-}
+// Sprint 20 PR-F1 — GoalReverseEngineeringCard HARD DELETED.
+// The FIRE-target-derived "what does my goal require" view duplicated the
+// canonical FIRE Goal panel on /financial-plan. The card is removed; the
+// underlying engine output (goalReverseEngineering) is still consumed by the
+// Executive Summary above, so no upstream math changes.
 
 /* ─── Constraints Panel ───────────────────────────────────────────────── */
 
@@ -1285,7 +1257,9 @@ export function TruePortfolioOptimizer(props: TruePortfolioOptimizerProps) {
         searchMetrics={result.searchMetrics}
         gapSolver={result.gapSolver}
       />
-      <GoalReverseEngineeringCard section={result.goalReverseEngineering} />
+      {/* Sprint 20 PR-F1 — GoalReverseEngineeringCard removed (dedup). The
+          canonical FIRE Goal panel at /financial-plan#fire-goal is the single
+          surface for FIRE-target-derived figures. */}
       <ConstraintsPanel constraints={constraints} onChange={setConstraints} />
       <RecommendationsGrid recommendations={result.recommendations} />
       <GapSolverCard gap={result.gapSolver} />

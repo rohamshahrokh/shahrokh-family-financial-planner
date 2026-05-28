@@ -20,6 +20,7 @@ import {
   deriveTargetAge,
   targetYearFromAge,
 } from "./fireGoalCanonical";
+import type { CanonicalFireTarget } from "@/types/canonicalFire";
 
 /** Source shape we can migrate FROM. */
 export interface LegacyFireGoalSource {
@@ -145,7 +146,11 @@ export async function runFireGoalMigration(args: {
   if (existing) {
     return { migrated: false, reason: `already migrated at ${existing}`, skipped: true };
   }
-  const synth = synthesiseCanonicalFireGoal(args.source);
+  // Sprint 20 PR-F1 polish — runner must never throw on corrupted input.
+  // A null/undefined source resolves to a no-op (no synthesis, no write).
+  const safeSource: LegacyFireGoalSource =
+    args.source && typeof args.source === "object" ? args.source : { snapshot: null, legacyStore: null };
+  const synth = synthesiseCanonicalFireGoal(safeSource);
   if (!synth.migrated) {
     args.writeFlag(new Date().toISOString());
     log("[fireGoalCanonical.migration] no legacy fields, flagging migrated", synth);
@@ -175,3 +180,74 @@ export async function runFireGoalMigration(args: {
 }
 
 export { MIGRATED_FLAG_KEY };
+
+/**
+ * Sprint 20 PR-F1 — map a CanonicalFireGoal (legacy alias that still backs the
+ * Sprint 20 PR-A reader/writer) onto the canonical CanonicalFireTarget shape
+ * consumed by F1+ engines.
+ *
+ * PR-F1 fix-up (defect 3): the full advanced bundle (targetNetWorth,
+ * minLiquidityBufferMonths, maxRiskTolerance) now round-trips through the
+ * canonical storage path (mc_fire_settings.action_checklist.__advanced_fire),
+ * so when the legacy alias carries `advanced.*`, those values flow through to
+ * the canonical target untouched.
+ */
+export function toCanonicalFireTarget(
+  goal: CanonicalFireGoal,
+): CanonicalFireTarget {
+  const target: CanonicalFireTarget = {
+    targetFireYear: goal.targetFireYear,
+    targetPassiveIncomeMonthly: goal.targetMonthlyPassiveIncome,
+  };
+  const advanced: NonNullable<CanonicalFireTarget["advanced"]> = {};
+  if (Number.isFinite(goal.swrOverride) && (goal.swrOverride as number) > 0) {
+    advanced.safeWithdrawalRateOverride = (goal.swrOverride as number) / 100;
+  }
+  if (goal.advanced) {
+    if (
+      goal.advanced.safeWithdrawalRateOverride !== undefined &&
+      Number.isFinite(goal.advanced.safeWithdrawalRateOverride) &&
+      (goal.advanced.safeWithdrawalRateOverride as number) > 0
+    ) {
+      // Decimal form already; mirror it onto the target.
+      advanced.safeWithdrawalRateOverride = goal.advanced.safeWithdrawalRateOverride;
+    }
+    if (
+      goal.advanced.targetNetWorth !== undefined &&
+      Number.isFinite(goal.advanced.targetNetWorth) &&
+      (goal.advanced.targetNetWorth as number) > 0
+    ) {
+      advanced.targetNetWorth = goal.advanced.targetNetWorth;
+    }
+    if (
+      goal.advanced.minLiquidityBufferMonths !== undefined &&
+      Number.isFinite(goal.advanced.minLiquidityBufferMonths) &&
+      (goal.advanced.minLiquidityBufferMonths as number) >= 0
+    ) {
+      advanced.minLiquidityBufferMonths = goal.advanced.minLiquidityBufferMonths;
+    }
+    if (goal.advanced.maxRiskTolerance) {
+      advanced.maxRiskTolerance = goal.advanced.maxRiskTolerance;
+    }
+  }
+  if (Object.keys(advanced).length > 0) {
+    target.advanced = advanced;
+  }
+  return target;
+}
+
+/**
+ * Sprint 20 PR-F1 — synthesise a CanonicalFireTarget directly from a legacy
+ * source. Convenience wrapper around synthesiseCanonicalFireGoal that adapts
+ * the percentage-style swrOverride into the decimal-style override the
+ * canonical target type uses (e.g. legacy swr_pct=4 → 0.04).
+ *
+ * Returns null when no legacy fields are present.
+ */
+export function synthesiseCanonicalFireTarget(
+  source: LegacyFireGoalSource,
+): CanonicalFireTarget | null {
+  const synth = synthesiseCanonicalFireGoal(source);
+  if (!synth.migrated) return null;
+  return toCanonicalFireTarget(synth.canonical);
+}
