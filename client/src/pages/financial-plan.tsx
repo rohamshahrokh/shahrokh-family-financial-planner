@@ -71,6 +71,7 @@ import {
 } from "lucide-react";
 import {
   useSetFireGoal,
+  useFireSettingsRow,
   defaultTargetFireYear,
   deriveTargetAge,
 } from "@/lib/fireGoalCanonical";
@@ -353,49 +354,16 @@ function IncomeEngineTraceButton({
 // IMPORTANT: this panel does NOT touch any forecast / Monte Carlo / FIRE
 // calculation logic. It only mutates the four input fields on mc_fire_settings.
 //
-// LocalStorage key for the F1 advanced fields that don't yet have a column
-// on mc_fire_settings. These persist across reloads on the same browser and
-// the engine reads them through the CanonicalFireTarget shape. Downstream
-// PRs may migrate them to a server-side column when the schema allows.
-const FIRE_ADVANCED_LS_KEY = "sprint20.fireTarget.advanced.v1";
-
-interface PersistedAdvancedFire {
-  targetNetWorth?: number;
-  minLiquidityBufferMonths?: number;
-  maxRiskTolerance?: CanonicalFireRiskTolerance;
-}
-
-function readPersistedAdvancedFire(): PersistedAdvancedFire {
-  try {
-    const raw = window.localStorage.getItem(FIRE_ADVANCED_LS_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as PersistedAdvancedFire;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function writePersistedAdvancedFire(v: PersistedAdvancedFire): void {
-  try {
-    window.localStorage.setItem(FIRE_ADVANCED_LS_KEY, JSON.stringify(v));
-  } catch {
-    /* localStorage unavailable — non-fatal */
-  }
-}
-
 function FireGoalPanel() {
   const { auditMode } = useAuditMode();
   const { toast } = useToast();
   const setGoalMutation = useSetFireGoal();
 
-  // We still GET the row directly (read-only) so we can hydrate the form with
-  // any previously saved values and surface the "already saved" state. Writes
-  // route through the canonical writer hook.
-  const { data: mcSettings, isLoading } = useQuery<any>({
-    queryKey: ["/api/mc-fire-settings"],
-    queryFn: () => apiRequest("GET", "/api/mc-fire-settings").then(r => r.json()),
-  });
+  // Sprint 20 PR-F1 — read both the canonical goal AND the household-shape
+  // context fields the SWR band engine needs through the canonical reader
+  // hook. The hook is the only place that talks to `/api/mc-fire-settings`;
+  // FireGoalPanel never reaches the endpoint directly.
+  const { row: mcSettings, advanced: persistedAdvanced, isLoading } = useFireSettingsRow();
 
   // Year-based primary inputs (Sprint 20 PR-A). Current age is read off
   // mc_fire_settings.current_age (already persisted by the Monte Carlo
@@ -410,7 +378,7 @@ function FireGoalPanel() {
   const [passiveMonth, setPassiveMonth] = useState<string>("");
   const [swrOverride, setSwrOverride] = useState<string>("");
   // PR-F1 advanced fields. swrOverride above persists via mc_fire_settings.swr_pct;
-  // the three below are client-persisted via localStorage until a column lands.
+  // the three below round-trip server-side via action_checklist.__advanced_fire.
   const [targetNetWorth, setTargetNetWorth] = useState<string>("");
   const [minLiquidityBufferMonths, setMinLiquidityBufferMonths] = useState<string>("");
   const [maxRiskTolerance, setMaxRiskTolerance] = useState<CanonicalFireRiskTolerance | "">("");
@@ -433,12 +401,19 @@ function FireGoalPanel() {
     if (typeof r.swr_pct === "number") {
       setSwrOverride(String(r.swr_pct));
     }
-    const adv = readPersistedAdvancedFire();
-    if (typeof adv.targetNetWorth === "number") setTargetNetWorth(String(adv.targetNetWorth));
-    if (typeof adv.minLiquidityBufferMonths === "number") setMinLiquidityBufferMonths(String(adv.minLiquidityBufferMonths));
-    if (adv.maxRiskTolerance) setMaxRiskTolerance(adv.maxRiskTolerance);
+    if (persistedAdvanced) {
+      if (typeof persistedAdvanced.targetNetWorth === "number") {
+        setTargetNetWorth(String(persistedAdvanced.targetNetWorth));
+      }
+      if (typeof persistedAdvanced.minLiquidityBufferMonths === "number") {
+        setMinLiquidityBufferMonths(String(persistedAdvanced.minLiquidityBufferMonths));
+      }
+      if (persistedAdvanced.maxRiskTolerance) {
+        setMaxRiskTolerance(persistedAdvanced.maxRiskTolerance);
+      }
+    }
     setHydrated(true);
-  }, [mcSettings, hydrated, currentAge]);
+  }, [mcSettings, hydrated, currentAge, persistedAdvanced]);
 
   const yearNum = Number(targetYear);
   const passiveNum = Number(passiveMonth);
@@ -581,17 +556,21 @@ function FireGoalPanel() {
       return;
     }
     try {
+      // Sprint 20 PR-F1 — the writer now persists the full advanced bundle
+      // through the canonical storage path. swrOverride (percentage form)
+      // continues to map to mc_fire_settings.swr_pct; the three sibling
+      // advanced fields round-trip server-side via action_checklist JSON.
+      const advancedBundle: Record<string, unknown> = {};
+      if (tnwNum !== undefined) advancedBundle.targetNetWorth = tnwNum;
+      if (swrNum !== undefined) advancedBundle.safeWithdrawalRateOverride = (swrNum as number) / 100;
+      if (liqNum !== undefined) advancedBundle.minLiquidityBufferMonths = liqNum;
+      if (maxRiskTolerance) advancedBundle.maxRiskTolerance = maxRiskTolerance;
       await setGoalMutation.mutateAsync({
         targetFireYear: yearNum,
         targetMonthlyPassiveIncome: passiveNum,
         swrOverride: swrNum,
         currentAge,
-      });
-      // Persist the F1 advanced fields that don't yet have a server column.
-      writePersistedAdvancedFire({
-        targetNetWorth: tnwNum,
-        minLiquidityBufferMonths: liqNum,
-        maxRiskTolerance: maxRiskTolerance || undefined,
+        advanced: Object.keys(advancedBundle).length > 0 ? (advancedBundle as any) : undefined,
       });
       toast({
         title: "FIRE goal saved",
@@ -625,9 +604,9 @@ function FireGoalPanel() {
                   (target_fire_age, target_passive_monthly, swr_pct,
                   goals_set, goal_set_timestamp). Target year is converted to
                   age at write boundary using current_age={currentAge}.
-                  Advanced fields (target_net_worth, min_liquidity_buffer_months,
-                  max_risk_tolerance) persist client-side in localStorage key
-                  <code> {FIRE_ADVANCED_LS_KEY}</code> until a server column lands.
+                  Advanced fields (targetNetWorth, safeWithdrawalRateOverride,
+                  minLiquidityBufferMonths, maxRiskTolerance) round-trip
+                  server-side via <code>action_checklist.__advanced_fire</code>.
                 </p>
               )}
             </div>
