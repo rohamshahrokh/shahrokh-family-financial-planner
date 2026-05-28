@@ -287,22 +287,29 @@ function ConstraintsPanel({
         <Field label="Max Monthly Contribution ($/mo)" testid="constraint-max-monthly-contribution" value={constraints.maxMonthlyContribution} onInput={v => update("maxMonthlyContribution", v)} />
         <Field label="Max Investment Property Count" testid="constraint-max-property-count" value={constraints.maxPropertyCount} onInput={v => update("maxPropertyCount", v)} />
         <Field label="Min Liquidity (months)" testid="constraint-min-liquidity" value={constraints.minLiquidityMonths} onInput={v => update("minLiquidityMonths", v)} />
-        <Field label="Target FIRE Year" testid="constraint-target-fire-year" value={constraints.targetFireYear} onInput={v => update("targetFireYear", v)} />
+        <Field
+          label="Optimization horizon (FIRE year)"
+          testid="constraint-target-fire-year"
+          value={constraints.targetFireYear}
+          onInput={v => update("targetFireYear", v)}
+          hint="This is the year the optimizer targets — set your real FIRE goal in Financial Plan → FIRE Goal."
+        />
       </div>
     </section>
   );
 }
 
 function Field({
-  label, value, onInput, testid,
+  label, value, onInput, testid, hint,
 }: {
   label: string;
   value: number | undefined;
   onInput: (v: string) => void;
   testid: string;
+  hint?: string;
 }) {
   return (
-    <label className="flex flex-col gap-1">
+    <label className="flex flex-col gap-1" title={hint}>
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
       <input
         type="number"
@@ -312,6 +319,7 @@ function Field({
         onChange={e => onInput(e.target.value)}
         data-testid={testid}
       />
+      {hint ? <span className="text-[10px] text-muted-foreground/80">{hint}</span> : null}
     </label>
   );
 }
