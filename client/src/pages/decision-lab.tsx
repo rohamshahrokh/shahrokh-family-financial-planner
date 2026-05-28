@@ -452,14 +452,45 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
           The engine evaluated {plan!.templatesEvaluatedIds.length} scenarios for your profile but found no path that survived current safety ceilings. Loosen risk tolerance or revisit FIRE targets in Goal Lab.
         </p>
       ) : picks ? (
-        <ul className="space-y-2">
-          <GoalLabPick label="Recommended next move" tone="violet"  pick={picks.recommended} testId="recommended" />
-          <GoalLabPick label="Safest path"           tone="emerald" pick={picks.safest}      testId="safest" />
-          <GoalLabPick label="Fastest path"          tone="amber"   pick={picks.fastest}     testId="fastest" />
-          <GoalLabPick label="Highest probability"   tone="blue"    pick={picks.highestProbability} testId="highest-prob" />
-          <GoalLabPick label="Best cashflow"         tone="teal"    pick={picks.bestCashflow} testId="best-cashflow" />
-          <GoalLabPick label="Best hybrid"           tone="rose"    pick={picks.bestHybrid}   testId="best-hybrid" />
-        </ul>
+        <div className="space-y-4">
+          {/* Primary recommendation — always rendered as the single headline pick. */}
+          <div className="space-y-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+              Primary recommendation
+            </div>
+            <ul className="space-y-2">
+              <GoalLabPick label="Recommended next move" tone="violet" pick={picks.recommended} testId="recommended" />
+            </ul>
+            {picks.recommendedRationale ? (
+              <p
+                data-testid="dl-goal-lab-recommended-rationale"
+                className="rounded-md border border-violet-300/50 bg-violet-50/70 px-3 py-2 text-xs leading-relaxed text-violet-900 dark:border-violet-500/40 dark:bg-violet-950/40 dark:text-violet-100"
+              >
+                <span className="font-semibold">Why this is primary: </span>
+                {picks.recommendedRationale}
+              </p>
+            ) : null}
+          </div>
+
+          {/* Trade-offs — alternatives the user can compare against the primary. */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Trade-offs — alternatives
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                Slower vs faster, not conflicting picks
+              </div>
+            </div>
+            <ul className="space-y-2">
+              <GoalLabPick label="Safest path"           tone="emerald" pick={picks.safest}      testId="safest" />
+              <GoalLabPick label="Fastest path"          tone="amber"   pick={picks.fastest}     testId="fastest" />
+              <GoalLabPick label="Highest probability"   tone="blue"    pick={picks.highestProbability} testId="highest-prob" />
+              <GoalLabPick label="Best cashflow"         tone="teal"    pick={picks.bestCashflow} testId="best-cashflow" />
+              <GoalLabPick label="Best hybrid"           tone="rose"    pick={picks.bestHybrid}   testId="best-hybrid" />
+            </ul>
+          </div>
+        </div>
       ) : null}
     </section>
   );

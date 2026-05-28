@@ -103,6 +103,13 @@ export interface GoalLabPathPicks {
   highestProbability: GoalLabRankedScenario | null;
   bestCashflow:      GoalLabRankedScenario | null;
   bestHybrid:        GoalLabRankedScenario | null;
+  /**
+   * Plain-English explanation for why `recommended` was chosen — surfaces the
+   * risk-aware tie-breaker logic so users understand why a slower template was
+   * preferred over the cross-template top scorer when risk capacity is low.
+   * Null when the top-of-list scenario was selected without any override.
+   */
+  recommendedRationale: string | null;
 }
 
 export interface GoalLabPlanOutput {
@@ -214,7 +221,7 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
   // sink to the bottom but are kept (surfaces show "Not modelled yet").
   rankedScenarios.sort((a, b) => (b.scoreP50 ?? -Infinity) - (a.scoreP50 ?? -Infinity));
 
-  const picks = pickNamedPaths(rankedScenarios);
+  const picks = pickNamedPaths(rankedScenarios, profile);
 
   const output: GoalLabPlanOutput = {
     profile,
@@ -393,19 +400,61 @@ function extractProbabilityP50(winner: RankedCandidate | null): number | null {
 }
 
 /**
+ * Templates classified as "safe" — buffer building, debt reduction, delay,
+ * offset, liquidity preservation, lower/extend the target. These never add new
+ * leverage or new positions and are always the safest action set.
+ */
+const SAFE_TEMPLATE_IDS = new Set([
+  "delay-ip",
+  "debt-reduction",
+  "liquidity-preservation",
+  "offset-optimisation",
+  "lower-target-or-extend",
+]);
+
+/**
+ * Templates that explicitly add leverage / new positions / acceleration. Only
+ * appropriate when risk capacity is moderate-or-higher AND liquidity is sound.
+ */
+const AGGRESSIVE_TEMPLATE_IDS = new Set([
+  "buy-ip-now",
+  "etf-acceleration",
+  "debt-recycling",
+]);
+
+/**
  * Compute the six named picks from the cross-template ranked list. Each pick
  * is sourced from the engine's already-computed metrics — we do NOT re-score.
+ *
+ * Recommended pick uses a **risk-aware tie-breaker** on top of the engine
+ * ranking:
+ *
+ *   1. If risk tolerance is "low" OR liquidity is amber/red, prefer the
+ *      highest-scoring SAFE template over any aggressive template. This
+ *      removes the "Buy IP now" contradiction that Sprint 24 fix #5 reports.
+ *   2. If risk tolerance is "low" AND savings consistency is low, prefer
+ *      debt-reduction / liquidity-preservation over any new acquisition
+ *      (fix #6: "low risk + weak buffer → build buffer first").
+ *   3. Otherwise fall back to the cross-template top scorer.
+ *
+ * We always also surface `safest` and `fastest` as alternatives so the user
+ * sees the trade-offs, not just the engine’s pick.
  */
-function pickNamedPaths(scenarios: GoalLabRankedScenario[]): GoalLabPathPicks {
+/**
+ * Exported for unit tests of the risk-aware tie-breaker. Surfaces should keep
+ * consuming `picks` from `runGoalLabPlan`, not call this directly.
+ */
+export function pickNamedPaths(
+  scenarios: GoalLabRankedScenario[],
+  profile: CanonicalGoalProfile,
+): GoalLabPathPicks {
   if (scenarios.length === 0) {
     return {
       recommended: null, safest: null, fastest: null,
       highestProbability: null, bestCashflow: null, bestHybrid: null,
+      recommendedRationale: null,
     };
   }
-
-  // Recommended = top of the cross-template list (already sorted desc).
-  const recommended = scenarios[0] ?? null;
 
   // Highest probability = winner with max engine probabilityP50. Null prob
   // entries are excluded from this pick (we never claim probability we don't
@@ -414,15 +463,12 @@ function pickNamedPaths(scenarios: GoalLabRankedScenario[]): GoalLabPathPicks {
     .filter((s) => s.probabilityP50 != null)
     .sort((a, b) => (b.probabilityP50! - a.probabilityP50!))[0] ?? null;
 
-  // Safest = template id "delay-ip" | "debt-reduction" | "liquidity-preservation"
-  // ordered by score. Falls back to the cross-template top if no safe template
-  // is in the active set.
-  const safeIds = new Set(["delay-ip", "debt-reduction", "liquidity-preservation", "offset-optimisation"]);
-  const safest = scenarios.find((s) => safeIds.has(s.templateId)) ?? null;
+  // Safest = highest-scoring safe template (scenarios is already sorted desc
+  // by score, so .find returns the top one).
+  const safest = scenarios.find((s) => SAFE_TEMPLATE_IDS.has(s.templateId)) ?? null;
 
-  // Fastest = template ids that prioritise speed (buy-now, etf-acceleration, debt-recycling).
-  const fastIds = new Set(["buy-ip-now", "etf-acceleration", "debt-recycling"]);
-  const fastest = scenarios.find((s) => fastIds.has(s.templateId)) ?? null;
+  // Fastest = highest-scoring aggressive template.
+  const fastest = scenarios.find((s) => AGGRESSIVE_TEMPLATE_IDS.has(s.templateId)) ?? null;
 
   // Best cashflow = template whose winner used the "cashflow_safe" profile.
   const bestCashflow = scenarios.find(
@@ -432,5 +478,63 @@ function pickNamedPaths(scenarios: GoalLabRankedScenario[]): GoalLabPathPicks {
   // Best hybrid = the named hybrid template if it ranked; otherwise null.
   const bestHybrid = scenarios.find((s) => s.templateId === "hybrid-property-etf") ?? null;
 
-  return { recommended, safest, fastest, highestProbability: probable, bestCashflow, bestHybrid };
+  // ── Risk-aware recommendation ────────────────────────────────────────────
+  const top = scenarios[0]!;
+  const risk = profile.resolved.riskTolerance;                     // "low" | "moderate" | "high"
+  const pv   = profile.inferences.preferenceVector;
+  const liq  = pv?.signals.liquidityStressBand   ?? null;          // "green" | "amber" | "red" | null
+  const sav  = pv?.signals.savingsConsistencyBand ?? null;         // "low" | "medium" | "high" | null
+  const lev  = pv?.signals.leveragePressureBand ?? null;
+
+  const liquidityWeak = liq === "red" || liq === "amber";
+  const leverageStretched = lev === "red" || lev === "amber";
+  const savingsWeak  = sav === "low";
+  const lowRisk      = risk === "low";
+  const topIsAggressive = AGGRESSIVE_TEMPLATE_IDS.has(top.templateId);
+
+  let recommended: GoalLabRankedScenario = top;
+  let recommendedRationale: string | null = null;
+
+  // Rule 1: Low risk OR weak liquidity → must not recommend an aggressive
+  // template if any safe template is available.
+  if ((lowRisk || liquidityWeak) && topIsAggressive && safest) {
+    recommended = safest;
+    const reasons: string[] = [];
+    if (lowRisk)         reasons.push("risk tolerance is Low");
+    if (liq === "red")   reasons.push("liquidity buffer is red");
+    else if (liq === "amber") reasons.push("liquidity buffer is thin");
+    if (leverageStretched) reasons.push("leverage pressure is elevated");
+    recommendedRationale =
+      `Engine top-scorer was an aggressive path (${top.templateLabel}), but ${reasons.join(" and ")} \u2014 building safety first is the responsible primary recommendation. The aggressive path remains available under \u201CFastest\u201D.`;
+  }
+  // Rule 2: Low risk + weak savings → prefer debt-reduction or
+  // liquidity-preservation over any new acquisition. Find the best-scoring
+  // candidate among those two specifically.
+  else if (lowRisk && savingsWeak) {
+    const buildBufferFirst = scenarios.find(
+      (s) => s.templateId === "liquidity-preservation" || s.templateId === "debt-reduction",
+    );
+    if (buildBufferFirst && buildBufferFirst.templateId !== top.templateId) {
+      recommended = buildBufferFirst;
+      recommendedRationale =
+        "Risk tolerance is Low and savings consistency is weak \u2014 lifting the growth engine before adding leverage is the safer next move. The faster engine\u2019s pick is still shown as \u201CFastest\u201D for comparison.";
+    }
+  }
+  // Rule 3: Otherwise, when the top scorer IS aggressive but we have no
+  // explicit risk reason to override, still surface a short rationale so the
+  // UI explains why "Buy IP now" was chosen.
+  else if (topIsAggressive) {
+    recommendedRationale =
+      `Recommended as primary because risk capacity supports it (${risk}) and the safety signals are clear. \u201CSafest\u201D shows the slower-but-lower-risk alternative.`;
+  }
+
+  return {
+    recommended,
+    safest,
+    fastest,
+    highestProbability: probable,
+    bestCashflow,
+    bestHybrid,
+    recommendedRationale,
+  };
 }

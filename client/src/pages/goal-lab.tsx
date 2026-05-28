@@ -125,7 +125,8 @@ interface GoalLabCardShellProps {
   status: CardStatus;
   /** Body slot — the "Current answer" panel + any inline summary. */
   children: React.ReactNode;
-  onEdit: () => void;
+  /** Optional in Sprint 24 — readOnly cards (Q6) don't need an edit handler. */
+  onEdit?: () => void;
   onConfirm: () => void;
   /** Optional dedicated save handler used when in edit mode. Falls back to onConfirm. */
   onSaveEdit?: () => void;
@@ -136,14 +137,25 @@ interface GoalLabCardShellProps {
   testId: string;
   /** Provenance badge rendered top-right of card header. */
   sourceBadge?: BadgeVariant;
+  /**
+   * Sprint 24 — some cards (Q6 blocker) are system-derived and not user-
+   * editable. When true, the Edit button is hidden and only the Confirm
+   * affordance is rendered. The card still flips to "confirmed" status.
+   */
+  readOnly?: boolean;
+  /** Optional label for the confirm button when readOnly. Defaults to "Confirm" / "Confirmed". */
+  confirmLabel?: { idle: string; confirmed: string };
 }
 
 function GoalLabCard(props: GoalLabCardShellProps) {
   const {
     index, tone, title, subtitle, icon, status, children,
     onEdit, onConfirm, onSaveEdit, editing, editingBody, saving, testId, sourceBadge,
+    readOnly, confirmLabel,
   } = props;
   const handleSave = onSaveEdit ?? onConfirm;
+  const confirmIdle = confirmLabel?.idle ?? "Looks good";
+  const confirmDone = confirmLabel?.confirmed ?? "Confirmed";
 
   return (
     <div
@@ -212,28 +224,41 @@ function GoalLabCard(props: GoalLabCardShellProps) {
           </>
         ) : (
           <>
+            {readOnly ? (
+              // Read-only card (e.g. Q6 system-derived blocker). No Edit button.
+              <span
+                className="inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+                data-testid={`${testId}-readonly-tag`}
+              >
+                <Lock className="h-3 w-3" />
+                System derived
+              </span>
+            ) : (
+              <Button
+                size="sm"
+                onClick={onEdit}
+                className={`text-white ${TONE_EDIT_BUTTON[tone]}`}
+                data-testid={`${testId}-edit`}
+              >
+                <Edit3 className="mr-1.5 h-3.5 w-3.5" />
+                Edit
+              </Button>
+            )}
             <Button
               size="sm"
-              onClick={onEdit}
-              className={`text-white ${TONE_EDIT_BUTTON[tone]}`}
-              data-testid={`${testId}-edit`}
-            >
-              <Edit3 className="mr-1.5 h-3.5 w-3.5" />
-              Edit
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
+              variant={status === "confirmed" ? "ghost" : readOnly ? "default" : "ghost"}
               onClick={onConfirm}
               data-testid={`${testId}-looks-good`}
               className={
                 status === "confirmed"
                   ? "text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
-                  : "text-muted-foreground hover:bg-muted/50"
+                  : readOnly
+                    ? `text-white ${TONE_EDIT_BUTTON[tone]}`
+                    : "text-muted-foreground hover:bg-muted/50"
               }
             >
               <Check className={`mr-1.5 h-3.5 w-3.5 ${status === "confirmed" ? "text-emerald-600 dark:text-emerald-300" : ""}`} />
-              {status === "confirmed" ? "Confirmed" : "Looks good"}
+              {status === "confirmed" ? confirmDone : confirmIdle}
             </Button>
           </>
         )}
@@ -250,12 +275,14 @@ function AnswerPanel({ children, tone = "slate" }: {
   // Neutral well — sits inside the card. In dark mode it reads as a slightly
   // deeper surface (the --muted token) so the well is distinct from the card
   // body without introducing a gradient.
+  // Higher-contrast dark variants: deeper saturated backgrounds and clearer
+  // borders so info wells don't disappear into the card body.
   const bg =
-    tone === "amber" ? "bg-amber-50/70 border-amber-100 dark:bg-amber-500/8 dark:border-amber-400/15" :
-    tone === "rose"  ? "bg-rose-50/70 border-rose-100 dark:bg-rose-500/8 dark:border-rose-400/15" :
-    "bg-muted/40 border-border/40 dark:bg-muted/30";
+    tone === "amber" ? "bg-amber-50/70 border-amber-100 dark:bg-amber-950/40 dark:border-amber-700/50" :
+    tone === "rose"  ? "bg-rose-50/70 border-rose-100 dark:bg-rose-950/40 dark:border-rose-700/50" :
+    "bg-muted/40 border-border/40 dark:bg-slate-900/60 dark:border-slate-700/60";
   return (
-    <div className={`rounded-xl border p-3.5 text-sm leading-relaxed text-foreground ${bg}`}>
+    <div className={`rounded-xl border p-3.5 text-sm leading-relaxed text-foreground/95 ${bg}`}>
       {children}
     </div>
   );
@@ -303,12 +330,12 @@ function DataSourceBadge({ variant }: { variant: BadgeVariant }) {
 
 function MissingState({ message, cta }: { message: string; cta: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-border/60 bg-muted/30 p-3.5 text-sm text-muted-foreground">
+    <div className="rounded-xl border border-dashed border-border/60 bg-muted/40 p-3.5 text-sm text-foreground/90 dark:border-slate-700/60 dark:bg-slate-900/60">
       <div className="flex items-start gap-2">
-        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/70" />
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground dark:text-amber-300" />
         <div>
           <div className="font-medium text-foreground">{message}</div>
-          <div className="mt-0.5 text-xs text-muted-foreground">{cta}</div>
+          <div className="mt-0.5 text-xs text-foreground/75 dark:text-foreground/80">{cta}</div>
         </div>
       </div>
     </div>
@@ -359,7 +386,6 @@ export default function GoalLabPage() {
   const [confirmed, setConfirmed] = React.useState<Record<DimKey, boolean>>({
     Q1: false, Q2: false, Q3: false, Q4: false, Q5: false, Q6: false,
   });
-  const [editing, setEditing] = React.useState<DimKey | null>(null);
   const toggleConfirmed = (k: DimKey) =>
     setConfirmed((c) => ({ ...c, [k]: !c[k] }));
 
@@ -368,6 +394,11 @@ export default function GoalLabPage() {
   const [draftFireAge, setDraftFireAge] = React.useState<string>("");
   const [draftPassiveMonthly, setDraftPassiveMonthly] = React.useState<string>("");
   const [draftLifestyle, setDraftLifestyle] = React.useState<string>("comfortable");
+
+  // Sprint 24 — editor key state. A small wrapper (defined below) seeds the
+  // Q5 draft when the user opens the editor and is the single boundary that
+  // closes the editor on Save / Cancel.
+  const [editing, _setEditingRaw] = React.useState<DimKey | null>(null);
 
   // ── Q4 / Q5 / Q6 overrides — React state only (no schema yet) ──────────
   // The brief introduces three canonical goal-profile fields. Until
@@ -382,6 +413,27 @@ export default function GoalLabPage() {
   const [preferredEngine,    setPreferredEngine]    = React.useState<PreferredEngine>("auto");
   const [riskTolerance,      setRiskTolerance]      = React.useState<RiskTolerance>("auto");
   const [constraintOverride, setConstraintOverride] = React.useState<ConstraintOverride>("auto");
+
+  // Sprint 24 — Q5 draft pattern. The previous implementation wrote the
+  // select's onChange directly into `riskTolerance`, so a user who opened
+  // the editor, picked a value, then clicked Cancel still had the value
+  // committed silently. Worse, clicking Save (which fell back to onConfirm
+  // → toggleConfirmed) didn't close the editor or give feedback. The draft
+  // state below decouples editor UI from committed state: edit-time changes
+  // go to `draftRiskTolerance`; Save commits + closes; Cancel discards.
+  const [draftRiskTolerance, setDraftRiskTolerance] = React.useState<RiskTolerance>("auto");
+
+  // Wrapper around _setEditingRaw — declared AFTER riskTolerance so the
+  // closure captures the latest committed value when seeding the draft.
+  const setEditing = React.useCallback((k: DimKey | null) => {
+    _setEditingRaw((prev) => {
+      // Opening Q5 → seed draft from committed value.
+      if (k === "Q5" && prev !== "Q5") {
+        setDraftRiskTolerance(riskTolerance);
+      }
+      return k;
+    });
+  }, [riskTolerance]);
 
   // Sprint 23 — mirror Q4/Q5/Q6 selections into the canonical goal-profile
   // store so the orchestrator + downstream engines can read them. The page
@@ -749,6 +801,22 @@ export default function GoalLabPage() {
             status={confirmed.Q5 ? "confirmed" : riskCapacity ? "inferred" : "missing"}
             onEdit={() => setEditing(editing === "Q5" ? null : "Q5")}
             onConfirm={() => toggleConfirmed("Q5")}
+            onSaveEdit={() => {
+              // Sprint 24 — Q5 Save: commit draft → committed, mark confirmed,
+              // close editor, and toast for feedback. The committed value
+              // mirrors into the goalProfileStore via the existing useEffect
+              // (line ~424) so engines pick it up immediately.
+              setRiskTolerance(draftRiskTolerance);
+              setConfirmed((c) => ({ ...c, Q5: true }));
+              _setEditingRaw(null);
+              toast({
+                title: "Risk tolerance saved",
+                description:
+                  draftRiskTolerance === "auto"
+                    ? "Using your inferred capacity from the ledger."
+                    : `Set to ${draftRiskTolerance}. Decision Lab will respect this.`,
+              });
+            }}
             editing={editing === "Q5"}
             testId="goal-lab-q5"
             sourceBadge={
@@ -766,8 +834,8 @@ export default function GoalLabPage() {
                   use the lower of the two when ranking paths.
                 </p>
                 <select
-                  value={riskTolerance}
-                  onChange={(e) => setRiskTolerance(e.target.value as RiskTolerance)}
+                  value={draftRiskTolerance}
+                  onChange={(e) => setDraftRiskTolerance(e.target.value as RiskTolerance)}
                   data-testid="goal-lab-q5-tolerance-select"
                   className="w-full rounded-md border border-border bg-background text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30"
                 >
@@ -777,7 +845,7 @@ export default function GoalLabPage() {
                   <option value="high">High — comfortable with volatility</option>
                 </select>
                 <p className="text-[11px] text-muted-foreground">
-                  Saved this session.
+                  Click <span className="font-medium text-foreground">Save</span> to apply. <span className="font-medium text-foreground">Cancel</span> discards changes.
                 </p>
               </div>
             }
@@ -797,7 +865,7 @@ export default function GoalLabPage() {
                   Comfort with leverage: <span className="capitalize">{riskCapacity.leverageComfort}</span>.
                 </p>
                 {riskTolerance !== "auto" ? (
-                  <div className="mt-2 rounded-md border border-violet-200/60 bg-violet-50/60 px-2.5 py-1.5 text-xs text-violet-800 dark:border-violet-400/25 dark:bg-violet-500/10 dark:text-violet-200">
+                  <div className="mt-2 rounded-md border border-violet-200/60 bg-violet-50/60 px-2.5 py-1.5 text-xs text-violet-900 dark:border-violet-500/40 dark:bg-violet-950/40 dark:text-violet-100">
                     Your emotional tolerance: <span className="font-semibold capitalize">{riskTolerance}</span>
                   </div>
                 ) : null}
@@ -811,69 +879,48 @@ export default function GoalLabPage() {
             )}
           </GoalLabCard>
 
-          {/* Q6 ── Preference vector (hybrid) ──────────────────────────── */}
+          {/* Q6 ── Preference vector (system-inferred, read-only) ──────── */}
           <GoalLabCard
             index={6}
             tone="teal"
             title="What is currently blocking your path to FIRE?"
-            subtitle="We identify your biggest constraint so we can solve the right problem."
+            subtitle="System-derived from your ledger, cashflow, leverage and risk capacity. Confirm to lock in."
             icon={<Lock className="h-5 w-5" />}
             status={confirmed.Q6 ? "confirmed" : preferenceVec ? "inferred" : "missing"}
-            onEdit={() => setEditing(editing === "Q6" ? null : "Q6")}
             onConfirm={() => toggleConfirmed("Q6")}
-            editing={editing === "Q6"}
+            editing={false}
+            readOnly
+            confirmLabel={{ idle: "Confirm diagnosis", confirmed: "Diagnosis confirmed" }}
             testId="goal-lab-q6"
             sourceBadge={
               confirmed.Q6 ? "confirmed" :
-              constraintOverride !== "auto" ? "confirmed" :
               preferenceVec ? "estimated" :
               "needs-confirmation"
-            }
-            editingBody={
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  We've inferred a primary blocker from your ledger. If you'd
-                  rather solve a different one first, pick it here. Decision Lab
-                  will rank paths that resolve your chosen blocker.
-                </p>
-                <select
-                  value={constraintOverride}
-                  onChange={(e) => setConstraintOverride(e.target.value as ConstraintOverride)}
-                  data-testid="goal-lab-q6-constraint-select"
-                  className="w-full rounded-md border border-border bg-background text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/30"
-                >
-                  <option value="auto">Use system inference</option>
-                  <option value="timeline-too-aggressive">Timeline too aggressive</option>
-                  <option value="savings-too-low">Savings rate too low</option>
-                  <option value="debt-pressure">Debt servicing pressure</option>
-                  <option value="liquidity-too-low">Liquidity too low</option>
-                  <option value="concentration-high">Concentration / overreliance</option>
-                  <option value="target-too-high">Target passive income too high</option>
-                  <option value="growth-engine-low">Growth engine too low</option>
-                </select>
-                <p className="text-[11px] text-muted-foreground">Saved this session.</p>
-              </div>
             }
           >
             {preferenceVec ? (
               <AnswerPanel tone="rose">
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Biggest constraint</div>
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Biggest constraint (system-inferred)</div>
                 <div className="mt-1 font-semibold text-rose-700 dark:text-rose-300">
-                  {constraintOverride !== "auto" ? constraintOverrideLabel(constraintOverride) : primaryDriverCopy(preferenceVec.primaryDriver)}
+                  {primaryDriverCopy(preferenceVec.primaryDriver)}
                 </div>
-                {constraintOverride !== "auto" ? (
-                  <div className="mt-1 text-[11px] text-muted-foreground">
-                    System inferred: {primaryDriverCopy(preferenceVec.primaryDriver)}
-                  </div>
-                ) : null}
-                <p className="mt-1 text-foreground/85">
-                  Your plan currently weights{" "}
+                <p className="mt-2 text-foreground/95">
+                  {buildBlockerDiagnosis(preferenceVec, riskCapacity)}
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                  <SignalChip label="Liquidity" band={preferenceVec.signals.liquidityStressBand} />
+                  <SignalChip label="Leverage pressure" band={preferenceVec.signals.leveragePressureBand} />
+                  <SignalChip label="Savings consistency" band={preferenceVec.signals.savingsConsistencyBand} />
+                  <SignalChip label="Risk capacity" band={riskCapacity?.band ?? null} />
+                </div>
+                <p className="mt-3 text-foreground/85">
+                  Plan weighting:{" "}
                   <span className="font-semibold">safety {Math.round(preferenceVec.safety * 100)}%</span>,
                   speed {Math.round(preferenceVec.speed * 100)}%,
                   flexibility {Math.round(preferenceVec.flexibility * 100)}%,
                   lifestyle {Math.round(preferenceVec.lifestyle * 100)}%.
                 </p>
-                <SourceTag>Inferred from your behaviour</SourceTag>
+                <SourceTag>System-derived — not user-selectable</SourceTag>
               </AnswerPanel>
             ) : (
               <MissingState
@@ -889,6 +936,14 @@ export default function GoalLabPage() {
           <SummaryPanel
             completed={completed}
             confirmed={confirmed}
+            statuses={{
+              Q1: confirmed.Q1 ? "confirmed" : goal?.status === "SET" ? "inferred" : "missing",
+              Q2: confirmed.Q2 ? "confirmed" : headline ? "inferred" : "missing",
+              Q3: confirmed.Q3 ? "confirmed" : capital ? "inferred" : "missing",
+              Q4: confirmed.Q4 ? "confirmed" : wealthMix ? "inferred" : "missing",
+              Q5: confirmed.Q5 ? "confirmed" : riskCapacity ? "inferred" : "missing",
+              Q6: confirmed.Q6 ? "locked-confirmed" : preferenceVec ? "locked-inferred" : "missing",
+            }}
           />
           <LiveSignalsPanel
             completed={completed}
@@ -971,10 +1026,38 @@ const DIM_META: Array<{ key: DimKey; label: string; icon: React.ReactNode }> = [
   { key: "Q6", label: "Constraints",        icon: <Lock className="h-4 w-4" /> },
 ];
 
-function SummaryPanel({ completed, confirmed }: {
+function StatusChip({ status }: { status: SummaryStatus }) {
+  const map: Record<SummaryStatus, { label: string; cls: string }> = {
+    "confirmed":        { label: "Confirmed",          cls: "border-emerald-500/40 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200" },
+    "inferred":         { label: "Inferred — confirm",  cls: "border-amber-500/40 bg-amber-500/15 text-amber-900 dark:text-amber-100" },
+    "locked-confirmed": { label: "System — confirmed",  cls: "border-violet-500/40 bg-violet-500/15 text-violet-800 dark:text-violet-200" },
+    "locked-inferred":  { label: "System derived",      cls: "border-slate-500/40 bg-slate-500/15 text-slate-800 dark:text-slate-200" },
+    "missing":          { label: "Add data",             cls: "border-border bg-muted/40 text-muted-foreground" },
+  };
+  const { label, cls } = map[status];
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${cls}`}>
+      {status === "confirmed" || status === "locked-confirmed" ? <Check className="h-2.5 w-2.5" /> : null}
+      {label}
+    </span>
+  );
+}
+
+type SummaryStatus =
+  | "confirmed"          // user explicitly confirmed
+  | "inferred"           // system has a value; user hasn't confirmed yet
+  | "locked-confirmed"   // system-derived AND user confirmed (e.g. Q6)
+  | "locked-inferred"    // system-derived, awaiting confirm (e.g. Q6)
+  | "missing";           // no data
+
+function SummaryPanel({ completed, confirmed, statuses }: {
   completed: number;
   confirmed: Record<DimKey, boolean>;
+  statuses: Record<DimKey, SummaryStatus>;
 }) {
+  const inferredCount = (Object.values(statuses) as SummaryStatus[])
+    .filter((s) => s === "inferred" || s === "locked-inferred")
+    .length;
   const pct = (completed / 6) * 100;
   const circumference = 2 * Math.PI * 42;
   const offset = circumference * (1 - pct / 100);
@@ -1013,28 +1096,27 @@ function SummaryPanel({ completed, confirmed }: {
         </div>
       </div>
 
-      <p className="mb-3 text-center text-sm text-muted-foreground">
+      <p className="mb-1 text-center text-sm text-foreground/80">
         {completed === 0 ? "Start with any card that feels easiest." :
-         completed === 6 ? <span><span className="font-semibold text-foreground">Great job!</span> You've completed your Goal Lab.</span> :
+         completed === 6 ? <span><span className="font-semibold text-foreground">Great job.</span> You've completed your Goal Lab.</span> :
          "Keep going — confirm each card when it looks right."}
       </p>
+      {inferredCount > 0 && completed < 6 ? (
+        <p className="mb-3 text-center text-xs text-amber-700 dark:text-amber-300">
+          +{inferredCount} system-inferred — review and confirm.
+        </p>
+      ) : <div className="mb-3" />}
 
       <ul className="space-y-1.5">
         {DIM_META.map((d) => {
-          const isDone = confirmed[d.key];
+          const s = statuses[d.key];
           return (
             <li key={d.key} className="flex items-center justify-between text-sm">
-              <span className="inline-flex items-center gap-2 text-foreground/85">
+              <span className="inline-flex items-center gap-2 text-foreground/90">
                 <span className="text-muted-foreground/70">{d.icon}</span>
                 {d.label}
               </span>
-              <span className={
-                isDone
-                  ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white"
-                  : "h-5 w-5 rounded-full border border-border"
-              }>
-                {isDone && <Check className="h-3 w-3" />}
-              </span>
+              <StatusChip status={s} />
             </li>
           );
         })}
@@ -1285,6 +1367,95 @@ function preferredEngineLabel(e: string): string {
     case "unsure":         return "Undecided";
     default:               return "—";
   }
+}
+
+type PrefVec = import("@/lib/goalLab/inferences").PreferenceVectorInference;
+type RiskCap = import("@/lib/goalLab/inferences").RiskCapacityInference;
+
+function buildBlockerDiagnosis(
+  pv: PrefVec,
+  rc: RiskCap | null,
+): string {
+  const liq = pv.signals.liquidityStressBand;
+  const lev = pv.signals.leveragePressureBand;
+  const sav = pv.signals.savingsConsistencyBand;
+  const risk = rc?.band ?? null;
+
+  const parts: string[] = [];
+  if (liq === "red") {
+    parts.push("your liquidity buffer is red \u2014 cash runway is too thin to absorb a shock");
+  } else if (liq === "amber") {
+    parts.push("your liquidity buffer is amber \u2014 some runway, but not enough for a confident new position");
+  }
+  if (lev === "red") {
+    parts.push("leverage pressure is red \u2014 existing debt servicing is already stretched");
+  } else if (lev === "amber") {
+    parts.push("leverage pressure is amber \u2014 adding more debt would raise serviceability risk");
+  }
+  if (sav === "low") {
+    parts.push("savings consistency is low \u2014 the growth engine isn\u2019t reliably feeding the plan yet");
+  }
+  if (risk === "low" || risk === "medium_low") {
+    parts.push("risk capacity is on the low side \u2014 the plan can\u2019t afford a large drawdown right now");
+  }
+
+  let lead: string;
+  switch (pv.primaryDriver) {
+    case "liquidity_buffer":
+      lead = "Buffer building should come before new positions.";
+      break;
+    case "leverage_headroom":
+      lead = "Reducing debt pressure should come before stacking more leverage.";
+      break;
+    case "savings_rate_and_cashflow":
+      lead = "Lifting savings rate and cashflow is the highest-leverage move right now.";
+      break;
+    case "lifestyle_protection":
+      lead = "Protecting lifestyle resilience is the binding constraint right now.";
+      break;
+    default:
+      lead = "Your plan is reasonably balanced \u2014 the smallest gap is what to solve next.";
+  }
+
+  if (parts.length === 0) {
+    return `${lead} No red or amber signals on liquidity, leverage or savings \u2014 the binding constraint is structural rather than acute.`;
+  }
+  const tail = parts.join("; ");
+  return `${lead} The diagnosis: ${tail}.`;
+}
+
+function SignalChip({
+  label,
+  band,
+}: {
+  label: string;
+  band:
+    | "green" | "amber" | "red"
+    | "low" | "medium" | "high"
+    | "medium_low" | "medium_high"
+    | null;
+}) {
+  const norm =
+    band === "green" || band === "high" ? "good" :
+    band === "amber" || band === "medium" || band === "medium_high" ? "warn" :
+    band === "red" || band === "low" || band === "medium_low" ? "bad" :
+    "unknown";
+  const styles =
+    norm === "good" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200" :
+    norm === "warn" ? "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200" :
+    norm === "bad"  ? "border-rose-500/40 bg-rose-500/15 text-rose-800 dark:text-rose-200" :
+                      "border-slate-400/40 bg-slate-500/10 text-slate-700 dark:text-slate-200";
+  const bandText =
+    band === null ? "\u2014" :
+    band === "medium_low" ? "med-low" :
+    band === "medium_high" ? "med-high" :
+    band;
+  return (
+    <div className={`flex items-center justify-between rounded-md border px-2 py-1 ${styles}`}>
+      <span className="font-medium">{label}</span>
+      <span className="capitalize">{bandText}</span>
+    </div>
+  );
 }
 
 function constraintOverrideLabel(c: string): string {
