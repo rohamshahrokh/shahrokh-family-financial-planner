@@ -226,15 +226,101 @@ export function useFireGoal(currentAge?: number): FireGoalState {
 }
 
 /**
+ * Sprint 20 PR-F1 polish — normalized FIRE settings shape exposed by
+ * `useFireSettingsRow`. This is the canonical app-shape contract: surfaces
+ * consume these camelCased typed fields and NEVER touch raw mc_fire_settings
+ * column names. The hook implementation is the ONLY boundary that maps
+ * storage shape → app shape.
+ */
+export interface FireSettingsNormalized {
+  /** FIRE goal fields (mirrors mc_fire_settings columns). */
+  currentAge: number | null;
+  targetFireAge: number | null;
+  targetPassiveMonthly: number | null;
+  swrPct: number | null;
+  goalsSet: boolean;
+  /** Household-shape fields used by SWR band sizing + feasibility snapshot. */
+  startPpor: number;
+  startStocks: number;
+  startCrypto: number;
+  startSuper: number;
+  startMortgage: number;
+  startOtherDebts: number;
+  startCash: number;
+  startOffset: number;
+  startMonthlyExpenses: number;
+  startMonthlyIncome: number;
+}
+
+const ZERO_HOUSEHOLD: FireSettingsNormalized = {
+  currentAge: null,
+  targetFireAge: null,
+  targetPassiveMonthly: null,
+  swrPct: null,
+  goalsSet: false,
+  startPpor: 0,
+  startStocks: 0,
+  startCrypto: 0,
+  startSuper: 0,
+  startMortgage: 0,
+  startOtherDebts: 0,
+  startCash: 0,
+  startOffset: 0,
+  startMonthlyExpenses: 0,
+  startMonthlyIncome: 0,
+};
+
+function numberOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function numberOrZero(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+/**
+ * Map a raw `mc_fire_settings` row into the canonical normalized shape.
+ * This function is the SINGLE boundary that translates storage column
+ * names (snake_case) into the app-shape camelCase contract surfaces use.
+ */
+export function normalizeFireSettingsRow(
+  row: Record<string, unknown> | null | undefined,
+): FireSettingsNormalized {
+  if (!row) return { ...ZERO_HOUSEHOLD };
+  return {
+    currentAge: numberOrNull(row.current_age),
+    targetFireAge: numberOrNull(row.target_fire_age),
+    targetPassiveMonthly: numberOrNull(row.target_passive_monthly),
+    swrPct: numberOrNull(row.swr_pct),
+    goalsSet: !!row.goals_set,
+    startPpor: numberOrZero(row.start_ppor),
+    startStocks: numberOrZero(row.start_stocks),
+    startCrypto: numberOrZero(row.start_crypto),
+    startSuper: numberOrZero(row.start_super),
+    startMortgage: numberOrZero(row.start_mortgage),
+    startOtherDebts: numberOrZero(row.start_other_debts),
+    startCash: numberOrZero(row.start_cash),
+    startOffset: numberOrZero(row.start_offset),
+    startMonthlyExpenses: numberOrZero(row.start_monthly_expenses),
+    startMonthlyIncome: numberOrZero(row.start_monthly_income),
+  };
+}
+
+/**
  * Sprint 20 PR-F1 — internal canonical reader for the raw `mc_fire_settings`
  * row. Wraps the existing `/api/mc-fire-settings` GET so the FireGoalPanel
  * (and any other surface that needs `current_age` + household-shape fields
  * for SWR band sizing OR the round-tripped advanced bundle) does NOT call
  * the endpoint directly. This is the ONLY direct row reader; callers route
  * through `useFireSettingsRow()` or `useFireGoal()`.
+ *
+ * Sprint 20 PR-F1 polish — the hook now exposes `normalized` (canonical
+ * app-shape camelCase fields). Consumers must read from `normalized` and
+ * NEVER reach into `row` for storage column names.
  */
 export function useFireSettingsRow(): {
   row: Record<string, unknown> | null;
+  normalized: FireSettingsNormalized;
   advanced: CanonicalFireAdvancedSettings | null;
   isLoading: boolean;
 } {
@@ -245,6 +331,7 @@ export function useFireSettingsRow(): {
   const row = q.data ?? null;
   return {
     row,
+    normalized: normalizeFireSettingsRow(row),
     advanced: row ? extractAdvancedFromRow(row as { action_checklist?: Record<string, unknown> | null }) : null,
     isLoading: q.isLoading || q.isFetching,
   };

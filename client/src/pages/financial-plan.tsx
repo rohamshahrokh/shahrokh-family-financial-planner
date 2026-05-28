@@ -359,26 +359,23 @@ function FireGoalPanel() {
   const { toast } = useToast();
   const setGoalMutation = useSetFireGoal();
 
-  // Sprint 20 PR-F1 — read both the canonical goal AND the household-shape
-  // context fields the SWR band engine needs through the canonical reader
-  // hook. The hook is the only place that talks to `/api/mc-fire-settings`;
-  // FireGoalPanel never reaches the endpoint directly.
-  const { row: mcSettings, advanced: persistedAdvanced, isLoading } = useFireSettingsRow();
+  // Sprint 20 PR-F1 polish — FireGoalPanel reads ONLY the normalized output
+  // of `useFireSettingsRow()`. The hook is the single boundary that translates
+  // mc_fire_settings storage shape (snake_case columns) into the canonical
+  // app shape (camelCase typed fields). This panel never touches raw column
+  // names, never imports `mcSettings`, and never depends on storage layout.
+  const { normalized: fireSettings, advanced: persistedAdvanced, isLoading } = useFireSettingsRow();
 
-  // Year-based primary inputs (Sprint 20 PR-A). Current age is read off
-  // mc_fire_settings.current_age (already persisted by the Monte Carlo
-  // dashboard); when missing we default to 40 so age ↔ year derivation
-  // doesn't throw on a fresh household. The household profile feature in
-  // PR-B will supersede this read with a DOB-based currentAge.
-  const currentAge: number = Number.isFinite((mcSettings as any)?.current_age)
-    ? Number((mcSettings as any).current_age)
-    : 40;
+  // Year-based primary inputs (Sprint 20 PR-A). currentAge comes from the
+  // normalized hook; when not persisted yet (fresh household) we default to
+  // 40 so age ↔ year derivation doesn't throw.
+  const currentAge: number = fireSettings.currentAge ?? 40;
 
   const [targetYear, setTargetYear] = useState<string>("");
   const [passiveMonth, setPassiveMonth] = useState<string>("");
   const [swrOverride, setSwrOverride] = useState<string>("");
-  // PR-F1 advanced fields. swrOverride above persists via mc_fire_settings.swr_pct;
-  // the three below round-trip server-side via action_checklist.__advanced_fire.
+  // PR-F1 advanced fields. swrOverride above persists via swrPct; the three
+  // below round-trip server-side via action_checklist.__advanced_fire.
   const [targetNetWorth, setTargetNetWorth] = useState<string>("");
   const [minLiquidityBufferMonths, setMinLiquidityBufferMonths] = useState<string>("");
   const [maxRiskTolerance, setMaxRiskTolerance] = useState<CanonicalFireRiskTolerance | "">("");
@@ -386,20 +383,19 @@ function FireGoalPanel() {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    if (hydrated || !mcSettings) return;
-    const r = mcSettings as any;
-    if (typeof r.target_fire_age === "number" && Number.isFinite(r.target_fire_age)) {
-      const yearsToGoal = (r.target_fire_age as number) - currentAge;
+    if (hydrated || isLoading) return;
+    if (fireSettings.targetFireAge !== null) {
+      const yearsToGoal = fireSettings.targetFireAge - currentAge;
       const inferredYear = new Date().getFullYear() + yearsToGoal;
       setTargetYear(String(inferredYear));
     } else {
       setTargetYear(String(defaultTargetFireYear()));
     }
-    if (typeof r.target_passive_monthly === "number") {
-      setPassiveMonth(String(r.target_passive_monthly));
+    if (fireSettings.targetPassiveMonthly !== null) {
+      setPassiveMonth(String(fireSettings.targetPassiveMonthly));
     }
-    if (typeof r.swr_pct === "number") {
-      setSwrOverride(String(r.swr_pct));
+    if (fireSettings.swrPct !== null) {
+      setSwrOverride(String(fireSettings.swrPct));
     }
     if (persistedAdvanced) {
       if (typeof persistedAdvanced.targetNetWorth === "number") {
@@ -413,7 +409,7 @@ function FireGoalPanel() {
       }
     }
     setHydrated(true);
-  }, [mcSettings, hydrated, currentAge, persistedAdvanced]);
+  }, [fireSettings, isLoading, hydrated, currentAge, persistedAdvanced]);
 
   const yearNum = Number(targetYear);
   const passiveNum = Number(passiveMonth);
@@ -437,31 +433,26 @@ function FireGoalPanel() {
   const allValid = yearValid && passiveValid && swrValid && tnwValid && liqValid;
 
   // Engine-selected SWR band — uses the household's broad-strokes shape from
-  // the persisted MC settings (or sensible defaults if not yet hydrated).
+  // the normalized hook output. Never references raw column names.
   const swrInputs: SwrInputs = useMemo(() => {
-    const r = (mcSettings ?? {}) as any;
-    const startPpor = Number(r.start_ppor) || 0;
-    const startStocks = Number(r.start_stocks) || 0;
-    const startCrypto = Number(r.start_crypto) || 0;
-    const startSuper = Number(r.start_super) || 0;
-    const startMortgage = Number(r.start_mortgage) || 0;
-    const startOther = Number(r.start_other_debts) || 0;
-    const startCash = Number(r.start_cash) || 0;
-    const startOffset = Number(r.start_offset) || 0;
-    const monthlyExpenses = Number(r.start_monthly_expenses) || 0;
+    const {
+      startPpor, startStocks, startCrypto, startSuper,
+      startMortgage, startOtherDebts, startCash, startOffset,
+      startMonthlyExpenses,
+    } = fireSettings;
     const totalInvestable = startStocks + startCrypto + startSuper;
     const totalAssets = totalInvestable + startPpor + startCash + startOffset;
-    const totalDebts = startMortgage + startOther;
+    const totalDebts = startMortgage + startOtherDebts;
     return {
       retirementHorizonYears: Math.max(0, yearNum - new Date().getFullYear()),
       equityShare: totalInvestable > 0 ? (startStocks + startSuper) / totalInvestable : 0.6,
       propertyShare: totalAssets > 0 ? startPpor / totalAssets : 0.3,
       leverageRatio: totalAssets > 0 ? totalDebts / totalAssets : 0.3,
       currentAge,
-      liquidityMonths: monthlyExpenses > 0 ? (startCash + startOffset) / monthlyExpenses : 6,
+      liquidityMonths: startMonthlyExpenses > 0 ? (startCash + startOffset) / startMonthlyExpenses : 6,
       incomeReliability: "medium",
     };
-  }, [mcSettings, yearNum, currentAge]);
+  }, [fireSettings, yearNum, currentAge]);
 
   const engineBand = useMemo(() => selectSwrBand(swrInputs), [swrInputs]);
   const effective = useMemo(
@@ -470,7 +461,7 @@ function FireGoalPanel() {
   );
 
   const derivedAge = deriveTargetAge(yearNum, currentAge);
-  const alreadyGoalsSet = !!(mcSettings as any)?.goals_set;
+  const alreadyGoalsSet = fireSettings.goalsSet;
 
   // Build the canonical CanonicalFireTarget on the fly so derived values use
   // the same single-source pure functions every downstream engine will.
@@ -501,28 +492,21 @@ function FireGoalPanel() {
   const derivedRequiredNw = canonicalTarget ? canonicalRequiredNetWorth(canonicalTarget) : 0;
   const derivedEffectiveSwrDecimal = canonicalTarget ? canonicalEffectiveSwr(canonicalTarget) : 0;
   const householdSnapshot = useMemo(() => {
-    const r = (mcSettings ?? {}) as any;
-    const cash = Number(r.start_cash) || 0;
-    const offset = Number(r.start_offset) || 0;
-    const ppor = Number(r.start_ppor) || 0;
-    const stocks = Number(r.start_stocks) || 0;
-    const crypto = Number(r.start_crypto) || 0;
-    const superBal = Number(r.start_super) || 0;
-    const mortgage = Number(r.start_mortgage) || 0;
-    const other = Number(r.start_other_debts) || 0;
-    const monthlyIncome = Number(r.start_monthly_income) || 0;
-    const monthlyExpenses = Number(r.start_monthly_expenses) || 0;
-    const nw = cash + offset + ppor + stocks + crypto + superBal - mortgage - other;
-    const surplus = Math.max(0, monthlyIncome - monthlyExpenses);
+    const {
+      startCash, startOffset, startPpor, startStocks, startCrypto, startSuper,
+      startMortgage, startOtherDebts, startMonthlyIncome, startMonthlyExpenses,
+    } = fireSettings;
+    const nw = startCash + startOffset + startPpor + startStocks + startCrypto + startSuper - startMortgage - startOtherDebts;
+    const surplus = Math.max(0, startMonthlyIncome - startMonthlyExpenses);
     return {
       currentYear: new Date().getFullYear(),
       currentNetWorth: nw,
       currentMonthlySurplus: surplus,
-      liquidAssets: cash + offset,
-      monthlyExpenses,
+      liquidAssets: startCash + startOffset,
+      monthlyExpenses: startMonthlyExpenses,
       expectedAnnualReturn: 0.07,
     };
-  }, [mcSettings]);
+  }, [fireSettings]);
   const yearsToTarget = canonicalTarget
     ? canonicalTarget.targetFireYear - householdSnapshot.currentYear
     : 0;
@@ -558,7 +542,7 @@ function FireGoalPanel() {
     try {
       // Sprint 20 PR-F1 — the writer now persists the full advanced bundle
       // through the canonical storage path. swrOverride (percentage form)
-      // continues to map to mc_fire_settings.swr_pct; the three sibling
+      // continues to map to the canonical SWR pct field; the three sibling
       // advanced fields round-trip server-side via action_checklist JSON.
       const advancedBundle: Record<string, unknown> = {};
       if (tnwNum !== undefined) advancedBundle.targetNetWorth = tnwNum;
@@ -601,9 +585,9 @@ function FireGoalPanel() {
               {auditMode && (
                 <p className="mt-1 text-[10px]">
                   Writes via canonical writer hook → <code>mc_fire_settings</code>{" "}
-                  (target_fire_age, target_passive_monthly, swr_pct,
-                  goals_set, goal_set_timestamp). Target year is converted to
-                  age at write boundary using current_age={currentAge}.
+                  (targetFireAge, targetPassiveMonthly, swrPct,
+                  goalsSet, goalSetTimestamp). Target year is converted to
+                  age at write boundary using currentAge={currentAge}.
                   Advanced fields (targetNetWorth, safeWithdrawalRateOverride,
                   minLiquidityBufferMonths, maxRiskTolerance) round-trip
                   server-side via <code>action_checklist.__advanced_fire</code>.
