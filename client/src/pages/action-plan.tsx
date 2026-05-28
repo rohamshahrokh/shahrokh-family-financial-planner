@@ -481,7 +481,7 @@ function GoalLabBannerSection() {
           >
             {recommended.probabilityP50 != null
               ? <>Survivability {(recommended.probabilityP50 * 100).toFixed(0)}% · score {recommended.scoreP50?.toFixed(0)}</>
-              : <span data-testid="ac-goal-lab-banner-prob-null">Probability not modelled yet</span>}
+              : <span data-testid="ac-goal-lab-banner-prob-null">Scenario confidence not yet available</span>}
           </p>
           {auditMode && (
             <p className="text-[10px] text-muted-foreground/80 mt-1">

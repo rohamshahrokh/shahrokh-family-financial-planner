@@ -632,6 +632,11 @@ export default function GoalLabPage() {
             status={confirmed.Q2 ? "confirmed" : headline ? "inferred" : "missing"}
             onEdit={() => setEditing(editing === "Q2" ? null : "Q2")}
             onConfirm={() => toggleConfirmed("Q2")}
+            onSaveEdit={() => {
+              setConfirmed((c) => ({ ...c, Q2: true }));
+              _setEditingRaw(null);
+              toast({ title: "Saved", description: "Monthly fuel confirmed." });
+            }}
             editing={editing === "Q2"}
             saving={fireSettingsMutation.isPending}
             testId="goal-lab-q2"
@@ -677,6 +682,11 @@ export default function GoalLabPage() {
             status={confirmed.Q3 ? "confirmed" : capital ? "inferred" : "missing"}
             onEdit={() => setEditing(editing === "Q3" ? null : "Q3")}
             onConfirm={() => toggleConfirmed("Q3")}
+            onSaveEdit={() => {
+              setConfirmed((c) => ({ ...c, Q3: true }));
+              _setEditingRaw(null);
+              toast({ title: "Saved", description: "Capital structure confirmed." });
+            }}
             editing={editing === "Q3"}
             testId="goal-lab-q3"
             sourceBadge={confirmed.Q3 ? "confirmed" : capital ? "ledger" : "needs-confirmation"}
@@ -723,6 +733,18 @@ export default function GoalLabPage() {
             status={confirmed.Q4 ? "confirmed" : wealthMix ? "inferred" : "missing"}
             onEdit={() => setEditing(editing === "Q4" ? null : "Q4")}
             onConfirm={() => toggleConfirmed("Q4")}
+            onSaveEdit={() => {
+              // preferredEngine is bound directly to the store via the select onChange,
+              // so any change is already persisted at the moment Save is clicked.
+              setConfirmed((c) => ({ ...c, Q4: true }));
+              _setEditingRaw(null);
+              toast({
+                title: "Saved",
+                description: preferredEngine === "auto"
+                  ? "Wealth engine preference cleared \u2014 using system inference."
+                  : `Wealth engine set to ${preferredEngineLabel(preferredEngine)}.`,
+              });
+            }}
             editing={editing === "Q4"}
             testId="goal-lab-q4"
             sourceBadge={
@@ -1017,26 +1039,39 @@ function Header() {
 /* Right rail panels                                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-const DIM_META: Array<{ key: DimKey; label: string; icon: React.ReactNode }> = [
-  { key: "Q1", label: "Goal clarity",       icon: <Target className="h-4 w-4" /> },
-  { key: "Q2", label: "Savings engine",     icon: <TrendingUp className="h-4 w-4" /> },
-  { key: "Q3", label: "Capital structure",  icon: <PieChart className="h-4 w-4" /> },
-  { key: "Q4", label: "Wealth engine",      icon: <Rocket className="h-4 w-4" /> },
-  { key: "Q5", label: "Risk capacity",      icon: <Shield className="h-4 w-4" /> },
-  { key: "Q6", label: "Constraints",        icon: <Lock className="h-4 w-4" /> },
+/**
+ * Sprint 25 — human-language Summary rows.
+ * Every row reads in plain English and explains where the data came from in
+ * one short sentence. Targets a non-finance user understanding the row in
+ * ≤3 seconds.
+ */
+const DIM_META: Array<{
+  key: DimKey;
+  label: string;
+  source: string;
+  icon: React.ReactNode;
+}> = [
+  { key: "Q1", label: "Your FIRE Goal",       source: "Set by you \u2014 target retirement age and income",      icon: <Target className="h-4 w-4" /> },
+  { key: "Q2", label: "Monthly Savings",      source: "Derived from your income and expenses",                  icon: <TrendingUp className="h-4 w-4" /> },
+  { key: "Q3", label: "Available Capital",    source: "Estimated from your assets, debts and liquidity",        icon: <PieChart className="h-4 w-4" /> },
+  { key: "Q4", label: "Wealth Engine",        source: "Based on where your wealth is currently growing",        icon: <Rocket className="h-4 w-4" /> },
+  { key: "Q5", label: "Risk Capacity",        source: "Calculated automatically from your finances",           icon: <Shield className="h-4 w-4" /> },
+  { key: "Q6", label: "Biggest Blocker",      source: "Identified automatically \u2014 what to solve first",     icon: <Lock className="h-4 w-4" /> },
 ];
 
 function StatusChip({ status }: { status: SummaryStatus }) {
+  // Sprint 25 — plain English status chip. No jargon (no "inferred",
+  // "derived", "engine", "signal").
   const map: Record<SummaryStatus, { label: string; cls: string }> = {
-    "confirmed":        { label: "Confirmed",          cls: "border-emerald-500/40 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200" },
-    "inferred":         { label: "Inferred — confirm",  cls: "border-amber-500/40 bg-amber-500/15 text-amber-900 dark:text-amber-100" },
-    "locked-confirmed": { label: "System — confirmed",  cls: "border-violet-500/40 bg-violet-500/15 text-violet-800 dark:text-violet-200" },
-    "locked-inferred":  { label: "System derived",      cls: "border-slate-500/40 bg-slate-500/15 text-slate-800 dark:text-slate-200" },
-    "missing":          { label: "Add data",             cls: "border-border bg-muted/40 text-muted-foreground" },
+    "confirmed":        { label: "Confirmed",         cls: "border-emerald-500/40 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200" },
+    "inferred":         { label: "Please review",     cls: "border-amber-500/40 bg-amber-500/15 text-amber-900 dark:text-amber-100" },
+    "locked-confirmed": { label: "Confirmed",         cls: "border-emerald-500/40 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200" },
+    "locked-inferred":  { label: "Please review",     cls: "border-amber-500/40 bg-amber-500/15 text-amber-900 dark:text-amber-100" },
+    "missing":          { label: "Needs data",         cls: "border-border bg-muted/40 text-muted-foreground" },
   };
   const { label, cls } = map[status];
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${cls}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${cls}`}>
       {status === "confirmed" || status === "locked-confirmed" ? <Check className="h-2.5 w-2.5" /> : null}
       {label}
     </span>
@@ -1099,24 +1134,31 @@ function SummaryPanel({ completed, confirmed, statuses }: {
       <p className="mb-1 text-center text-sm text-foreground/80">
         {completed === 0 ? "Start with any card that feels easiest." :
          completed === 6 ? <span><span className="font-semibold text-foreground">Great job.</span> You've completed your Goal Lab.</span> :
-         "Keep going — confirm each card when it looks right."}
+         "Keep going — review and confirm each row."}
       </p>
       {inferredCount > 0 && completed < 6 ? (
         <p className="mb-3 text-center text-xs text-amber-700 dark:text-amber-300">
-          +{inferredCount} system-inferred — review and confirm.
+          {inferredCount} {inferredCount === 1 ? "row is" : "rows are"} ready for you to review.
         </p>
       ) : <div className="mb-3" />}
 
-      <ul className="space-y-1.5">
+      <ul className="space-y-2.5">
         {DIM_META.map((d) => {
           const s = statuses[d.key];
           return (
-            <li key={d.key} className="flex items-center justify-between text-sm">
-              <span className="inline-flex items-center gap-2 text-foreground/90">
-                <span className="text-muted-foreground/70">{d.icon}</span>
-                {d.label}
-              </span>
-              <StatusChip status={s} />
+            <li key={d.key} className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5 dark:bg-slate-900/40">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <span className="text-muted-foreground/80">{d.icon}</span>
+                    {d.label}
+                  </div>
+                  <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                    {d.source}
+                  </div>
+                </div>
+                <StatusChip status={s} />
+              </div>
             </li>
           );
         })}
