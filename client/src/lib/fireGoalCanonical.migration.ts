@@ -146,7 +146,11 @@ export async function runFireGoalMigration(args: {
   if (existing) {
     return { migrated: false, reason: `already migrated at ${existing}`, skipped: true };
   }
-  const synth = synthesiseCanonicalFireGoal(args.source);
+  // Sprint 20 PR-F1 polish — runner must never throw on corrupted input.
+  // A null/undefined source resolves to a no-op (no synthesis, no write).
+  const safeSource: LegacyFireGoalSource =
+    args.source && typeof args.source === "object" ? args.source : { snapshot: null, legacyStore: null };
+  const synth = synthesiseCanonicalFireGoal(safeSource);
   if (!synth.migrated) {
     args.writeFlag(new Date().toISOString());
     log("[fireGoalCanonical.migration] no legacy fields, flagging migrated", synth);
