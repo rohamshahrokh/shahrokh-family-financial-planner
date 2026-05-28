@@ -761,24 +761,26 @@ function AssumptionsPanel({
             <SettingRow label="Desired FIRE age (Roham)"   value={s.desired_fire_age || null}  onChange={v => set('desired_fire_age', v)}  unit="yrs" min={30} max={80} step={1} srcKey="desired_fire_age" rawSettings={rs} />
             <SettingRow label="Desired FIRE age (Fara)"    value={s.desired_partner_fire_age || null} onChange={v => set('desired_partner_fire_age', v)} unit="yrs" min={30} max={80} step={1} srcKey="desired_partner_fire_age" rawSettings={rs} />
             <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mt-3 mb-2">FIRE Target</div>
-            <SettingRow label="Desired monthly passive income" value={s.desired_monthly_passive} onChange={v => set('desired_monthly_passive', v)} unit="$/mo" min={0} max={200000} step={100} srcKey="desired_monthly_passive" rawSettings={rs} />
-            {/* Sprint 20 PR-F1 — duplicate "Safe withdrawal rate" input HARD
-                DELETED. SWR is sourced from the canonical FIRE Goal panel on
-                /financial-plan (mc_fire_settings.swr_pct, read via the
-                canonical reader hook). The engine continues to consume the
-                resolved SWR through the existing firePathEngine code path. */}
+            {/* Sprint 20 PR-F1 fix-up #3 (W1) — duplicate "Desired monthly
+                passive income" input HARD DELETED. Together with the previously
+                removed "Safe withdrawal rate" input, the FIRE target now lives
+                exclusively on /financial-plan#fire-goal (mc_fire_settings,
+                read via useFireSettingsRow). The firePathEngine continues to
+                consume both values through the existing settings code path —
+                this is a UI dedup only, engine math is bit-identical. */}
             <p
               className="rounded border border-dashed border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"
-              data-testid="fire-path-swr-canonical-pointer"
+              data-testid="fire-path-fire-target-canonical-pointer"
             >
-              Safe withdrawal rate is set in one place — the{" "}
+              Monthly passive-income target and safe withdrawal rate are set
+              in one place — the{" "}
               <a
                 href="/financial-plan#fire-goal"
                 className="underline underline-offset-2 hover:text-foreground"
               >
                 canonical FIRE Goal panel
               </a>
-              . Effective SWR in use: {pct(s.safe_withdrawal_rate, 1)}.
+              . Effective values in use: ${(s.desired_monthly_passive ?? 0).toLocaleString()}/mo at {pct(s.safe_withdrawal_rate, 1)} SWR.
             </p>
             <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mt-3 mb-2">Include in accessible FIRE capital</div>
             <ToggleRow label="Include super in FIRE"        value={s.include_super_in_fire}    onChange={v => set('include_super_in_fire', v)}  srcKey="include_super_in_fire" rawSettings={rs} />
