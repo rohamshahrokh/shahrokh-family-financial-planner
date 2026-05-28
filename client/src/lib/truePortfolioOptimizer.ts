@@ -487,7 +487,7 @@ function buildGoalReverseEngineering(
     goal.trace.incomplete;
 
   const summary = incomplete
-    ? "Goal reverse engineering is incomplete — one or more engine outputs is missing. See audit trail."
+    ? "FIRE target derivation is incomplete — one or more engine outputs is missing. See audit trail."
     : `Working backwards from ${requiredNetWorth.textOverride ?? "the canonical FIRE number"} at ${(fire.swrPct).toFixed(1)}% SWR: household needs $${Math.round(goal.requiredAssetBase).toLocaleString()} of investible assets and $${Math.round(goal.requiredMonthlyContribution).toLocaleString()}/mo of contribution.`;
 
   return {
@@ -1196,7 +1196,7 @@ function buildAuditTrail(
 
   entries.push({
     id: "audit-goal-reverse-engineering",
-    label: "Goal Reverse Engineering",
+    label: "FIRE target derivation",
     enginesUsed: ["canonicalFire", "goalSolver"],
     inputsUsed: [
       "canonicalFire.fireNumber",
