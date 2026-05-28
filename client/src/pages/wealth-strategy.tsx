@@ -318,9 +318,13 @@ function calcQldStampDuty(price: number): number {
 // ─── TAB 1: FIRE TRACKER ─────────────────────────────────────────────────────
 
 function FireTracker({ snap, stocks, crypto }: { snap: Record<string, number>; stocks: any[]; crypto: any[] }) {
-  const [desiredMonthly, setDesiredMonthly] = useState(10000);
+  // Sprint 20 PR-F1 fix-up #2: FIRE target inputs (desired monthly passive
+  // income and safe withdrawal rate) live exclusively on /financial-plan#fire-goal.
+  // The scenario tracker now uses fixed canonical defaults for those targets;
+  // edits flow through the canonical FireGoalPanel.
+  const desiredMonthly = 10000;
+  const swr = 4;
   const [expectedReturn, setExpectedReturn] = useState(7);
-  const [swr, setSwr] = useState(4);
   const [extraMonthly, setExtraMonthly] = useState(2000);
   const [ipMonthly, setIpMonthly] = useState(2000);
 
@@ -376,13 +380,35 @@ function FireTracker({ snap, stocks, crypto }: { snap: Record<string, number>; s
 
   return (
     <div className="space-y-6">
-      {/* Assumptions */}
+      {/* Sprint 20 PR-F1 fix-up #2: the editable FIRE-target widgets
+          (desired monthly passive income, safe withdrawal rate) were removed
+          here. The canonical FIRE target editor is the FireGoalPanel on
+          /financial-plan#fire-goal. Scenario contribution knobs remain. */}
+      <div
+        className="rounded-2xl border border-dashed border-border bg-muted/20 p-4 text-xs text-muted-foreground"
+        data-testid="fire-tracker-canonical-pointer"
+      >
+        <p className="font-medium text-foreground">
+          FIRE targets are now set in <span className="text-foreground">Financial Plan &rarr; FIRE Goal</span>. This page reflects those settings.
+        </p>
+        <p className="mt-1">
+          Edit the target FIRE year and monthly passive income on the canonical{" "}
+          <a
+            href="/financial-plan#fire-goal"
+            className="underline underline-offset-2 hover:text-foreground"
+            data-testid="fire-tracker-canonical-link"
+          >
+            FIRE Goal panel
+          </a>
+          .
+        </p>
+      </div>
+
+      {/* Scenario contribution knobs (non-FIRE-target) */}
       <div className="bg-card border border-border rounded-2xl p-5">
-        <SectionTitle>Assumptions</SectionTitle>
+        <SectionTitle>Scenario contributions</SectionTitle>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <InputRow label="Desired monthly passive income" value={desiredMonthly} onChange={setDesiredMonthly} prefix="$" />
           <InputRow label="Expected portfolio return" value={expectedReturn} onChange={setExpectedReturn} suffix="%" step={0.5} />
-          <InputRow label="Safe withdrawal rate" value={swr} onChange={setSwr} suffix="%" step={0.5} />
           <InputRow label="Extra monthly investment" value={extraMonthly} onChange={setExtraMonthly} prefix="$" />
           <InputRow label="IP income (Scenario B)" value={ipMonthly} onChange={setIpMonthly} prefix="$" />
         </div>
@@ -1707,8 +1733,12 @@ function PropertyExpansion({ snap }: { snap: Record<string, number> }) {
 
 function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, number>; stocks: any[]; crypto: any[] }) {
   const [currentAge, setCurrentAge] = useState(36);
-  const [targetAge, setTargetAge] = useState(55);
-  const [targetPassive, setTargetPassive] = useState(8000);
+  // Sprint 20 PR-F1 fix-up #2: target retirement age and target monthly
+  // passive income live exclusively on /financial-plan#fire-goal. Defaults
+  // here preserve prior scenario behavior; edits flow through the canonical
+  // FireGoalPanel.
+  const targetAge = 55;
+  const targetPassive = 8000;
   const [expectedReturn, setExpectedReturn] = useState(7);
 
   const stocksVal = stocks.reduce((s: number, st: any) => s + safeNum(st.current_holding) * safeNum(st.current_price), 0);
@@ -1801,13 +1831,37 @@ function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, nu
 
   return (
     <div className="space-y-6">
-      {/* Inputs */}
+      {/* Sprint 20 PR-F1 fix-up #2: the editable FIRE-target inputs (target
+          retirement age, target monthly passive income) were removed here.
+          The canonical FIRE target editor is the FireGoalPanel on
+          /financial-plan#fire-goal. Scenario inputs (current age, expected
+          return) live in the scenario controls below; FIRE targets reflect
+          the canonical settings. */}
+      <div
+        className="rounded-2xl border border-dashed border-border bg-muted/20 p-4 text-xs text-muted-foreground"
+        data-testid="retirement-predictor-canonical-pointer"
+      >
+        <p className="font-medium text-foreground">
+          FIRE targets are now set in <span className="text-foreground">Financial Plan &rarr; FIRE Goal</span>. This page reflects those settings.
+        </p>
+        <p className="mt-1">
+          Edit the target FIRE year and monthly passive income on the canonical{" "}
+          <a
+            href="/financial-plan#fire-goal"
+            className="underline underline-offset-2 hover:text-foreground"
+            data-testid="retirement-predictor-canonical-link"
+          >
+            FIRE Goal panel
+          </a>
+          .
+        </p>
+      </div>
+
+      {/* Scenario inputs (non-FIRE-target knobs) */}
       <div className="bg-card border border-border rounded-2xl p-5">
-        <SectionTitle>Inputs</SectionTitle>
+        <SectionTitle>Scenario inputs</SectionTitle>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <InputRow label="Current age" value={currentAge} onChange={setCurrentAge} />
-          <InputRow label="Target retirement age" value={targetAge} onChange={setTargetAge} />
-          <InputRow label="Target monthly passive income" value={targetPassive} onChange={setTargetPassive} prefix="$" />
           <InputRow label="Expected return" value={expectedReturn} onChange={setExpectedReturn} suffix="%" step={0.5} />
         </div>
       </div>
@@ -1815,7 +1869,7 @@ function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, nu
       {/* Summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KpiCard label="Investable Assets" value={formatCurrency(investableAssets)} />
-        <KpiCard label="Target FIRE Capital" value={formatCurrency(targetCapital)} sub="@4% SWR" />
+        <KpiCard label="FIRE capital required" value={formatCurrency(targetCapital)} sub="from canonical FIRE goal" />
         <KpiCard label="Monthly Surplus" value={formatCurrency(monthlySurplus)} />
         <KpiCard label="Monthly Needed" value={formatCurrency(requiredMonthly)} sub={`to retire at ${targetAge}`} color="hsl(43,85%,55%)" />
       </div>
@@ -3667,20 +3721,14 @@ export default function WealthStrategyPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
-              <SignalTile label="Current age"          value="36"                              tone="neutral" />
-              <SignalTile label="Target FIRE year"     value={String(new Date().getFullYear() + 19)} tone="neutral" />
-              <SignalTile label="Desired passive / mo" value={fmtAUD0(derived.monthlyExpenses)} tone="neutral" />
-              <SignalTile label="FIRE target capital"  value={fmtAUD0(derived.requiredFIRE)}    tone="neutral" />
-              <SignalTile label="Capital gap"          value={fmtAUD0(derived.fireGap)}         tone={fireStatus} />
-              <SignalTile label="Investable now"       value={fmtAUD0(derived.investable)}      tone="neutral" />
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3">
-              <SignalTile label="Monthly required (to age 55)" value={fmtAUD0(derived.requiredMonthly)} tone={derived.monthlySurplus >= derived.requiredMonthly ? "good" : "watch"} />
-              <SignalTile label="Projected FIRE year"          value={String(derived.fireYear)}        tone={fireStatus} />
-              <SignalTile label="Semi-FIRE year (50% target)"  value={String(derived.semiFireYear)}    tone="neutral" />
-            </div>
+            {/* Sprint 20 PR-F1 fix-up #2: the FIRE-specific summary tiles
+                (target FIRE year, desired passive, FIRE target capital,
+                capital gap, projected FIRE year, semi-FIRE year, etc.) were
+                hard-deleted here. The canonical FIRE summary lives in the
+                FireGoalPanel on /financial-plan#fire-goal and the dashboard
+                summary tile sourced from `useFireSettingsRow()`. The
+                headline progress %, progress bar, advisor narrative and
+                deep-link buttons below remain. */}
 
             <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 mt-5 flex items-start gap-3">
               <Sparkles className="w-4 h-4 text-primary mt-0.5 shrink-0" />
@@ -3737,7 +3785,7 @@ export default function WealthStrategyPage() {
             <Disclosure
               id="freedom-tracker"
               title="FIRE Tracker — Interactive Scenarios"
-              description="Tune SWR, expected return, extra contributions and IP income — see the impact on years-to-FIRE in real time."
+              description="Adjust expected return, extra contributions and IP income — see the impact on years-to-FIRE in real time. FIRE targets come from the canonical FIRE Goal panel."
             >
               <FireTracker snap={snap} stocks={stocks} crypto={crypto} />
             </Disclosure>
