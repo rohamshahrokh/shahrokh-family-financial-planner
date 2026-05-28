@@ -56,6 +56,36 @@ import {
   inferPreferenceVector,
   primaryDriverCopy,
 } from "@/lib/goalLab/inferences";
+import {
+  useGoalProfileStore,
+  type ConstraintOverride as StoreConstraintOverride,
+} from "@/lib/goalLab/goalProfileStore";
+
+/**
+ * Sprint 23 — page→store constraint mapper.
+ *
+ * The Q6 dropdown shows UI-blocker copy ("Timeline too aggressive", "Savings
+ * too low", …) because that's what users recognise. The engine consumes a
+ * constraint-axis vocabulary ("timeline", "growth", "liquidity", …) because
+ * that's what scenario templates branch on. This is the single boundary that
+ * translates between the two. If you add a Q6 option, add a mapping here.
+ */
+function mapPageConstraintToStore(
+  v:
+    | "auto" | "timeline-too-aggressive" | "savings-too-low" | "debt-pressure"
+    | "liquidity-too-low" | "concentration-high" | "target-too-high" | "growth-engine-low",
+): StoreConstraintOverride {
+  switch (v) {
+    case "auto":                     return "auto";
+    case "timeline-too-aggressive": return "timeline";
+    case "target-too-high":         return "timeline";   // same axis — reach
+    case "savings-too-low":         return "growth";
+    case "growth-engine-low":       return "growth";
+    case "debt-pressure":           return "leverage";
+    case "liquidity-too-low":       return "liquidity";
+    case "concentration-high":      return "stability";
+  }
+}
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Card primitive                                                             */
@@ -352,6 +382,32 @@ export default function GoalLabPage() {
   const [preferredEngine,    setPreferredEngine]    = React.useState<PreferredEngine>("auto");
   const [riskTolerance,      setRiskTolerance]      = React.useState<RiskTolerance>("auto");
   const [constraintOverride, setConstraintOverride] = React.useState<ConstraintOverride>("auto");
+
+  // Sprint 23 — mirror Q4/Q5/Q6 selections into the canonical goal-profile
+  // store so the orchestrator + downstream engines can read them. The page
+  // still owns the UI vocabulary; this effect translates page enums into the
+  // store's engine-facing vocabulary. See lib/goalLab/goalProfileStore.ts.
+  const setStorePreferredEngine    = useGoalProfileStore((s) => s.setPreferredEngine);
+  const setStoreRiskTolerance      = useGoalProfileStore((s) => s.setRiskTolerance);
+  const setStoreConstraintOverride = useGoalProfileStore((s) => s.setConstraintOverride);
+
+  React.useEffect(() => {
+    // Q4 — page enum is identical to store enum (auto/property/etf-stocks/
+    // hybrid/debt-reduction/unsure). Safe pass-through.
+    setStorePreferredEngine(preferredEngine);
+  }, [preferredEngine, setStorePreferredEngine]);
+
+  React.useEffect(() => {
+    // Q5 — page enum is identical to store enum.
+    setStoreRiskTolerance(riskTolerance);
+  }, [riskTolerance, setStoreRiskTolerance]);
+
+  React.useEffect(() => {
+    // Q6 — page enum is UI-blocker copy; store enum is engine-axis copy.
+    // This mapper is the boundary between the two vocabularies. The store
+    // value is what reaches the engine; the UI value is what the user sees.
+    setStoreConstraintOverride(mapPageConstraintToStore(constraintOverride));
+  }, [constraintOverride, setStoreConstraintOverride]);
 
   // When the user opens an edit drawer, seed the draft from canonical.
   React.useEffect(() => {

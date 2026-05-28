@@ -61,6 +61,10 @@ import { evaluateFreshness } from "@shared/forecastFreshness";
 import { formatCurrency } from "@/lib/finance";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import { Button } from "@/components/ui/button";
+import {
+  readLatestGoalLabPlan,
+  readLatestGoalLabPlanGeneratedAt,
+} from "@/lib/goalLab/orchestrator";
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Plain-language label dictionary                                            */
@@ -412,6 +416,88 @@ function splitReasoning(text: string | null | undefined): { head: string; tail: 
   }
   // No early sentence break: hide nothing.
   return { head: trimmed, tail: "" };
+}
+
+/* ──────────────────────────────────────────────────────────────────── */
+/* Section — Goal Lab plan banner (Sprint 23)                                 */
+/*                                                                            */
+/* Surfaces the Goal-Lab orchestrator's recommended pick WHEN one has been    */
+/* computed this session. Does NOT auto-run the orchestrator (that costs ~N   */
+/* engine runs). When no plan has been computed, points the user at          */
+/* /decision-lab where the Run-plan button lives. Cohabits with the existing  */
+/* RecommendedNextMoveSection without contradiction: Goal Lab is the          */
+/* explicit profile-driven recommendation; computeUnifiedBestMove is the     */
+/* passive ambient recommendation that runs without orchestration.            */
+/* ──────────────────────────────────────────────────────────────────── */
+function GoalLabBannerSection() {
+  const { auditMode } = useAuditMode();
+  // Read straight from the in-memory cache. No hook subscription needed:
+  // the cache is set once per orchestration run, and we want this to be a
+  // passive read (no React re-renders driven by store deltas here).
+  const plan         = readLatestGoalLabPlan();
+  const generatedAt  = readLatestGoalLabPlanGeneratedAt();
+  const recommended  = plan?.picks.recommended ?? null;
+
+  if (!plan) {
+    // Quiet hint, not a loud empty state — the legacy unified next-move
+    // section still renders below this and is the primary CTA in this case.
+    return (
+      <section data-testid="ac-goal-lab-banner-empty" className="text-xs text-muted-foreground">
+        Tip: open <Link href="/decision-lab"><span className="underline text-foreground">Decision Lab</span></Link>
+        {" "}and click <span className="text-foreground font-medium">Run plan</span> to get profile-driven Goal-Lab paths.
+      </section>
+    );
+  }
+
+  if (!recommended) {
+    return (
+      <section
+        data-testid="ac-goal-lab-banner-infeasible"
+        className="rounded-lg border border-amber-400/40 bg-amber-50/40 dark:bg-amber-500/5 p-3 text-xs sm:text-sm"
+      >
+        Goal Lab evaluated {plan.templatesEvaluatedIds.length} scenarios for your profile but found no
+        path that survived safety ceilings. Revisit risk tolerance or FIRE targets in
+        <Link href="/goal-lab"><span className="underline text-foreground"> Goal Lab</span></Link>.
+      </section>
+    );
+  }
+
+  return (
+    <section
+      data-testid="ac-goal-lab-banner"
+      className="rounded-lg border bg-card p-3 sm:p-4 space-y-2"
+      style={{ borderColor: "hsl(var(--border))" }}
+    >
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Goal Lab recommended path</p>
+          <p className="text-sm sm:text-base font-semibold leading-snug mt-0.5">
+            {recommended.templateLabel}
+          </p>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">{recommended.promise}</p>
+          <p
+            data-testid="ac-goal-lab-banner-prob"
+            className="text-xs text-muted-foreground mt-0.5"
+          >
+            {recommended.probabilityP50 != null
+              ? <>Survivability {(recommended.probabilityP50 * 100).toFixed(0)}% · score {recommended.scoreP50?.toFixed(0)}</>
+              : <span data-testid="ac-goal-lab-banner-prob-null">Probability not modelled yet</span>}
+          </p>
+          {auditMode && (
+            <p className="text-[10px] text-muted-foreground/80 mt-1">
+              engine: {plan.enginesUsed.candidateGenerator} · {plan.enginesUsed.monteCarlo}
+              {generatedAt ? ` · generated ${new Date(generatedAt).toLocaleString()}` : ""}
+            </p>
+          )}
+        </div>
+        <Link href="/decision-lab">
+          <Button size="sm" variant="outline" data-testid="ac-goal-lab-banner-cta">
+            See all ranked paths
+          </Button>
+        </Link>
+      </div>
+    </section>
+  );
 }
 
 function RecommendedNextMoveSection({ unified }: { unified: UnifiedBestMoveResult | null }) {
@@ -1043,6 +1129,7 @@ export default function ActionPlanPage() {
 
       <CurrentPositionSection ledger={canonicalLedger} goalTargetNetWorth={goalTargetNW} unified={unified} />
       <FireGoalSection />
+      <GoalLabBannerSection />
       <RecommendedNextMoveSection unified={unified} />
       <TopActionsSection unified={unified} />
       <BlockersSection unified={unified} />

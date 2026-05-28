@@ -45,7 +45,10 @@ import { FireGoalEmptyState } from "@/components/FireGoalEmptyState";
 import { formatCurrency } from "@/lib/finance";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Scale, Target, PieChart } from "lucide-react";
+import { ArrowRight, Scale, Target, PieChart, Sparkles, Loader2 } from "lucide-react";
+import { useCanonicalGoalProfile } from "@/lib/goalLab/useCanonicalGoalProfile";
+import { useGoalLabPlan } from "@/lib/goalLab/useGoalLabPlan";
+import type { GoalLabRankedScenario } from "@/lib/goalLab/orchestrator";
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Local helpers                                                              */
@@ -333,9 +336,189 @@ export default function DecisionLabPage() {
         </p>
       </header>
 
+      <GoalLabPlanSummary ledger={canonicalLedger} />
       <DecisionEngineSummary />
       <GoalClosureSummary ledger={canonicalLedger} />
       <PortfolioLabSummary ledger={canonicalLedger} />
     </div>
   );
 }
+
+/* ──────────────────────────────────────────────────────────────────── */
+/* Section — Goal Lab Plan (Sprint 23)                                          */
+/* Reads the canonical Goal Profile + ledger and offers to run the Goal-Lab    */
+/* orchestrator. Surfaces the six named picks the brief mandates: recommended,*/
+/* safest, fastest, highest-probability, best-cashflow, best-hybrid. All     */
+/* numbers come from the existing scenarioV2 engine — this section adds      */
+/* ZERO financial math.                                                       */
+/* ──────────────────────────────────────────────────────────────────── */
+function GoalLabPlanSummary({ ledger }: { ledger: DashboardInputs | null }) {
+  const { auditMode } = useAuditMode();
+  // No-op fallback when ledger has not loaded yet — the page still renders
+  // its other summary cards.
+  if (!ledger) {
+    return (
+      <section
+        data-testid="dl-section-goal-lab-plan"
+        className="rounded-lg border bg-card p-3 sm:p-4"
+        style={{ borderColor: "hsl(var(--border))" }}
+      >
+        <p className="text-sm text-muted-foreground">Loading household ledger…</p>
+      </section>
+    );
+  }
+  return <GoalLabPlanSummaryInner ledger={ledger} auditMode={auditMode} />;
+}
+
+function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInputs; auditMode: boolean }) {
+  const profile = useCanonicalGoalProfile(ledger);
+  const { plan, generatedAt, isRunning, error, run } = useGoalLabPlan(ledger, profile);
+
+  const picks = plan?.picks;
+  const noPlan = !plan;
+  const noFeasible = !!plan && !plan.hasFeasibleScenario;
+
+  return (
+    <section
+      data-testid="dl-section-goal-lab-plan"
+      className="rounded-lg border bg-card p-3 sm:p-4 space-y-3"
+      style={{ borderColor: "hsl(var(--border))" }}
+    >
+      <header className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-foreground shrink-0">
+              <Sparkles className="w-4 h-4 text-violet-400" />
+            </span>
+            <h2 className="text-base sm:text-lg font-semibold">Goal Lab plan</h2>
+          </div>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1 leading-snug">
+            Ranked next-move paths from your canonical Goal Profile. Powered by
+            the existing decision engine — no new math.
+          </p>
+          {auditMode && (
+            <div className="mt-1 text-[10px] text-muted-foreground/80">
+              {plan
+                ? `engines: ${plan.enginesUsed.candidateGenerator} · ${plan.enginesUsed.monteCarlo}`
+                : "engines: scenarioV2/decisionEngine/candidateGenerator (not yet run)"}
+              {generatedAt ? ` · generated ${new Date(generatedAt).toLocaleString()}` : ""}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Link href="/goal-lab">
+            <Button size="sm" variant="outline" data-testid="dl-goal-lab-cta" className="gap-1.5">
+              Edit goal
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Button>
+          </Link>
+          <Button
+            size="sm"
+            onClick={() => void run()}
+            disabled={isRunning}
+            data-testid="dl-goal-lab-run"
+            className="gap-1.5"
+          >
+            {isRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            {plan ? "Re-run plan" : "Run plan"}
+          </Button>
+        </div>
+      </header>
+
+      {error && (
+        <p
+          data-testid="dl-goal-lab-error"
+          className="text-xs text-rose-500 dark:text-rose-300"
+        >
+          Couldn’t compute a plan: {error}
+        </p>
+      )}
+
+      {!profile.isExplicitlySet && (
+        <p
+          data-testid="dl-goal-lab-needs-goal"
+          className="text-xs text-amber-600 dark:text-amber-300"
+        >
+          Set your FIRE goal in Goal Lab to enable Goal-Lab orchestration.
+        </p>
+      )}
+
+      {noPlan ? (
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          No Goal-Lab plan has run yet this session. Click <span className="font-medium text-foreground">Run plan</span> to generate ranked paths from your current ledger + goal profile.
+        </p>
+      ) : noFeasible ? (
+        <p data-testid="dl-goal-lab-no-feasible" className="text-sm text-muted-foreground leading-relaxed">
+          The engine evaluated {plan!.templatesEvaluatedIds.length} scenarios for your profile but found no path that survived current safety ceilings. Loosen risk tolerance or revisit FIRE targets in Goal Lab.
+        </p>
+      ) : picks ? (
+        <ul className="space-y-2">
+          <GoalLabPick label="Recommended next move" tone="violet"  pick={picks.recommended} testId="recommended" />
+          <GoalLabPick label="Safest path"           tone="emerald" pick={picks.safest}      testId="safest" />
+          <GoalLabPick label="Fastest path"          tone="amber"   pick={picks.fastest}     testId="fastest" />
+          <GoalLabPick label="Highest probability"   tone="blue"    pick={picks.highestProbability} testId="highest-prob" />
+          <GoalLabPick label="Best cashflow"         tone="teal"    pick={picks.bestCashflow} testId="best-cashflow" />
+          <GoalLabPick label="Best hybrid"           tone="rose"    pick={picks.bestHybrid}   testId="best-hybrid" />
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Single named pick row. Renders “Not modelled yet” when probabilityP50 is
+ * null — NEVER 0%. Mirrors the brief’s probability-honesty rule.
+ */
+function GoalLabPick({
+  label, tone, pick, testId,
+}: {
+  label: string;
+  tone: "violet" | "emerald" | "amber" | "blue" | "teal" | "rose";
+  pick: GoalLabRankedScenario | null;
+  testId: string;
+}) {
+  const toneClass = TONE_DOT[tone];
+  if (!pick) {
+    return (
+      <li
+        data-testid={`dl-goal-lab-pick-${testId}`}
+        className="flex items-baseline gap-2 text-sm"
+      >
+        <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${toneClass}`} aria-hidden />
+        <span className="font-medium text-foreground">{label}:</span>
+        <span className="text-muted-foreground">No matching path for this profile</span>
+      </li>
+    );
+  }
+  return (
+    <li
+      data-testid={`dl-goal-lab-pick-${testId}`}
+      className="flex items-baseline gap-2 text-sm"
+    >
+      <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${toneClass}`} aria-hidden />
+      <div className="flex-1 min-w-0">
+        <div>
+          <span className="font-medium text-foreground">{label}: </span>
+          <span className="text-foreground">{pick.templateLabel}</span>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {pick.promise}
+        </div>
+        <div className="text-xs text-muted-foreground mt-0.5">
+          {pick.probabilityP50 != null
+            ? <>Survivability {(pick.probabilityP50 * 100).toFixed(0)}% · score {pick.scoreP50?.toFixed(0)}</>
+            : <span data-testid={`dl-goal-lab-pick-${testId}-prob-null`}>Probability not modelled yet</span>}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+const TONE_DOT: Record<"violet" | "emerald" | "amber" | "blue" | "teal" | "rose", string> = {
+  violet:  "bg-violet-400",
+  emerald: "bg-emerald-400",
+  amber:   "bg-amber-400",
+  blue:    "bg-blue-400",
+  teal:    "bg-teal-400",
+  rose:    "bg-rose-400",
+};
