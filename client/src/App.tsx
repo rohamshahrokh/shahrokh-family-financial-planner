@@ -368,6 +368,13 @@ function AppRouter() {
             host page that owns that feature today. */}
         <Route path="/monte-carlo"><Redirect to="/ai-forecast-engine" /></Route>
         <Route path="/goal-solver"><Redirect to="/wealth-strategy" /></Route>
+        {/* Sprint 20 PR-F1 — legacy alias paths for the dead duplicate FIRE
+            surfaces. /fire-goal-reverse used to be "Goal Reverse Engineering"
+            (a TruePortfolioOptimizer sub-card); /goal-solver-pro used to be
+            "Set Your Targets". Both now redirect to the single canonical FIRE
+            Goal panel on /financial-plan. */}
+        <Route path="/fire-goal-reverse"><Redirect to="/financial-plan" /></Route>
+        <Route path="/goal-solver-pro"><Redirect to="/financial-plan" /></Route>
         <Route path="/risk-engine"><Redirect to="/risk-radar" /></Route>
         <Route path="/net-worth-timeline"><Redirect to="/timeline" /></Route>
         <Route path="/snapshot"><Redirect to="/dashboard" /></Route>

@@ -37,7 +37,13 @@ import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 export interface GoalSolverProSectionProps {
   result: GoalSolverProResult;
   targets: GoalSolverProTargets;
-  onTargetsChange: (next: GoalSolverProTargets) => void;
+  /**
+   * Sprint 20 PR-F1: target editing is dead. Targets are sourced from the
+   * canonical FIRE goal by the parent; this callback is kept (optional) for
+   * backward source-compatibility with older callers — invoking it is a no-op
+   * from the section's perspective.
+   */
+  onTargetsChange?: (next: GoalSolverProTargets) => void;
   className?: string;
 }
 
@@ -85,68 +91,33 @@ function isAllEmpty(t: GoalSolverProTargets): boolean {
   );
 }
 
-function num(s: string): number | null {
-  if (s == null || s === "") return null;
-  const v = Number(s);
-  return Number.isFinite(v) ? v : null;
-}
-
-interface TargetFieldProps {
-  label: string;
-  value: number | null | undefined;
-  unit?: string;
-  testid: string;
-  onChange: (v: number | null) => void;
-}
-function TargetField({ label, value, unit, testid, onChange }: TargetFieldProps) {
-  return (
-    <label className="flex flex-col gap-1 text-xs">
-      <span className="text-muted-foreground">{label}{unit ? <span className="text-[10px]"> ({unit})</span> : null}</span>
-      <input
-        type="number"
-        inputMode="decimal"
-        defaultValue={value == null ? "" : String(value)}
-        onChange={(e) => onChange(num(e.target.value))}
-        className="rounded border border-border bg-background px-2 py-1 text-sm"
-        data-testid={testid}
-      />
-    </label>
-  );
-}
-
 /* ─── Section components ──────────────────────────────────────────── */
 
-function TargetsForm({
-  targets,
-  onTargetsChange,
-}: {
-  targets: GoalSolverProTargets;
-  onTargetsChange: (t: GoalSolverProTargets) => void;
-}) {
-  const update = (key: keyof GoalSolverProTargets) => (v: number | null) =>
-    onTargetsChange({ ...targets, [key]: v });
-
+/**
+ * Sprint 20 PR-F1 — dedup. The legacy "Set Your Targets" FIRE-target editor
+ * was a duplicate of the canonical FIRE Goal panel on /financial-plan. The
+ * editable form has been HARD DELETED here; this banner now points users to
+ * the single canonical surface. The targets flowing into the solver are
+ * sourced from the canonical FIRE goal by the parent, so the underlying
+ * solver math is unchanged.
+ */
+function TargetsReadOnlyPointer() {
   return (
     <div
-      className="rounded-lg border border-border bg-card p-4"
-      data-testid="goal-solver-targets-form"
+      className="rounded-lg border border-dashed border-border bg-muted/20 p-4 text-xs text-muted-foreground"
+      data-testid="goal-solver-targets-canonical-pointer"
     >
-      <h3 className="mb-3 text-sm font-semibold">Set Your Targets</h3>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-        <TargetField label="Target FIRE Year" value={targets.targetFireYear} testid="goal-solver-target-fireYear" onChange={update("targetFireYear")} />
-        <TargetField label="Target Net Worth" unit="$" value={targets.targetNetWorth} testid="goal-solver-target-netWorth" onChange={update("targetNetWorth")} />
-        <TargetField label="Target Passive Income" unit="$/yr" value={targets.targetPassiveIncomeAnnual} testid="goal-solver-target-passiveAnnual" onChange={update("targetPassiveIncomeAnnual")} />
-        <TargetField label="Target Monthly Passive" unit="$/mo" value={targets.targetPassiveIncomeMonthly} testid="goal-solver-target-passiveMonthly" onChange={update("targetPassiveIncomeMonthly")} />
-        <TargetField label="Target Property Count" value={targets.targetPropertyCount} testid="goal-solver-target-propertyCount" onChange={update("targetPropertyCount")} />
-        <TargetField label="Target Portfolio Value" unit="$" value={targets.targetPortfolioValue} testid="goal-solver-target-portfolioValue" onChange={update("targetPortfolioValue")} />
-        <TargetField label="Target Debt Ceiling" unit="$" value={targets.targetDebtCeiling} testid="goal-solver-target-debtCeiling" onChange={update("targetDebtCeiling")} />
-        <TargetField label="Target Monthly Contribution Limit" unit="$/mo" value={targets.targetMonthlyContributionLimit} testid="goal-solver-target-monthlyContribLimit" onChange={update("targetMonthlyContributionLimit")} />
-        <TargetField label="Target Risk Limit" unit="score" value={targets.targetRiskLimit} testid="goal-solver-target-riskLimit" onChange={update("targetRiskLimit")} />
-        <TargetField label="Target Liquidity Min" unit="months" value={targets.targetLiquidityMinimum} testid="goal-solver-target-liquidityMin" onChange={update("targetLiquidityMinimum")} />
-        <TargetField label="Target Retirement Year" value={targets.targetRetirementYear} testid="goal-solver-target-retirementYear" onChange={update("targetRetirementYear")} />
-      </div>
-      <p className="mt-3 text-[11px] text-muted-foreground">
-        All fields optional. Leave empty to use Sprint 9 best strategy as-is.
+      <p className="font-medium text-foreground">FIRE targets are set in one place.</p>
+      <p className="mt-1">
+        Edit your target FIRE year and monthly passive income on the canonical{" "}
+        <a
+          href="/financial-plan#fire-goal"
+          className="underline underline-offset-2 hover:text-foreground"
+          data-testid="goal-solver-targets-canonical-link"
+        >
+          FIRE Goal panel
+        </a>
+        . The solver below reads those targets through the canonical reader hook.
       </p>
     </div>
   );
@@ -469,7 +440,6 @@ function AuditTrailCard({ result }: { result: GoalSolverProResult }) {
 export function GoalSolverProSection({
   result,
   targets,
-  onTargetsChange,
   className,
 }: GoalSolverProSectionProps) {
   const targetsEmpty = isAllEmpty(targets);
@@ -480,7 +450,7 @@ export function GoalSolverProSection({
       className={`flex flex-col gap-4 ${className ?? ""}`}
       data-testid="goal-solver-root"
     >
-      <TargetsForm targets={targets} onTargetsChange={onTargetsChange} />
+      <TargetsReadOnlyPointer />
       {showPlaceholder ? (
         <div
           className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground"
