@@ -44,6 +44,7 @@ import {
   Activity, Zap, Gauge, Flag,
 } from "lucide-react";
 
+import AssumptionsPanel from "@/components/AssumptionsPanel";
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
 import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
 import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics";
@@ -103,12 +104,14 @@ interface GoalLabCardShellProps {
   editingBody?: React.ReactNode;
   saving?: boolean;
   testId: string;
+  /** Provenance badge rendered top-right of card header. */
+  sourceBadge?: BadgeVariant;
 }
 
 function GoalLabCard(props: GoalLabCardShellProps) {
   const {
     index, tone, title, subtitle, icon, status, children,
-    onEdit, onConfirm, onSaveEdit, editing, editingBody, saving, testId,
+    onEdit, onConfirm, onSaveEdit, editing, editingBody, saving, testId, sourceBadge,
   } = props;
   const handleSave = onSaveEdit ?? onConfirm;
 
@@ -130,9 +133,12 @@ function GoalLabCard(props: GoalLabCardShellProps) {
             {subtitle}
           </p>
         </div>
-        <span className="mt-1 text-muted-foreground/70" aria-hidden>
-          {icon}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          {sourceBadge ? <DataSourceBadge variant={sourceBadge} /> : null}
+          <span className="text-muted-foreground/70" aria-hidden>
+            {icon}
+          </span>
+        </div>
       </div>
 
       <div className="px-5 pb-4">
@@ -234,6 +240,37 @@ function SourceTag({ children }: { children: React.ReactNode }) {
   );
 }
 
+/* ── DataSourceBadge ─────────────────────────────────────────────────
+ * Honest provenance tag rendered at the top-right of every card. Six variants
+ * map to the trust states from the brief:
+ *   - ledger              -> reads directly from canonical ledger selectors
+ *   - fire-settings       -> reads mc_fire_settings via useCanonicalGoal
+ *   - assumptions         -> reads from canonical assumptions layer
+ *   - estimated           -> computed locally from canonical sources
+ *   - confirmed           -> user has confirmed in this session
+ *   - needs-confirmation  -> system has a value but the user hasn't agreed yet
+ * Tone is muted on purpose — these are provenance, not headlines.                          */
+type BadgeVariant = "ledger" | "fire-settings" | "assumptions" | "estimated" | "confirmed" | "needs-confirmation";
+function DataSourceBadge({ variant }: { variant: BadgeVariant }) {
+  const map: Record<BadgeVariant, { label: string; cls: string }> = {
+    "ledger":             { label: "From ledger",          cls: "text-emerald-700 ring-emerald-200/70 dark:text-emerald-300 dark:ring-emerald-400/25" },
+    "fire-settings":      { label: "From FIRE settings",   cls: "text-violet-700 ring-violet-200/70 dark:text-violet-300 dark:ring-violet-400/25" },
+    "assumptions":        { label: "From assumptions",     cls: "text-blue-700 ring-blue-200/70 dark:text-blue-300 dark:ring-blue-400/25" },
+    "estimated":          { label: "Estimated",            cls: "text-amber-700 ring-amber-200/70 dark:text-amber-300 dark:ring-amber-400/25" },
+    "confirmed":          { label: "User confirmed",       cls: "text-emerald-700 ring-emerald-200/70 dark:text-emerald-300 dark:ring-emerald-400/25" },
+    "needs-confirmation": { label: "Needs confirmation",   cls: "text-muted-foreground ring-border" },
+  };
+  const { label, cls } = map[variant];
+  return (
+    <span
+      data-testid={`goal-lab-badge-${variant}`}
+      className={`inline-flex items-center gap-1 rounded-full bg-card/60 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ring-1 ${cls}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 function MissingState({ message, cta }: { message: string; cta: string }) {
   return (
     <div className="rounded-xl border border-dashed border-border/60 bg-muted/30 p-3.5 text-sm text-muted-foreground">
@@ -301,6 +338,20 @@ export default function GoalLabPage() {
   const [draftFireAge, setDraftFireAge] = React.useState<string>("");
   const [draftPassiveMonthly, setDraftPassiveMonthly] = React.useState<string>("");
   const [draftLifestyle, setDraftLifestyle] = React.useState<string>("comfortable");
+
+  // ── Q4 / Q5 / Q6 overrides — React state only (no schema yet) ──────────
+  // The brief introduces three canonical goal-profile fields. Until
+  // goal_profile_extras lands, these live in component state; the data-source
+  // badge flips to 'User confirmed' whenever the user picks anything other
+  // than 'auto' (i.e. anything other than the engine's inferred default).
+  type PreferredEngine = "auto" | "property" | "etf-stocks" | "hybrid" | "debt-reduction" | "unsure";
+  type RiskTolerance  = "auto" | "low" | "moderate" | "high";
+  type ConstraintOverride =
+    | "auto" | "timeline-too-aggressive" | "savings-too-low" | "debt-pressure"
+    | "liquidity-too-low" | "concentration-high" | "target-too-high" | "growth-engine-low";
+  const [preferredEngine,    setPreferredEngine]    = React.useState<PreferredEngine>("auto");
+  const [riskTolerance,      setRiskTolerance]      = React.useState<RiskTolerance>("auto");
+  const [constraintOverride, setConstraintOverride] = React.useState<ConstraintOverride>("auto");
 
   // When the user opens an edit drawer, seed the draft from canonical.
   React.useEffect(() => {
@@ -377,6 +428,11 @@ export default function GoalLabPage() {
             editing={editing === "Q1"}
             saving={fireSettingsMutation.isPending}
             testId="goal-lab-q1"
+            sourceBadge={
+              confirmed.Q1 ? "confirmed" :
+              goal?.status === "SET" ? "fire-settings" :
+              "needs-confirmation"
+            }
             editingBody={
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
@@ -471,6 +527,7 @@ export default function GoalLabPage() {
             editing={editing === "Q2"}
             saving={fireSettingsMutation.isPending}
             testId="goal-lab-q2"
+            sourceBadge={confirmed.Q2 ? "confirmed" : headline ? "ledger" : "needs-confirmation"}
             editingBody={
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
@@ -514,6 +571,7 @@ export default function GoalLabPage() {
             onConfirm={() => toggleConfirmed("Q3")}
             editing={editing === "Q3"}
             testId="goal-lab-q3"
+            sourceBadge={confirmed.Q3 ? "confirmed" : capital ? "ledger" : "needs-confirmation"}
             editingBody={
               <p className="text-xs text-muted-foreground">
                 Capital structure is calculated from your ledger. To change it,
@@ -559,11 +617,37 @@ export default function GoalLabPage() {
             onConfirm={() => toggleConfirmed("Q4")}
             editing={editing === "Q4"}
             testId="goal-lab-q4"
+            sourceBadge={
+              confirmed.Q4 ? "confirmed" :
+              preferredEngine !== "auto" ? "confirmed" :
+              wealthMix ? "estimated" :
+              "needs-confirmation"
+            }
             editingBody={
-              <p className="text-xs text-muted-foreground">
-                Wealth engine mix is derived from your ledger. Edit your income,
-                properties, or investments to shift the mix.
-              </p>
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Pick your preferred wealth engine going forward. We'll bias
+                  Decision Lab paths toward this engine while still scoring all
+                  options.
+                </p>
+                <select
+                  value={preferredEngine}
+                  onChange={(e) => setPreferredEngine(e.target.value as PreferredEngine)}
+                  data-testid="goal-lab-q4-engine-select"
+                  className="w-full rounded-md border border-border bg-background text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                >
+                  <option value="auto">Use system inference</option>
+                  <option value="property">Property-led</option>
+                  <option value="etf-stocks">ETF / stocks-led</option>
+                  <option value="hybrid">Hybrid — property + ETF</option>
+                  <option value="debt-reduction">Debt reduction first</option>
+                  <option value="unsure">I'm not sure yet</option>
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  Saved this session. Persists to your goal profile once the
+                  schema lands.
+                </p>
+              </div>
             }
           >
             {wealthMix ? (
@@ -585,6 +669,11 @@ export default function GoalLabPage() {
                    wealthMix.convictionTag === "medium" ? "Medium conviction" :
                    "Diversified mix"}
                 </div>
+                {preferredEngine !== "auto" ? (
+                  <div className="mt-2 rounded-md border border-amber-200/60 bg-amber-50/60 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-200">
+                    Preferred going forward: <span className="font-semibold">{preferredEngineLabel(preferredEngine)}</span>
+                  </div>
+                ) : null}
               </AnswerPanel>
             ) : (
               <MissingState
@@ -606,16 +695,40 @@ export default function GoalLabPage() {
             onConfirm={() => toggleConfirmed("Q5")}
             editing={editing === "Q5"}
             testId="goal-lab-q5"
+            sourceBadge={
+              confirmed.Q5 ? "confirmed" :
+              riskTolerance !== "auto" ? "confirmed" :
+              riskCapacity ? "estimated" :
+              "needs-confirmation"
+            }
             editingBody={
-              <p className="text-xs text-muted-foreground">
-                Risk capacity is derived from your liquidity buffer, debt service,
-                and current asset mix. Override coming in the next phase.
-              </p>
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Risk capacity</span> is
+                  what your ledger can absorb. <span className="font-medium text-foreground">Risk
+                  tolerance</span> is what you emotionally accept. Set your tolerance — we'll
+                  use the lower of the two when ranking paths.
+                </p>
+                <select
+                  value={riskTolerance}
+                  onChange={(e) => setRiskTolerance(e.target.value as RiskTolerance)}
+                  data-testid="goal-lab-q5-tolerance-select"
+                  className="w-full rounded-md border border-border bg-background text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                >
+                  <option value="auto">Use inferred capacity</option>
+                  <option value="low">Low — prioritise safety, avoid drawdowns</option>
+                  <option value="moderate">Moderate — balanced</option>
+                  <option value="high">High — comfortable with volatility</option>
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  Saved this session.
+                </p>
+              </div>
             }
           >
             {riskCapacity ? (
               <AnswerPanel>
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Risk capacity</div>
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Risk capacity (from ledger)</div>
                 <div className="mt-1 font-semibold text-violet-700 dark:text-violet-300">
                   {bandLabel(riskCapacity.band)}
                 </div>
@@ -627,6 +740,11 @@ export default function GoalLabPage() {
                 <p className="text-foreground/85">
                   Comfort with leverage: <span className="capitalize">{riskCapacity.leverageComfort}</span>.
                 </p>
+                {riskTolerance !== "auto" ? (
+                  <div className="mt-2 rounded-md border border-violet-200/60 bg-violet-50/60 px-2.5 py-1.5 text-xs text-violet-800 dark:border-violet-400/25 dark:bg-violet-500/10 dark:text-violet-200">
+                    Your emotional tolerance: <span className="font-semibold capitalize">{riskTolerance}</span>
+                  </div>
+                ) : null}
                 <SourceTag>Derived from ledger</SourceTag>
               </AnswerPanel>
             ) : (
@@ -649,19 +767,49 @@ export default function GoalLabPage() {
             onConfirm={() => toggleConfirmed("Q6")}
             editing={editing === "Q6"}
             testId="goal-lab-q6"
+            sourceBadge={
+              confirmed.Q6 ? "confirmed" :
+              constraintOverride !== "auto" ? "confirmed" :
+              preferenceVec ? "estimated" :
+              "needs-confirmation"
+            }
             editingBody={
-              <p className="text-xs text-muted-foreground">
-                The inferred answer is based on five signals from your ledger.
-                Manual override comes in the next phase.
-              </p>
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  We've inferred a primary blocker from your ledger. If you'd
+                  rather solve a different one first, pick it here. Decision Lab
+                  will rank paths that resolve your chosen blocker.
+                </p>
+                <select
+                  value={constraintOverride}
+                  onChange={(e) => setConstraintOverride(e.target.value as ConstraintOverride)}
+                  data-testid="goal-lab-q6-constraint-select"
+                  className="w-full rounded-md border border-border bg-background text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                >
+                  <option value="auto">Use system inference</option>
+                  <option value="timeline-too-aggressive">Timeline too aggressive</option>
+                  <option value="savings-too-low">Savings rate too low</option>
+                  <option value="debt-pressure">Debt servicing pressure</option>
+                  <option value="liquidity-too-low">Liquidity too low</option>
+                  <option value="concentration-high">Concentration / overreliance</option>
+                  <option value="target-too-high">Target passive income too high</option>
+                  <option value="growth-engine-low">Growth engine too low</option>
+                </select>
+                <p className="text-[11px] text-muted-foreground">Saved this session.</p>
+              </div>
             }
           >
             {preferenceVec ? (
               <AnswerPanel tone="rose">
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Biggest constraint</div>
                 <div className="mt-1 font-semibold text-rose-700 dark:text-rose-300">
-                  {primaryDriverCopy(preferenceVec.primaryDriver)}
+                  {constraintOverride !== "auto" ? constraintOverrideLabel(constraintOverride) : primaryDriverCopy(preferenceVec.primaryDriver)}
                 </div>
+                {constraintOverride !== "auto" ? (
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    System inferred: {primaryDriverCopy(preferenceVec.primaryDriver)}
+                  </div>
+                ) : null}
                 <p className="mt-1 text-foreground/85">
                   Your plan currently weights{" "}
                   <span className="font-semibold">safety {Math.round(preferenceVec.safety * 100)}%</span>,
@@ -696,6 +844,11 @@ export default function GoalLabPage() {
             goal={goal}
           />
           <WhatHappensNext />
+          {/* Canonical assumptions disclosure — collapsed by default. Brief says
+              'Goal Lab should show only simplified assumption disclosure.' We use
+              the existing AssumptionsPanel in compact mode so a click reveals the
+              full audit-mode set without cluttering the primary surface.            */}
+          <AssumptionsPanel mode="compact" />
           <QuoteCard />
         </aside>
       </div>
@@ -1064,5 +1217,29 @@ function bandLabel(b: "low" | "medium_low" | "medium" | "medium_high" | "high"):
     case "medium":       return "Medium";
     case "medium_high":  return "Medium-High";
     case "high":         return "High";
+  }
+}
+
+function preferredEngineLabel(e: string): string {
+  switch (e) {
+    case "property":       return "Property-led";
+    case "etf-stocks":     return "ETF / stocks-led";
+    case "hybrid":         return "Hybrid — property + ETF";
+    case "debt-reduction": return "Debt reduction first";
+    case "unsure":         return "Undecided";
+    default:               return "—";
+  }
+}
+
+function constraintOverrideLabel(c: string): string {
+  switch (c) {
+    case "timeline-too-aggressive": return "Timeline too aggressive";
+    case "savings-too-low":         return "Savings rate too low";
+    case "debt-pressure":           return "Debt servicing pressure";
+    case "liquidity-too-low":       return "Liquidity too low";
+    case "concentration-high":      return "Concentration / overreliance";
+    case "target-too-high":         return "Target passive income too high";
+    case "growth-engine-low":       return "Growth engine too low";
+    default:                        return "—";
   }
 }
