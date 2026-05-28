@@ -172,28 +172,68 @@ export const ADVANCED_FIRE_CHECKLIST_KEY = "__advanced_fire" as const;
 /**
  * Extract the advanced bundle from a raw mc_fire_settings row. Tolerates a
  * missing or malformed `action_checklist` and unknown keys.
+ *
+ * Sprint 20 PR-F2 — read precedence:
+ *   1. First-class column on `mc_fire_settings` (added by the F2 migration
+ *      `20260528120000_pr_f2_advanced_fire_columns.sql`). Preferred when
+ *      present.
+ *   2. Existing F1 round-tripped JSON sub-key (`action_checklist.__advanced_fire`).
+ *      Used as fallback for households not yet backfilled.
+ * Fields from (1) override the corresponding fields from (2) on a per-field
+ * basis (NOT all-or-nothing) so partially populated columns still benefit
+ * from any missing fields in the JSON fallback.
  */
 export function extractAdvancedFromRow(
-  row: { action_checklist?: Record<string, unknown> | null } | null | undefined,
+  row:
+    | {
+        action_checklist?: Record<string, unknown> | null;
+        target_net_worth?: number | null;
+        min_liquidity_buffer_months?: number | null;
+        max_risk_tolerance?: string | null;
+        safe_withdrawal_rate_override?: number | null;
+      }
+    | null
+    | undefined,
 ): CanonicalFireAdvancedSettings | null {
-  if (!row || !row.action_checklist) return null;
-  const raw = (row.action_checklist as Record<string, unknown>)[ADVANCED_FIRE_CHECKLIST_KEY];
-  if (!raw || typeof raw !== "object") return null;
-  const r = raw as Record<string, unknown>;
+  if (!row) return null;
   const out: CanonicalFireAdvancedSettings = {};
-  if (typeof r.targetNetWorth === "number" && Number.isFinite(r.targetNetWorth) && r.targetNetWorth > 0) {
-    out.targetNetWorth = r.targetNetWorth;
+
+  // (2) JSON fallback — populate first so the column read can override.
+  if (row.action_checklist) {
+    const raw = (row.action_checklist as Record<string, unknown>)[ADVANCED_FIRE_CHECKLIST_KEY];
+    if (raw && typeof raw === "object") {
+      const r = raw as Record<string, unknown>;
+      if (typeof r.targetNetWorth === "number" && Number.isFinite(r.targetNetWorth) && r.targetNetWorth > 0) {
+        out.targetNetWorth = r.targetNetWorth;
+      }
+      if (typeof r.safeWithdrawalRateOverride === "number" && Number.isFinite(r.safeWithdrawalRateOverride) && r.safeWithdrawalRateOverride > 0) {
+        out.safeWithdrawalRateOverride = r.safeWithdrawalRateOverride;
+      }
+      if (typeof r.minLiquidityBufferMonths === "number" && Number.isFinite(r.minLiquidityBufferMonths) && r.minLiquidityBufferMonths >= 0) {
+        out.minLiquidityBufferMonths = r.minLiquidityBufferMonths;
+      }
+      const rt = r.maxRiskTolerance;
+      if (rt === "conservative" || rt === "balanced" || rt === "growth") {
+        out.maxRiskTolerance = rt;
+      }
+    }
   }
-  if (typeof r.safeWithdrawalRateOverride === "number" && Number.isFinite(r.safeWithdrawalRateOverride) && r.safeWithdrawalRateOverride > 0) {
-    out.safeWithdrawalRateOverride = r.safeWithdrawalRateOverride;
+
+  // (1) First-class column read. Per-field override of (2).
+  if (typeof row.target_net_worth === "number" && Number.isFinite(row.target_net_worth) && row.target_net_worth > 0) {
+    out.targetNetWorth = row.target_net_worth;
   }
-  if (typeof r.minLiquidityBufferMonths === "number" && Number.isFinite(r.minLiquidityBufferMonths) && r.minLiquidityBufferMonths >= 0) {
-    out.minLiquidityBufferMonths = r.minLiquidityBufferMonths;
+  if (typeof row.min_liquidity_buffer_months === "number" && Number.isFinite(row.min_liquidity_buffer_months) && row.min_liquidity_buffer_months >= 0) {
+    out.minLiquidityBufferMonths = row.min_liquidity_buffer_months;
   }
-  const rt = r.maxRiskTolerance;
-  if (rt === "conservative" || rt === "balanced" || rt === "growth") {
-    out.maxRiskTolerance = rt;
+  if (typeof row.safe_withdrawal_rate_override === "number" && Number.isFinite(row.safe_withdrawal_rate_override) && row.safe_withdrawal_rate_override > 0) {
+    out.safeWithdrawalRateOverride = row.safe_withdrawal_rate_override;
   }
+  const colRt = row.max_risk_tolerance;
+  if (colRt === "conservative" || colRt === "balanced" || colRt === "growth") {
+    out.maxRiskTolerance = colRt;
+  }
+
   return Object.keys(out).length > 0 ? out : null;
 }
 
@@ -332,7 +372,17 @@ export function useFireSettingsRow(): {
   return {
     row,
     normalized: normalizeFireSettingsRow(row),
-    advanced: row ? extractAdvancedFromRow(row as { action_checklist?: Record<string, unknown> | null }) : null,
+    advanced: row
+      ? extractAdvancedFromRow(
+          row as {
+            action_checklist?: Record<string, unknown> | null;
+            target_net_worth?: number | null;
+            min_liquidity_buffer_months?: number | null;
+            max_risk_tolerance?: string | null;
+            safe_withdrawal_rate_override?: number | null;
+          },
+        )
+      : null,
     isLoading: q.isLoading || q.isFetching,
   };
 }

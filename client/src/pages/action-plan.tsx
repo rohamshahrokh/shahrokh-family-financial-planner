@@ -57,6 +57,7 @@ import { readLatestQuickDecisionGeneratedAt, type UnifiedBestMoveResult } from "
 import type { Recommendation } from "@/lib/recommendationEngine/types";
 import { formatConfidence } from "@/lib/confidenceLabels";
 import { useCanonicalRecommendation } from "@/hooks/useCanonicalRecommendation";
+import { CanonicalMoveRankingPanel } from "@/components/canonicalMove/CanonicalMoveRankingPanel";
 import { evaluateFreshness } from "@shared/forecastFreshness";
 import { formatCurrency } from "@/lib/finance";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
@@ -1048,6 +1049,7 @@ export default function ActionPlanPage() {
       <BlockersSection unified={unified} />
       <DoNothingSection unified={unified} ledger={canonicalLedger} />
       <ChecklistSection unified={unified} />
+      <CanonicalMoveRankingPanel />
 
       <div>
         <button
