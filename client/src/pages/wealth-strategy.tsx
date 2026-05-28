@@ -35,6 +35,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/finance";
 import { useForecastAssumptions } from "@/lib/useForecastAssumptions";
+import { useFireSettingsRow } from "@/lib/fireGoalCanonical";
 // Sprint 4A Final Closure — Wealth Strategy reads headline figures from the
 // canonical ledger so its narrative cards reconcile with Dashboard / Reports
 // / Financial Plan / Timeline / Risk to within $1.
@@ -318,12 +319,26 @@ function calcQldStampDuty(price: number): number {
 // ─── TAB 1: FIRE TRACKER ─────────────────────────────────────────────────────
 
 function FireTracker({ snap, stocks, crypto }: { snap: Record<string, number>; stocks: any[]; crypto: any[] }) {
-  // Sprint 20 PR-F1 fix-up #2: FIRE target inputs (desired monthly passive
-  // income and safe withdrawal rate) live exclusively on /financial-plan#fire-goal.
-  // The scenario tracker now uses fixed canonical defaults for those targets;
-  // edits flow through the canonical FireGoalPanel.
-  const desiredMonthly = 10000;
-  const swr = 4;
+  // Sprint 20 PR-F1 fix-up #3 (W2 Path A) — FIRE target inputs (desired
+  // monthly passive income and safe withdrawal rate) live exclusively on
+  // /financial-plan#fire-goal. This surface now READS the canonical settings
+  // through useFireSettingsRow() instead of using bare hardcoded constants,
+  // so the "reflects those settings" copy below is literally true.
+  const { normalized: fireSettings } = useFireSettingsRow();
+  const canonicalDesiredMonthly = fireSettings.targetPassiveMonthly;
+  const canonicalSwrPct = fireSettings.swrPct;
+  // Fallbacks only when the canonical goal has never been saved (goalsSet=false).
+  // Named constants — these are NOT the live values; live values are the hook reads above.
+  const FIRE_TRACKER_FALLBACK_PASSIVE_MONTHLY = 10_000;
+  const FIRE_TRACKER_FALLBACK_SWR_PCT = 4;
+  const passiveMonthlyForScenario =
+    canonicalDesiredMonthly != null && canonicalDesiredMonthly > 0
+      ? canonicalDesiredMonthly
+      : FIRE_TRACKER_FALLBACK_PASSIVE_MONTHLY;
+  const swrPctForScenario =
+    canonicalSwrPct != null && canonicalSwrPct > 0
+      ? canonicalSwrPct
+      : FIRE_TRACKER_FALLBACK_SWR_PCT;
   const [expectedReturn, setExpectedReturn] = useState(7);
   const [extraMonthly, setExtraMonthly] = useState(2000);
   const [ipMonthly, setIpMonthly] = useState(2000);
@@ -341,8 +356,8 @@ function FireTracker({ snap, stocks, crypto }: { snap: Record<string, number>; s
       stocksTotal +
       cryptoTotal;
 
-    const reqAnnual = desiredMonthly * 12;
-    const reqCapital = reqAnnual / (swr / 100);
+    const reqAnnual = passiveMonthlyForScenario * 12;
+    const reqCapital = reqAnnual / (swrPctForScenario / 100);
     const progress = Math.min(100, (currentInvestable / reqCapital) * 100);
     const gap = Math.max(0, reqCapital - currentInvestable);
     const monthlyRate = expectedReturn / 100 / 12;
@@ -376,7 +391,7 @@ function FireTracker({ snap, stocks, crypto }: { snap: Record<string, number>; s
       savedByIP: yearsBase - yearsIP,
       monthlySaving,
     };
-  }, [snap, stocks, crypto, desiredMonthly, expectedReturn, swr, extraMonthly, ipMonthly]);
+  }, [snap, stocks, crypto, passiveMonthlyForScenario, expectedReturn, swrPctForScenario, extraMonthly, ipMonthly]);
 
   return (
     <div className="space-y-6">
@@ -423,7 +438,7 @@ function FireTracker({ snap, stocks, crypto }: { snap: Record<string, number>; s
             <span className="text-xs text-muted-foreground mt-1">of target</span>
           </ProgressRing>
           <div className="w-full grid grid-cols-2 gap-3 mt-2">
-            <KpiCard label="FIRE Target" value={formatCurrency(calc.reqCapital)} sub={`@${swr}% SWR`} />
+            <KpiCard label="FIRE Target" value={formatCurrency(calc.reqCapital)} sub={`@${swrPctForScenario}% SWR`} />
             <KpiCard label="Current Investable" value={formatCurrency(calc.currentInvestable)} color="hsl(142,60%,45%)" />
             <KpiCard label="Capital Gap" value={formatCurrency(calc.gap)} color="hsl(0,72%,51%)" />
             <KpiCard label="Monthly Surplus" value={formatCurrency(calc.monthlySaving)} />
@@ -1733,12 +1748,33 @@ function PropertyExpansion({ snap }: { snap: Record<string, number> }) {
 
 function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, number>; stocks: any[]; crypto: any[] }) {
   const [currentAge, setCurrentAge] = useState(36);
-  // Sprint 20 PR-F1 fix-up #2: target retirement age and target monthly
-  // passive income live exclusively on /financial-plan#fire-goal. Defaults
-  // here preserve prior scenario behavior; edits flow through the canonical
-  // FireGoalPanel.
-  const targetAge = 55;
-  const targetPassive = 8000;
+  // Sprint 20 PR-F1 fix-up #3 (W2 Path A) — target retirement age and target
+  // monthly passive income live exclusively on /financial-plan#fire-goal.
+  // This surface READS the canonical settings through useFireSettingsRow()
+  // instead of using bare hardcoded constants, so the "reflects those
+  // settings" copy below is literally true.
+  const { normalized: fireSettings } = useFireSettingsRow();
+  const canonicalTargetAge = fireSettings.targetFireAge;
+  const canonicalTargetPassive = fireSettings.targetPassiveMonthly;
+  const canonicalPredictorSwrPct = fireSettings.swrPct;
+  // Fallbacks only when the canonical goal has never been saved (goalsSet=false).
+  // Named constants — these are NOT the live values; live values are the hook reads above.
+  const RETIREMENT_PREDICTOR_FALLBACK_TARGET_AGE = 55;
+  const RETIREMENT_PREDICTOR_FALLBACK_PASSIVE_MONTHLY = 8_000;
+  const RETIREMENT_PREDICTOR_FALLBACK_SWR_PCT = 4;
+  const targetAgeForScenario =
+    canonicalTargetAge != null && canonicalTargetAge > 0
+      ? canonicalTargetAge
+      : RETIREMENT_PREDICTOR_FALLBACK_TARGET_AGE;
+  const targetPassiveForScenario =
+    canonicalTargetPassive != null && canonicalTargetPassive > 0
+      ? canonicalTargetPassive
+      : RETIREMENT_PREDICTOR_FALLBACK_PASSIVE_MONTHLY;
+  const predictorSwrPctForScenario =
+    canonicalPredictorSwrPct != null && canonicalPredictorSwrPct > 0
+      ? canonicalPredictorSwrPct
+      : RETIREMENT_PREDICTOR_FALLBACK_SWR_PCT;
+  const predictorSwrFraction = predictorSwrPctForScenario / 100;
   const [expectedReturn, setExpectedReturn] = useState(7);
 
   const stocksVal = stocks.reduce((s: number, st: any) => s + safeNum(st.current_holding) * safeNum(st.current_price), 0);
@@ -1754,7 +1790,7 @@ function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, nu
     cryptoVal;
 
   const monthlySurplus = safeNum(snap.monthly_income) - safeNum(snap.monthly_expenses);
-  const targetCapital = (targetPassive * 12) / 0.04;
+  const targetCapital = (targetPassiveForScenario * 12) / predictorSwrFraction;
 
   const scenarios = useMemo(() => {
     const defs = [
@@ -1782,16 +1818,16 @@ function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, nu
           portfolio += 750000 * Math.pow(1.06, 10) - 600000 * 0.5; // rough IP equity
         }
 
-        const passiveFromPortfolio = portfolio * 0.04 / 12;
+        const passiveFromPortfolio = portfolio * predictorSwrFraction / 12;
         chartData.push({ age, value: Math.round(portfolio) });
 
-        if (fireAge === 80 && passiveFromPortfolio >= targetPassive) {
+        if (fireAge === 80 && passiveFromPortfolio >= targetPassiveForScenario) {
           fireAge = age;
         }
       }
 
-      const nwAtTarget = chartData.find((d) => d.age === targetAge)?.value || 0;
-      const gapToTarget = fireAge - targetAge;
+      const nwAtTarget = chartData.find((d) => d.age === targetAgeForScenario)?.value || 0;
+      const gapToTarget = fireAge - targetAgeForScenario;
 
       return {
         ...s,
@@ -1801,7 +1837,7 @@ function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, nu
         chartData,
       };
     });
-  }, [snap, stocks, crypto, currentAge, targetAge, targetPassive, expectedReturn, investableAssets, monthlySurplus]);
+  }, [snap, stocks, crypto, currentAge, targetAgeForScenario, targetPassiveForScenario, predictorSwrFraction, expectedReturn, investableAssets, monthlySurplus]);
 
   // Merge chart data
   const merged = useMemo(() => {
@@ -1820,14 +1856,14 @@ function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, nu
 
   // Monthly needed to hit target age
   const requiredMonthly = useMemo(() => {
-    const targetMonths = (targetAge - currentAge) * 12;
+    const targetMonths = (targetAgeForScenario - currentAge) * 12;
     if (targetMonths <= 0) return 0;
     const mr = expectedReturn / 100 / 12;
     if (mr === 0) return (targetCapital - investableAssets) / targetMonths;
     const fvFactor = (Math.pow(1 + mr, targetMonths) - 1) / mr;
     const pvGrowth = investableAssets * Math.pow(1 + mr, targetMonths);
     return Math.max(0, (targetCapital - pvGrowth) / fvFactor);
-  }, [targetAge, currentAge, expectedReturn, targetCapital, investableAssets]);
+  }, [targetAgeForScenario, currentAge, expectedReturn, targetCapital, investableAssets]);
 
   return (
     <div className="space-y-6">
@@ -1871,7 +1907,7 @@ function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, nu
         <KpiCard label="Investable Assets" value={formatCurrency(investableAssets)} />
         <KpiCard label="FIRE capital required" value={formatCurrency(targetCapital)} sub="from canonical FIRE goal" />
         <KpiCard label="Monthly Surplus" value={formatCurrency(monthlySurplus)} />
-        <KpiCard label="Monthly Needed" value={formatCurrency(requiredMonthly)} sub={`to retire at ${targetAge}`} color="hsl(43,85%,55%)" />
+        <KpiCard label="Monthly Needed" value={formatCurrency(requiredMonthly)} sub={`to retire at ${targetAgeForScenario}`} color="hsl(43,85%,55%)" />
       </div>
 
       {/* Scenario cards */}
@@ -1899,7 +1935,7 @@ function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, nu
             >
               {s.gapToTarget <= 0 ? "✓ On Track" : "⚠ Adjust Plan"}
             </div>
-            <p className="text-xs text-muted-foreground">NW at age {targetAge}: {formatCurrency(s.nwAtTarget)}</p>
+            <p className="text-xs text-muted-foreground">NW at age {targetAgeForScenario}: {formatCurrency(s.nwAtTarget)}</p>
           </div>
         ))}
       </div>
@@ -1917,7 +1953,7 @@ function RetirementPredictor({ snap, stocks, crypto }: { snap: Record<string, nu
               formatter={(v: number) => [`$${v}k`, ""]}
             />
             <Legend />
-            <ReferenceLine x={targetAge} stroke="hsl(43,85%,55%)" strokeDasharray="4 4" label={{ value: `Target ${targetAge}`, fill: "hsl(43,85%,55%)", fontSize: 10 }} />
+            <ReferenceLine x={targetAgeForScenario} stroke="hsl(43,85%,55%)" strokeDasharray="4 4" label={{ value: `Target ${targetAgeForScenario}`, fill: "hsl(43,85%,55%)", fontSize: 10 }} />
             {scenarios.map((s) => (
               <Line key={s.label} type="monotone" dataKey={s.label} stroke={s.color} strokeWidth={2} dot={false} />
             ))}
