@@ -178,30 +178,56 @@ export async function runFireGoalMigration(args: {
 export { MIGRATED_FLAG_KEY };
 
 /**
- * Sprint 20 PR-F1 — map a CanonicalFireGoal (legacy interface that still backs
- * the in-flight Sprint 20 PR-A reader/writer) onto the canonical
- * CanonicalFireTarget shape consumed by F1+ engines.
+ * Sprint 20 PR-F1 — map a CanonicalFireGoal (legacy alias that still backs the
+ * Sprint 20 PR-A reader/writer) onto the canonical CanonicalFireTarget shape
+ * consumed by F1+ engines.
  *
- * The output is deliberately minimal: only the two primary fields, plus an
- * advanced.safeWithdrawalRateOverride when the user has saved an explicit
- * percentage. The advanced fields targetNetWorth / minLiquidityBufferMonths /
- * maxRiskTolerance are NOT stored in mc_fire_settings yet — they live on the
- * in-memory canonical target so F1's UI can edit them; F2/F3 will add their
- * persistence path when those engines come online.
+ * PR-F1 fix-up (defect 3): the full advanced bundle (targetNetWorth,
+ * minLiquidityBufferMonths, maxRiskTolerance) now round-trips through the
+ * canonical storage path (mc_fire_settings.action_checklist.__advanced_fire),
+ * so when the legacy alias carries `advanced.*`, those values flow through to
+ * the canonical target untouched.
  */
 export function toCanonicalFireTarget(
   goal: CanonicalFireGoal,
 ): CanonicalFireTarget {
-  const advancedSwr =
-    Number.isFinite(goal.swrOverride) && (goal.swrOverride as number) > 0
-      ? (goal.swrOverride as number) / 100
-      : undefined;
   const target: CanonicalFireTarget = {
     targetFireYear: goal.targetFireYear,
     targetPassiveIncomeMonthly: goal.targetMonthlyPassiveIncome,
   };
-  if (advancedSwr !== undefined) {
-    target.advanced = { safeWithdrawalRateOverride: advancedSwr };
+  const advanced: NonNullable<CanonicalFireTarget["advanced"]> = {};
+  if (Number.isFinite(goal.swrOverride) && (goal.swrOverride as number) > 0) {
+    advanced.safeWithdrawalRateOverride = (goal.swrOverride as number) / 100;
+  }
+  if (goal.advanced) {
+    if (
+      goal.advanced.safeWithdrawalRateOverride !== undefined &&
+      Number.isFinite(goal.advanced.safeWithdrawalRateOverride) &&
+      (goal.advanced.safeWithdrawalRateOverride as number) > 0
+    ) {
+      // Decimal form already; mirror it onto the target.
+      advanced.safeWithdrawalRateOverride = goal.advanced.safeWithdrawalRateOverride;
+    }
+    if (
+      goal.advanced.targetNetWorth !== undefined &&
+      Number.isFinite(goal.advanced.targetNetWorth) &&
+      (goal.advanced.targetNetWorth as number) > 0
+    ) {
+      advanced.targetNetWorth = goal.advanced.targetNetWorth;
+    }
+    if (
+      goal.advanced.minLiquidityBufferMonths !== undefined &&
+      Number.isFinite(goal.advanced.minLiquidityBufferMonths) &&
+      (goal.advanced.minLiquidityBufferMonths as number) >= 0
+    ) {
+      advanced.minLiquidityBufferMonths = goal.advanced.minLiquidityBufferMonths;
+    }
+    if (goal.advanced.maxRiskTolerance) {
+      advanced.maxRiskTolerance = goal.advanced.maxRiskTolerance;
+    }
+  }
+  if (Object.keys(advanced).length > 0) {
+    target.advanced = advanced;
   }
   return target;
 }
