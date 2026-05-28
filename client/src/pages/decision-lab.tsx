@@ -46,6 +46,7 @@ import { formatCurrency } from "@/lib/finance";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Scale, Target, PieChart } from "lucide-react";
+import { CanonicalMoveRankingPanel } from "@/components/canonicalMove/CanonicalMoveRankingPanel";
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Local helpers                                                              */
@@ -336,6 +337,7 @@ export default function DecisionLabPage() {
       <DecisionEngineSummary />
       <GoalClosureSummary ledger={canonicalLedger} />
       <PortfolioLabSummary ledger={canonicalLedger} />
+      <CanonicalMoveRankingPanel />
     </div>
   );
 }

@@ -22,6 +22,7 @@
 
 import SaveButton from "@/components/SaveButton";
 import AssumptionsPanel from "@/components/AssumptionsPanel";
+import { CanonicalMoveRankingPanel } from "@/components/canonicalMove/CanonicalMoveRankingPanel";
 import RiskRadarPage from "./risk-radar";
 import FIREPathPage from "./fire-path";
 import MonteCarloDashboard from "@/components/MonteCarloDashboard";
@@ -4126,6 +4127,7 @@ export default function WealthStrategyPage() {
         </div>
 
         <AssumptionsPanel mode="compact" />
+        <CanonicalMoveRankingPanel />
       </div>
     </div>
   );
