@@ -9,6 +9,7 @@
     "build:client": "vite build",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "test": "tsx script/run-tests.ts",
     "test:property-lifecycle-persistence": "tsx script/test-property-lifecycle-persistence.ts",
     "test:property-lifecycle-audit": "tsx script/test-property-lifecycle-audit.ts",
     "test:sprint-2c-property-lifecycle": "tsx script/test-sprint2c-property-lifecycle.ts",
