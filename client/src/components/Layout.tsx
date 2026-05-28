@@ -33,51 +33,32 @@ import {
 } from "lucide-react";
 
 // ─── Navigation Structure ─────────────────────────────────────────────────────
-// Each step maps to a life stage in the wealth-building journey.
-
-// FWL Phase 7 (polish) — Unified visible journey across sidebar + animated
-// dashboard timeline. Canonical labels are TODAY / PLAN / FUTURE / MOVE.
-// The internal terms (Snapshot / Strategy / Forecast / Action) survive as
-// sublabels so the routing taxonomy stays stable and discoverable.
-//   TODAY  · Snapshot  — Where am I now?
-//   PLAN   · Strategy  — What is my financial plan?
-//   FUTURE · Forecast  — Where am I heading?
-//   MOVE   · Action    — What should I do next?
-// The Decision Engine sits in MOVE because it drives the weekly action queue.
-// Sprint 14 — IA reorganisation. Nav items now carry a `depth` (0 | 1 | 2)
-// for visual indent so the renderer at L346+ can show nested hierarchy
-// without restructuring its iteration shape (smallest-diff extension).
-// Sprint 20 PR-E — A NavItem can also be a pure expandable group header
-// (kind: "group"): no href, the whole row toggles expand/collapse, no
-// active-page highlight. groupId binds it to the open-state map.
+// Sprint 20 PR-H — Sidebar flattened to exactly 4 top-level expandable groups:
+// TODAY, PLAN, FORECAST, MOVE. No nested accordion parents anywhere. Every
+// child is a direct <Link>; clicking a child navigates only, never toggles.
+// The 4 top-level groups are the ONLY expandable items in the sidebar.
 type NavItem = {
   href: string;
   label: string;
   icon: typeof LayoutDashboard;
   adminOnly: boolean;
   requiredPermission?: Permission;
-  /** 0 = top-level, 1 = child, 2 = grandchild (visual indent only) */
-  depth?: 0 | 1 | 2;
-  /** "link" (default) renders <Link>; "group" renders a non-routing expandable header */
-  kind?: "link" | "group";
-  /** Identifier used to look up expanded state for "group" items */
-  groupId?: string;
+  /** Visual indent (0 = top-level, 1 = child). Used only in SECONDARY/SYSTEM
+   *  to nest sub-rows under their parent surface. The 4 top-level workflow
+   *  groups are flat — no child here ever sets depth > 0. */
+  depth?: 0 | 1;
 };
 
 const NAV_STEPS: Array<{
   id: string;
   step: number;
   label: string;
-  sublabel: string;
-  badgeClass: string;
   items: NavItem[];
 }> = [
   {
-    id: "snapshot",
+    id: "today",
     step: 1,
-    label: "Today",
-    sublabel: "Snapshot · Where am I now",
-    badgeClass: "step-1",
+    label: "TODAY",
     items: [
       { href: "/dashboard",       label: "Executive Overview",  icon: LayoutDashboard, adminOnly: false },
       { href: "/expenses",        label: "Income & Expenses",   icon: DollarSign,      adminOnly: false },
@@ -86,63 +67,37 @@ const NAV_STEPS: Array<{
     ],
   },
   {
-    id: "strategy",
+    id: "plan",
     step: 2,
-    label: "Plan",
-    sublabel: "Strategy · What is my plan",
-    badgeClass: "step-2",
+    label: "PLAN",
     items: [
       { href: "/financial-plan",  label: "Family Plan",         icon: ClipboardList,   adminOnly: false },
-      // Sprint 20 PR-E — Wealth Strategy is a pure expandable group header
-      // (no route, whole row toggles). The previous /wealth-strategy page is
-      // preserved as a redirect to /property in App.tsx.
-      { href: "",                 label: "Wealth Strategy",     icon: Briefcase,       adminOnly: false, kind: "group", groupId: "wealthStrategy" },
-      { href: "/property",        label: "Property",            icon: Home,            adminOnly: false, depth: 1 },
-      { href: "/stocks",          label: "Stocks",              icon: BarChart2,       adminOnly: false, depth: 1 },
-      { href: "/crypto",          label: "Crypto",              icon: Bitcoin,         adminOnly: false, depth: 1 },
-      { href: "/debt-strategy",   label: "Debt Strategy",       icon: CreditCard,      adminOnly: false, depth: 1 },
-      // Sprint 20 PR-E — Tax Strategy is a pure expandable group header
-      // sitting at depth 1 (nested under Wealth Strategy). Itself parents
-      // CGT Simulator at depth 2. /tax-strategy redirects to /cgt-simulator.
-      { href: "",                 label: "Tax Strategy",        icon: Calculator,      adminOnly: false, depth: 1, kind: "group", groupId: "taxStrategy" },
-      { href: "/cgt-simulator",   label: "CGT Simulator",       icon: BarChart2,       adminOnly: false, depth: 2 },
+      { href: "/wealth-strategy", label: "Wealth Strategy",     icon: Briefcase,       adminOnly: false },
+      { href: "/property",        label: "Property",            icon: Home,            adminOnly: false },
+      { href: "/stocks",          label: "Stocks",              icon: BarChart2,       adminOnly: false },
+      { href: "/crypto",          label: "Crypto",              icon: Bitcoin,         adminOnly: false },
+      { href: "/debt-strategy",   label: "Debt Strategy",       icon: CreditCard,      adminOnly: false },
+      { href: "/tax-strategy",    label: "Tax Strategy",        icon: Calculator,      adminOnly: false },
+      { href: "/cgt-simulator",   label: "CGT Simulator",       icon: BarChart2,       adminOnly: false },
     ],
   },
   {
     id: "forecast",
     step: 3,
-    label: "Future",
-    sublabel: "Forecast · Where am I heading",
-    badgeClass: "step-3",
+    label: "FORECAST",
     items: [
-      { href: "/timeline",                    label: "Net Worth Timeline", icon: TrendingUp,   adminOnly: false },
-      // Sprint 20 PR-E — Forecast Engine is a pure expandable group header.
-      // /ai-forecast-engine redirects to /scenario-compare in App.tsx.
-      { href: "",                             label: "Forecast Engine",    icon: Sigma,        adminOnly: false, kind: "group", groupId: "forecastEngine" },
-      { href: "/scenario-compare",            label: "Scenario Compare",   icon: FlaskConical, adminOnly: false, depth: 1 },
+      { href: "/timeline",            label: "Net Worth Timeline", icon: TrendingUp,   adminOnly: false },
+      { href: "/ai-forecast-engine",  label: "Forecast Engine",    icon: Sigma,        adminOnly: false },
+      { href: "/scenario-compare",    label: "Scenario Compare",   icon: FlaskConical, adminOnly: false },
     ],
   },
   {
-    id: "action",
+    id: "move",
     step: 4,
-    label: "Move",
-    sublabel: "Action · What should I do next",
-    badgeClass: "step-4",
+    label: "MOVE",
     items: [
-      // Sprint 14 — Action Plan is the unified MOVE shell, kept lean
-      // (plain-English, ~1.85 mobile scrolls, no embedded heavy compute).
-      //
-      // Sprint 14.3 — Decision Lab is the summary-first hub over the three
-      // deeper analytical pages (/decision, /goal-closure-lab, /portfolio-lab).
-      // Sprint 20 PR-F1 — those three pages no longer host any FIRE-target
-      // editor (the "Set Your Targets" and "Goal Reverse Engineering" duplicate
-      // surfaces were hard-deleted). They stay reachable for non-FIRE content
-      // (scenario compare, portfolio frontier, decision narrative); the
-      // canonical FIRE Goal editor is the panel on /financial-plan#fire-goal.
-      // Standalone legacy aliases (/fire-goal-reverse, /goal-solver-pro)
-      // redirect to that canonical surface — see App.tsx.
-      { href: "/action-plan",    label: "Action Plan",         icon: ClipboardCheck,  adminOnly: false },
-      { href: "/decision-lab",   label: "Decision Lab",        icon: Beaker,          adminOnly: false },
+      { href: "/action-plan",  label: "Action Plan",  icon: ClipboardCheck, adminOnly: false },
+      { href: "/decision-lab", label: "Decision Lab", icon: Beaker,         adminOnly: false },
     ],
   },
 ];
@@ -276,13 +231,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const seeItem = (item: { adminOnly: boolean; requiredPermission?: Permission }) =>
     canSeeItem(item, isAdmin, hasPermission);
 
-  // Sprint 20 PR-D — Default sidebar state: only TODAY (snapshot) expanded on
-  // first load. PLAN / FUTURE / MOVE all collapsed. Persisted to localStorage
-  // so the user's manual toggles survive refresh. A never-visited user always
-  // starts with only TODAY open.
+  // Sprint 20 PR-H — Sidebar IA flatten. All 4 top-level groups start
+  // COLLAPSED on a fresh load (including TODAY, even though Executive Overview
+  // is the landing page — this is explicit per the user). Persisted to
+  // localStorage so user toggles survive refresh. The 4 groups are the ONLY
+  // expandable items in the sidebar; no nested accordion parents remain.
   const SECTION_NAV_KEY = "fwl.nav.sections.open";
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
-    const initial = { snapshot: true, strategy: false, forecast: false, action: false };
+    const initial: Record<string, boolean> = {
+      today: false,
+      plan: false,
+      forecast: false,
+      move: false,
+    };
     if (typeof window === "undefined") return initial;
     try {
       const raw = window.localStorage.getItem(SECTION_NAV_KEY);
@@ -293,61 +254,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       return initial;
     }
   });
-
-  // Sprint 20 PR-E — Unified expansion state for the three pure parent group
-  // headers (Wealth Strategy, Forecast Engine, Tax Strategy). Each is keyed
-  // by `groupId`. Persisted to localStorage. Default collapsed; the renderer
-  // auto-reveals a group when one of its children is the active route, but
-  // a user's explicit collapse still takes precedence for the current route
-  // (effective open = persisted toggle OR active-child).
-  const GROUPS_NAV_KEY = "fwl.nav.groups.open";
-  const WEALTH_CHILD_HREFS = ["/property", "/stocks", "/crypto", "/debt-strategy", "/cgt-simulator"];
-  const TAX_CHILD_HREFS = ["/cgt-simulator"];
-  const FORECAST_CHILD_HREFS = ["/scenario-compare"];
-  const isWealthChildRoute = WEALTH_CHILD_HREFS.some(h => isPathActive(h, location));
-  const isTaxChildRoute = TAX_CHILD_HREFS.some(h => isPathActive(h, location));
-  const isForecastChildRoute = FORECAST_CHILD_HREFS.some(h => isPathActive(h, location));
-
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
-    const initial: Record<string, boolean> = {
-      wealthStrategy: false,
-      forecastEngine: false,
-      taxStrategy: false,
-    };
-    if (typeof window === "undefined") return initial;
-    try {
-      const raw = window.localStorage.getItem(GROUPS_NAV_KEY);
-      if (raw === null) return initial;
-      const parsed = JSON.parse(raw) as Record<string, boolean>;
-      return { ...initial, ...parsed };
-    } catch {
-      return initial;
-    }
-  });
-  const toggleGroup = (id: string) => {
-    setOpenGroups(prev => {
-      const next = { ...prev, [id]: !prev[id] };
-      if (typeof window !== "undefined") {
-        try { window.localStorage.setItem(GROUPS_NAV_KEY, JSON.stringify(next)); } catch { /* no-op */ }
-      }
-      return next;
-    });
-  };
-
-  // Effective expansion = explicit toggle OR active-child route. This
-  // mirrors PR-D's pattern so the active child highlight is always visible
-  // on a fresh tab, while still letting the user collapse the group
-  // explicitly (the toggle simply flips the persisted boolean — the
-  // active-child OR overrides it for the active route, which is desirable:
-  // collapsing a group whose child you're standing on doesn't hide your
-  // current location).
-  const wealthEffectiveOpen = openGroups.wealthStrategy || isWealthChildRoute;
-  const taxEffectiveOpen = openGroups.taxStrategy || isTaxChildRoute;
-  const forecastEffectiveOpen = openGroups.forecastEngine || isForecastChildRoute;
-
-  // Sprint 20 PR-D — Removed route-driven auto-expand. Section open state is
-  // user-controlled only; visiting a route inside a section no longer pops it
-  // open. The state still persists across reloads via localStorage.
 
   const toggleSection = (id: string) => {
     setOpenSections(prev => {
@@ -373,16 +279,22 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // Step accent colors for active section headers
   const stepColors: Record<string, string> = {
-    snapshot: "hsl(var(--intelligence-light))",
-    strategy: "hsl(var(--gold-light))",
+    today:    "hsl(var(--intelligence-light))",
+    plan:     "hsl(var(--gold-light))",
     forecast: "hsl(var(--forecast-light))",
-    action:   "hsl(var(--success-light))",
+    move:     "hsl(var(--success-light))",
   };
   const stepBorderColors: Record<string, string> = {
-    snapshot: "hsl(var(--intelligence))",
-    strategy: "hsl(var(--gold))",
+    today:    "hsl(var(--intelligence))",
+    plan:     "hsl(var(--gold))",
     forecast: "hsl(var(--forecast))",
-    action:   "hsl(var(--success))",
+    move:     "hsl(var(--success))",
+  };
+  const stepSurfaceVar: Record<string, string> = {
+    today:    "intelligence",
+    plan:     "gold",
+    forecast: "forecast",
+    move:     "success",
   };
 
   // ─── Sidebar scroll preservation ───────────────────────────────────────────
@@ -467,7 +379,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
           return (
             <div key={stepDef.id} className="relative">
-              {/* Section header */}
+              {/* Group header — toggles expand/collapse only; never navigates.
+                  Sprint 20 PR-H: the 4 top-level groups (TODAY / PLAN /
+                  FORECAST / MOVE) are the only expandable items in the
+                  sidebar; all children are direct links. */}
               <button
                 className="nav-section-header"
                 style={isActiveSection ? { color: accentColor } : {}}
@@ -476,12 +391,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 aria-expanded={isOpen}
               >
                 <div className="flex items-center gap-2">
-                  {/* Step number badge */}
                   <span
                     className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0"
                     style={{
                       background: isActiveSection
-                        ? `hsl(var(--${stepDef.id === "snapshot" ? "intelligence" : stepDef.id === "strategy" ? "gold" : stepDef.id === "forecast" ? "forecast" : "success"}-surface))`
+                        ? `hsl(var(--${stepSurfaceVar[stepDef.id]}-surface))`
                         : "hsl(var(--muted))",
                       color: isActiveSection ? accentColor : "hsl(var(--muted-foreground))",
                     }}
@@ -491,18 +405,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <div className="text-left leading-none">
                     <span className="block text-[11px] font-bold uppercase tracking-widest">
                       {stepDef.label}
-                    </span>
-                    {/* FWL Phase 7 polish — always show the canonical
-                        sublabel (Snapshot / Strategy / Forecast / Action) so
-                        the journey mapping is visible everywhere. */}
-                    <span
-                      className="block text-[9px] font-medium uppercase tracking-wider mt-0.5"
-                      style={{
-                        color: isActiveSection ? accentColor : "hsl(var(--muted-foreground))",
-                        opacity: isActiveSection ? 0.8 : 0.55,
-                      }}
-                    >
-                      {stepDef.sublabel}
                     </span>
                   </div>
                 </div>
@@ -515,10 +417,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 />
               </button>
 
-              {/* Section items */}
+              {/* Direct-link children — no nested toggles. */}
               {isOpen && (
                 <div className="mt-0.5 space-y-0.5 pb-1">
-                  {/* Vertical step line */}
                   <div
                     className="absolute left-[18px] top-9 w-px"
                     style={{
@@ -528,214 +429,31 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         : "hsl(var(--border))",
                     }}
                   />
-                  {/* Sprint 14 visual-hierarchy refinement — render items so
-                      contiguous depth>=1 runs are wrapped in a left-border
-                      "tree branch" element that visually ties children to
-                      the preceding depth=0 parent. Same render path is used
-                      on desktop and mobile (the sidebar is one component). */}
-                  {(() => {
-                    // Sprint 20 PR-E — Three group-header IDs.
-                    const groupEffectiveOpen: Record<string, boolean> = {
-                      wealthStrategy: wealthEffectiveOpen,
-                      taxStrategy: taxEffectiveOpen,
-                      forecastEngine: forecastEffectiveOpen,
-                    };
-                    const groupHasActiveChild: Record<string, boolean> = {
-                      wealthStrategy: isWealthChildRoute,
-                      taxStrategy: isTaxChildRoute,
-                      forecastEngine: isForecastChildRoute,
-                    };
-
-                    // Sprint 20 PR-E — Pure group header row. NOT a route, no
-                    // `href`, no active-page highlight. The whole row toggles
-                    // expand/collapse (button covers the full row width).
-                    const renderGroupHeader = (item: NavItem) => {
-                      const { label, icon: Icon, groupId } = item;
-                      const depth = item.depth ?? 0;
-                      if (!groupId) return null;
-                      const expanded = !!groupEffectiveOpen[groupId];
-                      const hasActiveChild = !!groupHasActiveChild[groupId];
-                      const slug = label.toLowerCase().replace(/\s+/g, "-");
-                      return (
-                        <button
-                          key={`group-${groupId}`}
-                          type="button"
-                          onClick={() => toggleGroup(groupId)}
-                          aria-expanded={expanded}
-                          aria-controls={`nav-${slug}-children`}
-                          aria-label={
-                            expanded ? `Collapse ${label}` : `Expand ${label}`
-                          }
-                          data-testid={`nav-${slug}-toggle`}
-                          className={`nav-group-header${hasActiveChild ? " has-active-child" : ""}`}
-                          style={depth > 0 ? { paddingLeft: `${0.75 + depth * 1.5}rem` } : undefined}
-                        >
-                          <Icon className="nav-item-icon" />
-                          <span className={depth > 0 ? "text-[12px]" : "text-[13px]"}>
-                            {label}
-                          </span>
-                          <ChevronDown
-                            className="w-3.5 h-3.5 ml-auto shrink-0 transition-transform duration-200"
-                            style={{
-                              transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
-                              color: hasActiveChild
-                                ? "hsl(var(--foreground))"
-                                : "hsl(var(--muted-foreground))",
-                            }}
+                  {visibleItems.map((item) => {
+                    const { href, label, icon: Icon } = item;
+                    const active = isPathActive(href, location);
+                    return (
+                      <Link
+                        key={href}
+                        href={href}
+                        onClick={() => setMobileOpen(false)}
+                        data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
+                        className={`nav-item${active ? " active" : ""}`}
+                      >
+                        <Icon
+                          className="nav-item-icon"
+                          style={active ? { color: accentColor } : {}}
+                        />
+                        <span className="text-[13px]">{label}</span>
+                        {active && (
+                          <ChevronRight
+                            className="w-3 h-3 ml-auto shrink-0"
+                            style={{ color: accentColor }}
                           />
-                        </button>
-                      );
-                    };
-
-                    const renderLinkItem = (item: NavItem) => {
-                      const { href, label, icon: Icon } = item;
-                      const depth = item.depth ?? 0;
-                      const active = isPathActive(href, location);
-                      const isChild = depth > 0;
-                      const childTextClass =
-                        isChild && !active ? " text-muted-foreground" : "";
-                      return (
-                        <Link
-                          key={href}
-                          href={href}
-                          onClick={() => setMobileOpen(false)}
-                          data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
-                          className={`nav-item${active ? " active" : ""}`}
-                          style={isChild ? { paddingLeft: `${0.75 + depth * 1.5}rem` } : undefined}
-                        >
-                          <Icon
-                            className="nav-item-icon"
-                            style={{
-                              ...(active ? { color: accentColor } : {}),
-                              ...(isChild && !active ? { opacity: 0.7 } : {}),
-                            }}
-                          />
-                          <span className={`${isChild ? "text-[12px]" : "text-[13px]"}${childTextClass}`}>
-                            {label}
-                          </span>
-                          {active && (
-                            <ChevronRight
-                              className="w-3 h-3 ml-auto shrink-0"
-                              style={{ color: accentColor }}
-                            />
-                          )}
-                        </Link>
-                      );
-                    };
-
-                    const renderItem = (item: NavItem) =>
-                      item.kind === "group" ? renderGroupHeader(item) : renderLinkItem(item);
-
-                    // Sprint 20 PR-E — Walk visibleItems and emit:
-                    //   • depth-0 link → flat in `out`
-                    //   • depth-0 group header → flat; the following depth>=1
-                    //     contiguous run becomes its child-group div, gated
-                    //     on its effective-open state.
-                    //   • depth-1 group header (Tax Strategy) → rendered as
-                    //     part of its parent's depth>=1 child run; its
-                    //     depth-2 children form a nested child-group div.
-                    const groupForItem = (it: NavItem | undefined): string | null =>
-                      it && it.kind === "group" && it.groupId ? it.groupId : null;
-
-                    const out: React.ReactNode[] = [];
-                    let i = 0;
-                    let lastDepth0Group: string | null = null;
-                    while (i < visibleItems.length) {
-                      const item = visibleItems[i];
-                      const depth = item.depth ?? 0;
-                      if (depth === 0) {
-                        out.push(renderItem(item));
-                        lastDepth0Group = groupForItem(item);
-                        i++;
-                      } else {
-                        // Collect contiguous depth>=1 items.
-                        const group: NavItem[] = [];
-                        while (
-                          i < visibleItems.length &&
-                          (visibleItems[i].depth ?? 0) > 0
-                        ) {
-                          group.push(visibleItems[i]);
-                          i++;
-                        }
-                        // Gate this child run on the preceding depth-0
-                        // parent's expansion (only meaningful when the
-                        // depth-0 sibling is a group header).
-                        if (lastDepth0Group && !groupEffectiveOpen[lastDepth0Group]) {
-                          continue;
-                        }
-                        const wrapperId = lastDepth0Group
-                          ? `nav-${lastDepth0Group
-                              .replace(/([A-Z])/g, "-$1")
-                              .toLowerCase()}-children`
-                          : undefined;
-                        // Inside this child run, render items sequentially.
-                        // If an item is itself a depth-1 group header (Tax
-                        // Strategy), the subsequent depth-2 run is wrapped
-                        // in a nested child-group div gated on that group's
-                        // expansion state.
-                        const children: React.ReactNode[] = [];
-                        let j = 0;
-                        let lastDepth1Group: string | null = null;
-                        while (j < group.length) {
-                          const g = group[j];
-                          const gDepth = g.depth ?? 0;
-                          if (gDepth === 1) {
-                            children.push(renderItem(g));
-                            lastDepth1Group = groupForItem(g);
-                            j++;
-                          } else {
-                            // depth === 2 — collect contiguous depth-2 run
-                            const sub: NavItem[] = [];
-                            while (j < group.length && (group[j].depth ?? 0) >= 2) {
-                              sub.push(group[j]);
-                              j++;
-                            }
-                            if (lastDepth1Group && !groupEffectiveOpen[lastDepth1Group]) {
-                              continue;
-                            }
-                            const subId = lastDepth1Group
-                              ? `nav-${lastDepth1Group
-                                  .replace(/([A-Z])/g, "-$1")
-                                  .toLowerCase()}-children`
-                              : undefined;
-                            children.push(
-                              <div
-                                key={`child-group-${sub[0].href || sub[0].label}`}
-                                id={subId}
-                                className="my-1 ml-4 pl-1 py-1 space-y-0.5 rounded-r-md bg-muted/20"
-                                style={{
-                                  borderLeft: `1px solid ${
-                                    isActiveSection
-                                      ? `${borderColor}40`
-                                      : "hsl(var(--border) / 0.7)"
-                                  }`,
-                                }}
-                              >
-                                {sub.map(renderItem)}
-                              </div>,
-                            );
-                          }
-                        }
-                        out.push(
-                          <div
-                            key={`child-group-${group[0].href || group[0].label}`}
-                            id={wrapperId}
-                            className="my-2 ml-4 pl-1 py-1.5 space-y-0.5 rounded-r-md bg-muted/30"
-                            style={{
-                              borderLeft: `1px solid ${
-                                isActiveSection
-                                  ? `${borderColor}60`
-                                  : "hsl(var(--border))"
-                              }`,
-                            }}
-                          >
-                            {children}
-                          </div>,
-                        );
-                      }
-                    }
-                    return out;
-                  })()}
+                        )}
+                      </Link>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1134,18 +852,18 @@ function TopBarBreadcrumb({ location, isAdmin }: { location: string; isAdmin: bo
       stepLabel = "Support";
       pageLabel = supportMatch.label;
     } else {
-      stepLabel = "Today";
+      stepLabel = "TODAY";
       pageLabel = "Overview";
     }
   }
 
-  // FWL Phase 7 polish — keyed by the new canonical visible labels.
+  // Sprint 20 PR-H — keyed by the flat 4-group uppercase labels.
   const stepColorMap: Record<string, string> = {
-    Today:   "hsl(var(--intelligence-light))",
-    Plan:    "hsl(var(--gold-light))",
-    Future:  "hsl(var(--forecast-light))",
-    Move:    "hsl(var(--success-light))",
-    Support: "hsl(var(--muted-foreground))",
+    TODAY:    "hsl(var(--intelligence-light))",
+    PLAN:     "hsl(var(--gold-light))",
+    FORECAST: "hsl(var(--forecast-light))",
+    MOVE:     "hsl(var(--success-light))",
+    Support:  "hsl(var(--muted-foreground))",
   };
 
   return (
