@@ -378,6 +378,28 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
   const noPlan = !plan;
   const noFeasible = !!plan && !plan.hasFeasibleScenario;
 
+  // Sprint 25 #2 — Run-plan loading feedback.
+  // We drive a fake 4-step progress reel while `isRunning` is true so the user
+  // always sees the system working. When `isRunning` transitions true→false we
+  // briefly hold a "complete" state, then smoothly scroll to the recommendation.
+  const [showComplete, setShowComplete] = React.useState(false);
+  const wasRunning = React.useRef(false);
+  const recommendedRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (wasRunning.current && !isRunning && !error) {
+      setShowComplete(true);
+      const t = setTimeout(() => {
+        setShowComplete(false);
+        // Smoothly bring the recommended card into view once available.
+        recommendedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 1100);
+      wasRunning.current = false;
+      return () => clearTimeout(t);
+    }
+    if (isRunning) wasRunning.current = true;
+  }, [isRunning, error]);
+
   return (
     <section
       data-testid="dl-section-goal-lab-plan"
@@ -418,9 +440,10 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
             disabled={isRunning}
             data-testid="dl-goal-lab-run"
             className="gap-1.5"
+            aria-busy={isRunning}
           >
             {isRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            {plan ? "Re-run plan" : "Run plan"}
+            {isRunning ? "Running analysis…" : plan ? "Re-run plan" : "Run plan"}
           </Button>
         </div>
       </header>
@@ -432,6 +455,18 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
         >
           Couldn’t compute a plan: {error}
         </p>
+      )}
+
+      {isRunning && <RunPlanProgress />}
+
+      {showComplete && !isRunning && !error && (
+        <div
+          data-testid="dl-goal-lab-complete"
+          className="flex items-center gap-2 rounded-md border border-emerald-400/70 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-400/60 dark:bg-emerald-950/60 dark:text-emerald-100"
+        >
+          <Check className="h-4 w-4" />
+          Analysis complete
+        </div>
       )}
 
       {!profile.isExplicitlySet && (
@@ -454,10 +489,12 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
       ) : picks ? (
         <div className="space-y-5">
           {/* Primary recommendation — large emphasised block. */}
-          <RecommendedPathCard
-            pick={picks.recommended}
-            rationale={picks.recommendedRationale}
-          />
+          <div ref={recommendedRef}>
+            <RecommendedPathCard
+              pick={picks.recommended}
+              rationale={picks.recommendedRationale}
+            />
+          </div>
 
           {/* Alternatives — trade-off cards, NOT competing recommendations. */}
           {(() => {
@@ -503,6 +540,124 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
   );
 }
 
+/**
+ * Sprint 25 #2 — Run-plan progress reel.
+ *
+ * Drives four labelled steps with a slight timed cadence so the user always
+ * sees motion while the underlying engine is computing. The progress is
+ * intentionally *simulated* — the real engines (candidate generator, MC,
+ * ranker) run too quickly and don't emit progress events, so we render a
+ * deterministic time-based reel instead of fake numbers.
+ */
+const RUN_PLAN_STEPS: Array<{ label: string; detail: string }> = [
+  { label: "Reading financial profile",    detail: "Confirming ledger, FIRE goal and risk settings." },
+  { label: "Generating scenarios",         detail: "Building eligible path templates from your profile." },
+  { label: "Running Monte Carlo",          detail: "Stress-testing each path against market scenarios." },
+  { label: "Ranking recommendations",      detail: "Scoring paths and selecting the recommended option." },
+];
+
+function RunPlanProgress() {
+  // Cadence: ~700ms per step, capped at last step until parent flips off.
+  const [activeIdx, setActiveIdx] = React.useState(0);
+  React.useEffect(() => {
+    setActiveIdx(0);
+    const interval = setInterval(() => {
+      setActiveIdx((i) => (i < RUN_PLAN_STEPS.length - 1 ? i + 1 : i));
+    }, 700);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div
+      data-testid="dl-goal-lab-progress"
+      role="status"
+      aria-live="polite"
+      className="rounded-lg border border-violet-300/60 bg-violet-50 p-4 dark:border-violet-400/50 dark:bg-violet-950/50"
+    >
+      <div className="flex items-center gap-2">
+        <Loader2 className="h-4 w-4 animate-spin text-violet-700 dark:text-violet-200" />
+        <div className="text-sm font-semibold text-violet-900 dark:text-violet-50">
+          Evaluating scenarios…
+        </div>
+      </div>
+      <ol className="mt-3 space-y-2">
+        {RUN_PLAN_STEPS.map((step, idx) => {
+          const state: "done" | "active" | "waiting" =
+            idx < activeIdx ? "done" : idx === activeIdx ? "active" : "waiting";
+          return (
+            <li
+              key={step.label}
+              data-testid={`dl-goal-lab-progress-step-${idx + 1}`}
+              data-state={state}
+              className="flex items-start gap-3"
+            >
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
+                    style={{
+                      borderColor:
+                        state === "done"
+                          ? "rgb(5 150 105)"
+                          : state === "active"
+                          ? "rgb(124 58 237)"
+                          : "rgba(100,116,139,0.5)",
+                      background:
+                        state === "done"
+                          ? "rgb(16 185 129)"
+                          : state === "active"
+                          ? "transparent"
+                          : "transparent",
+                    }}
+              >
+                {state === "done" ? (
+                  <Check className="h-3 w-3 text-white" />
+                ) : state === "active" ? (
+                  <Loader2 className="h-3 w-3 animate-spin text-violet-700 dark:text-violet-200" />
+                ) : (
+                  <span className="h-1.5 w-1.5 rounded-full bg-slate-400 dark:bg-slate-500" />
+                )}
+              </span>
+              <div className="min-w-0">
+                <div
+                  className={
+                    state === "waiting"
+                      ? "text-sm text-slate-500 dark:text-slate-400"
+                      : "text-sm font-medium text-slate-900 dark:text-slate-50"
+                  }
+                >
+                  Step {idx + 1} — {step.label}
+                  {state === "active" && (
+                    <span className="ml-2 text-xs font-normal text-violet-700 dark:text-violet-200">
+                      in progress
+                    </span>
+                  )}
+                  {state === "done" && (
+                    <span className="ml-2 text-xs font-normal text-emerald-700 dark:text-emerald-300">
+                      done
+                    </span>
+                  )}
+                  {state === "waiting" && (
+                    <span className="ml-2 text-xs font-normal text-slate-500 dark:text-slate-400">
+                      waiting
+                    </span>
+                  )}
+                </div>
+                <div
+                  className={
+                    state === "waiting"
+                      ? "text-xs text-slate-500 dark:text-slate-500"
+                      : "text-xs text-slate-700 dark:text-slate-200"
+                  }
+                >
+                  {step.detail}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Sprint 25 — Recommended / Alternative path cards
 // ────────────────────────────────────────────────────────────────────────────
@@ -527,12 +682,12 @@ function RecommendedPathCard({
     return (
       <div
         data-testid="dl-goal-lab-recommended-card"
-        className="rounded-2xl border border-dashed border-violet-400/40 bg-violet-50/40 p-4 dark:bg-violet-950/30"
+        className="rounded-2xl border-2 border-dashed border-violet-400/60 bg-violet-50 p-4 dark:border-violet-400/60 dark:bg-violet-950/70"
       >
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-300">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-violet-800 dark:text-violet-200">
           Recommended path
         </div>
-        <div className="mt-1 text-sm text-foreground/85">
+        <div className="mt-1 text-sm text-slate-800 dark:text-slate-100">
           No matching path yet. Run the plan once your ledger and FIRE goal are set.
         </div>
       </div>
@@ -543,30 +698,30 @@ function RecommendedPathCard({
   return (
     <div
       data-testid="dl-goal-lab-recommended-card"
-      className="rounded-2xl border border-violet-400/50 bg-gradient-to-br from-violet-50 to-violet-100/70 p-5 shadow-sm dark:border-violet-500/40 dark:from-violet-950/60 dark:to-violet-900/40"
+      className="rounded-2xl border-2 border-violet-500/70 bg-gradient-to-br from-violet-50 to-violet-100 p-5 shadow-sm dark:border-violet-400/70 dark:from-violet-900/80 dark:to-violet-950/90"
     >
       <div className="flex items-center gap-2">
-        <Star className="h-4 w-4 text-violet-600 dark:text-violet-300" />
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-300">
+        <Star className="h-4 w-4 text-violet-700 dark:text-violet-200" />
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-violet-800 dark:text-violet-200">
           Recommended path
         </div>
       </div>
-      <div className="mt-2 text-lg font-semibold text-foreground">
+      <div className="mt-2 text-lg font-semibold text-slate-900 dark:text-slate-50">
         {pick.templateLabel}
       </div>
-      <div className="mt-0.5 text-sm text-foreground/80">
+      <div className="mt-0.5 text-sm text-slate-700 dark:text-slate-200">
         {pick.promise}
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto]">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-violet-800 dark:text-violet-200">
             Why this is recommended
           </div>
           <ul className="mt-1.5 space-y-1.5">
             {why.map((w, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-foreground/90">
-                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <li key={i} className="flex items-start gap-2 text-sm text-slate-800 dark:text-slate-100">
+                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-700 dark:text-emerald-300" />
                 <span>{w}</span>
               </li>
             ))}
@@ -579,7 +734,7 @@ function RecommendedPathCard({
       {rationale ? (
         <p
           data-testid="dl-goal-lab-recommended-rationale"
-          className="mt-4 rounded-md border border-violet-300/50 bg-white/70 px-3 py-2 text-xs leading-relaxed text-violet-900 dark:border-violet-500/40 dark:bg-violet-950/60 dark:text-violet-100"
+          className="mt-4 rounded-md border border-violet-400/60 bg-white px-3 py-2 text-xs leading-relaxed text-violet-900 dark:border-violet-400/60 dark:bg-violet-950/80 dark:text-violet-50"
         >
           <span className="font-semibold">Why this is primary: </span>
           {rationale}
@@ -617,10 +772,10 @@ function AlternativePathCard({
             <intentMeta.Icon className="h-3 w-3" />
             {intentMeta.label}
           </div>
-          <div className="mt-1 text-sm font-semibold text-foreground">
+          <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-50">
             {pick.templateLabel}
           </div>
-          <div className="mt-0.5 text-xs text-foreground/75">
+          <div className="mt-0.5 text-xs text-slate-700 dark:text-slate-200">
             {pick.promise}
           </div>
         </div>
@@ -628,26 +783,26 @@ function AlternativePathCard({
 
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-800 dark:text-emerald-200">
             Pros
           </div>
           <ul className="mt-1 space-y-1">
             {pros.map((p, i) => (
-              <li key={i} className="flex items-start gap-1.5 text-xs text-foreground/90">
-                <Check className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <li key={i} className="flex items-start gap-1.5 text-xs text-slate-800 dark:text-slate-100">
+                <Check className="mt-0.5 h-3 w-3 shrink-0 text-emerald-700 dark:text-emerald-300" />
                 <span>{p}</span>
               </li>
             ))}
           </ul>
         </div>
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-700 dark:text-rose-300">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-800 dark:text-rose-200">
             Cons
           </div>
           <ul className="mt-1 space-y-1">
             {cons.map((c, i) => (
-              <li key={i} className="flex items-start gap-1.5 text-xs text-foreground/90">
-                <X className="mt-0.5 h-3 w-3 shrink-0 text-rose-600 dark:text-rose-400" />
+              <li key={i} className="flex items-start gap-1.5 text-xs text-slate-800 dark:text-slate-100">
+                <X className="mt-0.5 h-3 w-3 shrink-0 text-rose-700 dark:text-rose-300" />
                 <span>{c}</span>
               </li>
             ))}
@@ -669,37 +824,37 @@ function ConfidenceBadge({
     return (
       <div
         data-testid="dl-goal-lab-confidence-unmodelled"
-        className="rounded-lg border border-border/60 bg-card/70 px-3 py-2 text-center sm:min-w-[150px]"
+        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-center sm:min-w-[150px] dark:border-slate-600 dark:bg-slate-900"
       >
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
           Confidence
         </div>
-        <div className="mt-1 text-xs text-foreground/80">
+        <div className="mt-1 text-xs text-slate-700 dark:text-slate-200">
           Scenario confidence not yet available
         </div>
       </div>
     );
   }
   const ring =
-    confidence.tone === "emerald" ? "border-emerald-400/50 bg-emerald-50/80 dark:bg-emerald-950/40 dark:border-emerald-500/40" :
-    confidence.tone === "amber"   ? "border-amber-400/50 bg-amber-50/80 dark:bg-amber-950/40 dark:border-amber-500/40" :
-                                    "border-rose-400/50 bg-rose-50/80 dark:bg-rose-950/40 dark:border-rose-500/40";
+    confidence.tone === "emerald" ? "border-emerald-500/70 bg-emerald-50 dark:bg-emerald-950/70 dark:border-emerald-400/70" :
+    confidence.tone === "amber"   ? "border-amber-500/70 bg-amber-50 dark:bg-amber-950/70 dark:border-amber-400/70" :
+                                    "border-rose-500/70 bg-rose-50 dark:bg-rose-950/70 dark:border-rose-400/70";
   const text =
-    confidence.tone === "emerald" ? "text-emerald-700 dark:text-emerald-200" :
-    confidence.tone === "amber"   ? "text-amber-700 dark:text-amber-200" :
-                                    "text-rose-700 dark:text-rose-200";
+    confidence.tone === "emerald" ? "text-emerald-800 dark:text-emerald-100" :
+    confidence.tone === "amber"   ? "text-amber-800 dark:text-amber-100" :
+                                    "text-rose-800 dark:text-rose-100";
   return (
     <div
       data-testid="dl-goal-lab-confidence-value"
       className={`rounded-lg border px-3 py-2 text-center sm:min-w-[150px] ${ring}`}
     >
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-200">
         Confidence
       </div>
       <div className={`mt-0.5 text-2xl font-bold leading-none ${text}`}>
         {confidence.pct}%
       </div>
-      <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="mt-0.5 text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-300">
         {confidence.label}
       </div>
     </div>
@@ -715,11 +870,11 @@ const INTENT_META: Record<AltIntent, { label: string; Icon: typeof ShieldCheck }
 };
 
 const ALT_TONE_STYLES: Record<AlternativeTone, { card: string; label: string }> = {
-  emerald: { card: "border-emerald-300/50 bg-emerald-50/50 dark:border-emerald-500/30 dark:bg-emerald-950/30", label: "text-emerald-700 dark:text-emerald-300" },
-  amber:   { card: "border-amber-300/50 bg-amber-50/50 dark:border-amber-500/30 dark:bg-amber-950/30",       label: "text-amber-700 dark:text-amber-300" },
-  blue:    { card: "border-blue-300/50 bg-blue-50/50 dark:border-blue-500/30 dark:bg-blue-950/30",           label: "text-blue-700 dark:text-blue-300" },
-  teal:    { card: "border-teal-300/50 bg-teal-50/50 dark:border-teal-500/30 dark:bg-teal-950/30",           label: "text-teal-700 dark:text-teal-300" },
-  rose:    { card: "border-rose-300/50 bg-rose-50/50 dark:border-rose-500/30 dark:bg-rose-950/30",           label: "text-rose-700 dark:text-rose-300" },
+  emerald: { card: "border-emerald-400/70 bg-emerald-50 dark:border-emerald-400/50 dark:bg-emerald-950/60", label: "text-emerald-800 dark:text-emerald-200" },
+  amber:   { card: "border-amber-400/70 bg-amber-50 dark:border-amber-400/50 dark:bg-amber-950/60",       label: "text-amber-800 dark:text-amber-200" },
+  blue:    { card: "border-blue-400/70 bg-blue-50 dark:border-blue-400/50 dark:bg-blue-950/60",           label: "text-blue-800 dark:text-blue-200" },
+  teal:    { card: "border-teal-400/70 bg-teal-50 dark:border-teal-400/50 dark:bg-teal-950/60",           label: "text-teal-800 dark:text-teal-200" },
+  rose:    { card: "border-rose-400/70 bg-rose-50 dark:border-rose-400/50 dark:bg-rose-950/60",           label: "text-rose-800 dark:text-rose-200" },
 };
 
 /**
