@@ -18,8 +18,19 @@ import type { GoalLabPathPicks, GoalLabRankedScenario } from "@/lib/goalLab/orch
 import type { ConfidenceResult } from "@/lib/goalLab/goalLabConfidence";
 
 export interface RoadmapSectionProps {
+  /**
+   * Picks from the Goal Lab plan. May be a fully-empty shell when no
+   * feasible plan exists yet — in that case every named slot is null and
+   * sections must render "Not modelled yet" instead of crashing.
+   */
   picks: GoalLabPathPicks;
-  recommended: GoalLabRankedScenario;
+  /**
+   * The recommended ranked scenario. Null when the orchestrator could not
+   * find any feasible winner across templates (thin demo / under-specified
+   * goal). Sections still render — each cell falls back to "Not modelled
+   * yet" — so the user can see the 8-section architecture is alive.
+   */
+  recommended: GoalLabRankedScenario | null;
   roadmap: ActionRoadmap | null;
   enrichedMilestones: FireJourneyMilestone[];
   mcProjection: MonteCarloProjection;

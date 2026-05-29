@@ -75,13 +75,15 @@ function ToneArrow({ tone }: { tone: "up" | "down" | "flat" }) {
 export function AlternativeStrategies(props: RoadmapSectionProps) {
   const { picks, recommended, fireNumber, startAge, swrPct, auditMode } = props;
 
-  const recRow: Row = {
-    intent: "recommended",
-    intentLabel: "Recommended",
-    scenario: recommended,
-    mc: props.mcProjection,
-    riskBand: analyzeRoadmapRisk(recommended).overall,
-  };
+  const recRow: Row | null = recommended
+    ? {
+        intent: "recommended",
+        intentLabel: "Recommended",
+        scenario: recommended,
+        mc: props.mcProjection,
+        riskBand: analyzeRoadmapRisk(recommended).overall,
+      }
+    : null;
 
   const altRowsRaw: Array<{ intent: Row["intent"]; intentLabel: string; pick: GoalLabRankedScenario | null }> = [
     { intent: "safest",       intentLabel: "Safest",        pick: picks.safest },
@@ -89,7 +91,7 @@ export function AlternativeStrategies(props: RoadmapSectionProps) {
     { intent: "bestCashflow", intentLabel: "Best cashflow", pick: picks.bestCashflow },
     { intent: "bestHybrid",   intentLabel: "Best hybrid",   pick: picks.bestHybrid },
   ];
-  const seen = new Set<string>([recommended.templateId]);
+  const seen = new Set<string>(recommended ? [recommended.templateId] : []);
   const altRows: Row[] = altRowsRaw
     .filter((r) => r.pick != null && !seen.has(r.pick!.templateId))
     .map((r) => {
@@ -104,7 +106,7 @@ export function AlternativeStrategies(props: RoadmapSectionProps) {
       };
     });
 
-  const rows: Row[] = [recRow, ...altRows];
+  const rows: Row[] = recRow ? [recRow, ...altRows] : altRows;
 
   return (
     <section
@@ -120,13 +122,22 @@ export function AlternativeStrategies(props: RoadmapSectionProps) {
         </div>
       </div>
 
+      {rows.length === 0 && (
+        <div
+          data-testid="ar-s7-empty"
+          className="mt-4 rounded-lg border border-dashed border-border/60 bg-background/40 p-3 text-sm text-muted-foreground"
+        >
+          Not modelled yet — run a plan in Decision Lab to populate alternative strategies.
+        </div>
+      )}
+
       <ul className="mt-4 space-y-2">
         {rows.map((r) => {
           const isRec = r.intent === "recommended";
-          const isSupporting = !isRec && r.scenario.templateId !== recommended.templateId; // always true for alts but the badge is the point
-          const dAge   = isRec ? null : signedDelta(r.mc.fireAge.p50,            recRow.mc.fireAge.p50,            "years");
-          const dNw    = isRec ? null : signedDelta(r.mc.netWorthAtFire.p50,     recRow.mc.netWorthAtFire.p50,     "money");
-          const dPass  = isRec ? null : signedDelta(r.mc.passiveIncomeAtFire.p50, recRow.mc.passiveIncomeAtFire.p50, "money");
+          const isSupporting = !isRec && recommended != null && r.scenario.templateId !== recommended.templateId;
+          const dAge   = isRec || !recRow ? null : signedDelta(r.mc.fireAge.p50,            recRow.mc.fireAge.p50,            "years");
+          const dNw    = isRec || !recRow ? null : signedDelta(r.mc.netWorthAtFire.p50,     recRow.mc.netWorthAtFire.p50,     "money");
+          const dPass  = isRec || !recRow ? null : signedDelta(r.mc.passiveIncomeAtFire.p50, recRow.mc.passiveIncomeAtFire.p50, "money");
 
           return (
             <li

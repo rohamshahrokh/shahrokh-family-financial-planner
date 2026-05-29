@@ -46,8 +46,12 @@ export function ExecutiveDecision(props: RoadmapSectionProps) {
         <Compass className="mt-0.5 h-5 w-5 text-violet-600 dark:text-violet-400" aria-hidden />
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Executive decision</div>
-          <h2 id="ar-s1-heading" className="text-xl font-semibold text-foreground">{recommended.templateLabel}</h2>
-          {recommended.promise ? <p className="mt-0.5 text-sm text-muted-foreground">{recommended.promise}</p> : null}
+          <h2 id="ar-s1-heading" className="text-xl font-semibold text-foreground">
+            {recommended?.templateLabel ?? "Not modelled yet"}
+          </h2>
+          {recommended?.promise
+            ? <p className="mt-0.5 text-sm text-muted-foreground">{recommended.promise}</p>
+            : <p className="mt-0.5 text-sm text-muted-foreground">Run a plan from Decision Lab to populate this workspace.</p>}
         </div>
       </div>
 

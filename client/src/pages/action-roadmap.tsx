@@ -15,7 +15,7 @@
 import * as React from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Info } from "lucide-react";
 
 import { apiRequest } from "@/lib/queryClient";
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
@@ -106,39 +106,28 @@ export default function ActionRoadmapPage() {
 
   const plan = React.useMemo(() => readLatestGoalLabPlan(), [canonicalLedger, goal]);
 
-  /* ── Empty state ─────────────────────────────────────────────────────── */
-  if (!plan || !plan.picks?.recommended) {
-    return (
-      <div className="container mx-auto max-w-5xl px-3 sm:px-4 py-6 space-y-4" data-testid="action-roadmap-page">
-        <PageHeader auditMode={auditMode} onAuditChange={setAuditMode} hasPlan={false} />
-        <section
-          aria-labelledby="ar-empty-heading"
-          className="rounded-2xl border border-dashed border-border/60 bg-card p-6 text-center"
-          data-testid="ar-empty"
-        >
-          <Sparkles className="mx-auto h-8 w-8 text-violet-600 dark:text-violet-400" aria-hidden />
-          <h2 id="ar-empty-heading" className="mt-3 text-base font-semibold text-foreground">Not modelled yet</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Open Decision Lab to run a plan and populate your Action Roadmap.
-          </p>
-          <Link href="/decision-lab">
-            <Button size="sm" className="mt-4 gap-1.5">
-              Open Decision Lab <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-            </Button>
-          </Link>
-        </section>
-      </div>
-    );
-  }
-
-  /* ── Build roadmapContext once ───────────────────────────────────────── */
-  const recommended = plan.picks.recommended;
+  /* ── Build roadmapContext with safe defaults ─────────────────────────── */
+  // Honesty rule (SPRINT28B §3): when the plan is missing OR no feasible
+  // winner exists, we DO NOT hide the architecture behind one empty card.
+  // Every section still mounts and renders its own "Not modelled yet" cell.
+  // A top banner explains the state and points to Decision Lab.
+  const hasPlan = !!plan;
+  const recommended = plan?.picks?.recommended ?? null;
+  const picks = plan?.picks ?? {
+    recommended: null,
+    safest: null,
+    fastest: null,
+    highestProbability: null,
+    bestCashflow: null,
+    bestHybrid: null,
+    recommendedRationale: null,
+  };
   const targetFireAge = goal && goal.status === "SET" ? goal.targetFireAge : null;
-  const fan: FanPoint[] = (recommended.winner?.result?.netWorthFan as FanPoint[] | undefined) ?? [];
-  const finalState: PortfolioState | null = (recommended.winner?.result?.medianFinalState as PortfolioState | undefined) ?? null;
+  const fan: FanPoint[] = (recommended?.winner?.result?.netWorthFan as FanPoint[] | undefined) ?? [];
+  const finalState: PortfolioState | null = (recommended?.winner?.result?.medianFinalState as PortfolioState | undefined) ?? null;
   const fireNumber = fire?.fireNumber ?? null;
   const swrPct = fire?.swrPct ?? null;
-  const simulationCount = plan.metrics.simulationCount ?? 0;
+  const simulationCount = plan?.metrics.simulationCount ?? 0;
 
   const mcProjection = selectMonteCarloProjection({
     fan,
@@ -148,7 +137,9 @@ export default function ActionRoadmapPage() {
     simulationCount,
   });
 
-  const roadmap = buildActionRoadmap(recommended, { targetFireAge }, currentAge);
+  const roadmap = recommended
+    ? buildActionRoadmap(recommended, { targetFireAge }, currentAge)
+    : null;
 
   // Compute startMonth for fan-month indexing. The fan's own first point
   // carries the canonical month; fall back to the milestone derivation in
@@ -168,8 +159,8 @@ export default function ActionRoadmapPage() {
   });
 
   const failures = selectFailureAnalysis({
-    result: recommended.winner?.result ?? null,
-    softWarnings: recommended.winner?.softWarnings,
+    result: recommended?.winner?.result ?? null,
+    softWarnings: recommended?.winner?.softWarnings,
   });
 
   const nextActions = buildNextActions({
@@ -195,7 +186,7 @@ export default function ActionRoadmapPage() {
   });
 
   const ctx: RoadmapSectionProps = {
-    picks: plan.picks,
+    picks,
     recommended,
     roadmap,
     enrichedMilestones,
@@ -214,7 +205,31 @@ export default function ActionRoadmapPage() {
 
   return (
     <div className="container mx-auto max-w-5xl px-3 sm:px-4 py-6 space-y-4" data-testid="action-roadmap-page">
-      <PageHeader auditMode={auditMode} onAuditChange={setAuditMode} hasPlan={true} />
+      <PageHeader auditMode={auditMode} onAuditChange={setAuditMode} hasPlan={hasPlan && recommended != null} />
+      {!recommended && (
+        <section
+          aria-labelledby="ar-no-plan-heading"
+          className="flex items-start gap-3 rounded-2xl border border-amber-300/60 bg-amber-50/60 p-4 dark:border-amber-400/30 dark:bg-amber-950/20"
+          data-testid="ar-no-plan-banner"
+        >
+          <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+          <div className="flex-1">
+            <h2 id="ar-no-plan-heading" className="text-sm font-semibold text-foreground">
+              {hasPlan ? "No feasible plan yet" : "Not modelled yet"}
+            </h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {hasPlan
+                ? "The engine could not produce a feasible winner with the current goal inputs. Each section below shows \"Not modelled yet\" until a plan is found."
+                : "Open Decision Lab to run a plan and populate this workspace. Each section below previews its slot with \"Not modelled yet\" placeholders."}
+            </p>
+            <Link href="/decision-lab">
+              <Button size="sm" className="mt-3 gap-1.5" data-testid="ar-no-plan-cta">
+                Open Decision Lab <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+              </Button>
+            </Link>
+          </div>
+        </section>
+      )}
       <ExecutiveDecision {...ctx} />
       <FireJourneyRoadmap {...ctx} />
       <WealthTimelineGantt {...ctx} />
