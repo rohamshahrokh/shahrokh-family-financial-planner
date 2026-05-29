@@ -781,7 +781,7 @@ export default function GoalLabPage() {
             }
           >
             {wealthMix ? (
-              <AnswerPanel tone="amber">
+              <AnswerPanel>
                 <div className="font-semibold capitalize text-foreground">
                   {wealthMix.label.replace("-", " ")} engine
                 </div>
@@ -921,7 +921,7 @@ export default function GoalLabPage() {
             }
           >
             {preferenceVec ? (
-              <AnswerPanel tone="rose">
+              <AnswerPanel>
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Biggest constraint (system-inferred)</div>
                 <div className="mt-1 font-semibold text-rose-700 dark:text-rose-300">
                   {primaryDriverCopy(preferenceVec.primaryDriver)}
