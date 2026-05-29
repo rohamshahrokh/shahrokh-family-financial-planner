@@ -127,6 +127,7 @@ import TaxAlphaPage            from "./pages/tax-alpha";
 import AuditCoveragePage       from "./pages/audit-coverage";
 import ActionPlanPage          from "./pages/action-plan";
 import DecisionLabPage         from "./pages/decision-lab";
+import GoalLabPage             from "./pages/goal-lab";
 import Layout               from "./components/Layout";
 import NotFound           from "./pages/not-found";
 
@@ -338,6 +339,13 @@ function AppRouter() {
             only the cheap canonical selectors. */}
         <Route path="/decision-lab">
           <ProtectedRoute component={DecisionLabPage} title="Decision Lab" />
+        </Route>
+        {/* Sprint 21 P2 — Goal Lab: PLAN-step intake surface that captures
+            household intent + constraints in six calm cards and produces the
+            canonical goal profile downstream surfaces consume. UI foundation
+            only — no orchestrator wiring, no recommendation re-rank. */}
+        <Route path="/goal-lab">
+          <ProtectedRoute component={GoalLabPage} title="Goal Lab" />
         </Route>
         {/* Risk Radar — surfaced from Deep Analysis cards & sidebar nav */}
         <Route path="/risk-radar">

@@ -19,7 +19,8 @@ import React, { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { localStore } from "@/lib/localStore";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
+import { AdvancedDisclosure } from "@/components/ui/AdvancedDisclosure";
 import AssumptionsPanel from "@/components/AssumptionsPanel";
 import { formatCurrency, safeNum } from "@/lib/finance";
 // Income engine — Financial Plan registers the live trace on mount and wraps
@@ -346,10 +347,82 @@ function IncomeEngineTraceButton({
 
 // ─── FIRE Goal panel ───────────────────────────────────────────────────────
 //
+// Sprint 22: FIRE goal SUMMARY card. Goal Lab owns the primary edit surface;
+// this compact card lives on Family Plan and routes the user to /goal-lab for
+// any change. It reads via the same useFireSettingsRow() hook the editor uses,
+// so the displayed values cannot drift from the canonical mc_fire_settings row.
+function FireGoalSummary() {
+  const { normalized: fireSettings } = useFireSettingsRow();
+  const goalSet =
+    fireSettings?.targetFireAge != null &&
+    fireSettings?.targetPassiveMonthly != null;
+
+  // Derive the calendar year from age — same logic FireGoalPanel uses
+  // (line 387: `currentAge + yearsToGoal`). We anchor to age 35 only as a
+  // display fallback when no profile age is wired; engines never read this.
+  const targetFireYear = goalSet
+    ? new Date().getFullYear() + Math.max(0, (fireSettings!.targetFireAge as number) - 35)
+    : null;
+
+  return (
+    <SectionCard
+      title="FIRE Goal"
+      icon={<Target className="w-4 h-4 text-amber-400" />}
+    >
+      <div
+        className="flex flex-col items-start justify-between gap-3 pt-3 sm:flex-row sm:items-center"
+        data-testid="family-plan-fire-summary"
+      >
+        <div className="min-w-0 flex-1">
+          {goalSet ? (
+            <>
+              <div className="text-sm font-medium text-foreground">
+                FIRE by {targetFireYear}{" "}
+                <span className="font-normal text-muted-foreground">
+                  (age {fireSettings!.targetFireAge})
+                </span>
+              </div>
+              <div className="mt-0.5 text-sm text-muted-foreground">
+                {formatCurrency(fireSettings!.targetPassiveMonthly as number)} / month passive income target
+              </div>
+              <div className="mt-1.5 text-[11px] uppercase tracking-wide text-violet-400">
+                Managed in Goal Lab
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm font-medium text-foreground">
+                FIRE goal not set
+              </div>
+              <div className="mt-0.5 text-sm text-muted-foreground">
+                Set a target year and monthly passive income to unlock Decision Lab.
+              </div>
+            </>
+          )}
+        </div>
+        <Link href="/goal-lab">
+          <a
+            data-testid="family-plan-fire-edit-in-goal-lab"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-400"
+          >
+            {goalSet ? "Edit in Goal Lab" : "Set in Goal Lab"}
+            <ChevronRight className="h-4 w-4" />
+          </a>
+        </Link>
+      </div>
+    </SectionCard>
+  );
+}
+
 // Sprint 14.1-B. Reads and writes the canonical mc_fire_settings row through
 // the same /api/mc-fire-settings access path the rest of the codebase uses.
 // Writing here flips goals_set=true (and stamps goal_set_timestamp) so the
 // Action Centre's section B switches from "Goal not set" to a summary card.
+//
+// Sprint 22 demoted this from the primary Family Plan surface into a
+// default-closed AdvancedDisclosure (see mount site below). Goal Lab owns the
+// primary FIRE input surface now; this editor remains so muscle memory still
+// works and writes still target the same canonical mc_fire_settings row.
 //
 // IMPORTANT: this panel does NOT touch any forecast / Monte Carlo / FIRE
 // calculation logic. It only mutates the four input fields on mc_fire_settings.
@@ -1451,10 +1524,20 @@ export default function MyFinancialPlan() {
       </SectionCard>
 
       {/* ═══════════════════════════════════════════════════════════════════
-          Sprint 14.1-B — Canonical FIRE Goal panel
-          Writes to mc_fire_settings; flips goals_set so Action Centre updates.
+          Sprint 22 — FIRE goal ownership moved to Goal Lab.
+          Family Plan now shows a compact summary + Edit-in-Goal-Lab link.
+          The original FireGoalPanel is preserved inside a default-closed
+          AdvancedDisclosure (engines reading mc_fire_settings unaffected).
       ═══════════════════════════════════════════════════════════════════ */}
-      <FireGoalPanel />
+      <FireGoalSummary />
+      <AdvancedDisclosure
+        title="Advanced — edit FIRE inputs in-place"
+        subtitle="Goal Lab is now the primary surface for these inputs. This editor stays here for muscle memory and writes to the same canonical mc_fire_settings row."
+        defaultOpen={false}
+        data-testid="family-plan-fire-advanced-disclosure"
+      >
+        <FireGoalPanel />
+      </AdvancedDisclosure>
 
       {/* ═══════════════════════════════════════════════════════════════════
           SECTION 5 — Property Deposit Savings

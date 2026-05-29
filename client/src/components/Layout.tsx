@@ -20,7 +20,7 @@ import {
   // Step 1 — Today
   LayoutDashboard, TrendingUp, DollarSign, Receipt,
   // Step 2 — Plan
-  Home, Bitcoin, CreditCard, Calculator, Target, ClipboardList, Briefcase,
+  Home, Bitcoin, CreditCard, Calculator, Target, ClipboardList, Briefcase, Sparkles,
   // Step 3 — Future
   BarChart2, Sigma, FlaskConical, FileText,
   // Step 4 — Move
@@ -96,8 +96,9 @@ const NAV_STEPS: Array<{
     step: 4,
     label: "MOVE",
     items: [
-      { href: "/action-plan",  label: "Action Plan",  icon: ClipboardCheck, adminOnly: false },
-      { href: "/decision-lab", label: "Decision Lab", icon: Beaker,         adminOnly: false },
+      { href: "/goal-lab",     label: "Goal Lab",       icon: Sparkles,       adminOnly: false },
+      { href: "/decision-lab", label: "Decision Lab",   icon: Beaker,         adminOnly: false },
+      { href: "/action-plan",  label: "Action Roadmap", icon: ClipboardCheck, adminOnly: false },
     ],
   },
 ];
