@@ -63,7 +63,8 @@ check("null fan → message set", rNullFan.message === "No MC P50 terminal value
 // 3. PASS within 0.5% tolerance
 const state3 = makeState({
   properties: [
-    prop("ppor", 1_200_000, 400_000, 50_000, true),   // 850k ppor
+    // Sprint 30A.3: offsetBalance no longer added to equity (engine alignment).
+    prop("ppor", 1_200_000, 400_000, 50_000, true),   // 800k ppor (mv-loan, no offset)
     prop("ip-1", 600_000, 450_000, 0, false),         // 150k ip
   ],
   etfBalance: 200_000,
@@ -75,21 +76,21 @@ const state3 = makeState({
   otherAssets: 0,
   otherDebts: 20_000,
 });
-// Sum = 850 + 150 + 200 + 450 + 75 + 0 + 130 - 20 = 1,835,000
-const r3 = reconcileTerminalNetWorth({ finalState: state3, fanP50AtHorizon: 1_835_000 });
+// Sum = 800 + 150 + 200 + 450 + 75 + 0 + 130 - 20 = 1,785,000
+const r3 = reconcileTerminalNetWorth({ finalState: state3, fanP50AtHorizon: 1_785_000 });
 check("matched within 0.5% → PASS", r3.status === "PASS");
-check("componentsSum computed", r3.componentsSum === 1_835_000);
-check("breakdown.ppor = 850000", r3.breakdown.ppor === 850_000);
+check("componentsSum computed", r3.componentsSum === 1_785_000);
+check("breakdown.ppor = 800000 (mv-loan, no offset)", r3.breakdown.ppor === 800_000);
 check("breakdown.investmentProperty = 150000", r3.breakdown.investmentProperty === 150_000);
 check("breakdown.super = roham + fara", r3.breakdown.super === 450_000);
 check("breakdown.otherAssets = cars + iran", r3.breakdown.otherAssets === 130_000);
 check("breakdown.otherDebts subtracted in sum", r3.componentsSum === r3.breakdown.ppor + r3.breakdown.investmentProperty + r3.breakdown.etf + r3.breakdown.super + r3.breakdown.cash + r3.breakdown.crypto + r3.breakdown.otherAssets - r3.breakdown.otherDebts);
 
-const r3b = reconcileTerminalNetWorth({ finalState: state3, fanP50AtHorizon: 1_835_000 * 1.004 });
+const r3b = reconcileTerminalNetWorth({ finalState: state3, fanP50AtHorizon: 1_785_000 * 1.004 });
 check("0.4% drift → PASS", r3b.status === "PASS");
 
 // 4. FAIL beyond 0.5% tolerance
-const r4 = reconcileTerminalNetWorth({ finalState: state3, fanP50AtHorizon: 1_835_000 * 1.05 });
+const r4 = reconcileTerminalNetWorth({ finalState: state3, fanP50AtHorizon: 1_785_000 * 1.05 });
 check("5% drift → FAIL", r4.status === "FAIL");
 check("FAIL → message populated", r4.message != null && r4.message.length > 0);
 check("FAIL → deltaPct reflects drift", r4.deltaPct > 0.04 && r4.deltaPct < 0.06);

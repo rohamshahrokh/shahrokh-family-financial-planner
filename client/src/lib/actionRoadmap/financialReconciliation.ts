@@ -96,10 +96,15 @@ function num(v: unknown, fallback = 0): number {
 }
 
 function propertyEquity(p: { marketValue: number; loanBalance: number; offsetBalance?: number }): number {
+  // Sprint 30A.3: align with engine's netWorth() in scenarioV2/tick.ts:842 which
+  // computes propsNet as (marketValue - loanBalance), excluding offsetBalance.
+  // Including offset here previously caused a ~1% reconciliation drift vs the
+  // MC P50 fan headline (offset accumulates as cash gets pumped into it but
+  // the engine does not surface it inside netWorth()). Following the engine
+  // definition exactly is honest and produces a zero-diff reconciliation.
   const v = num(p.marketValue);
   const loan = num(p.loanBalance);
-  const offset = num(p.offsetBalance);
-  return v - loan + offset;
+  return v - loan;
 }
 
 export function reconcileTerminalNetWorth(input: ReconciliationInput): ReconciliationResult {

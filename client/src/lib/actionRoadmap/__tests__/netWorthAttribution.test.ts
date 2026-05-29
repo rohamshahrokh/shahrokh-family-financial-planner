@@ -67,9 +67,10 @@ check("null finalState → null result", nullResult === null);
 // 2. Single PPOR + IP + ETF + Super + Cash split correctly
 const s2 = makeState({
   properties: [
-    prop("ppor", 1_200_000, 400_000, 50_000),     // ppor equity = 850k
+    // Sprint 30A.3: offsetBalance no longer added to equity (engine alignment).
+    prop("ppor", 1_200_000, 400_000, 50_000),     // ppor equity = 800k (mv-loan)
     prop("ip-1", 600_000, 450_000, 0),             // ip equity = 150k
-    prop("ip-2", 700_000, 500_000, 25_000),        // ip equity = 225k
+    prop("ip-2", 700_000, 500_000, 25_000),        // ip equity = 200k (mv-loan)
   ],
   etfBalance: 200_000,
   superRoham: 250_000,
@@ -82,8 +83,8 @@ const s2 = makeState({
   otherDebts: 20_000,
 });
 const r2 = selectNetWorthAttribution({ finalState: s2, fanP50AtHorizon: 2_060_000 });
-check("ppor equity computed with offset", r2!.components.find(c => c.category === "ppor")?.value === 850_000);
-check("ip equity sums both IPs with offset", r2!.components.find(c => c.category === "investment_property")?.value === 375_000);
+check("ppor equity = marketValue - loan (no offset)", r2!.components.find(c => c.category === "ppor")?.value === 800_000);
+check("ip equity sums both IPs (no offset)", r2!.components.find(c => c.category === "investment_property")?.value === 350_000);
 check("etf component", r2!.components.find(c => c.category === "etf")?.value === 200_000);
 check("super sums roham + fara", r2!.components.find(c => c.category === "super")?.value === 450_000);
 check("cash component", r2!.components.find(c => c.category === "cash")?.value === 75_000);

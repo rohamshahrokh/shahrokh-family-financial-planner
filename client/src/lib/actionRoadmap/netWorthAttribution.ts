@@ -60,14 +60,13 @@ export interface NetWorthAttributionInput {
 const PPOR_ID = "ppor";
 
 function propertyEquity(p: { marketValue: number; loanBalance: number; offsetBalance?: number }): number {
-  // Equity = market value - loan + offset (offset reduces effective debt). The
-  // engine treats offset as cash-equivalent inside the property; the dashboard
-  // displays it the same way. We follow the dashboard convention here so the
-  // attribution sum aligns with the Monte Carlo NW.
+  // Sprint 30A.3: equity = market value - loan, matching the engine's
+  // netWorth() in scenarioV2/tick.ts:842 (propsNet excludes offsetBalance).
+  // Including offset previously drifted the attribution sum ~1% above the MC
+  // P50 fan headline; aligning to the engine eliminates that drift.
   const value = Number.isFinite(p.marketValue) ? p.marketValue : 0;
   const loan = Number.isFinite(p.loanBalance) ? p.loanBalance : 0;
-  const offset = Number.isFinite(p.offsetBalance ?? 0) ? p.offsetBalance ?? 0 : 0;
-  return value - loan + offset;
+  return value - loan;
 }
 
 function numOr(v: number | undefined | null, fallback = 0): number {
