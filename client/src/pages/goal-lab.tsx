@@ -40,15 +40,21 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Target, TrendingUp, PieChart, Rocket, Shield, Lock,
   Check, Edit3, ArrowRight, Sparkles, Quote,
-  Loader2, AlertCircle,
+  Loader2, AlertCircle, X as XIcon,
   Activity, Zap, Gauge, Flag,
 } from "lucide-react";
 
 import AssumptionsPanel from "@/components/AssumptionsPanel";
 import type { DashboardInputs } from "@/lib/dashboardDataContract";
-import { useCanonicalGoal } from "@/lib/useCanonicalGoal";
+import { useCanonicalGoal, type CanonicalGoal } from "@/lib/useCanonicalGoal";
 import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics";
+import { selectCanonicalFire, isFireGoalExplicitlySet } from "@/lib/canonicalFire";
 import { formatCurrency } from "@/lib/finance";
+import { readLatestGoalLabPlan } from "@/lib/goalLab/orchestrator";
+import {
+  computeGoalLabConfidence,
+  type ConfidenceResult,
+} from "@/lib/goalLab/goalLabConfidence";
 import {
   buildCapitalStructureSnapshot,
   buildWealthEngineMix,
@@ -515,6 +521,39 @@ export default function GoalLabPage() {
   const completed = Object.values(confirmed).filter(Boolean).length;
   const allDone = completed === 6;
 
+  // ── Sprint 26 P1 — Real Goal Lab confidence ──────────────────────────────
+  // We read the latest orchestrator plan from the in-memory cache (set by
+  // Decision Lab when Run plan was clicked). No engine call here.
+  const latestPlan = React.useMemo(() => readLatestGoalLabPlan(), [
+    // Re-evaluate when confirmations / ledger / goal change so the panel
+    // refreshes without forcing a re-run. The actual cache content updates
+    // are pushed by Decision Lab; this is a passive read.
+    confirmed, ledgerReady, goal,
+  ]);
+  const monthlySurplus = headline?.monthlySurplus ?? null;
+  const confidence: ConfidenceResult = React.useMemo(
+    () =>
+      computeGoalLabConfidence({
+        goal: goal ?? null,
+        hasLedger: ledgerReady,
+        netWorth: headline?.netWorth ?? null,
+        monthlySurplus,
+        confirmed,
+        plan: latestPlan,
+      }),
+    [goal, ledgerReady, headline?.netWorth, monthlySurplus, confirmed, latestPlan],
+  );
+
+  // ── Sprint 26 P2 — Current Position (FIRE gap / progress / target year) ──
+  const fire = React.useMemo(
+    () => (ledgerReady ? selectCanonicalFire(dashboardInputs, goal) : null),
+    [ledgerReady, dashboardInputs, goal],
+  );
+  const currentAge: number | null = React.useMemo(() => {
+    const a = Number(fireSettingsQ.data?.current_age);
+    return Number.isFinite(a) && a > 0 ? a : null;
+  }, [fireSettingsQ.data?.current_age]);
+
   // ── Render ──────────────────────────────────────────────────────────────
   return (
     <div className="mx-auto w-full max-w-[1280px] px-4 py-6 sm:px-6 lg:px-8">
@@ -955,6 +994,15 @@ export default function GoalLabPage() {
 
         {/* ── Right rail ──────────────────────────────────────────────── */}
         <aside className="space-y-4">
+          {/* Sprint 26 P2 — Current Position (FIRE numbers from Goal Closure) */}
+          <CurrentPositionPanel
+            goal={goal ?? null}
+            netWorth={headline?.netWorth ?? null}
+            fire={fire}
+            currentAge={currentAge}
+          />
+          {/* Sprint 26 P1 — Real confidence (replaces fake placeholder) */}
+          <ConfidencePanel confidence={confidence} />
           <SummaryPanel
             completed={completed}
             confirmed={confirmed}
@@ -1078,6 +1126,156 @@ function StatusChip({ status }: { status: SummaryStatus }) {
   );
 }
 
+/* ── Sprint 26 P2 — Current Position panel ─────────────────────────────── *
+ * Replaces the Goal Closure MOVE card. Shows four headline FIRE numbers          *
+ * computed from the same canonical selectors the rest of the app uses:           *
+ *   • Progress to FIRE  — NW ÷ FIRE number (selectCanonicalFire)                  *
+ *   • FIRE gap          — FIRE number − NW                                       *
+ *   • Target year       — today + (targetFireAge − currentAge)                    *
+ *   • Years remaining   — targetFireAge − currentAge                              *
+ *                                                                                *
+ * When the goal isn't set we suppress goal-derived figures rather than           *
+ * invent defaults — same contract as Action Centre / Goal Closure Lab.           */
+function CurrentPositionPanel({
+  goal, netWorth, fire, currentAge,
+}: {
+  goal: CanonicalGoal | null;
+  netWorth: number | null;
+  fire: ReturnType<typeof selectCanonicalFire> | null;
+  currentAge: number | null;
+}) {
+  const goalSet = isFireGoalExplicitlySet(goal);
+  const fireNumber = fire?.fireNumber && fire.fireNumber > 0 ? fire.fireNumber : null;
+  const progressPct =
+    goalSet && netWorth !== null && fireNumber !== null
+      ? Math.max(0, Math.min(100, (netWorth / fireNumber) * 100))
+      : null;
+  const gap = goalSet ? (fire?.gap ?? null) : null;
+  const targetFireAge =
+    goalSet && goal && goal.status === "SET" ? goal.targetFireAge : null;
+  const yearsRemaining =
+    targetFireAge !== null && currentAge !== null
+      ? Math.max(0, targetFireAge - currentAge)
+      : null;
+  const targetYear =
+    yearsRemaining !== null ? new Date().getFullYear() + yearsRemaining : null;
+
+  return (
+    <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm" data-testid="goal-lab-current-position">
+      <div className="flex items-center justify-between">
+        <h3 className="text-base font-semibold text-foreground">Current Position</h3>
+        <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+          <Activity className="h-3 w-3" />
+          From ledger
+        </span>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <PositionCell
+          label="Progress to FIRE"
+          value={progressPct !== null ? `${progressPct.toFixed(0)}%` : "—"}
+          hint={!goalSet ? "Set FIRE goal in Q1" : netWorth === null ? "Ledger missing" : null}
+          testId="gl-cp-progress"
+        />
+        <PositionCell
+          label="FIRE gap"
+          value={gap !== null ? (gap > 0 ? formatCurrency(gap) : "On target") : "—"}
+          hint={!goalSet ? "Set FIRE goal in Q1" : null}
+          testId="gl-cp-gap"
+        />
+        <PositionCell
+          label="Target year"
+          value={targetYear !== null ? String(targetYear) : "—"}
+          hint={
+            !goalSet ? "Set FIRE goal in Q1"
+            : currentAge === null ? "Save current age in Settings"
+            : null
+          }
+          testId="gl-cp-target-year"
+        />
+        <PositionCell
+          label="Years remaining"
+          value={yearsRemaining !== null ? `${yearsRemaining} yr${yearsRemaining === 1 ? "" : "s"}` : "—"}
+          hint={
+            !goalSet ? "Set FIRE goal in Q1"
+            : currentAge === null ? "Save current age in Settings"
+            : null
+          }
+          testId="gl-cp-years-remaining"
+        />
+      </div>
+      <p className="mt-3 text-[11px] text-muted-foreground/80">
+        Same numbers as <Link href="/goal-closure-lab"><span className="underline text-foreground">Goal Closure Lab</span></Link> — powered by canonical selectors.
+      </p>
+    </div>
+  );
+}
+
+function PositionCell({
+  label, value, hint, testId,
+}: { label: string; value: string; hint: string | null; testId: string }) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-muted/30 dark:bg-slate-900/40 p-3" data-testid={testId}>
+      <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="mt-1 text-base font-semibold text-foreground">{value}</div>
+      {hint ? <div className="mt-0.5 text-[11px] text-muted-foreground/80">{hint}</div> : null}
+    </div>
+  );
+}
+
+/* ── Sprint 26 P1 — Confidence panel ──────────────────────────────────── *
+ * Real Goal Lab trust score. Shows the band (High / Medium / Low) and the        *
+ * numeric score, plus a "Why" list of the six signals with tick / X marks.       *
+ * NO fabricated probability — if MC didn't produce a P50 the row says            *
+ * "Probability unavailable" rather than inventing a number.                      */
+function ConfidencePanel({ confidence }: { confidence: ConfidenceResult }) {
+  const { score, band, signals } = confidence;
+  const bandColor =
+    band === "High"   ? "text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/15 ring-emerald-200 dark:ring-emerald-400/30" :
+    band === "Medium" ? "text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/15 ring-amber-200 dark:ring-amber-400/30" :
+                        "text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-500/15 ring-rose-200 dark:ring-rose-400/30";
+  const trackBg =
+    band === "High"   ? "bg-emerald-500" :
+    band === "Medium" ? "bg-amber-500"   :
+                        "bg-rose-500";
+  return (
+    <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm" data-testid="goal-lab-confidence">
+      <div className="flex items-center justify-between">
+        <h3 className="text-base font-semibold text-foreground">Confidence</h3>
+        <span
+          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ${bandColor}`}
+          data-testid="goal-lab-confidence-band"
+        >
+          {band} ({score}%)
+        </span>
+      </div>
+      {/* Score track — simple horizontal bar mirroring the band colour. */}
+      <div className="mt-3 h-1.5 w-full rounded-full bg-muted/60 dark:bg-slate-800/80 overflow-hidden">
+        <div
+          className={`h-full ${trackBg} transition-all`}
+          style={{ width: `${Math.max(2, Math.min(100, score))}%` }}
+          data-testid="goal-lab-confidence-track"
+        />
+      </div>
+      <div className="mt-4 text-[11px] font-medium uppercase tracking-widest text-muted-foreground">Why</div>
+      <ul className="mt-2 space-y-1.5" data-testid="goal-lab-confidence-why">
+        {signals.map((s) => (
+          <li key={s.id} className="flex items-start gap-2 text-sm">
+            {s.ok ? (
+              <Check className="mt-0.5 h-4 w-4 flex-none text-emerald-600 dark:text-emerald-300" />
+            ) : (
+              <XIcon className="mt-0.5 h-4 w-4 flex-none text-muted-foreground/70" />
+            )}
+            <div className="min-w-0">
+              <div className={`font-medium ${s.ok ? "text-foreground" : "text-muted-foreground"}`}>{s.label}</div>
+              <div className="text-[12px] text-muted-foreground/85 leading-snug">{s.detail}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 type SummaryStatus =
   | "confirmed"          // user explicitly confirmed
   | "inferred"           // system has a value; user hasn't confirmed yet
@@ -1187,20 +1385,10 @@ function LiveSignalsPanel(props: {
   headline: ReturnType<typeof computeCanonicalHeadlineMetrics> | null;
   goal: ReturnType<typeof useCanonicalGoal>["data"];
 }) {
-  const { completed, riskCapacity, preferenceVec, capital, wealthMix, headline, goal } = props;
-
-  // Confidence = blended ledger completeness + confirmation rate.
-  // Each of the six derived sources contributes; we weight ledger over confirms.
-  const ledgerScore =
-    (goal?.status === "SET" ? 1 : 0) +
-    (headline ? 1 : 0) +
-    (capital ? 1 : 0) +
-    (wealthMix ? 1 : 0) +
-    (riskCapacity ? 1 : 0) +
-    (preferenceVec ? 1 : 0);
-  const confidencePct = Math.round(((ledgerScore / 6) * 0.7 + (completed / 6) * 0.3) * 100);
-  const confidenceBand: "low" | "medium" | "high" =
-    confidencePct < 40 ? "low" : confidencePct < 75 ? "medium" : "high";
+  // Sprint 26 P1 — the dedicated <ConfidencePanel/> is now the canonical
+  // surface for the trust score. We deliberately drop the old blended
+  // "Confidence score" row from this panel to avoid two competing numbers.
+  const { riskCapacity, preferenceVec, wealthMix } = props;
 
   // Path stability — directly from risk capacity band.
   const stabilityLabel = riskCapacity ? bandLabel(riskCapacity.band) : "—";
@@ -1235,12 +1423,6 @@ function LiveSignalsPanel(props: {
       </div>
 
       <div className="mt-4 space-y-3">
-        <SignalRow
-          icon={<Gauge className="h-4 w-4" />}
-          label="Confidence score"
-          value={`${confidencePct}%`}
-          valueTone={confidenceBand === "high" ? "green" : confidenceBand === "medium" ? "amber" : "red"}
-        />
         <SignalRow
           icon={<Zap className="h-4 w-4" />}
           label="Strongest leverage"
