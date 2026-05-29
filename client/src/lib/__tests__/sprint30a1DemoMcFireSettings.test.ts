@@ -11,13 +11,19 @@
  * Invariants this file locks down:
  *   1. The baseline row carries the same `current_age` as DEMO_FIRE_SETTINGS
  *      (single source of truth for the demo persona's age).
- *   2. The baseline row carries `goals_set: false` so the canonical-goal
- *      selector continues to report NOT_SET — Goal Lab gating semantics
- *      must NOT change.
+ *   2. The baseline row carries a complete FIRE goal (goals_set:true,
+ *      target_fire_age, target_passive_monthly, swr_pct, goal_set_timestamp)
+ *      so the canonical-goal selector derives status=SET and downstream
+ *      selectors compute a real fireNumber. Goal Lab UI itself is untouched.
+ *   2b. `deriveCanonicalGoalFromRow(baseline)` returns status=SET with the
+ *      DEMO_FIRE_SETTINGS values (targetFireAge=55, targetPassiveMonthly=9000,
+ *      swrPct=4.0, targetNetWorth=2_700_000).
  *   3. `currentAge` derivation `Number.isFinite(Number(row.current_age))
  *      && a > 0` returns 37 (the demo age), not null.
  *   4. A simulated GET/PUT round-trip preserves the merge semantics that
- *      Goal Lab writes depend on (subsequent GETs see the PUT body).
+ *      Goal Lab writes depend on: subsequent GETs see the PUT body, the
+ *      goals_set:true baseline is preserved across writes, and the
+ *      canonical-goal selector re-derives with the user-edited values.
  *   5. The page-level `selectMonteCarloProjection` is honest when
  *      startAge is null and produces a numeric FIRE Age when startAge is
  *      37 + a P50 month index (the upstream behaviour that the demo
@@ -31,6 +37,41 @@ import {
   getDemoMCFireSettingsBaseline,
 } from "../demoData";
 
+// Local copy of deriveCanonicalGoalFromRow (mirrors queryClient.ts:51-83 and
+// server/lib/canonicalGoal.ts). Keep these three copies in sync.
+function deriveCanonicalGoalFromRow(row: any): any {
+  if (!row || typeof row !== "object") {
+    return { status: "NOT_SET", reason: "mc_fire_settings row not found for owner" };
+  }
+  if (row.goals_set !== true) {
+    return { status: "NOT_SET", reason: "goals_set is false" };
+  }
+  const swrPct = typeof row.swr_pct === "number" ? row.swr_pct : null;
+  if (swrPct === null || !Number.isFinite(swrPct) || swrPct <= 0) {
+    return { status: "NOT_SET", reason: "swr_pct invalid" };
+  }
+  const targetFireAge =
+    typeof row.target_fire_age === "number" && Number.isFinite(row.target_fire_age)
+      ? row.target_fire_age : null;
+  const targetPassiveMonthly =
+    typeof row.target_passive_monthly === "number" && Number.isFinite(row.target_passive_monthly)
+      ? row.target_passive_monthly : null;
+  if (targetFireAge === null) return { status: "NOT_SET", reason: "target_fire_age missing" };
+  if (targetPassiveMonthly === null) return { status: "NOT_SET", reason: "target_passive_monthly missing" };
+  const targetPassiveAnnual = targetPassiveMonthly * 12;
+  const targetNetWorth      = targetPassiveAnnual / (swrPct / 100);
+  return {
+    status: "SET",
+    targetFireAge,
+    targetPassiveMonthly,
+    swrPct,
+    targetPassiveAnnual,
+    targetNetWorth,
+    goalSetTimestamp: row.goal_set_timestamp ?? row.updated_at ?? new Date(0).toISOString(),
+    source: "mc_fire_settings",
+  };
+}
+
 let pass = 0;
 let fail = 0;
 function check(name: string, cond: boolean, detail?: string) {
@@ -39,22 +80,20 @@ function check(name: string, cond: boolean, detail?: string) {
     console.log(`  ✔ ${name}`);
   } else {
     fail++;
-    console.log(`  ✘ ${name}${detail ? ` — ${detail}` : ""}`);
+    console.log(`  ✘ ${name}${detail ? ` (${detail})` : ""}`);
   }
 }
 
-// ─── Invariant 1 — baseline current_age tracks DEMO_FIRE_SETTINGS ──────────────
-console.log("\n── baseline current_age tracks DEMO_FIRE_SETTINGS ──");
+console.log("Sprint 30A.1 — demo /api/mc-fire-settings baseline invariants\n");
+
+// ─── Invariant 1 — current_age tracks DEMO_FIRE_SETTINGS ──────────────────────
+console.log("── baseline current_age tracks DEMO_FIRE_SETTINGS ──");
 {
   const row = getDemoMCFireSettingsBaseline();
   check(
     "baseline.current_age === DEMO_FIRE_SETTINGS.current_age",
     row.current_age === DEMO_FIRE_SETTINGS.current_age,
-    `expected ${DEMO_FIRE_SETTINGS.current_age}, got ${row.current_age}`,
-  );
-  check(
-    "baseline.current_age is a finite positive integer",
-    Number.isFinite(row.current_age) && row.current_age > 0,
+    `got ${row.current_age} vs DEMO ${DEMO_FIRE_SETTINGS.current_age}`,
   );
   check(
     "baseline.current_age is exactly 37 (demo persona)",
@@ -62,17 +101,65 @@ console.log("\n── baseline current_age tracks DEMO_FIRE_SETTINGS ──");
   );
 }
 
-// ─── Invariant 2 — goals_set must remain false ─────────────────────────────────
-console.log("\n── goals_set must remain false (Goal Lab gating untouched) ──");
+// ─── Invariant 2 — baseline carries complete FIRE goal row ────────────────────
+console.log("\n── baseline carries complete FIRE goal row ──");
 {
   const row = getDemoMCFireSettingsBaseline();
   check(
-    "baseline.goals_set === false",
-    row.goals_set === false,
+    "baseline.goals_set === true (canonical-goal can derive SET)",
+    row.goals_set === true,
   );
   check(
-    "baseline.goals_set is not true (canonical-goal must stay NOT_SET)",
-    row.goals_set !== true,
+    "baseline.target_fire_age === 55 (from DEMO_FIRE_SETTINGS)",
+    row.target_fire_age === 55,
+  );
+  check(
+    "baseline.target_passive_monthly === 9000 (from DEMO_FIRE_SETTINGS.target_monthly_income)",
+    row.target_passive_monthly === 9000,
+  );
+  check(
+    "baseline.swr_pct === 4.0 (from DEMO_FIRE_SETTINGS.safe_withdrawal_rate)",
+    row.swr_pct === 4.0,
+  );
+  check(
+    "baseline.goal_set_timestamp is a non-empty ISO string",
+    typeof row.goal_set_timestamp === "string" && row.goal_set_timestamp.length > 0,
+  );
+}
+
+// ─── Invariant 2b — canonical-goal selector returns SET from baseline ─────────
+console.log("\n── canonical-goal selector returns SET from baseline ──");
+{
+  const row = getDemoMCFireSettingsBaseline();
+  const canonical = deriveCanonicalGoalFromRow(row);
+  check(
+    "canonical.status === 'SET'",
+    canonical.status === "SET",
+    `got status=${canonical.status}, reason=${canonical.reason}`,
+  );
+  check(
+    "canonical.targetFireAge === 55",
+    canonical.targetFireAge === 55,
+  );
+  check(
+    "canonical.targetPassiveMonthly === 9000",
+    canonical.targetPassiveMonthly === 9000,
+  );
+  check(
+    "canonical.swrPct === 4.0",
+    canonical.swrPct === 4.0,
+  );
+  check(
+    "canonical.targetPassiveAnnual === 108000 (9000*12)",
+    canonical.targetPassiveAnnual === 108_000,
+  );
+  check(
+    "canonical.targetNetWorth === 2_700_000 (108000 / 0.04)",
+    canonical.targetNetWorth === 2_700_000,
+  );
+  check(
+    "canonical.source === 'mc_fire_settings'",
+    canonical.source === "mc_fire_settings",
   );
 }
 
@@ -126,12 +213,12 @@ console.log("\n── Goal Lab PUT merge semantics ──");
     return { ...baseline, ...putBody, updated_at: new Date().toISOString() };
   }
 
+  // Simulate user editing their FIRE goal via Goal Lab: bump target_fire_age
+  // to 50 and target_passive_monthly to 10000. The baseline goals_set:true
+  // and swr_pct must be preserved.
   const afterGoalLabSave = simulateDemoMcFireSettingsAfterPut({
-    target_fire_age: 55,
-    target_passive_monthly: 9000,
-    swr_pct: 4.0,
-    goals_set: true,
-    goal_set_timestamp: "2026-05-29T10:00:00Z",
+    target_fire_age: 50,
+    target_passive_monthly: 10_000,
   });
 
   check(
@@ -139,20 +226,35 @@ console.log("\n── Goal Lab PUT merge semantics ──");
     afterGoalLabSave.current_age === 37,
   );
   check(
-    "after Goal Lab PUT, goals_set flips to true (write wins)",
+    "after Goal Lab PUT, goals_set stays true (baseline preserved)",
     (afterGoalLabSave as any).goals_set === true,
   );
   check(
-    "after Goal Lab PUT, target_fire_age lands at 55",
-    (afterGoalLabSave as any).target_fire_age === 55,
+    "after Goal Lab PUT, target_fire_age lands at 50 (user edit wins)",
+    (afterGoalLabSave as any).target_fire_age === 50,
   );
   check(
-    "after Goal Lab PUT, target_passive_monthly lands at 9000",
-    (afterGoalLabSave as any).target_passive_monthly === 9000,
+    "after Goal Lab PUT, target_passive_monthly lands at 10000 (user edit wins)",
+    (afterGoalLabSave as any).target_passive_monthly === 10_000,
   );
   check(
-    "after Goal Lab PUT, swr_pct lands at 4.0",
+    "after Goal Lab PUT, swr_pct preserved at 4.0 (no override)",
     (afterGoalLabSave as any).swr_pct === 4.0,
+  );
+
+  // Re-derive canonical goal after the merge — status must remain SET.
+  const canonicalAfterEdit = deriveCanonicalGoalFromRow(afterGoalLabSave);
+  check(
+    "after Goal Lab PUT, canonical-goal still derives status=SET",
+    canonicalAfterEdit.status === "SET",
+  );
+  check(
+    "after Goal Lab PUT, canonical.targetFireAge reflects the edit (50)",
+    canonicalAfterEdit.targetFireAge === 50,
+  );
+  check(
+    "after Goal Lab PUT, canonical.targetNetWorth recomputes (120000/0.04 = 3_000_000)",
+    canonicalAfterEdit.targetNetWorth === 3_000_000,
   );
 }
 
