@@ -1,44 +1,82 @@
 /**
- * WealthTimelineGantt — Action Roadmap S3 (Sprint 28B).
+ * WealthTimelineGantt — Action Roadmap S3 (Sprint 28B + Sprint 29 §8).
  *
- * Hand-rolled Tailwind + SVG Gantt. Desktop (≥ sm): horizontal Gantt with
- * 6 lanes (Property / Debt / Cashflow / ETF / Super / FIRE Progress).
- * Mobile (< sm): vertical lane stack with compact segment rows.
+ * Sprint 29 rewrite. Desktop (≥ sm): horizontal SVG Gantt driven by the
+ * Sprint 29 engine-event timeline (`roadmapContext.engineEvents`). One row
+ * per category (Property / Debt / Cash / ETF / Super / Exit / FIRE). Each
+ * event = a rounded-rect bar centred on its month, coloured by category.
+ * Click → Radix HoverCard popover with full details.
  *
- * No new dependencies. Segment colours come from Tailwind utility classes
- * (not from a chart lib). The FIRE Progress lane is a sparkline of P50
- * progress over the same year axis, plus textual markers ("27% → 39% → 55%").
+ * Mobile (< sm): preserves the Sprint 28B vertical lane stack from
+ * `roadmapContext.lanes` so the mobile fallback continues to render the
+ * same content without regression.
  *
- * Honesty: an empty lane renders the lane label with "—" (muted). When
- * FIRE Progress points are all null we render "Not modelled yet" instead
- * of the sparkline.
+ * No new dependencies.
  */
 import * as React from "react";
 import { CalendarRange } from "lucide-react";
 import { SourceChip } from "@/components/SourceChip";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import type { RoadmapSectionProps } from "./roadmapContext";
 import type { LaneKey, LaneSegment } from "@/lib/actionRoadmap/wealthBuildingLanes";
+import type { EngineEvent, EngineEventCategory } from "@/lib/actionRoadmap/engineEventTimeline";
 
-const LANE_META: Record<LaneKey, { label: string; tone: string; bar: string }> = {
-  property:      { label: "Property",      tone: "text-violet-700 dark:text-violet-300",   bar: "fill-violet-500" },
-  debt:          { label: "Debt",          tone: "text-rose-700 dark:text-rose-300",       bar: "fill-rose-500" },
-  cashflow:      { label: "Cashflow",      tone: "text-amber-700 dark:text-amber-300",     bar: "fill-amber-500" },
-  etf:           { label: "ETF",           tone: "text-blue-700 dark:text-blue-300",       bar: "fill-blue-500" },
-  super:         { label: "Super",         tone: "text-teal-700 dark:text-teal-300",       bar: "fill-teal-500" },
-  fire_progress: { label: "FIRE progress", tone: "text-emerald-700 dark:text-emerald-300", bar: "fill-emerald-500" },
+const LANE_META: Record<LaneKey, { label: string; tone: string }> = {
+  property:      { label: "Property",      tone: "text-violet-700 dark:text-violet-300" },
+  debt:          { label: "Debt",          tone: "text-rose-700 dark:text-rose-300" },
+  cashflow:      { label: "Cashflow",      tone: "text-amber-700 dark:text-amber-300" },
+  etf:           { label: "ETF",           tone: "text-blue-700 dark:text-blue-300" },
+  super:         { label: "Super",         tone: "text-teal-700 dark:text-teal-300" },
+  fire_progress: { label: "FIRE progress", tone: "text-emerald-700 dark:text-emerald-300" },
 };
 
-const LANE_ORDER: LaneKey[] = ["property", "debt", "cashflow", "etf", "super", "fire_progress"];
+const MOBILE_LANE_ORDER: LaneKey[] = ["property", "debt", "cashflow", "etf", "super", "fire_progress"];
+
+const CATEGORY_ORDER: EngineEventCategory[] = ["property", "debt", "cash", "etf", "super", "exit", "fire"];
+const CATEGORY_LABEL: Record<EngineEventCategory, string> = {
+  property: "Property",
+  debt:     "Debt",
+  cash:     "Cash",
+  etf:      "ETF",
+  super:    "Super",
+  exit:     "Exit",
+  fire:     "FIRE",
+};
+const CATEGORY_FILL: Record<EngineEventCategory, string> = {
+  property: "fill-violet-500",
+  debt:     "fill-rose-500",
+  cash:     "fill-amber-500",
+  etf:      "fill-blue-500",
+  super:    "fill-teal-500",
+  exit:     "fill-fuchsia-500",
+  fire:     "fill-emerald-500",
+};
 
 function fmtPctFromFraction(p: number | null): string {
   if (p == null || !Number.isFinite(p)) return "—";
   return `${Math.round(p * 100)}%`;
 }
 
+function monthToFractionalYear(month: string): number {
+  const parts = month.split("-").map((n) => parseInt(n, 10));
+  if (parts.length < 2 || !parts.every((v) => Number.isFinite(v))) return 0;
+  const [y, m] = parts;
+  return y! + (m! - 1) / 12;
+}
+
 export function WealthTimelineGantt(props: RoadmapSectionProps) {
-  const { lanes, auditMode } = props;
-  const { from, to } = lanes.yearRange;
-  const years = Math.max(1, to - from);
+  const { lanes, engineEvents, auditMode } = props;
+  const { from: laneFrom, to: laneTo } = lanes.yearRange;
+
+  // Compute year window from engine events when available; else fall back
+  // to the Sprint 28B lane range (covers the empty-engine-events case).
+  const eventMonths = engineEvents.map((e) => monthToFractionalYear(e.month));
+  const fromYear = eventMonths.length > 0 ? Math.floor(Math.min(...eventMonths)) : laneFrom;
+  const toYear = eventMonths.length > 0 ? Math.ceil(Math.max(...eventMonths)) : laneTo;
 
   return (
     <section
@@ -51,20 +89,26 @@ export function WealthTimelineGantt(props: RoadmapSectionProps) {
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Wealth building timeline</div>
           <h2 id="ar-s3-heading" className="text-base font-semibold text-foreground">
-            {from} – {to}
+            {Math.min(fromYear, laneFrom)} – {Math.max(toYear, laneTo)}
           </h2>
         </div>
       </div>
 
-      {/* Desktop Gantt */}
+      {/* Desktop Gantt (engine events) */}
       <div className="mt-4 hidden sm:block" data-testid="ar-s3-desktop">
-        <DesktopGantt lanes={lanes} years={years} from={from} auditMode={auditMode} />
+        {engineEvents.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border/60 px-3 py-6 text-center text-sm text-muted-foreground">
+            No engine events surfaced for this run.
+          </div>
+        ) : (
+          <DesktopGantt events={engineEvents} fromYear={fromYear} toYear={toYear} auditMode={auditMode} />
+        )}
       </div>
 
-      {/* Mobile stack */}
+      {/* Mobile stack (Sprint 28B lanes fallback) */}
       <div className="mt-4 space-y-3 sm:hidden" data-testid="ar-s3-mobile">
-        {LANE_ORDER.map((lane) => (
-          <MobileLane key={lane} lane={lane} segments={lanes.lanes[lane] ?? []} fireProgress={lanes.fireProgress} from={from} to={to} auditMode={auditMode} />
+        {MOBILE_LANE_ORDER.map((lane) => (
+          <MobileLane key={lane} lane={lane} segments={lanes.lanes[lane] ?? []} fireProgress={lanes.fireProgress} from={laneFrom} to={laneTo} auditMode={auditMode} />
         ))}
       </div>
     </section>
@@ -72,68 +116,65 @@ export function WealthTimelineGantt(props: RoadmapSectionProps) {
 }
 
 function DesktopGantt({
-  lanes, years, from, auditMode,
+  events, fromYear, toYear, auditMode,
 }: {
-  lanes: RoadmapSectionProps["lanes"];
-  years: number;
-  from: number;
+  events: EngineEvent[];
+  fromYear: number;
+  toYear: number;
   auditMode: boolean;
 }) {
-  // SVG layout
-  const width = 800;
-  const rowHeight = 40;
+  const rangeYears = Math.max(1, toYear - fromYear + 1);
+  const width = 880;
+  const rowHeight = 36;
   const labelCol = 110;
-  const padRight = 20;
+  const padRight = 24;
   const plotWidth = width - labelCol - padRight;
-  const rows = LANE_ORDER.length;
-  const height = rows * rowHeight + 30;
+  const rows = CATEGORY_ORDER.length;
+  const height = rows * rowHeight + 24;
 
-  const yearToX = (y: number) => labelCol + ((y - from) / years) * plotWidth;
+  const yearToX = (y: number) => labelCol + ((y - fromYear) / rangeYears) * plotWidth;
+
+  // Group events by category for row positioning
+  const byCategory = new Map<EngineEventCategory, EngineEvent[]>();
+  for (const e of events) {
+    const arr = byCategory.get(e.category) ?? [];
+    arr.push(e);
+    byCategory.set(e.category, arr);
+  }
 
   return (
     <div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto" role="img" aria-label="Wealth building timeline">
-        {/* X-axis ticks: year labels at every year */}
-        {Array.from({ length: years + 1 }, (_, i) => from + i).map((y) => (
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto" role="img" aria-label="Wealth building Gantt">
+        {/* Year gridlines + tick labels */}
+        {Array.from({ length: rangeYears + 1 }, (_, i) => fromYear + i).map((y) => (
           <g key={y}>
-            <line x1={yearToX(y)} y1={0} x2={yearToX(y)} y2={height - 20} stroke="currentColor" strokeOpacity="0.06" />
-            <text x={yearToX(y)} y={height - 4} textAnchor="middle" fontSize="9" className="fill-muted-foreground">
+            <line x1={yearToX(y)} y1={0} x2={yearToX(y)} y2={height - 16} stroke="currentColor" strokeOpacity="0.06" />
+            <text x={yearToX(y)} y={height - 2} textAnchor="middle" fontSize="9" className="fill-muted-foreground">
               {y}
             </text>
           </g>
         ))}
-        {LANE_ORDER.map((lane, i) => {
+        {CATEGORY_ORDER.map((cat, i) => {
           const y = i * rowHeight + rowHeight / 2;
-          const meta = LANE_META[lane];
-          if (lane === "fire_progress") {
-            return (
-              <g key={lane}>
-                <text x={labelCol - 8} y={y + 4} textAnchor="end" fontSize="11" className="fill-foreground" fontWeight="600">{meta.label}</text>
-                <FireProgressSparkline
-                  fireProgress={lanes.fireProgress}
-                  yearToX={yearToX}
-                  y={y}
-                  className={meta.bar}
-                />
-              </g>
-            );
-          }
-          const segs = lanes.lanes[lane] ?? [];
+          const rowEvents = byCategory.get(cat) ?? [];
           return (
-            <g key={lane}>
-              <text x={labelCol - 8} y={y + 4} textAnchor="end" fontSize="11" className="fill-foreground" fontWeight="600">{meta.label}</text>
-              {segs.length === 0 ? (
+            <g key={cat}>
+              <text x={labelCol - 10} y={y + 4} textAnchor="end" fontSize="11" className="fill-foreground" fontWeight="600">
+                {CATEGORY_LABEL[cat]}
+              </text>
+              <line x1={labelCol} y1={y + 12} x2={width - padRight} y2={y + 12} stroke="currentColor" strokeOpacity="0.05" />
+              {rowEvents.length === 0 ? (
                 <text x={labelCol + 4} y={y + 4} fontSize="10" className="fill-muted-foreground">—</text>
-              ) : segs.map((s) => (
-                <SegmentBar key={s.sourceMilestoneId} segment={s} yearToX={yearToX} y={y} className={meta.bar} />
+              ) : rowEvents.map((e) => (
+                <EventBar key={e.id} event={e} yearToX={yearToX} y={y} />
               ))}
             </g>
           );
         })}
       </svg>
-      <div className="mt-2 flex justify-end">
+      <div className="mt-2 flex flex-wrap justify-end gap-1">
         <SourceChip
-          attribution={{ source: "actionRoadmap.pathCompletion", note: "Lanes derived from roadmap milestones" }}
+          attribution={{ source: "scenarioV2.events", note: `${events.length} engine event(s) across ${rangeYears} year(s)` }}
           auditMode={auditMode}
         />
       </div>
@@ -141,66 +182,52 @@ function DesktopGantt({
   );
 }
 
-function SegmentBar({
-  segment, yearToX, y, className,
+function EventBar({
+  event, yearToX, y,
 }: {
-  segment: LaneSegment;
+  event: EngineEvent;
   yearToX: (y: number) => number;
   y: number;
-  className: string;
 }) {
-  const x1 = yearToX(segment.startYear);
-  const x2 = yearToX(segment.endYear);
+  const xCenter = yearToX(monthToFractionalYear(event.month));
+  const widthBar = 18;
   return (
-    <g>
-      <rect
-        x={x1}
-        y={y - 8}
-        width={Math.max(2, x2 - x1)}
-        height={16}
-        rx={4}
-        className={className}
-        opacity={0.85}
-      >
-        <title>{segment.label} ({segment.startYear}–{segment.endYear})</title>
-      </rect>
-    </g>
-  );
-}
-
-function FireProgressSparkline({
-  fireProgress, yearToX, y, className,
-}: {
-  fireProgress: RoadmapSectionProps["lanes"]["fireProgress"];
-  yearToX: (y: number) => number;
-  y: number;
-  className: string;
-}) {
-  const points = fireProgress
-    .filter((p) => p.pctOfFire != null && Number.isFinite(p.pctOfFire))
-    .map((p) => ({ x: yearToX(p.year), pct: p.pctOfFire as number }));
-  if (points.length === 0) {
-    return <text x={yearToX(fireProgress[0]?.year ?? 0) + 4} y={y + 4} fontSize="10" className="fill-muted-foreground">Not modelled yet</text>;
-  }
-  // Plot bar heights scaled to 14px max within row
-  const path = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${y - 7 + (1 - p.pct) * 14}`)
-    .join(" ");
-  return (
-    <g>
-      <path d={path} stroke="currentColor" strokeOpacity="0.55" strokeWidth="1.5" fill="none" />
-      {points.map((p, i) => (
-        i % 2 === 0 ? (
-          <text key={i} x={p.x} y={y - 10} textAnchor="middle" fontSize="9" className="fill-foreground">
-            {Math.round(p.pct * 100)}%
-          </text>
-        ) : null
-      ))}
-      {/* The currentColor stroke above + filled dots tinted via Tailwind for accent. */}
-      {points.map((p, i) => (
-        <circle key={`d-${i}`} cx={p.x} cy={y - 7 + (1 - p.pct) * 14} r={2} className={className} />
-      ))}
-    </g>
+    <HoverCard>
+      <HoverCardTrigger asChild>
+        <g
+          data-testid={`ar-s3-event-${event.id}`}
+          className="cursor-pointer"
+        >
+          <rect
+            x={xCenter - widthBar / 2}
+            y={y - 8}
+            width={widthBar}
+            height={16}
+            rx={4}
+            className={CATEGORY_FILL[event.category]}
+            opacity={0.9}
+          />
+        </g>
+      </HoverCardTrigger>
+      <HoverCardContent align="start" className="w-72" data-testid={`ar-s3-event-popover-${event.id}`}>
+        <div className="space-y-1">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {CATEGORY_LABEL[event.category]} · {event.month}
+          </div>
+          <div className="text-sm font-semibold text-foreground">{event.action}</div>
+          <p className="text-xs text-muted-foreground">{event.expectedOutcome}</p>
+          {event.netWorthImpact != null && (
+            <div className="text-xs text-foreground">
+              NW impact: ${Math.round(event.netWorthImpact).toLocaleString("en-AU")}
+            </div>
+          )}
+          {event.riskImpact && (
+            <div className="text-xs text-foreground">Risk: {event.riskImpact}</div>
+          )}
+          <div className="text-[10px] text-muted-foreground">Source: {event.source} ({event.sourceEventType})</div>
+        </div>
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 

@@ -126,5 +126,35 @@ if (rmMixed) {
 const rmCustom = buildActionRoadmap(scenarioWith(events, "unknown-template-xyz"), { targetFireAge: 60 }, 40, NOW);
 check("unknown templateId → CUSTOM_PATH", rmCustom?.template.id === "CUSTOM_PATH");
 
+// ─── Sprint 29 §5 — single-path purity invariant tests ─────────────────────
+
+// 13. Every emitted milestone carries sourceTemplateId === recommended.templateId
+const recTemplateId = "buy-ip-now";
+const rmPure = buildActionRoadmap(scenarioWith(events, recTemplateId), { targetFireAge: 60 }, 40, NOW);
+check(
+  "milestones never cross template boundaries",
+  !!rmPure && rmPure.milestones.every((m) => m.sourceTemplateId === recTemplateId),
+);
+check("warnings array empty when build is clean", !!rmPure && rmPure.warnings.length === 0);
+
+// 14. Cross-template stowaway: deltas carrying a foreign `templateId` are filtered
+//     and recorded in warnings. We inject a templateId field onto a delta to mimic
+//     the cross-template injection scenario the contract warns about.
+const stowaway = delta("e-foreign", "etf_lump_sum", "2027-06", { lumpSum: 100_000 });
+(stowaway as unknown as Record<string, unknown>).templateId = "some-other-template";
+const rmInjected = buildActionRoadmap(scenarioWith([...events, stowaway], recTemplateId), { targetFireAge: 60 }, 40, NOW);
+check(
+  "cross-template delta filtered out",
+  !!rmInjected && !rmInjected.milestones.some((m) => m.id === "e-foreign"),
+);
+check(
+  "filter records warning",
+  !!rmInjected && rmInjected.warnings.some((w) => w.includes("Filtered cross-template milestone")),
+);
+check(
+  "remaining milestones all match recommended templateId",
+  !!rmInjected && rmInjected.milestones.every((m) => m.sourceTemplateId === recTemplateId),
+);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

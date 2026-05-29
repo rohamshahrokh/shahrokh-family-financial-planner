@@ -16,13 +16,17 @@
 
 export type MetricSource =
   | "scenarioV2.monteCarlo"
+  | "scenarioV2.monteCarlo.diagnostic"
+  | "scenarioV2.events"
   | "actionRoadmap.pathCompletion"
   | "actionRoadmap.accelerators"
   | "actionRoadmap.risk"
+  | "actionRoadmap.reconciliation"
   | "goalLab.orchestrator"
   | "goalLab.confidence"
   | "goalProfile"
   | "canonicalLedger"
+  | "reconciliationFailed"
   | "notModelled";
 
 export interface MetricAttribution {
@@ -35,15 +39,19 @@ export interface MetricAttribution {
 
 function sourceLabel(source: MetricSource): string {
   switch (source) {
-    case "scenarioV2.monteCarlo":          return "Monte Carlo";
-    case "actionRoadmap.pathCompletion":   return "Path completion engine";
-    case "actionRoadmap.accelerators":     return "Accelerator ranking";
-    case "actionRoadmap.risk":             return "Risk analyzer";
-    case "goalLab.orchestrator":           return "Goal Lab orchestrator";
-    case "goalLab.confidence":             return "Goal Lab confidence";
-    case "goalProfile":                    return "Goal profile";
-    case "canonicalLedger":                return "Canonical ledger";
-    case "notModelled":                    return "Not modelled yet";
+    case "scenarioV2.monteCarlo":             return "Monte Carlo";
+    case "scenarioV2.monteCarlo.diagnostic":  return "MC variance diagnostic";
+    case "scenarioV2.events":                 return "Engine event timeline";
+    case "actionRoadmap.pathCompletion":      return "Path completion engine";
+    case "actionRoadmap.accelerators":        return "Accelerator ranking";
+    case "actionRoadmap.risk":                return "Risk analyzer";
+    case "actionRoadmap.reconciliation":      return "Financial reconciliation";
+    case "goalLab.orchestrator":              return "Goal Lab orchestrator";
+    case "goalLab.confidence":                return "Goal Lab confidence";
+    case "goalProfile":                       return "Goal profile";
+    case "canonicalLedger":                   return "Canonical ledger";
+    case "reconciliationFailed":              return "Reconciliation failed";
+    case "notModelled":                       return "Not modelled yet";
   }
 }
 

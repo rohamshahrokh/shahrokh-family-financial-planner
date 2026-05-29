@@ -16,6 +16,9 @@ import type { NextActionsBuckets } from "@/lib/actionRoadmap/nextActionsBuilder"
 import type { WealthBuildingLanes } from "@/lib/actionRoadmap/wealthBuildingLanes";
 import type { GoalLabPathPicks, GoalLabRankedScenario } from "@/lib/goalLab/orchestrator";
 import type { ConfidenceResult } from "@/lib/goalLab/goalLabConfidence";
+import type { ReconciliationResult } from "@/lib/actionRoadmap/financialReconciliation";
+import type { MCVarianceDiagnostic } from "@/lib/actionRoadmap/mcVarianceDiagnostic";
+import type { EngineEvent } from "@/lib/actionRoadmap/engineEventTimeline";
 
 export interface RoadmapSectionProps {
   /**
@@ -43,5 +46,11 @@ export interface RoadmapSectionProps {
   swrPct: number | null;
   startAge: number | null;
   currentNetWorth: number | null;
+  /** Sprint 29 §3 — strict reconciliation gate. Blocks S1/S4/S5 NW figures when status !== PASS. */
+  reconciliation: ReconciliationResult;
+  /** Sprint 29 §4 — Monte Carlo variance diagnostic. Wired into S5 audit panel. */
+  mcVariance: MCVarianceDiagnostic;
+  /** Sprint 29 §7 — engine event timeline feeding the professional Gantt (P5). */
+  engineEvents: EngineEvent[];
   auditMode: boolean;
 }

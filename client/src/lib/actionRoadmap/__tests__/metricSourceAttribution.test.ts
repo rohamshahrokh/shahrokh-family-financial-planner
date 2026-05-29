@@ -58,13 +58,17 @@ check("shortAttribution returns source-only label", short === "Monte Carlo", `go
 // 9. All sources resolve to a non-empty label
 const allSources = [
   "scenarioV2.monteCarlo",
+  "scenarioV2.monteCarlo.diagnostic",
+  "scenarioV2.events",
   "actionRoadmap.pathCompletion",
   "actionRoadmap.accelerators",
   "actionRoadmap.risk",
+  "actionRoadmap.reconciliation",
   "goalLab.orchestrator",
   "goalLab.confidence",
   "goalProfile",
   "canonicalLedger",
+  "reconciliationFailed",
   "notModelled",
 ] as const;
 let allResolved = true;

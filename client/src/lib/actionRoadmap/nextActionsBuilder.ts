@@ -18,7 +18,8 @@
  */
 import type { RoadmapMilestone } from "./types";
 
-export type NextActionsBucket = "this_month" | "next_90_days" | "next_12_months" | "later";
+// Sprint 29 §11.1 — bucket renamed from "this_month" → "next_30_days".
+export type NextActionsBucket = "next_30_days" | "next_90_days" | "next_12_months" | "later";
 
 export interface NextActionItem {
   id: string;
@@ -29,7 +30,8 @@ export interface NextActionItem {
 }
 
 export interface NextActionsBuckets {
-  thisMonth: NextActionItem[];
+  /** Sprint 29 §11.1 — renamed from `thisMonth`. UI label is "NEXT 30 DAYS". */
+  next30Days: NextActionItem[];
   next90Days: NextActionItem[];
   next12Months: NextActionItem[];
 }
@@ -107,7 +109,7 @@ function actionsFor(label: string): string[] {
 function bucketFor(due: Date, today: Date): NextActionsBucket {
   const ms = due.getTime() - today.getTime();
   const days = ms / (1000 * 60 * 60 * 24);
-  if (days <= 30) return "this_month";
+  if (days <= 30) return "next_30_days";
   if (days <= 90) return "next_90_days";
   if (days <= 365) return "next_12_months";
   return "later";
@@ -126,8 +128,14 @@ function monthKeyToDate(mk: string): Date | null {
 
 export function buildNextActions(input: BuildInput): NextActionsBuckets {
   const { milestones, today } = input;
-  const out: NextActionsBuckets = { thisMonth: [], next90Days: [], next12Months: [] };
+  const out: NextActionsBuckets = { next30Days: [], next90Days: [], next12Months: [] };
   if (!Array.isArray(milestones) || milestones.length === 0) return out;
+
+  // Sprint 29 §11.2 — dedup by (title, sourceMilestoneId). Same title across
+  // different milestones is kept (still a distinct action); same title +
+  // same milestone is collapsed to one entry.
+  const seen = new Set<string>();
+  const key = (title: string, sourceMilestoneId: string) => `${title}::${sourceMilestoneId}`;
 
   for (const m of milestones) {
     if (m.status === "completed" || m.status === "fire") continue; // skip past + terminal
@@ -138,15 +146,20 @@ export function buildNextActions(input: BuildInput): NextActionsBuckets {
 
     const titles = actionsFor(m.label);
     for (let i = 0; i < titles.length; i++) {
+      const title = titles[i]!;
+      const k = key(title, m.id);
+      if (seen.has(k)) continue;
+      seen.add(k);
+
       const item: NextActionItem = {
         id: `${m.id}-${i}`,
-        title: titles[i]!,
+        title,
         due: m.month,
         sourceMilestoneId: m.id,
         bucket,
       };
-      if (bucket === "this_month")  out.thisMonth.push(item);
-      if (bucket === "next_90_days") out.next90Days.push(item);
+      if (bucket === "next_30_days")   out.next30Days.push(item);
+      if (bucket === "next_90_days")   out.next90Days.push(item);
       if (bucket === "next_12_months") out.next12Months.push(item);
     }
   }

@@ -33,8 +33,9 @@ function confidenceBand(c: RoadmapSectionProps["confidence"]): { label: string; 
 }
 
 export function ExecutiveDecision(props: RoadmapSectionProps) {
-  const { recommended, mcProjection, confidence, auditMode } = props;
+  const { recommended, mcProjection, confidence, reconciliation, auditMode } = props;
   const cBand = confidenceBand(confidence);
+  const reconBlocked = reconciliation.status !== "PASS";
 
   return (
     <section
@@ -65,8 +66,12 @@ export function ExecutiveDecision(props: RoadmapSectionProps) {
         />
         <Tile
           label="Net worth at FIRE (P50)"
-          value={fmtMoney(mcProjection.netWorthAtFire.p50)}
-          attribution={mcSource(mcProjection.netWorthAtFire.p50, mcProjection.simulationCount)}
+          value={reconBlocked ? "Reconciliation failed" : fmtMoney(mcProjection.netWorthAtFire.p50)}
+          attribution={
+            reconBlocked
+              ? { source: "reconciliationFailed", note: reconciliation.message ?? undefined }
+              : mcSource(mcProjection.netWorthAtFire.p50, mcProjection.simulationCount)
+          }
           auditMode={auditMode}
           testId="ar-s1-nw-at-fire"
         />

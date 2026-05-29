@@ -36,6 +36,7 @@ function ms(month: string, label = "Acquire investment property", status: Roadma
     effect: "Engine-modelled milestone.",
     status,
     sourceTag: "scenarioDelta.buy_property",
+    sourceTemplateId: "buy-ip-now",
   };
 }
 
@@ -89,13 +90,61 @@ const r6b = enrichFireJourneyMilestones({ milestones: [ms("2025-01")], fan, star
 check("milestone before fan start → progressImpact null", r6b[0].progressImpact === null);
 
 // 7. FIRE milestone always gets the special outcome string
-const fireMs: RoadmapMilestone = { ...ms("2031-01", "Target FIRE at age 55", "fire"), id: "derived.fire-target", sourceTag: "derived.fire-target" };
+const fireMs: RoadmapMilestone = { ...ms("2031-01", "Target FIRE at age 55", "fire"), id: "derived.fire-target", sourceTag: "derived.fire-target", sourceTemplateId: "buy-ip-now" };
 const r7 = enrichFireJourneyMilestones({ milestones: [fireMs], fan, startMonth: "2026-01", fireNumber: 2_000_000 });
 check("FIRE milestone → expectedOutcome mentions FIRE", r7[0].expectedOutcome.toLowerCase().includes("fire"));
 
-// 8. Completed milestone gets the executed-already message
-const r8 = enrichFireJourneyMilestones({ milestones: [ms("2026-03", "Refinance", "completed")], fan, startMonth: "2026-01", fireNumber: 2_000_000 });
-check("completed milestone outcome mentions executed", r8[0].expectedOutcome.toLowerCase().includes("execut"));
+// 8. Completed milestones with no measurable forward impact are filtered by §6.2.
+//    A flat fan yields zero NW delta; completed status yields null risk delta;
+//    therefore the milestone is dropped.
+const flatFanForCompleted: FanPoint[] = [];
+for (let i = 0; i < 12; i++) flatFanForCompleted.push(fp(1_000_000));
+const r8 = enrichFireJourneyMilestones({ milestones: [ms("2026-03", "Refinance", "completed")], fan: flatFanForCompleted, startMonth: "2026-01", fireNumber: 2_000_000 });
+check("completed milestone with no measurable impact is filtered (§6.2)", r8.length === 0);
+
+// ─── Sprint 29 §6 — 4-delta + zero-filter tests ──────────────────────────
+
+// 9. 4-delta computation: buy-property milestone with a rising fan + swr
+const r9 = enrichFireJourneyMilestones({
+  milestones: [ms("2027-01")],
+  fan, startMonth: "2026-01", fireNumber: 2_000_000, swrPct: 4,
+});
+check("netWorthDelta computed", r9[0].netWorthDelta != null && Number.isFinite(r9[0].netWorthDelta as number));
+check("passiveIncomeDelta = netWorthDelta × swrPct/100", r9[0].passiveIncomeDelta != null && Math.abs((r9[0].passiveIncomeDelta as number) - (r9[0].netWorthDelta as number) * 0.04) < 1e-6);
+check("fireProgressDelta matches progressImpact.delta", r9[0].fireProgressDelta === r9[0].progressImpact?.delta);
+check("buy_property → riskDelta = 'higher'", r9[0].riskDelta === "higher");
+
+// 10. Zero-delta filter drops a milestone with flat sourceTag and no fan-driven impact
+const flatMs: RoadmapMilestone = {
+  id: "flat-1",
+  year: 2027,
+  month: "2027-01",
+  label: "Plan event",
+  effect: "no-op",
+  status: "upcoming",
+  sourceTag: "scenarioDelta.cash_hold",       // riskDeltaFor → "flat"
+  sourceTemplateId: "buy-ip-now",
+};
+const flatFan: FanPoint[] = [];
+for (let i = 0; i < 24; i++) flatFan.push(fp(1_000_000));   // entirely flat fan → no NW delta
+const rFlat = enrichFireJourneyMilestones({ milestones: [flatMs], fan: flatFan, startMonth: "2026-01", fireNumber: 2_000_000, swrPct: 4 });
+check("all-zero milestone is dropped (§6.2)", rFlat.length === 0);
+
+// 11. FIRE marker is always kept even when every delta would be zero
+const fireOnlyFan: FanPoint[] = [fp(1_000_000)];
+const rFire = enrichFireJourneyMilestones({ milestones: [fireMs], fan: fireOnlyFan, startMonth: "2026-01", fireNumber: 2_000_000, swrPct: 4 });
+check("FIRE marker preserved with zero deltas", rFire.length === 1 && rFire[0].status === "fire");
+
+// 12. Milestone-to-milestone NW delta uses the previous milestone's month (not month-1)
+const r12 = enrichFireJourneyMilestones({
+  milestones: [ms("2026-06"), ms("2027-06")],
+  fan, startMonth: "2026-01", fireNumber: 2_000_000, swrPct: 4,
+});
+// fan is rising linearly; second milestone NW delta should be ~ fan[18] - fan[5]
+const expectedDelta2 = fan[17].p50 - fan[5].p50;
+check("second milestone NW delta measured vs previous milestone month, not month-1",
+  Math.abs((r12[1].netWorthDelta as number) - expectedDelta2) < 1e-6,
+  `got=${r12[1].netWorthDelta}, expected≈${expectedDelta2}`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

@@ -16,6 +16,7 @@ import type { RoadmapSectionProps } from "./roadmapContext";
 import type { GoalLabRankedScenario } from "@/lib/goalLab/orchestrator";
 import { selectMonteCarloProjection, type MonteCarloProjection } from "@/lib/actionRoadmap/montecarloProjection";
 import { analyzeRoadmapRisk } from "@/lib/actionRoadmap/roadmapRiskAnalyzer";
+import { buildAlternativeRationale } from "@/lib/actionRoadmap/alternativeRationale";
 import type { FanPoint } from "@/lib/scenarioV2/types";
 import type { RiskBand } from "@/lib/actionRoadmap/types";
 
@@ -163,6 +164,15 @@ export function AlternativeStrategies(props: RoadmapSectionProps) {
                 <Cell label="Passive income (P50)"     value={fmtMoney(r.mc.passiveIncomeAtFire.p50)} delta={dPass} />
               </div>
 
+              {!isRec && recommended && recRow && (
+                <RationaleBlock
+                  recommended={recommended}
+                  alternative={r.scenario}
+                  recommendedMC={recRow.mc}
+                  alternativeMC={r.mc}
+                />
+              )}
+
               <div className="mt-2">
                 <SourceChip
                   attribution={{
@@ -179,6 +189,37 @@ export function AlternativeStrategies(props: RoadmapSectionProps) {
         })}
       </ul>
     </section>
+  );
+}
+
+function RationaleBlock({
+  recommended, alternative, recommendedMC, alternativeMC,
+}: {
+  recommended: GoalLabRankedScenario;
+  alternative: GoalLabRankedScenario;
+  recommendedMC: MonteCarloProjection;
+  alternativeMC: MonteCarloProjection;
+}) {
+  const { reasons } = buildAlternativeRationale({ recommended, alternative, recommendedMC, alternativeMC });
+  if (reasons.length === 0) return null;
+  return (
+    <details className="mt-3 group" data-testid={`ar-s7-rationale-${alternative.templateId}`} open>
+      <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-muted-foreground select-none">
+        Why it's not recommended ({reasons.length})
+      </summary>
+      <ul className="mt-1.5 space-y-1">
+        {reasons.map((r, i) => (
+          <li key={i} className="flex items-start gap-2 text-xs">
+            <span className={"mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ring-1 " +
+              (r.sign === "+"
+                ? "bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/25"
+                : "bg-rose-100 text-rose-700 ring-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-400/25")
+            }>{r.sign}</span>
+            <span className="text-foreground">{r.text}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

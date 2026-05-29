@@ -52,6 +52,7 @@ import type {
   MonthKey,
   PortfolioState,
   ScenarioDelta,
+  ScenarioEvent,
   ScenarioResult,
 } from "./types";
 
@@ -142,6 +143,13 @@ export interface ExtendedScenarioResult extends ScenarioResult {
    * the engine. Sourced directly from `mc.medianFinalState`.
    */
   medianFinalState: PortfolioState;
+  /**
+   * Sprint 29 §7 — full sorted event store, surfaced (read-only) so the
+   * Action Roadmap's engine-event timeline + professional Gantt can group
+   * events by category without re-running the engine. Sourced directly from
+   * the local `events` variable built via `buildEventStore`.
+   */
+  events?: ScenarioEvent[];
 }
 
 export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
@@ -299,6 +307,7 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     survival,
     forcedSaleReport,
     medianFinalState: mc.medianFinalState,
+    events,
   };
 }
 

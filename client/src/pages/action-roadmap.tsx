@@ -1,16 +1,16 @@
 /**
- * /action-roadmap — Sprint 28B execution workspace.
+ * /action-roadmap — Sprint 28B execution workspace (Sprint 29 wiring).
  *
- * Layer 3 of the MOVE architecture (SPRINT28B_EXECUTION_ROADMAP.md §1):
- * "Execute. THE primary FIRE-execution workspace." Reads the cached Goal
- * Lab plan (no engine re-run, no Supabase write), wires together the
- * Sprint 27 + Sprint 28 selectors, and renders eight sections in spec
- * order: Executive Decision → FIRE Journey Roadmap → Wealth Building
- * Timeline → Net Worth Attribution → Monte Carlo Outlook → Risks &
- * Failure Points → Alternative Strategies → Next Actions.
+ * Layer 3 of the MOVE architecture: "Execute. THE primary FIRE-execution
+ * workspace." Reads the cached Goal Lab plan (no engine re-run, no Supabase
+ * write), wires together the Sprint 27 + Sprint 28 + Sprint 29 selectors,
+ * and renders eight sections.
  *
- * Honesty: every metric trace ends at an engine field. When a selector
- * returns null the affected cell renders the literal "Not modelled yet".
+ * Sprint 29 additions:
+ *   - reconciliation gate (P0) flows through S1 / S4 / S5
+ *   - MC variance diagnostic (P1) feeds the S5 audit panel + warning chips
+ *   - engine event timeline (P4) drives the S3 professional Gantt
+ *   - mobile (< sm) wraps the 8 sections into 6 tabs (P9). Desktop unchanged.
  */
 import * as React from "react";
 import { Link } from "wouter";
@@ -32,7 +32,10 @@ import { enrichFireJourneyMilestones } from "@/lib/actionRoadmap/fireJourneyMile
 import { selectFailureAnalysis } from "@/lib/actionRoadmap/stressFailureAnalysis";
 import { buildNextActions } from "@/lib/actionRoadmap/nextActionsBuilder";
 import { selectWealthBuildingLanes } from "@/lib/actionRoadmap/wealthBuildingLanes";
-import type { FanPoint, PortfolioState } from "@/lib/scenarioV2/types";
+import { reconcileTerminalNetWorth } from "@/lib/actionRoadmap/financialReconciliation";
+import { computeMCVarianceDiagnostic } from "@/lib/actionRoadmap/mcVarianceDiagnostic";
+import { selectEngineEventTimeline } from "@/lib/actionRoadmap/engineEventTimeline";
+import type { FanPoint, PortfolioState, ScenarioEvent } from "@/lib/scenarioV2/types";
 
 import { ExplainabilityToggle } from "@/components/actionRoadmap/ExplainabilityToggle";
 import { ExecutiveDecision } from "@/components/actionRoadmap/ExecutiveDecision";
@@ -45,11 +48,33 @@ import { AlternativeStrategies } from "@/components/actionRoadmap/AlternativeStr
 import { NextActionsPanel } from "@/components/actionRoadmap/NextActionsPanel";
 import type { RoadmapSectionProps } from "@/components/actionRoadmap/roadmapContext";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const HORIZON_YEARS_DEFAULT = 25;
+const MOBILE_TAB_STORAGE_KEY = "fwl.actionRoadmap.mobileTab";
+
+type MobileTabId = "summary" | "roadmap" | "timeline" | "risks" | "alternatives" | "actions";
+const MOBILE_TABS: Array<{ id: MobileTabId; label: string }> = [
+  { id: "summary",      label: "Summary" },
+  { id: "roadmap",      label: "Roadmap" },
+  { id: "timeline",     label: "Timeline" },
+  { id: "risks",        label: "Risks" },
+  { id: "alternatives", label: "Alternatives" },
+  { id: "actions",      label: "Actions" },
+];
 
 export default function ActionRoadmapPage() {
   const [auditMode, setAuditMode] = React.useState(false);
+  const [mobileTab, setMobileTab] = React.useState<MobileTabId>(() => {
+    if (typeof window === "undefined") return "summary";
+    const stored = window.sessionStorage.getItem(MOBILE_TAB_STORAGE_KEY);
+    if (stored && MOBILE_TABS.some((t) => t.id === stored)) return stored as MobileTabId;
+    return "summary";
+  });
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem(MOBILE_TAB_STORAGE_KEY, mobileTab);
+  }, [mobileTab]);
 
   /* Canonical ledger queries — same shape as decision-lab / goal-lab. */
   const { data: snapshot } = useQuery<any>({
@@ -107,10 +132,6 @@ export default function ActionRoadmapPage() {
   const plan = React.useMemo(() => readLatestGoalLabPlan(), [canonicalLedger, goal]);
 
   /* ── Build roadmapContext with safe defaults ─────────────────────────── */
-  // Honesty rule (SPRINT28B §3): when the plan is missing OR no feasible
-  // winner exists, we DO NOT hide the architecture behind one empty card.
-  // Every section still mounts and renders its own "Not modelled yet" cell.
-  // A top banner explains the state and points to Decision Lab.
   const hasPlan = !!plan;
   const recommended = plan?.picks?.recommended ?? null;
   const picks = plan?.picks ?? {
@@ -142,8 +163,7 @@ export default function ActionRoadmapPage() {
     : null;
 
   // Compute startMonth for fan-month indexing. The fan's own first point
-  // carries the canonical month; fall back to the milestone derivation in
-  // builder which uses now().
+  // carries the canonical month; fall back to current month otherwise.
   const startMonth = fan[0]?.month ?? new Date().toISOString().slice(0, 7);
 
   const enrichedMilestones = enrichFireJourneyMilestones({
@@ -151,20 +171,41 @@ export default function ActionRoadmapPage() {
     fan,
     startMonth,
     fireNumber,
+    swrPct,
   });
 
-  const attribution = selectNetWorthAttribution({
-    finalState,
-    fanP50AtHorizon: fan.length > 0 ? fan[fan.length - 1]!.p50 : null,
+  const fanP50AtHorizon = fan.length > 0 ? fan[fan.length - 1]!.p50 : null;
+  const attribution = selectNetWorthAttribution({ finalState, fanP50AtHorizon });
+  const reconciliation = reconcileTerminalNetWorth({ finalState, fanP50AtHorizon });
+
+  // Sprint 29 §4 — MC variance diagnostic.
+  const terminalNwSamples: number[] = (recommended?.winner?.result?.terminalNwSamples as number[] | undefined) ?? [];
+  const mcVariance = computeMCVarianceDiagnostic({
+    terminalNwSamples,
+    fireNumber,
+    swrPct,
+    startAge: currentAge,
+    fanFireMonths: { p25: monthIndexAt(fan, fireNumber, "p25"), p50: monthIndexAt(fan, fireNumber, "p50"), p75: monthIndexAt(fan, fireNumber, "p75") },
   });
+
+  // Sprint 29 §7 — engine event timeline.
+  const events: ScenarioEvent[] = (recommended?.winner?.result?.events as ScenarioEvent[] | undefined) ?? [];
+  const fireMonthCrossing = monthIndexAt(fan, fireNumber, "p50");
+  const fireMonth = fireMonthCrossing != null && fireMonthCrossing >= 0 && fireMonthCrossing < fan.length
+    ? fan[fireMonthCrossing]?.month ?? null
+    : null;
+  const engineEvents = selectEngineEventTimeline({ events, fireMonth });
 
   const failures = selectFailureAnalysis({
     result: recommended?.winner?.result ?? null,
     softWarnings: recommended?.winner?.softWarnings,
   });
 
+  // Filter milestones to those that survive the zero-delta filter (P3) before
+  // building Next Actions (§11.2). The roadmap already filters cross-template
+  // entries; enriched milestones add the zero-delta filter.
   const nextActions = buildNextActions({
-    milestones: roadmap?.milestones ?? [],
+    milestones: enrichedMilestones,
     today: new Date(),
   });
 
@@ -200,46 +241,99 @@ export default function ActionRoadmapPage() {
     swrPct,
     startAge: currentAge,
     currentNetWorth: headline?.netWorth ?? null,
+    reconciliation,
+    mcVariance,
+    engineEvents,
     auditMode,
   };
+
+  const noPlanBanner = !recommended ? (
+    <section
+      aria-labelledby="ar-no-plan-heading"
+      className="flex items-start gap-3 rounded-2xl border border-amber-300/60 bg-amber-50/60 p-4 dark:border-amber-400/30 dark:bg-amber-950/20"
+      data-testid="ar-no-plan-banner"
+    >
+      <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+      <div className="flex-1">
+        <h2 id="ar-no-plan-heading" className="text-sm font-semibold text-foreground">
+          {hasPlan ? "No feasible plan yet" : "Not modelled yet"}
+        </h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          {hasPlan
+            ? "The engine could not produce a feasible winner with the current goal inputs. Each section below shows \"Not modelled yet\" until a plan is found."
+            : "Open Decision Lab to run a plan and populate this workspace. Each section below previews its slot with \"Not modelled yet\" placeholders."}
+        </p>
+        <Link href="/decision-lab">
+          <Button size="sm" className="mt-3 gap-1.5" data-testid="ar-no-plan-cta">
+            Open Decision Lab <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+          </Button>
+        </Link>
+      </div>
+    </section>
+  ) : null;
 
   return (
     <div className="container mx-auto max-w-5xl px-3 sm:px-4 py-6 space-y-4" data-testid="action-roadmap-page">
       <PageHeader auditMode={auditMode} onAuditChange={setAuditMode} hasPlan={hasPlan && recommended != null} />
-      {!recommended && (
-        <section
-          aria-labelledby="ar-no-plan-heading"
-          className="flex items-start gap-3 rounded-2xl border border-amber-300/60 bg-amber-50/60 p-4 dark:border-amber-400/30 dark:bg-amber-950/20"
-          data-testid="ar-no-plan-banner"
-        >
-          <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
-          <div className="flex-1">
-            <h2 id="ar-no-plan-heading" className="text-sm font-semibold text-foreground">
-              {hasPlan ? "No feasible plan yet" : "Not modelled yet"}
-            </h2>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              {hasPlan
-                ? "The engine could not produce a feasible winner with the current goal inputs. Each section below shows \"Not modelled yet\" until a plan is found."
-                : "Open Decision Lab to run a plan and populate this workspace. Each section below previews its slot with \"Not modelled yet\" placeholders."}
-            </p>
-            <Link href="/decision-lab">
-              <Button size="sm" className="mt-3 gap-1.5" data-testid="ar-no-plan-cta">
-                Open Decision Lab <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-              </Button>
-            </Link>
-          </div>
-        </section>
-      )}
-      <ExecutiveDecision {...ctx} />
-      <FireJourneyRoadmap {...ctx} />
-      <WealthTimelineGantt {...ctx} />
-      <NetWorthAttribution {...ctx} />
-      <MonteCarloOutlook {...ctx} />
-      <RisksFailurePoints {...ctx} />
-      <AlternativeStrategies {...ctx} />
-      <NextActionsPanel {...ctx} />
+      {noPlanBanner}
+
+      {/* Desktop ≥ sm — full vertical stack of 8 sections (Sprint 28B layout) */}
+      <div className="hidden space-y-4 sm:block" data-testid="ar-desktop-stack">
+        <ExecutiveDecision {...ctx} />
+        <FireJourneyRoadmap {...ctx} />
+        <WealthTimelineGantt {...ctx} />
+        <NetWorthAttribution {...ctx} />
+        <MonteCarloOutlook {...ctx} />
+        <RisksFailurePoints {...ctx} />
+        <AlternativeStrategies {...ctx} />
+        <NextActionsPanel {...ctx} />
+      </div>
+
+      {/* Mobile < sm — 6-tab wrapper per Sprint 29 §12.1 */}
+      <div className="sm:hidden" data-testid="ar-mobile-tabs">
+        <Tabs value={mobileTab} onValueChange={(v) => setMobileTab(v as MobileTabId)}>
+          <TabsList className="grid h-auto w-full grid-cols-3 gap-1 bg-muted/60 p-1">
+            {MOBILE_TABS.map((t) => (
+              <TabsTrigger key={t.id} value={t.id} className="text-xs py-1.5" data-testid={`ar-mobile-tab-${t.id}`}>
+                {t.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <TabsContent value="summary" className="mt-4 space-y-4">
+            <ExecutiveDecision {...ctx} />
+          </TabsContent>
+          <TabsContent value="roadmap" className="mt-4 space-y-4">
+            <FireJourneyRoadmap {...ctx} />
+          </TabsContent>
+          <TabsContent value="timeline" className="mt-4 space-y-4">
+            <WealthTimelineGantt {...ctx} />
+          </TabsContent>
+          <TabsContent value="risks" className="mt-4 space-y-4">
+            <NetWorthAttribution {...ctx} />
+            <RisksFailurePoints {...ctx} />
+          </TabsContent>
+          <TabsContent value="alternatives" className="mt-4 space-y-4">
+            <MonteCarloOutlook {...ctx} />
+            <AlternativeStrategies {...ctx} />
+          </TabsContent>
+          <TabsContent value="actions" className="mt-4 space-y-4">
+            <NextActionsPanel {...ctx} />
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
+}
+
+/** First month-index where fan[idx][percentile] >= target. -1 if never. */
+function monthIndexAt(fan: FanPoint[], target: number | null, pct: "p25" | "p50" | "p75"): number | null {
+  if (target == null || !Number.isFinite(target) || target <= 0) return null;
+  if (!Array.isArray(fan) || fan.length === 0) return null;
+  for (let i = 0; i < fan.length; i++) {
+    const v = fan[i]![pct];
+    if (Number.isFinite(v) && v >= target) return i;
+  }
+  return null;
 }
 
 function PageHeader({

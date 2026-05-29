@@ -72,6 +72,12 @@ export interface RoadmapMilestone {
    * from (e.g. `scenarioDelta.buy_property` or `derived.fire-target`).
    */
   sourceTag: string;
+  /**
+   * Sprint 29 §5 — engine template id that produced this milestone. The
+   * roadmap belongs to ONE recommended strategy; cross-template milestones
+   * MUST be filtered before render. Builder sets this on every milestone.
+   */
+  sourceTemplateId: string;
 }
 
 // ─── Path completion ───────────────────────────────────────────────────────
@@ -174,4 +180,10 @@ export interface ActionRoadmap {
     candidateId: string;
     eventsConsidered: number;
   };
+  /**
+   * Sprint 29 §5 — warnings raised during construction (e.g.
+   * "Filtered cross-template milestone: …"). Always present; empty when
+   * the build was clean.
+   */
+  warnings: string[];
 }

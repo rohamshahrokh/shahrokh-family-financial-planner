@@ -1,7 +1,7 @@
 /**
  * NextActionsPanel — Action Roadmap S8 (Sprint 28B).
  *
- * Three sub-sections: THIS MONTH / NEXT 90 DAYS / NEXT 12 MONTHS. Each
+ * Three sub-sections: NEXT 30 DAYS / NEXT 90 DAYS / NEXT 12 MONTHS. Each
  * item is a checkbox row (visual only — no persistence). Empty bucket
  * renders "Nothing scheduled" in muted text.
  *
@@ -15,7 +15,7 @@ import type { RoadmapSectionProps } from "./roadmapContext";
 import type { NextActionItem } from "@/lib/actionRoadmap/nextActionsBuilder";
 
 const BUCKETS: Array<{ key: keyof RoadmapSectionProps["nextActions"]; label: string; testId: string }> = [
-  { key: "thisMonth",    label: "THIS MONTH",     testId: "ar-s8-bucket-this-month" },
+  { key: "next30Days",   label: "NEXT 30 DAYS",   testId: "ar-s8-bucket-next-30-days" },
   { key: "next90Days",   label: "NEXT 90 DAYS",   testId: "ar-s8-bucket-next-90-days" },
   { key: "next12Months", label: "NEXT 12 MONTHS", testId: "ar-s8-bucket-next-12-months" },
 ];

@@ -110,19 +110,7 @@ function MilestoneCard({
         <div className="mt-1 text-xs text-foreground/90">{milestone.expectedOutcome}</div>
 
         {!isFire ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">FIRE progress</span>
-            <span className="text-sm font-medium text-foreground">{progressText}</span>
-            <SourceChip
-              attribution={{
-                source: progress == null ? "notModelled" : "scenarioV2.monteCarlo",
-                percentile: "p50",
-                simulationCount: mc.simulationCount,
-                note: "% of FIRE number at milestone month",
-              }}
-              auditMode={auditMode}
-            />
-          </div>
+          <DeltaGrid milestone={milestone} progressText={progressText} mc={mc} auditMode={auditMode} />
         ) : (
           <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div>
@@ -149,6 +137,67 @@ function MilestoneCard({
         )}
       </div>
     </li>
+  );
+}
+
+function fmtMoneySigned(n: number | null): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const sign = n >= 0 ? "+" : "-";
+  return `${sign}$${Math.abs(Math.round(n)).toLocaleString("en-AU")}`;
+}
+
+function fmtPpSigned(n: number | null): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const sign = n >= 0 ? "+" : "";
+  return `${sign}${n.toFixed(1)}pp`;
+}
+
+function riskLabel(r: FireJourneyMilestone["riskDelta"]): { text: string; tone: string } {
+  if (r === "lower")  return { text: "lower",  tone: "text-emerald-700 dark:text-emerald-300" };
+  if (r === "higher") return { text: "higher", tone: "text-rose-700 dark:text-rose-300" };
+  if (r === "flat")   return { text: "flat",   tone: "text-muted-foreground" };
+  return { text: "—", tone: "text-muted-foreground" };
+}
+
+function DeltaGrid({
+  milestone, progressText, mc, auditMode,
+}: {
+  milestone: FireJourneyMilestone;
+  progressText: string;
+  mc: RoadmapSectionProps["mcProjection"];
+  auditMode: boolean;
+}) {
+  const risk = riskLabel(milestone.riskDelta);
+  return (
+    <div className="mt-3 grid grid-cols-2 gap-2 text-xs" data-testid={`ar-s2-deltas-${milestone.id}`}>
+      <DeltaCell label="NW Δ"        value={fmtMoneySigned(milestone.netWorthDelta)} />
+      <DeltaCell label="FIRE Δ"      value={milestone.fireProgressDelta != null ? progressText : "Not modelled yet"} />
+      <DeltaCell label="PI Δ"        value={fmtMoneySigned(milestone.passiveIncomeDelta)} />
+      <DeltaCell label="Risk Δ"      value={<span className={risk.tone}>{risk.text}</span>} />
+      <div className="col-span-2 flex items-center gap-1">
+        <SourceChip
+          attribution={{
+            source: milestone.netWorthDelta == null && milestone.fireProgressDelta == null ? "notModelled" : "scenarioV2.monteCarlo",
+            percentile: "p50",
+            simulationCount: mc.simulationCount,
+            note: "Per-milestone NW + progress + risk band deltas",
+          }}
+          auditMode={auditMode}
+        />
+        {milestone.fireProgressDelta != null && (
+          <span className="text-[10px] text-muted-foreground">· {fmtPpSigned(milestone.fireProgressDelta)} FIRE progress</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DeltaCell({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-border/40 bg-background/40 px-2 py-1.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-sm font-medium text-foreground">{value}</div>
+    </div>
   );
 }
 

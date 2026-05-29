@@ -91,6 +91,13 @@ export function buildActionRoadmap(
       : "upcoming";
     if (status === "next") nextAssigned = true;
 
+    // Sprint 29 §5 — every milestone carries the recommended templateId so
+    // the final purity filter can reject any cross-template stowaways.
+    const milestoneTemplateId =
+      (delta as unknown as { templateId?: string }).templateId
+        ?? (delta as unknown as { sourceTemplateId?: string }).sourceTemplateId
+        ?? scenario.templateId;
+
     milestones.push({
       id: delta.id || delta.idempotencyKey || `${delta.deltaType}-${delta.activationMonth}`,
       year: yearFromMonthKey(delta.activationMonth),
@@ -99,6 +106,7 @@ export function buildActionRoadmap(
       effect: effectForDelta(delta),
       status,
       sourceTag: `scenarioDelta.${delta.deltaType}`,
+      sourceTemplateId: milestoneTemplateId,
     });
   }
 
@@ -123,18 +131,35 @@ export function buildActionRoadmap(
       effect: "Goal achieved if the projected path meets the FIRE number by this date.",
       status: "fire",
       sourceTag: "derived.fire-target",
+      sourceTemplateId: scenario.templateId,
     });
+  }
+
+  // Sprint 29 §5 — single-path purity filter. Reject any milestone whose
+  // sourceTemplateId doesn't match the recommended template and record the
+  // rejection in warnings so the audit panel can surface the drift.
+  const warnings: string[] = [];
+  const purified: RoadmapMilestone[] = [];
+  for (const m of milestones) {
+    if (m.sourceTemplateId === scenario.templateId) {
+      purified.push(m);
+    } else {
+      warnings.push(
+        `Filtered cross-template milestone: ${m.label} (sourceTemplateId=${m.sourceTemplateId}, recommended=${scenario.templateId})`,
+      );
+    }
   }
 
   return {
     template,
-    milestones,
-    hasEngineMilestones,
+    milestones: purified,
+    hasEngineMilestones: purified.some((m) => m.status !== "fire"),
     audit: {
       engineTemplateId: scenario.templateId,
       candidateId: winner.id,
       eventsConsidered: sortedEvents.length,
     },
+    warnings,
   };
 }
 
