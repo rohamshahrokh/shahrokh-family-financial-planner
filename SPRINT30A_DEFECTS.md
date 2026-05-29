@@ -1,10 +1,9 @@
 # Sprint 30A — Defects Observed During Verification
 
-Verified preview URL: `https://shahrokh-family-financial-planner-ec2wxcbdx.vercel.app`
-This preview reflects the **Sprint 30A core build (commit 27a7b4e)**. The
-addendum commits (A1 `57391e0`, A2 `8f46f44`) are pushed but **not yet
-redeployed** because the Vercel CLI in this environment had no token.
-Defects observed are tagged accordingly.
+Verified preview URL (addendum included): `https://shahrokh-family-financial-planner-mrqdt49ks.vercel.app`
+This preview reflects **Sprint 30A core (27a7b4e) + addendum (57391e0,
+8f46f44, 55b4e7d)**. Earlier preview `ec2wxcbdx.vercel.app` is the
+core-only build.
 
 Screenshots captured in `/home/user/workspace/`:
 - sprint30a_action_roadmap_full_desktop.png
@@ -92,13 +91,11 @@ Screenshots captured in `/home/user/workspace/`:
   values would render when the upstream null is resolved.
 - Severity: **medium**, same root cause as D8.
 
-## A1 — Forecast nav route (FIXED in source; NOT REDEPLOYED)
+## A1 — Forecast nav route (FIXED, visually confirmed)
 
-- `/ai-forecast-engine` and `/scenario-compare` H1s both read
-  "Scenario Compare Lab" on the preview because the App.tsx redirect
-  is still live (commit 27a7b4e). The addendum commit 57391e0 wires
-  the `AIForecastEnginePage` component directly but the preview has
-  not been redeployed.
+- On the addendum preview, `/ai-forecast-engine` renders H1 **"AI
+  Forecast Engine"** and `/scenario-compare` renders H1 **"Scenario
+  Compare Lab"** — distinct pages, no redirect.
 - Existing page `client/src/pages/ai-forecast-engine.tsx` (1660 lines,
   fully implemented MC fan + percentile table + run controls) is now
   bound to `/ai-forecast-engine`. Same pattern for
@@ -109,11 +106,9 @@ Screenshots captured in `/home/user/workspace/`:
 - New `navRoutes.test.ts` audit (55 assertions) confirms every NAV
   href in Layout.tsx now resolves to a non-redirecting Route in
   App.tsx. All green.
-- Severity: **high** (user-reported direct defect). Source FIXED; visual
-  verification blocked by Vercel deploy auth.
-- Fix proposal: redeploy preview with the addendum commits.
+- Severity: **high** (user-reported direct defect). **FIXED + verified.**
 
-## A2 — Event traceability (FIXED in source; NOT REDEPLOYED)
+## A2 — Event traceability (FIXED, visually confirmed)
 
 - New `eventTraceability.ts` validator + 38 tests, all green.
 - New `engineEventLanes.ts` second-pass dedup (post-sourceDeltaId pass)
@@ -125,11 +120,11 @@ Screenshots captured in `/home/user/workspace/`:
 - Demo-path acceptance confirmed via test: `delay-ip` produces 3
   events (1 engine debt_reduction + 1 derived borrowing_capacity + 1
   derived exit), lanesRendered 3, lanesHidden 2.
-- Severity: **medium** (UI cleanup). Source FIXED; visual verification
-  blocked by Vercel deploy auth. On the preview the Timeline tab
-  (`sprint30a_mobile_tab_timeline.png`) still shows the 5 lane cards
-  with "Not modelled" labels for the empty 3 lanes — once the addendum
-  is redeployed those 3 cards will be hidden.
+- Severity: **medium**. **FIXED + verified** on the addendum preview:
+  Roadmap shows DEBT REDUCTION (engine) + BORROWING CAPACITY (derived)
+  lanes only; empty acquisition/equity_release lanes hidden. Dependency
+  chain badge renders "1 EDGE · engine · Deposit to offset → Re-test
+  borrowing capacity".
 
 ## NEW-1 — Empty Exit lane on preview Timeline despite demo crossing FIRE
 
@@ -148,20 +143,35 @@ Screenshots captured in `/home/user/workspace/`:
   complete before computing roadmap context (suspend or skeleton).
   Out of scope for Sprint 30A.
 
-## NEW-2 — Preview redeploy unavailable in this environment
+## NEW-2 — `/api/mc-fire-settings` returns HTML on Vercel (preexisting infra gap, blocks D8/D12 visible metrics)
 
-- The Sprint 30A core preview URL works but addendum commits
-  (`57391e0`, `8f46f44`) are not visible there. Vercel CLI in
-  `/tmp/vc/sprint30a-deploy` reports `No existing credentials found`;
-  no VERCEL_TOKEN in env; `auth.json` was empty.
-- The contract directs `api_credentials=["vercel"]` but the harness
-  did not surface the credential to my Bash tool.
-- Severity: **infrastructure**. Branch + commits pushed to
-  `feat/sprint28-move-refactor`; redeploy must run from an environment
-  with the token.
-- Reproduction: `cd /tmp/vc/sprint30a-deploy && npx vercel deploy
-  --yes --token $VERCEL_TOKEN --scope rohamshahrokhs-projects
-  --archive=tgz`.
+- During live verification, S1 FIRE Age + Passive Income + alt-strategy
+  card per-metric FIRE Age + PI still rendered "Not modelled yet" even
+  though the gate scope refactor is correct (29+12 unit tests pass).
+- Investigated upstream: `useQuery(['/api/mc-fire-settings'])` on the
+  Vercel preview returns the SPA fallback HTML, not JSON. JSON.parse
+  fails → `fireSettings = undefined` permanently → `currentAge = null`
+  → `selectMonteCarloProjection` honestly returns null FIRE age / PI
+  → UI shows "Not modelled yet".
+- Root cause: `vercel.json` only exposes `api/ai-insights.ts` and
+  `api/market-data.ts`. `mc-fire-settings` is served by the Express +
+  Supabase backend which is **not deployed to Vercel**. The catch-all
+  rewrite `/(.*) → /index.html` therefore returns SPA HTML for every
+  other `/api/*` path.
+- This is **NOT** a Sprint 30A regression. It is a preexisting
+  infrastructure gap that was masked in Sprint 28B because the Action
+  Roadmap page did not depend on `currentAge` at that time. The gate
+  refactor in Sprint 30A surfaced the gap by routing more fields
+  through the same null-bound path.
+- Severity: **infrastructure**. Out of scope for Sprint 30A per the
+  hard constraints (no Supabase migrations, no new infra). Suggested
+  for Sprint 30B/30C: decide between (a) porting mc-fire-settings to
+  a Vercel Function in `api/`, (b) routing the SPA to the Express
+  backend, or (c) hydrating `currentAge` from a non-API source like
+  `useCanonicalGoal()` as a fallback.
+- Evidence: action-roadmap.tsx lines 113-134; `vercel.json` does not
+  include mc-fire-settings; preview fetch of `/api/mc-fire-settings`
+  returns `<!doctype html>...`.
 
 ---
 
