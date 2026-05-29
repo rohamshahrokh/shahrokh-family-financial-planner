@@ -22,6 +22,7 @@ import type { EngineEvent } from "@/lib/actionRoadmap/engineEventTimeline";
 import type { LaneEvent } from "@/lib/actionRoadmap/engineEventLanes";
 import type { DependencyEdge } from "@/lib/actionRoadmap/milestoneDependencies";
 import type { McRiskValidationResult } from "@/lib/actionRoadmap/mcRiskValidation";
+import type { TraceabilityResult } from "@/lib/actionRoadmap/eventTraceability";
 
 export interface RoadmapSectionProps {
   /**
@@ -61,5 +62,8 @@ export interface RoadmapSectionProps {
   dependencyEdges: DependencyEdge[];
   /** Sprint 30A — MC risk validation chip for S6 Risks panel. */
   riskValidation: McRiskValidationResult;
+  /** Sprint 30A addendum A2 — event traceability validator result. Wired into
+   *  the page header chip + Timeline empty-lane filter. */
+  traceability: TraceabilityResult;
   auditMode: boolean;
 }

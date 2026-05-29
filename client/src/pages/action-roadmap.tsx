@@ -38,6 +38,7 @@ import { selectEngineEventTimeline } from "@/lib/actionRoadmap/engineEventTimeli
 import { selectEngineEventLanes } from "@/lib/actionRoadmap/engineEventLanes";
 import { buildDependencyChain } from "@/lib/actionRoadmap/milestoneDependencies";
 import { validateMcRiskOutputs } from "@/lib/actionRoadmap/mcRiskValidation";
+import { validateTraceability } from "@/lib/actionRoadmap/eventTraceability";
 import type { FanPoint, PortfolioState, ScenarioEvent } from "@/lib/scenarioV2/types";
 
 import { ExplainabilityToggle } from "@/components/actionRoadmap/ExplainabilityToggle";
@@ -225,6 +226,15 @@ export default function ActionRoadmapPage() {
     passiveIncomeCV: mcVariance.passiveIncome.cv,
   });
 
+  // Sprint 30A addendum A2 — event traceability validator runs every render.
+  // Outside Audit Mode a console.warn fires on any failure; the chip shows
+  // only when Audit Mode is on.
+  const traceability = validateTraceability(enrichedMilestones, laneEvents);
+  if (typeof window !== "undefined" && traceability.status === "fail" && !auditMode) {
+    // eslint-disable-next-line no-console
+    console.warn("[action-roadmap] traceability failed", traceability.failures);
+  }
+
   const failures = selectFailureAnalysis({
     result: recommended?.winner?.result ?? null,
     softWarnings: recommended?.winner?.softWarnings,
@@ -276,6 +286,7 @@ export default function ActionRoadmapPage() {
     laneEvents,
     dependencyEdges,
     riskValidation,
+    traceability,
     auditMode,
   };
 
@@ -308,6 +319,11 @@ export default function ActionRoadmapPage() {
     <div className="container mx-auto max-w-5xl px-3 sm:px-4 py-6 space-y-4" data-testid="action-roadmap-page">
       <PageHeader auditMode={auditMode} onAuditChange={setAuditMode} hasPlan={hasPlan && recommended != null} />
       {noPlanBanner}
+
+      {/* Sprint 30A addendum A2 — traceability chip (Audit Mode only). */}
+      {auditMode && (
+        <TraceabilityChip traceability={traceability} />
+      )}
 
       {/* Desktop ≥ sm — full vertical stack of 8 sections (Sprint 28B layout) */}
       <div className="hidden space-y-4 sm:block" data-testid="ar-desktop-stack">
@@ -369,6 +385,40 @@ function monthIndexAt(fan: FanPoint[], target: number | null, pct: "p25" | "p50"
     if (Number.isFinite(v) && v >= target) return i;
   }
   return null;
+}
+
+function TraceabilityChip({ traceability }: { traceability: import("@/lib/actionRoadmap/eventTraceability").TraceabilityResult }) {
+  const totalChecked = traceability.stats.totalEvents;
+  const failedCount = traceability.failures.length;
+  const passedCount = Math.max(0, totalChecked - failedCount);
+  const tone = traceability.status === "pass"
+    ? "border-emerald-300/60 bg-emerald-50/40 text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-950/20 dark:text-emerald-100"
+    : "border-rose-300/60 bg-rose-50/40 text-rose-900 dark:border-rose-400/30 dark:bg-rose-950/20 dark:text-rose-100";
+  return (
+    <div
+      data-testid="ar-traceability-chip"
+      className={`flex flex-wrap items-start gap-2 rounded-md border px-3 py-2 text-xs ${tone}`}
+    >
+      <span className="font-medium uppercase tracking-wider">Traceability:</span>
+      <span>
+        {passedCount} passed / {failedCount} failed ·{" "}
+        engine {traceability.stats.engineEvents} · derived {traceability.stats.derivedEvents} ·{" "}
+        lanes rendered {traceability.stats.lanesRendered} / hidden {traceability.stats.lanesHidden}
+      </span>
+      {traceability.failures.length > 0 && (
+        <ul className="mt-1 w-full space-y-1">
+          {traceability.failures.slice(0, 8).map((f, i) => (
+            <li key={i} className="text-[11px]">
+              <span className="font-mono">[{f.reason}]</span> {f.detail}
+            </li>
+          ))}
+          {traceability.failures.length > 8 && (
+            <li className="text-[11px] italic">… {traceability.failures.length - 8} more</li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function PageHeader({

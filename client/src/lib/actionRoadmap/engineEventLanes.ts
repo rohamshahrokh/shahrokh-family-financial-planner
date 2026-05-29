@@ -297,5 +297,19 @@ export function selectEngineEventLanes(input: LaneInput): LaneEvent[] {
     return laneOrder[a.lane] - laneOrder[b.lane];
   });
 
-  return out;
+  // Sprint 30A addendum A2 — second-pass dedup on (lane, month, action).
+  // The engine + derived passes can both surface the same logical event
+  // (e.g. two offset deposits collapsed to the same month). Keep the first
+  // occurrence; drop subsequent ones. The traceability validator emits a
+  // "duplicate" failure for any duplicate it still sees post-dedup.
+  const seen = new Set<string>();
+  const deduped: LaneEvent[] = [];
+  for (const e of out) {
+    const key = `${e.lane}::${e.month}::${e.action}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(e);
+  }
+
+  return deduped;
 }

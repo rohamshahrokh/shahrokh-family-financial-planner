@@ -115,26 +115,43 @@ function FiveLaneList({
     byLane.set(e.lane, arr);
   }
 
+  // Sprint 30A addendum A2 — hide empty lanes outside Audit Mode.
+  // Audit Mode still shows hidden lanes with a "0 events" badge so the user
+  // can confirm the engine honestly produced zero events (vs a UI bug).
   return (
     <div className="mt-4 space-y-3" data-testid="ar-s3-five-lanes">
       {SPRINT30A_LANE_ORDER.map((lane) => {
         const items = byLane.get(lane) ?? [];
+        const isEmpty = items.length === 0;
+        if (isEmpty && !auditMode) return null;
         return (
           <div
             key={lane}
             data-testid={`ar-s3-lane-${lane}`}
-            className="rounded-lg border border-border/60 bg-background/60 p-3"
+            data-empty={isEmpty ? "true" : "false"}
+            className={
+              "rounded-lg border bg-background/60 p-3 " +
+              (isEmpty ? "border-dashed border-border/40 opacity-70" : "border-border/60")
+            }
           >
             <div className="flex items-center justify-between gap-2">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {SPRINT30A_LANE_LABEL[lane]}
               </div>
               <div className="text-[10px] text-muted-foreground">
-                {items.length === 0 ? "Not modelled" : `${items.length} event${items.length === 1 ? "" : "s"}`}
+                {isEmpty ? (
+                  <span data-testid={`ar-s3-lane-${lane}-zero-badge`} className="rounded-full bg-muted px-2 py-0.5 ring-1 ring-border">
+                    0 events
+                  </span>
+                ) : (
+                  `${items.length} event${items.length === 1 ? "" : "s"}`
+                )}
               </div>
             </div>
-            {items.length === 0 ? (
-              <div className="mt-1 text-xs text-muted-foreground">No events for this lane in the current plan.</div>
+            {isEmpty ? (
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                Engine produced no events for this lane on the current path. Hidden outside Audit Mode.
+              </div>
             ) : (
               <ul className="mt-2 space-y-2">
                 {items.map((e) => (
