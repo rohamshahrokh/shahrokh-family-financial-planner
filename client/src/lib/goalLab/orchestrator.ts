@@ -316,31 +316,116 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
   return output;
 }
 
-// ─── In-memory cache for the full GoalLabPlanOutput ────────────────────────
+// ─── Cache for the full GoalLabPlanOutput ──────────────────────────────────
 //
 // canonicalAdapter only stores the recommended QuickDecisionOutput (one
 // scenario's ranking). The full multi-scenario summary surfaces /decision-lab
-// and /action-plan want lives here. Session-scoped, intentionally simple.
+// and /action-plan want lives here.
+//
+// Sprint 30B Step 1 (sessionStorage mirror, no math change):
+//   The original cache was a module-level variable that did NOT survive a
+//   full page reload. /action-roadmap reads via `readLatestGoalLabPlan()`,
+//   so any reload landed on the empty-state path ("Not modelled yet"),
+//   which then cascaded into "Reconciliation failed" downstream because
+//   `finalState` was null. This mirror writes the plan to sessionStorage on
+//   every set, and rehydrates the module variable on first read after a
+//   reload. SSR-safe: when `window` is undefined the mirror is a no-op and
+//   behaviour is identical to the pre-Sprint-30B in-memory cache.
+//
+//   No financial math is changed. No Monte Carlo / Forecast / FIRE /
+//   Scenario / Goal Lab calculations are touched. The serialised payload is
+//   a plain JSON copy of the existing `GoalLabPlanOutput` shape — the same
+//   object the in-memory cache already held.
+
+const SS_KEY = "fwl.goalLab.latestPlan.v1";
+/** Plans older than this are discarded on rehydrate to avoid stale ledgers. */
+const SS_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
 
 let _latestPlan: GoalLabPlanOutput | null = null;
 let _latestPlanGeneratedAt: string | null = null;
+/** True after the first read attempt has tried sessionStorage rehydration. */
+let _hydrated = false;
+
+function hasWindow(): boolean {
+  return typeof window !== "undefined" && typeof window.sessionStorage !== "undefined";
+}
+
+function persistToSessionStorage(plan: GoalLabPlanOutput): void {
+  if (!hasWindow()) return;
+  try {
+    window.sessionStorage.setItem(SS_KEY, JSON.stringify(plan));
+  } catch {
+    // Quota / serialisation errors are non-fatal: the in-memory cache still
+    // works for the current tab. We intentionally do not log to keep the
+    // console clean in production.
+  }
+}
+
+function rehydrateFromSessionStorage(): GoalLabPlanOutput | null {
+  if (!hasWindow()) return null;
+  try {
+    const raw = window.sessionStorage.getItem(SS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as GoalLabPlanOutput | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    // Age guard — drop plans older than SS_MAX_AGE_MS so a stale ledger
+    // cannot resurrect itself across days.
+    const gen = typeof parsed.generatedAt === "string" ? Date.parse(parsed.generatedAt) : NaN;
+    if (Number.isFinite(gen) && Date.now() - gen > SS_MAX_AGE_MS) {
+      try { window.sessionStorage.removeItem(SS_KEY); } catch { /* ignore */ }
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 function setLatestGoalLabPlan(plan: GoalLabPlanOutput): void {
   _latestPlan = plan;
   _latestPlanGeneratedAt = plan.generatedAt;
+  _hydrated = true;
+  persistToSessionStorage(plan);
 }
 
 export function readLatestGoalLabPlan(): GoalLabPlanOutput | null {
+  if (_latestPlan == null && !_hydrated) {
+    _hydrated = true;
+    const restored = rehydrateFromSessionStorage();
+    if (restored) {
+      _latestPlan = restored;
+      _latestPlanGeneratedAt = restored.generatedAt;
+    }
+  }
   return _latestPlan;
 }
 
 export function readLatestGoalLabPlanGeneratedAt(): string | null {
+  // Ensure we have attempted rehydration before answering.
+  if (_latestPlan == null && !_hydrated) {
+    void readLatestGoalLabPlan();
+  }
   return _latestPlanGeneratedAt;
 }
 
 export function clearLatestGoalLabPlan(): void {
   _latestPlan = null;
   _latestPlanGeneratedAt = null;
+  _hydrated = true; // "intentionally cleared" — don't auto-rehydrate next read
+  if (hasWindow()) {
+    try { window.sessionStorage.removeItem(SS_KEY); } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Sprint 30B Step 1 — test hook. Resets the module-level cache state to its
+ * pre-rehydration condition so unit tests can simulate "fresh page load"
+ * without spawning a new module context. Not exported for production use.
+ */
+export function __resetGoalLabPlanCacheForTests(): void {
+  _latestPlan = null;
+  _latestPlanGeneratedAt = null;
+  _hydrated = false;
 }
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
