@@ -42,7 +42,7 @@ function statusBadge(status: RoadmapMilestone["status"]): { label: string; tone:
 }
 
 export function FireJourneyRoadmap(props: RoadmapSectionProps) {
-  const { enrichedMilestones, mcProjection, auditMode } = props;
+  const { enrichedMilestones, mcProjection, dependencyEdges, laneEvents, auditMode } = props;
 
   return (
     <section
@@ -75,6 +75,38 @@ export function FireJourneyRoadmap(props: RoadmapSectionProps) {
             <MilestoneCard key={m.id} milestone={m} isLast={i === enrichedMilestones.length - 1} mc={mcProjection} auditMode={auditMode} />
           ))}
         </ol>
+      )}
+
+      {/* Sprint 30A — hybrid dependency chain summary. 30B will render this
+          as graphical arrows on the SVG Gantt; here it stays a card list. */}
+      {dependencyEdges.length > 0 && (
+        <div className="mt-4 rounded-lg border border-border/60 bg-background/60 p-3" data-testid="ar-s2-dep-chain">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Dependency chain ({dependencyEdges.length} edge{dependencyEdges.length === 1 ? "" : "s"})
+          </div>
+          <ul className="mt-2 space-y-1.5 text-xs">
+            {dependencyEdges.slice(0, 20).map((e, idx) => {
+              const fromLabel = laneEvents.find((le) => le.id === e.fromMilestoneId)?.action ?? e.fromMilestoneId;
+              const toLabel   = laneEvents.find((le) => le.id === e.toMilestoneId)?.action   ?? e.toMilestoneId;
+              const tone = e.source === "engine"
+                ? "bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/25"
+                : "bg-blue-100 text-blue-700 ring-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/25";
+              return (
+                <li key={`${e.fromMilestoneId}-${e.toMilestoneId}-${idx}`} data-testid={`ar-s2-dep-edge-${idx}`} className="flex flex-wrap items-start gap-2">
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${tone}`}>
+                    {e.source}
+                  </span>
+                  <span className="text-foreground">
+                    {fromLabel} → {toLabel}
+                  </span>
+                  {auditMode && (
+                    <span className="text-[11px] text-muted-foreground">— {e.rationale}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
     </section>
   );

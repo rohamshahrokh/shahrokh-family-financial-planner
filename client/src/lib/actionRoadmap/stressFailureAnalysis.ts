@@ -106,8 +106,16 @@ export function selectFailureAnalysis(input: StressFailureInput): FailurePoint[]
     driver: "result.defaultProbability",
   });
 
-  // 2. Liquidity stress
-  const liquidityProb = num(result.liquidityExhaustionProbability);
+  // 2. Liquidity stress — Sprint 30A §D10 wires the contract-specified
+  //    `liquidityStressProbability` (buffer-thinning) and falls back to
+  //    `liquidityExhaustionProbability` (true exhaustion) only when the
+  //    stress field is missing/null.
+  const liquidityStressP = num(result.liquidityStressProbability);
+  const liquidityExhaustionP = num(result.liquidityExhaustionProbability);
+  const liquidityProb = liquidityStressP ?? liquidityExhaustionP;
+  const liquidityDriver = liquidityStressP != null
+    ? "result.liquidityStressProbability"
+    : "result.liquidityExhaustionProbability";
   out.push({
     id: "liquidity_stress",
     label: "Liquidity stress",
@@ -115,10 +123,10 @@ export function selectFailureAnalysis(input: StressFailureInput): FailurePoint[]
     severity: bandFor(liquidityProb),
     detail: liquidityProb != null
       ? result.medianLiquidityFirstMonth != null
-        ? `Cash exhausted in ${(liquidityProb * 100).toFixed(1)}% of sims; median onset month ${result.medianLiquidityFirstMonth}.`
-        : `Cash exhausted in ${(liquidityProb * 100).toFixed(1)}% of sims.`
+        ? `Buffer thinned / cash exhausted in ${(liquidityProb * 100).toFixed(1)}% of sims; median onset month ${result.medianLiquidityFirstMonth}.`
+        : `Buffer thinned / cash exhausted in ${(liquidityProb * 100).toFixed(1)}% of sims.`
       : "Not modelled yet",
-    driver: "result.liquidityExhaustionProbability",
+    driver: liquidityDriver,
   });
 
   // 3. Negative equity

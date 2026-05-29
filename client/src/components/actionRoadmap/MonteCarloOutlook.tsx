@@ -17,6 +17,7 @@ import { SourceChip } from "@/components/SourceChip";
 import type { RoadmapSectionProps } from "./roadmapContext";
 import type { MonteCarloProjection } from "@/lib/actionRoadmap/montecarloProjection";
 import type { DistributionStats, MCVarianceWarning } from "@/lib/actionRoadmap/mcVarianceDiagnostic";
+import { isBlocked } from "@/lib/actionRoadmap/financialReconciliation";
 
 function fmtMoney(n: number | null): string {
   if (n == null || !Number.isFinite(n)) return "Not modelled yet";
@@ -46,7 +47,9 @@ interface Row {
 
 export function MonteCarloOutlook(props: RoadmapSectionProps) {
   const { mcProjection, mcVariance, reconciliation, auditMode } = props;
-  const reconBlocked = reconciliation.status !== "PASS";
+  // Sprint 30A §D8 — block ONLY the NW@FIRE row. FIRE age + Passive Income
+  // rows continue to render their engine percentiles regardless of recon.
+  const reconBlocked = isBlocked(reconciliation, "nw_at_fire");
 
   const warningFor = (key: RowKey): MCVarianceWarning | null => {
     if (key === "nw-at-fire" && mcVariance.warnings.includes("mc-variance-suspiciously-low")) return "mc-variance-suspiciously-low";

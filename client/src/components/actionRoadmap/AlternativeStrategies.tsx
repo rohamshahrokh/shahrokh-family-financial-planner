@@ -17,6 +17,7 @@ import type { GoalLabRankedScenario } from "@/lib/goalLab/orchestrator";
 import { selectMonteCarloProjection, type MonteCarloProjection } from "@/lib/actionRoadmap/montecarloProjection";
 import { analyzeRoadmapRisk } from "@/lib/actionRoadmap/roadmapRiskAnalyzer";
 import { buildAlternativeRationale } from "@/lib/actionRoadmap/alternativeRationale";
+import { isBlocked } from "@/lib/actionRoadmap/financialReconciliation";
 import type { FanPoint } from "@/lib/scenarioV2/types";
 import type { RiskBand } from "@/lib/actionRoadmap/types";
 
@@ -74,7 +75,10 @@ function ToneArrow({ tone }: { tone: "up" | "down" | "flat" }) {
 }
 
 export function AlternativeStrategies(props: RoadmapSectionProps) {
-  const { picks, recommended, fireNumber, startAge, swrPct, auditMode } = props;
+  const { picks, recommended, fireNumber, startAge, swrPct, reconciliation, auditMode } = props;
+  // Sprint 30A §D8 — block ONLY the NW column. FIRE age + passive income
+  // render unconditionally from each scenario's own result.
+  const nwBlocked = isBlocked(reconciliation, "alt_strategy_nw");
 
   const recRow: Row | null = recommended
     ? {
@@ -160,9 +164,24 @@ export function AlternativeStrategies(props: RoadmapSectionProps) {
 
               <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
                 <Cell label="FIRE age (P50)"          value={fmtAge(r.mc.fireAge.p50)}            delta={dAge} />
-                <Cell label="NW at FIRE (P50)"         value={fmtMoney(r.mc.netWorthAtFire.p50)}     delta={dNw} />
+                <Cell
+                  label="NW at FIRE (P50)"
+                  value={nwBlocked ? "Reconciliation failed" : fmtMoney(r.mc.netWorthAtFire.p50)}
+                  delta={nwBlocked ? null : dNw}
+                />
                 <Cell label="Passive income (P50)"     value={fmtMoney(r.mc.passiveIncomeAtFire.p50)} delta={dPass} />
               </div>
+
+              {/* Sprint 30A §D12 — lossReason / rank fallback rationale block.
+                  Renders the engine's lossReason text when present; otherwise
+                  emits a rank/score-anchored fallback so the user always sees
+                  *why* this alternative was not picked. */}
+              {!isRec && (
+                <LossReasonBlock
+                  scenario={r.scenario}
+                  recommended={recommended}
+                />
+              )}
 
               {!isRec && recommended && recRow && (
                 <RationaleBlock
@@ -220,6 +239,61 @@ function RationaleBlock({
         ))}
       </ul>
     </details>
+  );
+}
+
+function LossReasonBlock({
+  scenario, recommended,
+}: {
+  scenario: GoalLabRankedScenario;
+  recommended: GoalLabRankedScenario | null;
+}) {
+  // Engine `lossReason` field is not on every candidate; pull from common
+  // engine locations defensively. Fall back to score-delta rationale.
+  const engineLossReason =
+    (scenario as unknown as { lossReason?: string }).lossReason
+      ?? (scenario.winner as unknown as { lossReason?: string } | null | undefined)?.lossReason
+      ?? null;
+
+  let body: React.ReactNode;
+  if (engineLossReason && typeof engineLossReason === "string" && engineLossReason.trim().length > 0) {
+    body = <p className="text-xs text-foreground">{engineLossReason}</p>;
+  } else {
+    const recScore = recommended?.scoreP50 ?? null;
+    const altScore = scenario.scoreP50 ?? null;
+    const delta =
+      recScore != null && altScore != null && Number.isFinite(recScore) && Number.isFinite(altScore)
+        ? altScore - recScore
+        : null;
+    const rank = (scenario as unknown as { rank?: number }).rank ?? null;
+    if (delta != null && Math.abs(delta) > 0.001) {
+      const sign = delta < 0 ? "lower" : "higher";
+      body = (
+        <p className="text-xs text-foreground">
+          Engine score {altScore!.toFixed(1)} is {Math.abs(delta).toFixed(1)} pts {sign} than the recommended path ({recScore!.toFixed(1)}).
+          {rank != null ? <> Ranked #{rank} in this run.</> : null}
+        </p>
+      );
+    } else if (rank != null) {
+      body = (
+        <p className="text-xs text-foreground">
+          Ranked #{rank} in this run — engine scored it close to the recommended path; trade-offs below.
+        </p>
+      );
+    } else {
+      body = (
+        <p className="text-xs text-muted-foreground">
+          Engine did not surface a specific reason this path was not recommended.
+        </p>
+      );
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-border/60 bg-background/60 p-2" data-testid={`ar-s7-loss-reason-${scenario.templateId}`}>
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Why this is not the primary pick</div>
+      {body}
+    </div>
   );
 }
 

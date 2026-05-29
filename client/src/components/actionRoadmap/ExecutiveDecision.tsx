@@ -12,6 +12,7 @@ import * as React from "react";
 import { Compass } from "lucide-react";
 import { SourceChip } from "@/components/SourceChip";
 import type { MetricAttribution, MetricSource } from "@/lib/actionRoadmap/metricSourceAttribution";
+import { isBlocked } from "@/lib/actionRoadmap/financialReconciliation";
 import type { RoadmapSectionProps } from "./roadmapContext";
 
 function fmtMoney(n: number | null): string {
@@ -35,7 +36,9 @@ function confidenceBand(c: RoadmapSectionProps["confidence"]): { label: string; 
 export function ExecutiveDecision(props: RoadmapSectionProps) {
   const { recommended, mcProjection, confidence, reconciliation, auditMode } = props;
   const cBand = confidenceBand(confidence);
-  const reconBlocked = reconciliation.status !== "PASS";
+  // Sprint 30A §D8 — block ONLY the NW@FIRE tile via the per-field set.
+  // FIRE Age / Passive Income / Confidence render regardless.
+  const nwBlocked = isBlocked(reconciliation, "nw_at_fire");
 
   return (
     <section
@@ -66,9 +69,9 @@ export function ExecutiveDecision(props: RoadmapSectionProps) {
         />
         <Tile
           label="Net worth at FIRE (P50)"
-          value={reconBlocked ? "Reconciliation failed" : fmtMoney(mcProjection.netWorthAtFire.p50)}
+          value={nwBlocked ? "Reconciliation failed" : fmtMoney(mcProjection.netWorthAtFire.p50)}
           attribution={
-            reconBlocked
+            nwBlocked
               ? { source: "reconciliationFailed", note: reconciliation.message ?? undefined }
               : mcSource(mcProjection.netWorthAtFire.p50, mcProjection.simulationCount)
           }

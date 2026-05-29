@@ -35,6 +35,9 @@ import { selectWealthBuildingLanes } from "@/lib/actionRoadmap/wealthBuildingLan
 import { reconcileTerminalNetWorth } from "@/lib/actionRoadmap/financialReconciliation";
 import { computeMCVarianceDiagnostic } from "@/lib/actionRoadmap/mcVarianceDiagnostic";
 import { selectEngineEventTimeline } from "@/lib/actionRoadmap/engineEventTimeline";
+import { selectEngineEventLanes } from "@/lib/actionRoadmap/engineEventLanes";
+import { buildDependencyChain } from "@/lib/actionRoadmap/milestoneDependencies";
+import { validateMcRiskOutputs } from "@/lib/actionRoadmap/mcRiskValidation";
 import type { FanPoint, PortfolioState, ScenarioEvent } from "@/lib/scenarioV2/types";
 
 import { ExplainabilityToggle } from "@/components/actionRoadmap/ExplainabilityToggle";
@@ -196,6 +199,32 @@ export default function ActionRoadmapPage() {
     : null;
   const engineEvents = selectEngineEventTimeline({ events, fireMonth });
 
+  // Sprint 30A §P1 — 5-lane categorisation with engine|derived source labels.
+  const laneEvents = selectEngineEventLanes({
+    events,
+    fan,
+    startMonth,
+    fireNumber,
+    swrPct,
+    medianFinalState: finalState ?? undefined,
+  });
+
+  // Sprint 30A §P1 — hybrid dependency chain.
+  const dependencyEdges = buildDependencyChain({ events: laneEvents });
+
+  // Sprint 30A §P1 — MC risk validation chip.
+  const riskValidation = validateMcRiskOutputs({
+    defaultProbability: recommended?.winner?.result?.defaultProbability ?? null,
+    liquidityStressProbability: recommended?.winner?.result?.liquidityStressProbability ?? null,
+    liquidityExhaustionProbability: recommended?.winner?.result?.liquidityExhaustionProbability ?? null,
+    negativeEquityProbability: recommended?.winner?.result?.negativeEquityProbability ?? null,
+    refinancePressureProbability: recommended?.winner?.result?.refinancePressureProbability ?? null,
+    forcedSaleTriggerProbability: recommended?.winner?.result?.forcedSaleReport?.triggerProbability ?? null,
+    simulationCount: recommended?.winner?.result?.simulationCount ?? plan?.metrics.simulationCount ?? null,
+    terminalNwCV: mcVariance.terminalNetWorth.cv,
+    passiveIncomeCV: mcVariance.passiveIncome.cv,
+  });
+
   const failures = selectFailureAnalysis({
     result: recommended?.winner?.result ?? null,
     softWarnings: recommended?.winner?.softWarnings,
@@ -244,6 +273,9 @@ export default function ActionRoadmapPage() {
     reconciliation,
     mcVariance,
     engineEvents,
+    laneEvents,
+    dependencyEdges,
+    riskValidation,
     auditMode,
   };
 
@@ -292,9 +324,12 @@ export default function ActionRoadmapPage() {
       {/* Mobile < sm — 6-tab wrapper per Sprint 29 §12.1 */}
       <div className="sm:hidden" data-testid="ar-mobile-tabs">
         <Tabs value={mobileTab} onValueChange={(v) => setMobileTab(v as MobileTabId)}>
-          <TabsList className="grid h-auto w-full grid-cols-3 gap-1 bg-muted/60 p-1">
+          <TabsList
+            className="grid h-auto w-full gap-1 bg-muted/60 p-1 [grid-template-columns:repeat(3,minmax(0,1fr))]"
+            style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}
+          >
             {MOBILE_TABS.map((t) => (
-              <TabsTrigger key={t.id} value={t.id} className="text-xs py-1.5" data-testid={`ar-mobile-tab-${t.id}`}>
+              <TabsTrigger key={t.id} value={t.id} className="min-h-[36px] text-xs py-1.5 whitespace-nowrap" data-testid={`ar-mobile-tab-${t.id}`}>
                 {t.label}
               </TabsTrigger>
             ))}

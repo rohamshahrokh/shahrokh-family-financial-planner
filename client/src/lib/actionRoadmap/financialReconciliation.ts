@@ -20,6 +20,13 @@ import type { PortfolioState } from "../scenarioV2/types";
 
 export type ReconciliationStatus = "PASS" | "FAIL" | "INSUFFICIENT_DATA";
 
+/**
+ * Sprint 30A §D8 — per-field blocking. The gate exposes which fields the
+ * UI must NOT render numerically. Components inspect this set and block
+ * ONLY their owned field; they do not short-circuit on `status` alone.
+ */
+export type BlockedField = "nw_at_fire" | "attribution_chart" | "alt_strategy_nw";
+
 export interface ReconciliationBreakdown {
   ppor: number;
   investmentProperty: number;
@@ -35,12 +42,34 @@ export interface ReconciliationBreakdown {
 export interface ReconciliationResult {
   status: ReconciliationStatus;
   componentsSum: number;
+  /** Sprint 30A alias for `headlineNW` — matches the contract field name. */
+  mcP50: number;
   headlineNW: number;
   deltaAbs: number;
   deltaPct: number;
   tolerancePct: number;
   breakdown: ReconciliationBreakdown;
   message: string | null;
+  /**
+   * Sprint 30A §D8 — fields the UI must NOT render numerically. Scope is
+   * limited to net-worth-related figures (the contested quantity). FIRE
+   * Age, Passive Income, Confidence, Risks, Next Actions all stay rendered
+   * regardless of reconciliation status.
+   *
+   * Built as a plain array so it round-trips through React props without
+   * Set-identity churn. Helpers `isBlocked()` / `blockedSet()` below.
+   */
+  blockedFields: BlockedField[];
+}
+
+/** Convenience predicate — gate-aware UI components consult this. */
+export function isBlocked(result: ReconciliationResult, field: BlockedField): boolean {
+  return result.blockedFields.includes(field);
+}
+
+/** Convenience constructor — returns a Set view when callers prefer it. */
+export function blockedSet(result: ReconciliationResult): Set<BlockedField> {
+  return new Set(result.blockedFields);
 }
 
 export interface ReconciliationInput {
@@ -49,6 +78,7 @@ export interface ReconciliationInput {
 }
 
 const TOLERANCE = 0.005;
+const ALL_NW_FIELDS: BlockedField[] = ["nw_at_fire", "attribution_chart", "alt_strategy_nw"];
 
 const EMPTY_BREAKDOWN: ReconciliationBreakdown = {
   ppor: 0,
@@ -79,12 +109,14 @@ export function reconcileTerminalNetWorth(input: ReconciliationInput): Reconcili
     return {
       status: "INSUFFICIENT_DATA",
       componentsSum: 0,
+      mcP50: 0,
       headlineNW: 0,
       deltaAbs: 0,
       deltaPct: 0,
       tolerancePct: TOLERANCE,
       breakdown: EMPTY_BREAKDOWN,
       message: "No engine final state available.",
+      blockedFields: ALL_NW_FIELDS,
     };
   }
 
@@ -92,12 +124,14 @@ export function reconcileTerminalNetWorth(input: ReconciliationInput): Reconcili
     return {
       status: "INSUFFICIENT_DATA",
       componentsSum: 0,
+      mcP50: 0,
       headlineNW: 0,
       deltaAbs: 0,
       deltaPct: 0,
       tolerancePct: TOLERANCE,
       breakdown: EMPTY_BREAKDOWN,
       message: "No MC P50 terminal value available.",
+      blockedFields: ALL_NW_FIELDS,
     };
   }
 
@@ -137,12 +171,14 @@ export function reconcileTerminalNetWorth(input: ReconciliationInput): Reconcili
     return {
       status: "PASS",
       componentsSum,
+      mcP50: headlineNW,
       headlineNW,
       deltaAbs,
       deltaPct,
       tolerancePct: TOLERANCE,
       breakdown,
       message: null,
+      blockedFields: [],
     };
   }
 
@@ -156,11 +192,13 @@ export function reconcileTerminalNetWorth(input: ReconciliationInput): Reconcili
   return {
     status: "FAIL",
     componentsSum,
+    mcP50: headlineNW,
     headlineNW,
     deltaAbs,
     deltaPct,
     tolerancePct: TOLERANCE,
     breakdown,
     message,
+    blockedFields: ALL_NW_FIELDS,
   };
 }

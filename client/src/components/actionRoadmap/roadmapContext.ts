@@ -19,6 +19,9 @@ import type { ConfidenceResult } from "@/lib/goalLab/goalLabConfidence";
 import type { ReconciliationResult } from "@/lib/actionRoadmap/financialReconciliation";
 import type { MCVarianceDiagnostic } from "@/lib/actionRoadmap/mcVarianceDiagnostic";
 import type { EngineEvent } from "@/lib/actionRoadmap/engineEventTimeline";
+import type { LaneEvent } from "@/lib/actionRoadmap/engineEventLanes";
+import type { DependencyEdge } from "@/lib/actionRoadmap/milestoneDependencies";
+import type { McRiskValidationResult } from "@/lib/actionRoadmap/mcRiskValidation";
 
 export interface RoadmapSectionProps {
   /**
@@ -52,5 +55,11 @@ export interface RoadmapSectionProps {
   mcVariance: MCVarianceDiagnostic;
   /** Sprint 29 §7 — engine event timeline feeding the professional Gantt (P5). */
   engineEvents: EngineEvent[];
+  /** Sprint 30A — 5-lane categorised event view feeding S3 Timeline. */
+  laneEvents: LaneEvent[];
+  /** Sprint 30A — hybrid dependency edges feeding S2 FIRE Journey. */
+  dependencyEdges: DependencyEdge[];
+  /** Sprint 30A — MC risk validation chip for S6 Risks panel. */
+  riskValidation: McRiskValidationResult;
   auditMode: boolean;
 }

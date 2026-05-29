@@ -9,7 +9,7 @@
  * percentage. Severity "unknown" → neutral gray chip.
  */
 import * as React from "react";
-import { ShieldAlert } from "lucide-react";
+import { ShieldAlert, AlertTriangle } from "lucide-react";
 import { SourceChip } from "@/components/SourceChip";
 import type { RoadmapSectionProps } from "./roadmapContext";
 import type { Severity } from "@/lib/actionRoadmap/stressFailureAnalysis";
@@ -26,12 +26,17 @@ function severityLabel(s: Severity): string {
 }
 
 function fmtPct(p: number | null): string {
-  if (p == null || !Number.isFinite(p)) return "Not modelled yet";
+  if (p == null || !Number.isFinite(p)) return "Not modelled";
   return `${(p * 100).toFixed(1)}%`;
 }
 
+function fmtPctAudit(p: number | null): string {
+  if (p == null || !Number.isFinite(p)) return "null";
+  return p.toFixed(4);
+}
+
 export function RisksFailurePoints(props: RoadmapSectionProps) {
-  const { failures, auditMode } = props;
+  const { failures, auditMode, riskValidation } = props;
 
   return (
     <section
@@ -46,6 +51,20 @@ export function RisksFailurePoints(props: RoadmapSectionProps) {
           <h2 id="ar-s6-heading" className="text-base font-semibold text-foreground">What could break this plan</h2>
         </div>
       </div>
+
+      {riskValidation && riskValidation.status === "warning" && (
+        <div
+          data-testid="ar-s6-validation-chip"
+          className="mt-3 flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50/40 px-3 py-2 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-950/20 dark:text-amber-100"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+          <span>
+            <span className="font-medium uppercase tracking-wider">{riskValidation.warningKind?.replace(/_/g, " ")}</span>
+            {" — "}
+            {riskValidation.detail}
+          </span>
+        </div>
+      )}
 
       <ul className="mt-4 space-y-2" data-testid="ar-s6-list">
         {failures.map((f) => (
@@ -74,6 +93,35 @@ export function RisksFailurePoints(props: RoadmapSectionProps) {
           </li>
         ))}
       </ul>
+
+      {auditMode && riskValidation && (
+        <div
+          data-testid="ar-s6-audit-panel"
+          className="mt-4 rounded-lg border border-border/60 bg-background/60 p-3 text-xs"
+        >
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Audit · raw MC risk probabilities
+          </div>
+          <ul className="grid grid-cols-2 gap-1 text-foreground">
+            {failures.map((f) => (
+              <li key={`audit-${f.id}`} className="flex justify-between">
+                <span className="text-muted-foreground">{f.label}</span>
+                <span className="font-mono">{fmtPctAudit(f.probability)}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 text-[11px] text-muted-foreground">
+            Validation: <span className="font-mono">{riskValidation.status}</span>
+            {riskValidation.warningKind ? ` (${riskValidation.warningKind})` : ""}
+            {" · "}
+            sims: <span className="font-mono">{riskValidation.audit.simulationCount ?? "—"}</span>
+            {" · "}
+            terminalNwCV: <span className="font-mono">{riskValidation.audit.terminalNwCV != null ? riskValidation.audit.terminalNwCV.toFixed(4) : "—"}</span>
+            {" · "}
+            passiveIncomeCV: <span className="font-mono">{riskValidation.audit.passiveIncomeCV != null ? riskValidation.audit.passiveIncomeCV.toFixed(4) : "—"}</span>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

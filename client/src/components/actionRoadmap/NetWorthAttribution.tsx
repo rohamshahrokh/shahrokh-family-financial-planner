@@ -13,6 +13,7 @@ import { PieChart, AlertTriangle, ArrowUpRight } from "lucide-react";
 import { SourceChip } from "@/components/SourceChip";
 import type { RoadmapSectionProps } from "./roadmapContext";
 import type { NetWorthCategory, NetWorthComponent } from "@/lib/actionRoadmap/netWorthAttribution";
+import { isBlocked } from "@/lib/actionRoadmap/financialReconciliation";
 
 function fmtMoney(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "Not modelled yet";
@@ -50,8 +51,9 @@ function SectionHeader() {
 export function NetWorthAttribution(props: RoadmapSectionProps) {
   const { attribution, reconciliation, recommended, currentNetWorth, auditMode } = props;
 
-  // Reconciliation gate per §3.4 — block the chart + table.
-  if (reconciliation.status !== "PASS") {
+  // Sprint 30A §D8 — block ONLY when `attribution_chart` is in the gate's
+  // blockedFields list. Other sections continue to render.
+  if (isBlocked(reconciliation, "attribution_chart")) {
     return (
       <section
         data-testid="ar-s4-nw-attribution"

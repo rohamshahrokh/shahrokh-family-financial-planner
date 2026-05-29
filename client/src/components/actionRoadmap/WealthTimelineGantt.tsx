@@ -22,19 +22,7 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import type { RoadmapSectionProps } from "./roadmapContext";
-import type { LaneKey, LaneSegment } from "@/lib/actionRoadmap/wealthBuildingLanes";
 import type { EngineEvent, EngineEventCategory } from "@/lib/actionRoadmap/engineEventTimeline";
-
-const LANE_META: Record<LaneKey, { label: string; tone: string }> = {
-  property:      { label: "Property",      tone: "text-violet-700 dark:text-violet-300" },
-  debt:          { label: "Debt",          tone: "text-rose-700 dark:text-rose-300" },
-  cashflow:      { label: "Cashflow",      tone: "text-amber-700 dark:text-amber-300" },
-  etf:           { label: "ETF",           tone: "text-blue-700 dark:text-blue-300" },
-  super:         { label: "Super",         tone: "text-teal-700 dark:text-teal-300" },
-  fire_progress: { label: "FIRE progress", tone: "text-emerald-700 dark:text-emerald-300" },
-};
-
-const MOBILE_LANE_ORDER: LaneKey[] = ["property", "debt", "cashflow", "etf", "super", "fire_progress"];
 
 const CATEGORY_ORDER: EngineEventCategory[] = ["property", "debt", "cash", "etf", "super", "exit", "fire"];
 const CATEGORY_LABEL: Record<EngineEventCategory, string> = {
@@ -56,11 +44,6 @@ const CATEGORY_FILL: Record<EngineEventCategory, string> = {
   fire:     "fill-emerald-500",
 };
 
-function fmtPctFromFraction(p: number | null): string {
-  if (p == null || !Number.isFinite(p)) return "—";
-  return `${Math.round(p * 100)}%`;
-}
-
 function monthToFractionalYear(month: string): number {
   const parts = month.split("-").map((n) => parseInt(n, 10));
   if (parts.length < 2 || !parts.every((v) => Number.isFinite(v))) return 0;
@@ -69,7 +52,7 @@ function monthToFractionalYear(month: string): number {
 }
 
 export function WealthTimelineGantt(props: RoadmapSectionProps) {
-  const { lanes, engineEvents, auditMode } = props;
+  const { lanes, engineEvents, laneEvents, auditMode } = props;
   const { from: laneFrom, to: laneTo } = lanes.yearRange;
 
   // Compute year window from engine events when available; else fall back
@@ -94,25 +77,132 @@ export function WealthTimelineGantt(props: RoadmapSectionProps) {
         </div>
       </div>
 
-      {/* Desktop Gantt (engine events) */}
-      <div className="mt-4 hidden sm:block" data-testid="ar-s3-desktop">
-        {engineEvents.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border/60 px-3 py-6 text-center text-sm text-muted-foreground">
-            No engine events surfaced for this run.
-          </div>
-        ) : (
+      {/* Sprint 30A — 5-lane engine event list (replaces the bare lane cards). */}
+      <FiveLaneList laneEvents={laneEvents} auditMode={auditMode} />
+
+      {/* Desktop Gantt (engine events) — retained for now; 30B replaces this with graphical SVG. */}
+      <div className="mt-6 hidden sm:block" data-testid="ar-s3-desktop">
+        {engineEvents.length === 0 ? null : (
           <DesktopGantt events={engineEvents} fromYear={fromYear} toYear={toYear} auditMode={auditMode} />
         )}
       </div>
-
-      {/* Mobile stack (Sprint 28B lanes fallback) */}
-      <div className="mt-4 space-y-3 sm:hidden" data-testid="ar-s3-mobile">
-        {MOBILE_LANE_ORDER.map((lane) => (
-          <MobileLane key={lane} lane={lane} segments={lanes.lanes[lane] ?? []} fireProgress={lanes.fireProgress} from={laneFrom} to={laneTo} auditMode={auditMode} />
-        ))}
-      </div>
     </section>
   );
+}
+
+const SPRINT30A_LANE_LABEL: Record<import("@/lib/actionRoadmap/engineEventLanes").Lane, string> = {
+  acquisition:        "Acquisition",
+  equity_release:     "Equity release",
+  debt_reduction:     "Debt reduction",
+  borrowing_capacity: "Borrowing capacity",
+  exit:               "Exit",
+};
+
+const SPRINT30A_LANE_ORDER: Array<import("@/lib/actionRoadmap/engineEventLanes").Lane> = [
+  "acquisition", "equity_release", "debt_reduction", "borrowing_capacity", "exit",
+];
+
+function FiveLaneList({
+  laneEvents, auditMode,
+}: {
+  laneEvents: import("@/lib/actionRoadmap/engineEventLanes").LaneEvent[];
+  auditMode: boolean;
+}) {
+  const byLane = new Map<string, typeof laneEvents>();
+  for (const e of laneEvents) {
+    const arr = byLane.get(e.lane) ?? [];
+    arr.push(e);
+    byLane.set(e.lane, arr);
+  }
+
+  return (
+    <div className="mt-4 space-y-3" data-testid="ar-s3-five-lanes">
+      {SPRINT30A_LANE_ORDER.map((lane) => {
+        const items = byLane.get(lane) ?? [];
+        return (
+          <div
+            key={lane}
+            data-testid={`ar-s3-lane-${lane}`}
+            className="rounded-lg border border-border/60 bg-background/60 p-3"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {SPRINT30A_LANE_LABEL[lane]}
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                {items.length === 0 ? "Not modelled" : `${items.length} event${items.length === 1 ? "" : "s"}`}
+              </div>
+            </div>
+            {items.length === 0 ? (
+              <div className="mt-1 text-xs text-muted-foreground">No events for this lane in the current plan.</div>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {items.map((e) => (
+                  <LaneEventRow key={e.id} event={e} auditMode={auditMode} />
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function LaneEventRow({
+  event, auditMode,
+}: {
+  event: import("@/lib/actionRoadmap/engineEventLanes").LaneEvent;
+  auditMode: boolean;
+}) {
+  const sourceTone = event.source === "engine"
+    ? "bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/25"
+    : "bg-blue-100 text-blue-700 ring-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/25";
+
+  return (
+    <li className="rounded-md border border-border/40 bg-card/60 p-2 text-xs" data-testid={`ar-s3-event-row-${event.id}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[10px] text-muted-foreground">{event.month}</span>
+        <span className="font-medium text-foreground">{event.action}</span>
+        <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${sourceTone}`}>
+          {event.source}
+        </span>
+      </div>
+      <div className="mt-1 text-muted-foreground">{event.whyItExists}</div>
+      <div className="mt-1 flex flex-wrap gap-2 text-[11px]">
+        <Impact label="NW Δ" value={fmtMoneySigned(event.impact.netWorthDelta)} />
+        <Impact label="FIRE Δ months" value={event.impact.fireImpactMonths == null ? "—" : `${event.impact.fireImpactMonths}`} />
+        <Impact label="PI Δ /mo" value={fmtMoneySigned(event.impact.passiveIncomeDelta)} />
+        <Impact label="Risk" value={event.impact.riskDirection ?? "—"} />
+      </div>
+      {auditMode && event.source === "derived" && event.derivationFormula && (
+        <div className="mt-1 rounded border border-dashed border-border/50 bg-background/40 p-1.5 text-[10px] text-muted-foreground">
+          Derived: {event.derivationFormula}
+        </div>
+      )}
+      {auditMode && (
+        <div className="mt-1 text-[10px] text-muted-foreground/80">
+          sourceDeltaId: <span className="font-mono">{event.sourceDeltaId ?? "—"}</span>
+          {event.rawEventType ? <> · raw: <span className="font-mono">{event.rawEventType}</span></> : null}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function Impact({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-muted/60 px-1.5 py-0.5">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium text-foreground">{value}</span>
+    </span>
+  );
+}
+
+function fmtMoneySigned(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const sign = n >= 0 ? "+" : "-";
+  return `${sign}$${Math.abs(Math.round(n)).toLocaleString("en-AU")}`;
 }
 
 function DesktopGantt({
@@ -228,47 +318,6 @@ function EventBar({
         </div>
       </HoverCardContent>
     </HoverCard>
-  );
-}
-
-function MobileLane({
-  lane, segments, fireProgress, from, to, auditMode,
-}: {
-  lane: LaneKey;
-  segments: LaneSegment[];
-  fireProgress: RoadmapSectionProps["lanes"]["fireProgress"];
-  from: number;
-  to: number;
-  auditMode: boolean;
-}) {
-  const meta = LANE_META[lane];
-  return (
-    <div className="rounded-lg border border-border/60 bg-background/60 p-3" data-testid={`ar-s3-mobile-${lane}`}>
-      <div className={"text-[10px] font-semibold uppercase tracking-wider " + meta.tone}>{meta.label}</div>
-      {lane === "fire_progress" ? (
-        <div className="mt-1 text-sm text-foreground">
-          {fireProgress.filter(p => p.pctOfFire != null).length === 0
-            ? <span className="text-muted-foreground">Not modelled yet</span>
-            : fireProgress
-                .filter((_p, i) => i % 2 === 0)
-                .map((p) => `${p.year}: ${fmtPctFromFraction(p.pctOfFire)}`)
-                .join(" · ")}
-        </div>
-      ) : segments.length === 0 ? (
-        <div className="mt-1 text-sm text-muted-foreground">—</div>
-      ) : (
-        <ul className="mt-1 space-y-1">
-          {segments.map((s) => (
-            <li key={s.sourceMilestoneId} className="text-xs text-foreground">
-              <span className="font-medium">{s.startYear}–{s.endYear}</span> · {s.label}
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="mt-1.5">
-        <SourceChip attribution={{ source: "actionRoadmap.pathCompletion", note: `Years ${from}–${to}` }} auditMode={auditMode} />
-      </div>
-    </div>
   );
 }
 
