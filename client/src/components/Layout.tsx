@@ -49,7 +49,10 @@ type NavItem = {
   depth?: 0 | 1;
 };
 
-const NAV_STEPS: Array<{
+/** Sprint 30A addendum A1 — exported so the nav-routes test can audit
+ *  every workflow link against App.tsx route bindings. The runtime UI
+ *  behaviour is unchanged. */
+export const NAV_STEPS: Array<{
   id: string;
   step: number;
   label: string;
@@ -77,7 +80,7 @@ const NAV_STEPS: Array<{
       { href: "/stocks",          label: "Stocks",              icon: BarChart2,       adminOnly: false },
       { href: "/crypto",          label: "Crypto",              icon: Bitcoin,         adminOnly: false },
       { href: "/debt-strategy",   label: "Debt Strategy",       icon: CreditCard,      adminOnly: false },
-      { href: "/tax-strategy",    label: "Tax Strategy",        icon: Calculator,      adminOnly: false },
+      { href: "/tax",             label: "Tax Strategy",        icon: Calculator,      adminOnly: false },
       { href: "/cgt-simulator",   label: "CGT Simulator",       icon: BarChart2,       adminOnly: false },
     ],
   },
@@ -107,14 +110,14 @@ const NAV_STEPS: Array<{
 // Sprint 14: SUPPORT_LINKS split into SECONDARY (information / reports) and
 // SYSTEM (settings / admin tooling). Renderer below preserves the old slot.
 
-const SECONDARY_LINKS: NavItem[] = [
+export const SECONDARY_LINKS: NavItem[] = [
   { href: "/ai-insights",   label: "AI Insights",   icon: Lightbulb,   adminOnly: false, requiredPermission: 'view_ai_insights' as Permission },
   { href: "/market-news",   label: "Market News",   icon: Newspaper,   adminOnly: false },
   { href: "/reports",       label: "Reports",       icon: FileText,    adminOnly: false },
   { href: "/ai-weekly-cfo", label: "Sat. Bulletin", icon: BrainCircuit, adminOnly: false, requiredPermission: 'view_bulletin' as Permission, depth: 1 },
 ];
 
-const SYSTEM_LINKS: NavItem[] = [
+export const SYSTEM_LINKS: NavItem[] = [
   { href: "/settings",    label: "Settings",    icon: Settings,   adminOnly: false },
   { href: "/help",        label: "Help",        icon: HelpCircle, adminOnly: false },
   { href: "/data-health", label: "Data Health", icon: HeartPulse, adminOnly: true  },

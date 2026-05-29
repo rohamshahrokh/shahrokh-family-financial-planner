@@ -104,9 +104,14 @@ import TimelinePage       from "./pages/timeline";
 import DataHealthPage     from "./pages/data-health";
 import HelpPage           from "./pages/help";
 import AIInsightsPage     from "./pages/ai-insights";
-// Sprint 20 PR-E — /wealth-strategy and /ai-forecast-engine now redirect
-// (the parent rows became pure expandable sidebar groups). The page
-// components stay in the codebase but are no longer imported here.
+// Sprint 30A addendum A1 — restore the Forecast Engine page as its own
+// route. Sprint 20 PR-E (commit 90fa183) had redirected
+// /ai-forecast-engine → /scenario-compare, which made two distinct nav
+// items resolve to the same page. The page component
+// `client/src/pages/ai-forecast-engine.tsx` is still in the codebase and
+// just needs to be wired back into the router.
+import AIForecastEnginePage from "./pages/ai-forecast-engine";
+import WealthStrategyPage   from "./pages/wealth-strategy";
 import DebtStrategyPage     from "./pages/debt-strategy";
 import RecurringBillsPage   from "./pages/recurring-bills";
 import BudgetPage           from "./pages/budget";
@@ -265,8 +270,12 @@ function AppRouter() {
         {/* Sprint 20 PR-E — Wealth Strategy is now a pure expandable sidebar
             group (no longer a page). Preserve the deep link by redirecting
             to the first child route (/property). */}
+        {/* Sprint 30A addendum A1 — Wealth Strategy is its own page again.
+            Same fix pattern as the Forecast Engine: the Sprint 20 PR-E
+            redirect made the nav item a no-op. Page component has been
+            live in client/src/pages/wealth-strategy.tsx the whole time. */}
         <Route path="/wealth-strategy">
-          <Redirect to="/property" />
+          <ProtectedRoute component={WealthStrategyPage} title="Wealth Strategy" />
         </Route>
         <Route path="/debt-strategy">
           <ProtectedRoute component={DebtStrategyPage} title="Debt Strategy" />
@@ -280,11 +289,13 @@ function AppRouter() {
         <Route path="/market-news">
           <ProtectedRoute component={MarketNewsPage} title="Market News" />
         </Route>
-        {/* Sprint 20 PR-E — Forecast Engine is now a pure expandable sidebar
-            group (no longer a page). Preserve the deep link by redirecting
-            to its only child route (/scenario-compare). */}
+        {/* Sprint 30A addendum A1 — Forecast Engine is its own page again.
+            The Sprint 20 PR-E redirect made the Forecast nav group ambiguous
+            (two nav items resolved to /scenario-compare). The page component
+            in pages/ai-forecast-engine.tsx has been live the whole time;
+            this route binding makes the nav item land on it. */}
         <Route path="/ai-forecast-engine">
-          <Redirect to="/scenario-compare" />
+          <ProtectedRoute component={AIForecastEnginePage} title="Forecast Engine" />
         </Route>
         <Route path="/ai-weekly-cfo">
           <ProtectedRoute component={AIWeeklyCFOPage} title="AI Weekly CFO" />
