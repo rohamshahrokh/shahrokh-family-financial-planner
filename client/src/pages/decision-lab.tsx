@@ -443,7 +443,7 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
             aria-busy={isRunning}
           >
             {isRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            {isRunning ? "Running analysis…" : plan ? "Re-run plan" : "Run plan"}
+            {isRunning ? "Evaluating your FIRE path…" : plan ? "Re-run plan" : "Run plan"}
           </Button>
         </div>
       </header>
@@ -457,16 +457,13 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
         </p>
       )}
 
-      {isRunning && <RunPlanProgress />}
-
-      {showComplete && !isRunning && !error && (
-        <div
-          data-testid="dl-goal-lab-complete"
-          className="flex items-center gap-2 rounded-md border border-emerald-400/70 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-400/60 dark:bg-emerald-950/60 dark:text-emerald-100"
-        >
-          <Check className="h-4 w-4" />
-          Analysis complete
-        </div>
+      {(isRunning || showComplete) && (
+        <AnalysisTracePanel
+          isRunning={isRunning}
+          isComplete={showComplete}
+          error={error}
+          plan={plan}
+        />
       )}
 
       {!profile.isExplicitlySet && (
@@ -541,114 +538,328 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
 }
 
 /**
- * Sprint 25 #2 — Run-plan progress reel.
+ * Sprint 25 #3 — Analysis Trace panel.
  *
- * Drives four labelled steps with a slight timed cadence so the user always
- * sees motion while the underlying engine is computing. The progress is
- * intentionally *simulated* — the real engines (candidate generator, MC,
- * ranker) run too quickly and don't emit progress events, so we render a
- * deterministic time-based reel instead of fake numbers.
+ * Eight-step transparent trace shown while the orchestrator runs. Each step
+ * has:
+ *   - a plain-English heading
+ *   - a small technical "source" / "engine" label (real names from this codebase)
+ *   - a bullet list of inputs / candidates / purpose so the user can see what
+ *     the system is actually using
+ *   - a status chip (waiting / in progress / done / failed)
+ *
+ * The cadence is time-driven (~700ms/step) because the underlying engines
+ * (candidate generator + MC + ranker) run synchronously inside a single hook
+ * call and emit no progress events. To stay honest:
+ *   • If the run errors, the currently active step flips to FAILED with the
+ *     message "Could not complete this step" plus the engine error string.
+ *     No subsequent steps are marked done.
+ *   • We never claim “done” on Step 8 until the parent has a real plan.
+ *   • Engine names on Steps 4 / 5 / 6 are pulled from `plan.enginesUsed`
+ *     once available, so the labels match what actually ran.
  */
-const RUN_PLAN_STEPS: Array<{ label: string; detail: string }> = [
-  { label: "Reading financial profile",    detail: "Confirming ledger, FIRE goal and risk settings." },
-  { label: "Generating scenarios",         detail: "Building eligible path templates from your profile." },
-  { label: "Running Monte Carlo",          detail: "Stress-testing each path against market scenarios." },
-  { label: "Ranking recommendations",      detail: "Scoring paths and selecting the recommended option." },
+const ANALYSIS_TRACE_STEPS: Array<{
+  heading: string;
+  source: string;        // small "technical source" chip
+  sourceKind: "source" | "engine" | "output";
+  items: string[];       // bullet list rendered under the heading
+  itemsHeading: string;  // e.g. "Data used" / "Candidates" / "Purpose"
+}> = [
+  {
+    heading: "Reading your financial profile",
+    source: "Canonical Ledger",
+    sourceKind: "source",
+    itemsHeading: "Data used",
+    items: ["Income", "Expenses", "Net worth", "Liquidity", "Debts", "Assets"],
+  },
+  {
+    heading: "Reading your Goal Lab profile",
+    source: "Canonical Goal Profile",
+    sourceKind: "source",
+    itemsHeading: "Data used",
+    items: [
+      "FIRE target year",
+      "Target passive income",
+      "Preferred wealth engine",
+      "Risk tolerance",
+      "Liquidity preference",
+      "Constraints",
+    ],
+  },
+  {
+    heading: "Loading assumptions",
+    source: "Assumptions Centre",
+    sourceKind: "source",
+    itemsHeading: "Data used",
+    items: [
+      "Inflation",
+      "Property growth",
+      "ETF return",
+      "Interest rates",
+      "Safe withdrawal band",
+    ],
+  },
+  {
+    heading: "Generating strategy candidates",
+    source: "candidateGenerator \u00b7 scenarioTemplates",
+    sourceKind: "engine",
+    itemsHeading: "Candidates",
+    items: [
+      "Current plan",
+      "Buy investment property",
+      "Delay property",
+      "ETF acceleration",
+      "Debt reduction",
+      "Hybrid property + ETF",
+      "Liquidity preservation",
+    ],
+  },
+  {
+    heading: "Running scenario engine",
+    source: "runScenarioV2",
+    sourceKind: "engine",
+    itemsHeading: "Purpose",
+    items: ["Project each strategy path using your current household profile."],
+  },
+  {
+    heading: "Running risk and probability layer",
+    source: "scenarioV2/monteCarlo",
+    sourceKind: "engine",
+    itemsHeading: "Purpose",
+    items: [
+      "Estimate uncertainty, confidence and downside risk where available.",
+      "If a path has no modelled probability we show \u201cScenario confidence not yet available\u201d \u2014 never 0%.",
+    ],
+  },
+  {
+    heading: "Ranking recommendations",
+    source: "decisionRanking \u00b7 recommendationEngine",
+    sourceKind: "engine",
+    itemsHeading: "Ranked by",
+    items: [
+      "Probability",
+      "Speed to FIRE",
+      "Liquidity",
+      "Leverage risk",
+      "Cashflow impact",
+      "Behavioural fit",
+    ],
+  },
+  {
+    heading: "Producing your recommendation",
+    source: "Decision Lab output",
+    sourceKind: "output",
+    itemsHeading: "You will see",
+    items: [
+      "Recommended path",
+      "Why this path",
+      "Trade-offs",
+      "Alternatives",
+      "Confidence state",
+    ],
+  },
 ];
 
-function RunPlanProgress() {
-  // Cadence: ~700ms per step, capped at last step until parent flips off.
+function AnalysisTracePanel({
+  isRunning,
+  isComplete,
+  error,
+  plan,
+}: {
+  isRunning: boolean;
+  isComplete: boolean;
+  error: string | null;
+  plan: ReturnType<typeof useGoalLabPlan>["plan"];
+}) {
+  // Drive the active step from a timed reel while running. Once the parent
+  // signals completion, we hold all steps at "done". When an error appears,
+  // the active step flips to "failed" and we stop advancing.
   const [activeIdx, setActiveIdx] = React.useState(0);
+
   React.useEffect(() => {
+    if (!isRunning) return;
     setActiveIdx(0);
     const interval = setInterval(() => {
-      setActiveIdx((i) => (i < RUN_PLAN_STEPS.length - 1 ? i + 1 : i));
+      setActiveIdx((i) => (i < ANALYSIS_TRACE_STEPS.length - 1 ? i + 1 : i));
     }, 700);
     return () => clearInterval(interval);
-  }, []);
+  }, [isRunning]);
+
+  // Once the run completes successfully, hold every step as "done".
+  const allDone = !isRunning && isComplete && !error;
+
+  // Map known engine names from the plan back to step source overrides so the
+  // small technical chip matches what actually ran (defends against codebase
+  // renames diverging from the static labels above).
+  const engineOverrides = React.useMemo(() => {
+    if (!plan) return {} as Record<number, string>;
+    const out: Record<number, string> = {};
+    if (plan.enginesUsed?.candidateGenerator) {
+      out[3] = plan.enginesUsed.candidateGenerator;
+    }
+    if (plan.enginesUsed?.monteCarlo) {
+      out[5] = plan.enginesUsed.monteCarlo;
+    }
+    return out;
+  }, [plan]);
 
   return (
     <div
       data-testid="dl-goal-lab-progress"
       role="status"
       aria-live="polite"
-      className="rounded-lg border border-violet-300/60 bg-violet-50 p-4 dark:border-violet-400/50 dark:bg-violet-950/50"
+      className="rounded-xl border border-violet-300/70 bg-violet-50 p-4 dark:border-violet-400/60 dark:bg-violet-950/60"
     >
-      <div className="flex items-center gap-2">
-        <Loader2 className="h-4 w-4 animate-spin text-violet-700 dark:text-violet-200" />
-        <div className="text-sm font-semibold text-violet-900 dark:text-violet-50">
-          Evaluating scenarios…
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          {allDone ? (
+            <Check className="h-4 w-4 text-emerald-700 dark:text-emerald-300" />
+          ) : error ? (
+            <X className="h-4 w-4 text-rose-700 dark:text-rose-300" />
+          ) : (
+            <Loader2 className="h-4 w-4 animate-spin text-violet-700 dark:text-violet-200" />
+          )}
+          <div className="text-sm font-semibold text-violet-900 dark:text-violet-50 truncate">
+            {allDone
+              ? "Analysis complete"
+              : error
+              ? "Analysis paused"
+              : "Evaluating your FIRE path…"}
+          </div>
         </div>
+        <span className="shrink-0 rounded-full border border-violet-400/60 bg-white/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-800 dark:bg-violet-900/70 dark:text-violet-100">
+          Analysis trace
+        </span>
       </div>
-      <ol className="mt-3 space-y-2">
-        {RUN_PLAN_STEPS.map((step, idx) => {
-          const state: "done" | "active" | "waiting" =
-            idx < activeIdx ? "done" : idx === activeIdx ? "active" : "waiting";
+
+      {allDone && (
+        <p
+          data-testid="dl-goal-lab-complete"
+          className="mt-2 text-sm text-emerald-800 dark:text-emerald-100"
+        >
+          Your recommended path is ready.
+        </p>
+      )}
+
+      <ol className="mt-3 space-y-2.5">
+        {ANALYSIS_TRACE_STEPS.map((step, idx) => {
+          let state: "done" | "active" | "waiting" | "failed";
+          if (allDone) {
+            state = "done";
+          } else if (error && idx === activeIdx) {
+            state = "failed";
+          } else if (error && idx > activeIdx) {
+            state = "waiting";
+          } else {
+            state = idx < activeIdx ? "done" : idx === activeIdx ? "active" : "waiting";
+          }
+          const source = engineOverrides[idx] ?? step.source;
           return (
             <li
-              key={step.label}
+              key={step.heading}
               data-testid={`dl-goal-lab-progress-step-${idx + 1}`}
               data-state={state}
-              className="flex items-start gap-3"
+              className="flex items-start gap-3 rounded-lg border border-transparent px-2 py-1.5 transition-colors data-[state=active]:border-violet-300/70 data-[state=active]:bg-white/60 data-[state=failed]:border-rose-300/70 data-[state=failed]:bg-rose-50 data-[state=done]:opacity-95 dark:data-[state=active]:bg-violet-900/40 dark:data-[state=failed]:bg-rose-950/40"
             >
-              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
-                    style={{
-                      borderColor:
-                        state === "done"
-                          ? "rgb(5 150 105)"
-                          : state === "active"
-                          ? "rgb(124 58 237)"
-                          : "rgba(100,116,139,0.5)",
-                      background:
-                        state === "done"
-                          ? "rgb(16 185 129)"
-                          : state === "active"
-                          ? "transparent"
-                          : "transparent",
-                    }}
+              <span
+                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
+                style={{
+                  borderColor:
+                    state === "done"
+                      ? "rgb(5 150 105)"
+                      : state === "active"
+                      ? "rgb(124 58 237)"
+                      : state === "failed"
+                      ? "rgb(190 18 60)"
+                      : "rgba(100,116,139,0.55)",
+                  background:
+                    state === "done"
+                      ? "rgb(16 185 129)"
+                      : state === "failed"
+                      ? "rgb(244 63 94)"
+                      : "transparent",
+                }}
               >
                 {state === "done" ? (
                   <Check className="h-3 w-3 text-white" />
+                ) : state === "failed" ? (
+                  <X className="h-3 w-3 text-white" />
                 ) : state === "active" ? (
                   <Loader2 className="h-3 w-3 animate-spin text-violet-700 dark:text-violet-200" />
                 ) : (
                   <span className="h-1.5 w-1.5 rounded-full bg-slate-400 dark:bg-slate-500" />
                 )}
               </span>
-              <div className="min-w-0">
-                <div
-                  className={
-                    state === "waiting"
-                      ? "text-sm text-slate-500 dark:text-slate-400"
-                      : "text-sm font-medium text-slate-900 dark:text-slate-50"
-                  }
-                >
-                  Step {idx + 1} — {step.label}
-                  {state === "active" && (
-                    <span className="ml-2 text-xs font-normal text-violet-700 dark:text-violet-200">
-                      in progress
-                    </span>
-                  )}
-                  {state === "done" && (
-                    <span className="ml-2 text-xs font-normal text-emerald-700 dark:text-emerald-300">
-                      done
-                    </span>
-                  )}
-                  {state === "waiting" && (
-                    <span className="ml-2 text-xs font-normal text-slate-500 dark:text-slate-400">
-                      waiting
-                    </span>
-                  )}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <div
+                    className={
+                      state === "waiting"
+                        ? "text-sm text-slate-500 dark:text-slate-400"
+                        : state === "failed"
+                        ? "text-sm font-semibold text-rose-800 dark:text-rose-100"
+                        : "text-sm font-semibold text-slate-900 dark:text-slate-50"
+                    }
+                  >
+                    Step {idx + 1} — {step.heading}
+                  </div>
+                  <TraceStatusChip state={state} />
                 </div>
                 <div
                   className={
                     state === "waiting"
-                      ? "text-xs text-slate-500 dark:text-slate-500"
-                      : "text-xs text-slate-700 dark:text-slate-200"
+                      ? "mt-0.5 text-[10px] font-mono uppercase tracking-wider text-slate-400 dark:text-slate-500"
+                      : "mt-0.5 text-[10px] font-mono uppercase tracking-wider text-violet-700 dark:text-violet-200"
                   }
                 >
-                  {step.detail}
+                  {step.sourceKind === "engine"
+                    ? "Engine: "
+                    : step.sourceKind === "output"
+                    ? "Output: "
+                    : "Source: "}
+                  {source}
                 </div>
+
+                {state === "failed" ? (
+                  <div className="mt-1.5 rounded-md border border-rose-300/70 bg-white px-2.5 py-1.5 text-xs text-rose-800 dark:border-rose-400/50 dark:bg-rose-950/60 dark:text-rose-100">
+                    <div className="font-semibold">Could not complete this step.</div>
+                    <div className="mt-0.5 leading-relaxed">
+                      {humaniseTraceError(error, idx)}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      className={
+                        state === "waiting"
+                          ? "mt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                          : "mt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300"
+                      }
+                    >
+                      {step.itemsHeading}
+                    </div>
+                    <ul
+                      className={
+                        state === "waiting"
+                          ? "mt-0.5 flex flex-wrap gap-1.5 text-xs text-slate-500 dark:text-slate-500"
+                          : "mt-0.5 flex flex-wrap gap-1.5 text-xs text-slate-700 dark:text-slate-200"
+                      }
+                    >
+                      {step.items.map((it, i) => (
+                        <li
+                          key={i}
+                          className={
+                            state === "waiting"
+                              ? "rounded-full border border-slate-300/60 bg-white/40 px-2 py-0.5 dark:border-slate-600/60 dark:bg-slate-900/40"
+                              : "rounded-full border border-slate-300/80 bg-white px-2 py-0.5 dark:border-slate-600 dark:bg-slate-900"
+                          }
+                        >
+                          {it}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
             </li>
           );
@@ -656,6 +867,56 @@ function RunPlanProgress() {
       </ol>
     </div>
   );
+}
+
+function TraceStatusChip({
+  state,
+}: {
+  state: "done" | "active" | "waiting" | "failed";
+}) {
+  const map: Record<typeof state, { label: string; cls: string }> = {
+    done:    { label: "Done",         cls: "border-emerald-500/60 bg-emerald-100 text-emerald-800 dark:border-emerald-400/50 dark:bg-emerald-950/70 dark:text-emerald-100" },
+    active:  { label: "In progress",  cls: "border-violet-500/60 bg-violet-100 text-violet-800 dark:border-violet-400/50 dark:bg-violet-950/70 dark:text-violet-100" },
+    waiting: { label: "Waiting",      cls: "border-slate-400/50 bg-slate-100 text-slate-600 dark:border-slate-500/50 dark:bg-slate-900 dark:text-slate-300" },
+    failed:  { label: "Failed",       cls: "border-rose-500/60 bg-rose-100 text-rose-800 dark:border-rose-400/50 dark:bg-rose-950/70 dark:text-rose-100" },
+  };
+  const { label, cls } = map[state];
+  return (
+    <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Convert the engine's raw error string into a calm, plain-English
+ * explanation tied to the step that was active when it happened. We never
+ * silently continue — instead we explain which inputs are likely missing.
+ */
+function humaniseTraceError(error: string | null, stepIdx: number): string {
+  const raw = (error ?? "").toLowerCase();
+  if (raw.includes("goal")) {
+    return "Your FIRE goal profile looks incomplete. Open Goal Lab and confirm the goal cards, then re-run.";
+  }
+  if (raw.includes("ledger") || raw.includes("profile")) {
+    return "We could not read the canonical ledger / goal profile cleanly. Confirm your dashboard inputs, then re-run.";
+  }
+  if (raw.includes("scenario") || raw.includes("template")) {
+    return "No strategy candidates were eligible for your profile. Adjust your goal or risk settings in Goal Lab and re-run.";
+  }
+  // Step-anchored fallback so the failure message is always informative even
+  // when the engine error is opaque.
+  const stepHints: Record<number, string> = {
+    0: "Some financial profile inputs are missing or unreadable.",
+    1: "Some Goal Lab inputs (FIRE target, risk, preference) are missing.",
+    2: "Assumptions could not be loaded for this run.",
+    3: "No strategy candidates were eligible for your profile.",
+    4: "The scenario engine could not project the candidate paths.",
+    5: "The probability layer did not return a result for any path.",
+    6: "Ranking could not be completed with the available signals.",
+    7: "The recommendation could not be assembled.",
+  };
+  return error ? `${stepHints[stepIdx] ?? ""} (${error})`.trim() : (stepHints[stepIdx] ?? "Data is missing for this step.");
 }
 
 // ────────────────────────────────────────────────────────────────────────────
