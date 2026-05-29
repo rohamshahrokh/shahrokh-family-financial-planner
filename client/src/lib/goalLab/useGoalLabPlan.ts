@@ -68,6 +68,19 @@ export function useGoalLabPlan(
   const run = useCallback(async (): Promise<GoalLabPlanOutput | null> => {
     setIsRunning(true);
     setError(null);
+    // Sprint 25 P4 — yield to the browser BEFORE the heavy orchestrator
+    // call so React can commit the isRunning=true state and paint the
+    // Analysis Trace panel before CPU-heavy template runs begin.
+    // Two requestAnimationFrame ticks guarantee a paint happens between
+    // the state flip and the first engine call. Fall back to setTimeout
+    // for non-browser environments (e.g. JSDOM in tests).
+    await new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      } else {
+        setTimeout(resolve, 16);
+      }
+    });
     try {
       const out = await runGoalLabPlan({ ledger, profile, ...extraArgs });
       setPlan(out);

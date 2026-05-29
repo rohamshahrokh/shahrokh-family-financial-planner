@@ -136,6 +136,28 @@ export interface GoalLabPlanOutput {
   hasFeasibleScenario: boolean;
   /** Templates evaluated this run (for debugging). */
   templatesEvaluatedIds: string[];
+  /**
+   * Sprint 25 P4 — performance metrics captured during this run. All values
+   * are wall-clock milliseconds measured with `performance.now()`. These are
+   * reported to the UI so the Analysis Trace can show real timings.
+   */
+  metrics: {
+    /** Total runtime (start of runGoalLabPlan → before adapter write). */
+    totalMs: number;
+    /** Time spent inside generateQuickDecisionCandidates across all templates. */
+    candidateGenerationMs: number;
+    /**
+     * Approximate Monte Carlo time. The candidate generator runs the MC
+     * stack internally, so we cannot isolate it without instrumenting that
+     * file. We surface the same value as candidateGenerationMs and clarify
+     * that the two engines are wrapped together inside the candidate path.
+     */
+    scenarioAndMonteCarloMs: number;
+    /** Time spent ranking + pickNamedPaths. */
+    rankingMs: number;
+    /** Number of templates that were evaluated. */
+    templatesCount: number;
+  };
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
@@ -169,6 +191,8 @@ export interface RunGoalLabPlanArgs {
  * empty result.
  */
 export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabPlanOutput> {
+  const t0 = performance.now();
+
   const { ledger, profile } = args;
   const templates = selectActiveTemplates(ledger, profile);
 
@@ -186,16 +210,37 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
   const horizonYears   = args.horizonYears   ?? 25;
   const simulationCount = args.simulationCount ?? 300;
 
-  // Fan out — run each template in parallel. Engine is pure-deterministic
-  // per invocation; parallel runs are safe.
-  const settled = await Promise.allSettled(
-    templates.map((t) =>
-      generateQuickDecisionCandidates(buildEngineInput(t, ledger, profile, {
-        sharedTax, sharedHousehold, horizonYears, simulationCount,
-      })),
-    ),
-  );
+  // Sprint 25 P4 — instead of Promise.allSettled (which collapses all
+  // generator runs into one microtask and blocks the main thread), we run
+  // each template sequentially and YIELD to the browser between templates.
+  // This lets React paint the Analysis Trace panel and the per-step
+  // progress before the next CPU-heavy template starts. The total wall-
+  // clock cost is essentially unchanged (the work was already sequential
+  // inside Promise.allSettled because none of the engines yield), but the
+  // browser stays responsive and the trace animates against real progress.
+  const candidateStart = performance.now();
+  const settled: Array<
+    | { status: "fulfilled"; value: Awaited<ReturnType<typeof generateQuickDecisionCandidates>> }
+    | { status: "rejected"; reason: unknown }
+  > = [];
+  for (const t of templates) {
+    // Yield to the event loop so the browser can repaint between templates.
+    // setTimeout(0) is a portable yield point and works in JSDOM tests too.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    try {
+      const value = await generateQuickDecisionCandidates(
+        buildEngineInput(t, ledger, profile, {
+          sharedTax, sharedHousehold, horizonYears, simulationCount,
+        }),
+      );
+      settled.push({ status: "fulfilled", value });
+    } catch (reason) {
+      settled.push({ status: "rejected", reason });
+    }
+  }
+  const candidateGenerationMs = performance.now() - candidateStart;
 
+  const rankingStart = performance.now();
   const rankedScenarios: GoalLabRankedScenario[] = [];
   for (let i = 0; i < templates.length; i += 1) {
     const t = templates[i]!;
@@ -222,6 +267,9 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
   rankedScenarios.sort((a, b) => (b.scoreP50 ?? -Infinity) - (a.scoreP50 ?? -Infinity));
 
   const picks = pickNamedPaths(rankedScenarios, profile);
+  const rankingMs = performance.now() - rankingStart;
+
+  const totalMs = performance.now() - t0;
 
   const output: GoalLabPlanOutput = {
     profile,
@@ -236,6 +284,13 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
     },
     hasFeasibleScenario: rankedScenarios.some((r) => r.winner !== null),
     templatesEvaluatedIds: templates.map((t) => t.id),
+    metrics: {
+      totalMs,
+      candidateGenerationMs,
+      scenarioAndMonteCarloMs: candidateGenerationMs, // wrapped inside candidateGenerator
+      rankingMs,
+      templatesCount: templates.length,
+    },
   };
 
   // Publish to the existing canonical session cache so /decision-lab and

@@ -378,27 +378,71 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
   const noPlan = !plan;
   const noFeasible = !!plan && !plan.hasFeasibleScenario;
 
-  // Sprint 25 #2 — Run-plan loading feedback.
-  // We drive a fake 4-step progress reel while `isRunning` is true so the user
-  // always sees the system working. When `isRunning` transitions true→false we
-  // briefly hold a "complete" state, then smoothly scroll to the recommendation.
-  const [showComplete, setShowComplete] = React.useState(false);
+  // Sprint 25 P4 — Analysis Trace lifecycle.
+  //
+  // Goals:
+  //   • Trace appears IMMEDIATELY on click and remains visible while running.
+  //   • After completion, trace stays visible (user can collapse it) so the
+  //     user can review what the system did.
+  //   • Elapsed timer ticks every 250ms while running.
+  //   • On success we briefly highlight "Analysis complete", then smooth-
+  //     scroll the recommended card into view. The trace remains rendered.
+  const [traceVisible, setTraceVisible] = React.useState(false);
+  const [traceCollapsed, setTraceCollapsed] = React.useState(false);
+  const [runStartMs, setRunStartMs] = React.useState<number | null>(null);
+  const [elapsedMs, setElapsedMs] = React.useState(0);
+  const [lastCompletedElapsedMs, setLastCompletedElapsedMs] = React.useState<number | null>(null);
   const wasRunning = React.useRef(false);
   const recommendedRef = React.useRef<HTMLDivElement | null>(null);
 
+  // When isRunning flips true, start the timer + open the trace.
   React.useEffect(() => {
-    if (wasRunning.current && !isRunning && !error) {
-      setShowComplete(true);
-      const t = setTimeout(() => {
-        setShowComplete(false);
-        // Smoothly bring the recommended card into view once available.
-        recommendedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 1100);
-      wasRunning.current = false;
-      return () => clearTimeout(t);
+    if (isRunning) {
+      setTraceVisible(true);
+      setTraceCollapsed(false);
+      setRunStartMs(performance.now());
+      setElapsedMs(0);
+      wasRunning.current = true;
     }
-    if (isRunning) wasRunning.current = true;
-  }, [isRunning, error]);
+  }, [isRunning]);
+
+  // Tick the elapsed timer while running.
+  React.useEffect(() => {
+    if (!isRunning || runStartMs == null) return;
+    const id = setInterval(() => {
+      setElapsedMs(performance.now() - runStartMs);
+    }, 250);
+    return () => clearInterval(id);
+  }, [isRunning, runStartMs]);
+
+  // When isRunning falls false after a run, freeze the elapsed time, scroll,
+  // and KEEP the trace visible.
+  React.useEffect(() => {
+    if (wasRunning.current && !isRunning) {
+      if (runStartMs != null) {
+        setLastCompletedElapsedMs(performance.now() - runStartMs);
+      }
+      wasRunning.current = false;
+      if (!error) {
+        // Give React one paint to draw the success state, then scroll.
+        const id = window.setTimeout(() => {
+          recommendedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 150);
+        return () => window.clearTimeout(id);
+      }
+    }
+  }, [isRunning, error, runStartMs]);
+
+  // Wrap run() so the trace opens BEFORE the orchestrator is invoked. The
+  // useEffect above also handles this, but flipping traceVisible synchronously
+  // here gives the user immediate visual feedback even on the first click.
+  const handleRunClick = React.useCallback(() => {
+    setTraceVisible(true);
+    setTraceCollapsed(false);
+    setRunStartMs(performance.now());
+    setElapsedMs(0);
+    void run();
+  }, [run]);
 
   return (
     <section
@@ -436,14 +480,16 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
           </Link>
           <Button
             size="sm"
-            onClick={() => void run()}
+            onClick={handleRunClick}
             disabled={isRunning}
             data-testid="dl-goal-lab-run"
             className="gap-1.5"
             aria-busy={isRunning}
           >
             {isRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            {isRunning ? "Evaluating your FIRE path…" : plan ? "Re-run plan" : "Run plan"}
+            {isRunning ? (
+              <>Evaluating your FIRE path… <span className="font-mono tabular-nums">{formatElapsed(elapsedMs)}</span></>
+            ) : plan ? "Re-run plan" : "Run plan"}
           </Button>
         </div>
       </header>
@@ -457,12 +503,16 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
         </p>
       )}
 
-      {(isRunning || showComplete) && (
+      {traceVisible && (
         <AnalysisTracePanel
           isRunning={isRunning}
-          isComplete={showComplete}
+          collapsed={traceCollapsed}
+          onToggleCollapsed={() => setTraceCollapsed((c) => !c)}
+          onClose={() => setTraceVisible(false)}
           error={error}
           plan={plan}
+          elapsedMs={isRunning ? elapsedMs : lastCompletedElapsedMs ?? elapsedMs}
+          isLive={isRunning}
         />
       )}
 
@@ -662,14 +712,22 @@ const ANALYSIS_TRACE_STEPS: Array<{
 
 function AnalysisTracePanel({
   isRunning,
-  isComplete,
+  collapsed,
+  onToggleCollapsed,
+  onClose,
   error,
   plan,
+  elapsedMs,
+  isLive,
 }: {
   isRunning: boolean;
-  isComplete: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  onClose: () => void;
   error: string | null;
   plan: ReturnType<typeof useGoalLabPlan>["plan"];
+  elapsedMs: number;
+  isLive: boolean;
 }) {
   // Drive the active step from a timed reel while running. Once the parent
   // signals completion, we hold all steps at "done". When an error appears,
@@ -685,8 +743,9 @@ function AnalysisTracePanel({
     return () => clearInterval(interval);
   }, [isRunning]);
 
-  // Once the run completes successfully, hold every step as "done".
-  const allDone = !isRunning && isComplete && !error;
+  // Once the run completes successfully, hold every step as "done". We treat
+  // "completion" as: not running, no error, and a plan is available.
+  const allDone = !isRunning && !error && !!plan;
 
   // Map known engine names from the plan back to step source overrides so the
   // small technical chip matches what actually ran (defends against codebase
@@ -726,10 +785,40 @@ function AnalysisTracePanel({
               ? "Analysis paused"
               : "Evaluating your FIRE path…"}
           </div>
+          {(isLive || elapsedMs > 0) && (
+            <span
+              data-testid="dl-goal-lab-elapsed"
+              className="ml-1 rounded-full border border-violet-400/50 bg-white/80 px-2 py-0.5 font-mono text-[11px] tabular-nums text-violet-900 dark:border-violet-400/40 dark:bg-violet-900/60 dark:text-violet-50"
+            >
+              {formatElapsed(elapsedMs)}
+            </span>
+          )}
         </div>
-        <span className="shrink-0 rounded-full border border-violet-400/60 bg-white/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-800 dark:bg-violet-900/70 dark:text-violet-100">
-          Analysis trace
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="rounded-full border border-violet-400/60 bg-white/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-800 dark:bg-violet-900/70 dark:text-violet-100">
+            Analysis trace
+          </span>
+          {!isRunning && (
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              data-testid="dl-goal-lab-trace-toggle"
+              className="text-[11px] font-medium text-violet-800 underline-offset-2 hover:underline dark:text-violet-200"
+            >
+              {collapsed ? "View analysis details" : "Hide details"}
+            </button>
+          )}
+          {!isRunning && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Dismiss analysis trace"
+              className="rounded p-0.5 text-violet-700 hover:bg-violet-200/60 dark:text-violet-200 dark:hover:bg-violet-800/60"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {allDone && (
@@ -741,7 +830,11 @@ function AnalysisTracePanel({
         </p>
       )}
 
-      <ol className="mt-3 space-y-2.5">
+      {allDone && plan?.metrics && (
+        <TraceMetrics metrics={plan.metrics} totalElapsedMs={elapsedMs} />
+      )}
+
+      {collapsed ? null : <ol className="mt-3 space-y-2.5">
         {ANALYSIS_TRACE_STEPS.map((step, idx) => {
           let state: "done" | "active" | "waiting" | "failed";
           if (allDone) {
@@ -864,10 +957,54 @@ function AnalysisTracePanel({
             </li>
           );
         })}
-      </ol>
+      </ol>}
     </div>
   );
 }
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const mm = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
+  const ss = (totalSeconds % 60).toString().padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+function TraceMetrics({
+  metrics,
+  totalElapsedMs,
+}: {
+  metrics: NonNullable<GoalLabPlanOutputForUI["metrics"]>;
+  totalElapsedMs: number;
+}) {
+  const rows: Array<{ label: string; value: string }> = [
+    { label: "Total runtime",            value: `${(metrics.totalMs / 1000).toFixed(2)} s` },
+    { label: "UI elapsed",               value: `${(totalElapsedMs / 1000).toFixed(2)} s` },
+    { label: "Candidate generation",     value: `${(metrics.candidateGenerationMs / 1000).toFixed(2)} s` },
+    { label: "Scenario + Monte Carlo",   value: `${(metrics.scenarioAndMonteCarloMs / 1000).toFixed(2)} s` },
+    { label: "Ranking",                  value: `${metrics.rankingMs.toFixed(0)} ms` },
+    { label: "Templates evaluated",      value: `${metrics.templatesCount}` },
+  ];
+  return (
+    <dl
+      data-testid="dl-goal-lab-metrics"
+      className="mt-3 grid grid-cols-2 gap-2 rounded-md border border-violet-300/60 bg-white/70 px-3 py-2 text-xs sm:grid-cols-3 dark:border-violet-400/40 dark:bg-violet-950/40"
+    >
+      {rows.map((r) => (
+        <div key={r.label} className="flex flex-col">
+          <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+            {r.label}
+          </dt>
+          <dd className="font-mono tabular-nums text-slate-900 dark:text-slate-50">
+            {r.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+// Local alias for the inferred plan shape (used by TraceMetrics).
+type GoalLabPlanOutputForUI = NonNullable<ReturnType<typeof useGoalLabPlan>["plan"]>;
 
 function TraceStatusChip({
   state,
