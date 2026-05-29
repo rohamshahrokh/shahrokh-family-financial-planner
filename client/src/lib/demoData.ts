@@ -547,6 +547,33 @@ export const DEMO_FIRE_SETTINGS = {
   updated_at: new Date().toISOString(),
 };
 
+/**
+ * Sprint 30A.1 — baseline row for the demo `/api/mc-fire-settings` endpoint.
+ *
+ * Until the demo user explicitly saves a FIRE goal via Goal Lab, the row
+ * carries:
+ *   - `current_age` (sourced from DEMO_FIRE_SETTINGS) so the Action Roadmap,
+ *     FIRE Age, Passive Income, and alt-strategy MC selectors can resolve
+ *     `startAge`.
+ *   - `goals_set: false` so the canonical-goal selector keeps reporting
+ *     NOT_SET. Goal Lab gating semantics MUST NOT change.
+ *
+ * Once Goal Lab PUTs to /api/mc-fire-settings, the demo handler merges the
+ * write into the in-memory store and the row carries the real `goals_set`
+ * value. This baseline only governs the unwritten pre-Goal-Lab state.
+ */
+export function getDemoMCFireSettingsBaseline(): {
+  current_age: number;
+  goals_set: false;
+  updated_at: string;
+} {
+  return {
+    current_age: DEMO_FIRE_SETTINGS.current_age,
+    goals_set: false,
+    updated_at: new Date().toISOString(),
+  };
+}
+
 // ─── App Settings ─────────────────────────────────────────────────────────────
 
 export const DEMO_APP_SETTINGS: Record<string, any> = {

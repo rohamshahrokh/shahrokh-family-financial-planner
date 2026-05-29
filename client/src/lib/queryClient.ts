@@ -29,6 +29,7 @@ import {
   getDemoDataset,
   DEMO_FIRE_SETTINGS, DEMO_FIRE_SCENARIO_CONFIG, DEMO_APP_SETTINGS, DEMO_TAX_PROFILE,
   DEMO_ALERT_LOGS, DEMO_FAMILY_MSG, DEMO_PLANNED_INVESTMENTS, DEMO_SCENARIOS,
+  getDemoMCFireSettingsBaseline,
 } from "./demoData";
 
 // ─── Detect deployment mode ───────────────────────────────────────────────────
@@ -384,8 +385,18 @@ async function handleDemoRequest(method: string, path: string, body?: unknown): 
     if (m === "PUT") return { success: true };
   }
   if (path === "/api/mc-fire-settings") {
-    if (m === "GET") return {};
-    if (m === "PUT") return {};
+    // Sprint 30A.1 — see getDemoMCFireSettingsBaseline() for the rationale.
+    // The demo handler must surface `current_age` so MC startAge resolves,
+    // while keeping `goals_set: false` so canonical-goal remains NOT_SET.
+    const dsAny = ds as any;
+    if (!dsAny.mcFireSettings) {
+      dsAny.mcFireSettings = getDemoMCFireSettingsBaseline();
+    }
+    if (m === "GET") return dsAny.mcFireSettings;
+    if (m === "PUT") {
+      dsAny.mcFireSettings = { ...dsAny.mcFireSettings, ...(body as any), updated_at: new Date().toISOString() };
+      return dsAny.mcFireSettings;
+    }
   }
   if (path === "/api/mc-fire-results") {
     if (m === "GET") return null;
