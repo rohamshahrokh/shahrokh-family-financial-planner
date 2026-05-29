@@ -143,35 +143,70 @@ Screenshots captured in `/home/user/workspace/`:
   complete before computing roadmap context (suspend or skeleton).
   Out of scope for Sprint 30A.
 
-## NEW-2 — `/api/mc-fire-settings` returns HTML on Vercel (preexisting infra gap, blocks D8/D12 visible metrics)
+## NEW-2 — Demo `/api/mc-fire-settings` + `/api/canonical-goal` returned empty (FIXED in Sprint 30A.1, visually verified)
 
-- During live verification, S1 FIRE Age + Passive Income + alt-strategy
-  card per-metric FIRE Age + PI still rendered "Not modelled yet" even
-  though the gate scope refactor is correct (29+12 unit tests pass).
-- Investigated upstream: `useQuery(['/api/mc-fire-settings'])` on the
-  Vercel preview returns the SPA fallback HTML, not JSON. JSON.parse
-  fails → `fireSettings = undefined` permanently → `currentAge = null`
-  → `selectMonteCarloProjection` honestly returns null FIRE age / PI
-  → UI shows "Not modelled yet".
-- Root cause: `vercel.json` only exposes `api/ai-insights.ts` and
-  `api/market-data.ts`. `mc-fire-settings` is served by the Express +
-  Supabase backend which is **not deployed to Vercel**. The catch-all
-  rewrite `/(.*) → /index.html` therefore returns SPA HTML for every
-  other `/api/*` path.
-- This is **NOT** a Sprint 30A regression. It is a preexisting
-  infrastructure gap that was masked in Sprint 28B because the Action
-  Roadmap page did not depend on `currentAge` at that time. The gate
-  refactor in Sprint 30A surfaced the gap by routing more fields
-  through the same null-bound path.
-- Severity: **infrastructure**. Out of scope for Sprint 30A per the
-  hard constraints (no Supabase migrations, no new infra). Suggested
-  for Sprint 30B/30C: decide between (a) porting mc-fire-settings to
-  a Vercel Function in `api/`, (b) routing the SPA to the Express
-  backend, or (c) hydrating `currentAge` from a non-API source like
-  `useCanonicalGoal()` as a fallback.
-- Evidence: action-roadmap.tsx lines 113-134; `vercel.json` does not
-  include mc-fire-settings; preview fetch of `/api/mc-fire-settings`
-  returns `<!doctype html>...`.
+### Original symptom (Sprint 30A)
+- S1 FIRE Age + Passive Income + alt-strategy card metrics rendered
+  "Not modelled yet" on the preview. 25 placeholder instances counted.
+
+### Initial misdiagnosis (corrected during Sprint 30A.1)
+- Originally attributed to `vercel.json` not exposing `/api/mc-fire-settings`
+  as a Vercel Function. That diagnosis was **wrong** — the production
+  build is a static SPA with a demo-data shim, not an Express backend.
+
+### Actual root cause (Sprint 30A.1)
+- `apiRequest` in `client/src/lib/queryClient.ts` intercepts every
+  `/api/*` call in demo mode **before** any network call (line 898
+  `if (isDemoMode())`). Two demo handlers were under-specified:
+  1. `/api/mc-fire-settings` returned `{}` → `currentAge` resolved to
+     null → `selectMonteCarloProjection` short-circuited to
+     nullProjection.
+  2. `/api/canonical-goal` hardcoded `{ status: "NOT_SET" }` →
+     `fireNumber = 0` → even when currentAge was repaired, the
+     selector still nullified P50 crossings.
+- Both gaps cascaded: any field that read from MC outputs (FIRE Age,
+  Passive Income, alt-strategy card metrics, recommended-strategy card)
+  fell back to the "Not modelled yet" placeholder.
+- `DEMO_FIRE_SETTINGS` (demoData.ts:540) already carried the full goal
+  profile (current_age:37, target_fire_age:55, target_monthly_income:9000,
+  safe_withdrawal_rate:4.0) — the data was present, just not surfaced.
+
+### Fix (Sprint 30A.1, two commits)
+- **ec9c7c7** — Introduced `getDemoMCFireSettingsBaseline()` and
+  routed the demo `/api/mc-fire-settings` GET/PUT through it so
+  `current_age` resolves to 37. Insufficient alone (still 25 placeholders
+  in browser verification because canonical-goal stayed NOT_SET).
+- **be64d49** — Extended the baseline to return the **full** goal row
+  (`goals_set:true`, `target_fire_age`, `target_passive_monthly`,
+  `swr_pct`, `goal_set_timestamp`) and rewired the demo `/api/canonical-goal`
+  handler to reuse `deriveCanonicalGoalFromRow(baseline)` — mirroring real
+  server behaviour. Canonical goal now derives status=SET in demo,
+  unlocking fireNumber>0 and real P50/P75/P25 crossings.
+- Test coverage: `client/src/lib/__tests__/sprint30a1DemoMcFireSettings.test.ts`,
+  32 assertions across 6 invariant groups (baseline carries full goal row,
+  canonical-goal derives SET, Goal Lab PUT merge preserves baseline +
+  re-derives correctly, FIRE Age renders in 45–47 range).
+- Goal Lab UI untouched. `isFireGoalExplicitlySet` (8 call sites) now
+  returns true in demo by design — demo persona has a 'set' goal, matching
+  the post-Goal-Lab-save flow real users experience.
+
+### Live verification (preview `czjxhxhbc.vercel.app`)
+- **"Not modelled yet" count: 25 → 8** (68% reduction).
+- **FIRE Age renders 45** (P50 MEDIAN) — was "Not modelled yet".
+- **Passive Income renders $109,810** (P50 MEDIAN) — was "Not modelled yet".
+- Alt-strategy and recommended-strategy cards: real per-card metrics.
+- Remaining 8 placeholders are all in the **Monte Carlo Risk Stress Test**
+  section (Rate shock, Income reduction, Property under-performance, ETF
+  under-performance — each rendered twice). These require dedicated
+  stress-test MC engines that are **explicitly out of scope** per the
+  hard constraint "NO new MC/forecast/FIRE engines". Suggested for a
+  future sprint.
+
+### Status
+**RESOLVED** for the financial-correctness scope the user defined:
+currentAge always available, FIRE Age renders, Passive Income renders,
+Recommended/Alternative strategy cards render real values. Sprint 30B
+(graphical Gantt + FIRE Journey visualization) is unblocked.
 
 ---
 
