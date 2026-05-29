@@ -429,6 +429,17 @@ function splitReasoning(text: string | null | undefined): { head: string; tail: 
 /* explicit profile-driven recommendation; computeUnifiedBestMove is the     */
 /* passive ambient recommendation that runs without orchestration.            */
 /* ──────────────────────────────────────────────────────────────────── */
+/* ──────────────────────────────────────────────────────────────────── */
+/* Sprint 26 P4: Dual-card landing surface.                              */
+/*                                                                       */
+/* The MOVE landing now shows TWO clearly-distinct routes into the engines:*/
+/*   • Goal Lab        → "Tell me what to do" (one recommended path)     */
+/*   • Decision Engine → "Compare multiple strategies" (ranked alternates)*/
+/*                                                                       */
+/* The Goal Lab side reuses the existing in-memory plan cache (passive    */
+/* read) so we don't trigger an orchestration on render. The Decision     */
+/* Engine side links to /decision-lab where the Run-plan button lives.    */
+/* ──────────────────────────────────────────────────────────────────── */
 function GoalLabBannerSection() {
   const { auditMode } = useAuditMode();
   // Read straight from the in-memory cache. No hook subscription needed:
@@ -437,64 +448,115 @@ function GoalLabBannerSection() {
   const plan         = readLatestGoalLabPlan();
   const generatedAt  = readLatestGoalLabPlanGeneratedAt();
   const recommended  = plan?.picks.recommended ?? null;
-
-  if (!plan) {
-    // Quiet hint, not a loud empty state — the legacy unified next-move
-    // section still renders below this and is the primary CTA in this case.
-    return (
-      <section data-testid="ac-goal-lab-banner-empty" className="text-xs text-muted-foreground">
-        Tip: open <Link href="/decision-lab"><span className="underline text-foreground">Decision Lab</span></Link>
-        {" "}and click <span className="text-foreground font-medium">Run plan</span> to get profile-driven Goal-Lab paths.
-      </section>
-    );
-  }
-
-  if (!recommended) {
-    return (
-      <section
-        data-testid="ac-goal-lab-banner-infeasible"
-        className="rounded-lg border border-amber-400/40 bg-amber-50/40 dark:bg-amber-500/5 p-3 text-xs sm:text-sm"
-      >
-        Goal Lab evaluated {plan.templatesEvaluatedIds.length} scenarios for your profile but found no
-        path that survived safety ceilings. Revisit risk tolerance or FIRE targets in
-        <Link href="/goal-lab"><span className="underline text-foreground"> Goal Lab</span></Link>.
-      </section>
-    );
-  }
+  const rankedCount  = plan?.rankedScenarios?.length ?? 0;
 
   return (
     <section
-      data-testid="ac-goal-lab-banner"
-      className="rounded-lg border bg-card p-3 sm:p-4 space-y-2"
-      style={{ borderColor: "hsl(var(--border))" }}
+      data-testid="ac-move-landing-cards"
+      className="grid grid-cols-1 md:grid-cols-2 gap-3"
     >
-      <div className="flex items-start justify-between gap-3 flex-wrap">
+      {/* ── Goal Lab card — "Tell me what to do" ─────────────────────── */}
+      <div
+        data-testid="ac-goal-lab-banner"
+        className="rounded-lg border bg-card p-3 sm:p-4 space-y-2 flex flex-col"
+        style={{ borderColor: "hsl(var(--border))" }}
+      >
         <div className="min-w-0 flex-1">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Goal Lab recommended path</p>
-          <p className="text-sm sm:text-base font-semibold leading-snug mt-0.5">
-            {recommended.templateLabel}
+          <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Goal Lab</p>
+          <p className="text-sm sm:text-base font-semibold leading-snug mt-0.5" data-testid="ac-goal-lab-card-tagline">
+            Tell me what to do
           </p>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1">{recommended.promise}</p>
-          <p
-            data-testid="ac-goal-lab-banner-prob"
-            className="text-xs text-muted-foreground mt-0.5"
-          >
-            {recommended.probabilityP50 != null
-              ? <>Survivability {(recommended.probabilityP50 * 100).toFixed(0)}% · score {recommended.scoreP50?.toFixed(0)}</>
-              : <span data-testid="ac-goal-lab-banner-prob-null">Scenario confidence not yet available</span>}
+
+          {!plan && (
+            <p
+              data-testid="ac-goal-lab-banner-empty"
+              className="text-xs text-muted-foreground mt-2"
+            >
+              Run a plan in <Link href="/decision-lab"><span className="underline text-foreground">Decision Engine</span></Link>{" "}
+              to see your profile-driven recommended path here.
+            </p>
+          )}
+
+          {plan && !recommended && (
+            <p
+              data-testid="ac-goal-lab-banner-infeasible"
+              className="text-xs sm:text-sm text-amber-700 dark:text-amber-300 mt-2"
+            >
+              Goal Lab evaluated {plan.templatesEvaluatedIds.length} scenarios but found no path that
+              survived safety ceilings. Revisit risk or FIRE targets in{" "}
+              <Link href="/goal-lab"><span className="underline text-foreground">Goal Lab</span></Link>.
+            </p>
+          )}
+
+          {plan && recommended && (
+            <>
+              <p className="text-xs text-muted-foreground mt-2">Recommended path</p>
+              <p className="text-sm font-medium leading-snug mt-0.5">
+                {recommended.templateLabel}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">{recommended.promise}</p>
+              <p
+                data-testid="ac-goal-lab-banner-prob"
+                className="text-xs text-muted-foreground mt-0.5"
+              >
+                {recommended.probabilityP50 != null
+                  ? <>Survivability {(recommended.probabilityP50 * 100).toFixed(0)}% · score {recommended.scoreP50?.toFixed(0)}</>
+                  : <span data-testid="ac-goal-lab-banner-prob-null">Scenario confidence not yet available</span>}
+              </p>
+              {auditMode && (
+                <p className="text-[10px] text-muted-foreground/80 mt-1">
+                  engine: {plan.enginesUsed.candidateGenerator} · {plan.enginesUsed.monteCarlo}
+                  {generatedAt ? ` · generated ${new Date(generatedAt).toLocaleString()}` : ""}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+        <div className="pt-2">
+          <Link href="/goal-lab">
+            <Button size="sm" variant="default" data-testid="ac-goal-lab-card-cta">
+              Open Goal Lab
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      {/* ── Decision Engine card — "Compare multiple strategies" ─────── */}
+      <div
+        data-testid="ac-decision-engine-card"
+        className="rounded-lg border bg-card p-3 sm:p-4 space-y-2 flex flex-col"
+        style={{ borderColor: "hsl(var(--border))" }}
+      >
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Decision Engine</p>
+          <p className="text-sm sm:text-base font-semibold leading-snug mt-0.5" data-testid="ac-decision-engine-card-tagline">
+            Compare multiple strategies
           </p>
-          {auditMode && (
-            <p className="text-[10px] text-muted-foreground/80 mt-1">
-              engine: {plan.enginesUsed.candidateGenerator} · {plan.enginesUsed.monteCarlo}
-              {generatedAt ? ` · generated ${new Date(generatedAt).toLocaleString()}` : ""}
+          <p className="text-xs text-muted-foreground mt-2">
+            Side-by-side ranked alternatives — safest, fastest, highest probability, best
+            cashflow, and best hybrid — each with survivability and scoring.
+          </p>
+          {plan && rankedCount > 0 && (
+            <p
+              className="text-xs text-muted-foreground mt-2"
+              data-testid="ac-decision-engine-card-count"
+            >
+              {rankedCount} ranked scenario{rankedCount === 1 ? "" : "s"} ready from your last run.
+            </p>
+          )}
+          {!plan && (
+            <p className="text-xs text-muted-foreground mt-2">
+              No plan computed yet — hit <span className="text-foreground font-medium">Run plan</span> inside Decision Engine.
             </p>
           )}
         </div>
-        <Link href="/decision-lab">
-          <Button size="sm" variant="outline" data-testid="ac-goal-lab-banner-cta">
-            See all ranked paths
-          </Button>
-        </Link>
+        <div className="pt-2">
+          <Link href="/decision-lab">
+            <Button size="sm" variant="outline" data-testid="ac-decision-engine-card-cta">
+              Open Decision Engine
+            </Button>
+          </Link>
+        </div>
       </div>
     </section>
   );
@@ -793,15 +855,10 @@ function DoNothingSection(props: {
 /* ────────────────────────────────────────────────────────────────────────── */
 function LabSummaryCards({ ledger }: { ledger: DashboardInputs | null }) {
   const { auditMode } = useAuditMode();
-  // Sprint 15 Phase 2: thread canonical goal through the FIRE selector.
-  const { data: goal } = useCanonicalGoal();
-  const head = ledger ? computeCanonicalHeadlineMetrics(ledger) : null;
-  const fire = ledger ? selectCanonicalFire(ledger, goal) : null;
-  const goalSet = isFireGoalExplicitlySet(goal);
-
-  // Goal Closure: gap-to-goal headline from the canonical FIRE selector.
-  // Sprint 15.2: suppress the gap headline when no goal is explicitly set.
-  const gap = goalSet ? (fire?.gap ?? null) : null;
+  // Sprint 26 P3: Goal Closure card removed from the MOVE landing surface.
+  // The /goal-closure-lab route + page remain alive in App.tsx — its FIRE-gap
+  // / progress / target-year / years-remaining values now live as a "Current
+  // Position" panel inside Goal Lab instead. Portfolio Lab is untouched.
 
   // Portfolio Lab: 4-bucket snapshot from existing selectors. We don't
   // recompute allocation here — only sum the canonical bucket values and let
@@ -818,32 +875,6 @@ function LabSummaryCards({ ledger }: { ledger: DashboardInputs | null }) {
 
   return (
     <div className="space-y-2" data-testid="ac-lab-summary-cards">
-      <Card testId="ac-lab-summary-goal-closure">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="min-w-0 flex-1">
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Goal Closure Lab</div>
-            <div className="text-base sm:text-lg font-bold num-display mt-1">
-              {!goalSet
-                ? "Set your FIRE goal"
-                : gap !== null
-                  ? gap > 0
-                    ? `${formatCurrency(gap)} to go`
-                    : "On target"
-                  : "Not available"}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              How far you are from your FIRE number, and what closes the gap.
-            </div>
-            {auditMode && <SourceChip>canonicalFire.gap = fireNumber − netWorth</SourceChip>}
-          </div>
-          <Link href="/goal-closure-lab">
-            <Button size="sm" variant="outline" data-testid="ac-lab-summary-goal-closure-cta">
-              Open Goal Closure Lab
-            </Button>
-          </Link>
-        </div>
-      </Card>
-
       <Card testId="ac-lab-summary-portfolio">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0 flex-1">
