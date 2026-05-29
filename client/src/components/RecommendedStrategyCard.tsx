@@ -1,40 +1,29 @@
 /**
- * RecommendedStrategyCard — Sprint 28.
+ * RecommendedStrategyCard — Sprint 28B (post-Run-Plan handoff).
  *
- * Single Goal-Lab card surfaced after Run Plan. Pure handoff to Action
- * Roadmap — strategy name + up to 3 "why" bullets + CTA. No numbers, no
- * probability, no charts (those live on `/action-roadmap`).
+ * Per SPRINT28B_EXECUTION_ROADMAP.md §2, after Run Plan the Goal Lab post-run
+ * surface shows ONLY this card. No bullets, no metrics, no probability —
+ * those all live on `/action-roadmap`. This card is a pure handoff.
  *
- * Honesty: when the recommendation rationale is missing, we render the
- * literal phrase "Not modelled yet" — never a fabricated bullet.
+ * Required body copy is verbatim and intentionally generic — the Action
+ * Roadmap is where the user goes for any per-path detail.
  */
 import * as React from "react";
 import { Link } from "wouter";
-import { ArrowRight, Star, Map as MapIcon } from "lucide-react";
+import { ArrowRight, Map as MapIcon } from "lucide-react";
 
 import type { GoalLabRankedScenario } from "@/lib/goalLab/orchestrator";
 
 export interface RecommendedStrategyCardProps {
   pick: GoalLabRankedScenario | null;
-  rationale: string | null;
+  /** Kept on the prop API for backward compatibility; intentionally unused. */
+  rationale?: string | null;
 }
 
-/**
- * Pick exactly 3 short "why" lines from the engine winner's `rationale`
- * array. We do NOT invent bullets — when the engine produced fewer than 3,
- * we surface what we have. When the engine produced none, we surface the
- * orchestrator rationale (if any) and otherwise "Not modelled yet".
- */
-function pickWhyBullets(pick: GoalLabRankedScenario, rationale: string | null): string[] {
-  const fromWinner: string[] = Array.isArray(pick.winner?.rationale)
-    ? (pick.winner!.rationale as string[]).filter((s) => typeof s === "string" && s.trim().length > 0)
-    : [];
-  if (fromWinner.length > 0) return fromWinner.slice(0, 3);
-  if (rationale && rationale.trim().length > 0) return [rationale];
-  return ["Not modelled yet"];
-}
+const BODY_COPY =
+  "This path currently provides the strongest probability-adjusted route toward your FIRE target.";
 
-export function RecommendedStrategyCard({ pick, rationale }: RecommendedStrategyCardProps) {
+export function RecommendedStrategyCard({ pick }: RecommendedStrategyCardProps) {
   if (!pick) {
     return (
       <section
@@ -45,10 +34,10 @@ export function RecommendedStrategyCard({ pick, rationale }: RecommendedStrategy
           <MapIcon className="mt-0.5 h-5 w-5 text-violet-600 dark:text-violet-400" aria-hidden />
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-wider text-violet-800 dark:text-violet-200">
-              Recommended strategy
+              Recommended path
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Run a plan from Decision Lab to surface the recommended strategy here.
+              Run a plan from Decision Lab to surface the recommended path here.
             </p>
           </div>
         </div>
@@ -56,42 +45,20 @@ export function RecommendedStrategyCard({ pick, rationale }: RecommendedStrategy
     );
   }
 
-  const bullets = pickWhyBullets(pick, rationale);
-
   return (
     <section
       data-testid="recommended-strategy-card"
       aria-labelledby="recommended-strategy-heading"
       className="rounded-2xl border border-violet-500/60 bg-gradient-to-br from-violet-50 to-white p-5 shadow-sm dark:border-violet-400/50 dark:from-violet-950/40 dark:to-card"
     >
-      <div className="flex items-center gap-2">
-        <Star className="h-4 w-4 text-violet-600 dark:text-violet-300" aria-hidden />
-        <div
-          id="recommended-strategy-heading"
-          className="text-[10px] font-semibold uppercase tracking-wider text-violet-800 dark:text-violet-200"
-        >
-          Recommended strategy
-        </div>
+      <div
+        id="recommended-strategy-heading"
+        className="text-[10px] font-semibold uppercase tracking-wider text-violet-800 dark:text-violet-200"
+      >
+        Recommended path
       </div>
-      <div className="mt-2 text-lg font-semibold text-foreground">{pick.templateLabel}</div>
-      {pick.promise ? (
-        <div className="mt-0.5 text-sm text-muted-foreground">{pick.promise}</div>
-      ) : null}
-
-      <div className="mt-4">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-violet-800 dark:text-violet-200">
-          Why this strategy
-        </div>
-        <ul className="mt-1.5 space-y-1.5">
-          {bullets.map((b, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm text-foreground">
-              <span aria-hidden className="mt-1.5 inline-block h-1 w-1 flex-none rounded-full bg-violet-500/70" />
-              <span>{b}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
+      <div className="mt-2 text-xl font-semibold text-foreground">{pick.templateLabel}</div>
+      <p className="mt-2 text-sm text-muted-foreground">{BODY_COPY}</p>
       <Link
         href="/action-roadmap"
         data-testid="recommended-strategy-cta"
