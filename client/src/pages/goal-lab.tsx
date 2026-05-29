@@ -66,7 +66,7 @@ import {
   useGoalProfileStore,
   type ConstraintOverride as StoreConstraintOverride,
 } from "@/lib/goalLab/goalProfileStore";
-import { ActionRoadmapPanel } from "@/lib/actionRoadmap/ActionRoadmapPanel";
+import { RecommendedStrategyCard } from "@/components/RecommendedStrategyCard";
 
 /**
  * Sprint 23 — page→store constraint mapper.
@@ -1004,8 +1004,15 @@ export default function GoalLabPage() {
           />
           {/* Sprint 26 P1 — Real confidence (replaces fake placeholder) */}
           <ConfidencePanel confidence={confidence} />
-          {/* Sprint 27 — Action Roadmap (Goal Lab orchestrator → roadmap, completion, risk, narrative) */}
-          <ActionRoadmapPanel goal={goal ?? null} fire={fire} currentAge={currentAge} />
+          {/* Sprint 28 — Recommended Strategy handoff to /action-roadmap.
+              Goal Lab no longer renders milestones, accelerators, risk axes, or
+              path-completion — those live exclusively on the Action Roadmap. */}
+          {latestPlan?.picks?.recommended ? (
+            <RecommendedStrategyCard
+              pick={latestPlan.picks.recommended}
+              rationale={latestPlan.picks.recommendedRationale}
+            />
+          ) : null}
           <SummaryPanel
             completed={completed}
             confirmed={confirmed}

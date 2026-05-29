@@ -157,6 +157,13 @@ export interface GoalLabPlanOutput {
     rankingMs: number;
     /** Number of templates that were evaluated. */
     templatesCount: number;
+    /**
+     * Sprint 28 — Monte Carlo simulations per template used for this run. The
+     * Action Roadmap's S3 (Monte Carlo Projection) cites this in audit mode
+     * via metricSourceAttribution. Source of truth: the `simulationCount`
+     * argument passed into `runGoalLabPlan` (default 300). Adds no new math.
+     */
+    simulationCount: number;
   };
 }
 
@@ -290,6 +297,7 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
       scenarioAndMonteCarloMs: candidateGenerationMs, // wrapped inside candidateGenerator
       rankingMs,
       templatesCount: templates.length,
+      simulationCount,
     },
   };
 

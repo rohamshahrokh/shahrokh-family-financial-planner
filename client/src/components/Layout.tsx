@@ -98,7 +98,7 @@ const NAV_STEPS: Array<{
     items: [
       { href: "/goal-lab",     label: "Goal Lab",       icon: Sparkles,       adminOnly: false },
       { href: "/decision-lab", label: "Decision Lab",   icon: Beaker,         adminOnly: false },
-      { href: "/action-plan",  label: "Action Roadmap", icon: ClipboardCheck, adminOnly: false },
+      { href: "/action-roadmap", label: "Action Roadmap", icon: ClipboardCheck, adminOnly: false },
     ],
   },
 ];

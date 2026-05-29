@@ -119,7 +119,7 @@ import ScenarioComparePage     from "./pages/scenario-compare";
 import ScenarioCompareV2Page   from "./pages/scenario-compare-v2";
 import WhatIfScenariosPage     from "./pages/what-if-scenarios";
 import ScenarioCompareWorkspacePage from "./pages/scenario-compare-workspace";
-import GoalClosureLabPage      from "./pages/goal-closure-lab";
+import ActionRoadmapPage       from "./pages/action-roadmap";
 import PortfolioLabPage        from "./pages/portfolio-lab";
 import DecisionPage            from "./pages/decision";
 import RiskRadarPage           from "./pages/risk-radar";
@@ -322,9 +322,18 @@ function AppRouter() {
         <Route path="/scenario-compare-workspace">
           <Redirect to="/scenario-compare-v2" />
         </Route>
-        {/* Sprint 6 Phase 4 — Goal Closure Lab, the primary decision workspace. */}
+        {/* Sprint 28 — /goal-closure-lab is REPLACED by /action-roadmap. We
+            keep the route registered so any deep links / bookmarks redirect
+            cleanly to the new flagship Action Roadmap page. */}
         <Route path="/goal-closure-lab">
-          <ProtectedRoute component={GoalClosureLabPage} title="Goal Closure Lab" />
+          <Redirect to="/action-roadmap" />
+        </Route>
+        {/* Sprint 28 — Action Roadmap (Layer 3 of the MOVE architecture).
+            Reads the cached Goal Lab plan, surfaces 8 sections (executive
+            summary, FIRE journey, Monte Carlo projection, path completion,
+            accelerators, risk dashboard, alternative paths, explainability). */}
+        <Route path="/action-roadmap">
+          <ProtectedRoute component={ActionRoadmapPage} title="Action Roadmap" />
         </Route>
         {/* Sprint 6 Phase 5 — Portfolio Lab Optimizer workspace. */}
         <Route path="/portfolio-lab">

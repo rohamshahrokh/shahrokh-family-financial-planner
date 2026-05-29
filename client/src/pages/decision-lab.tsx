@@ -45,10 +45,13 @@ import { FireGoalEmptyState } from "@/components/FireGoalEmptyState";
 import { formatCurrency } from "@/lib/finance";
 import { useAuditMode } from "@/lib/auditMode/AuditModeContext";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Scale, Target, PieChart, Sparkles, Loader2, Check, X, Star, TrendingUp, ShieldCheck, Zap } from "lucide-react";
+import { ArrowRight, Scale, Target, PieChart, Sparkles, Loader2, Check, X, ShieldCheck } from "lucide-react";
 import { useCanonicalGoalProfile } from "@/lib/goalLab/useCanonicalGoalProfile";
 import { useGoalLabPlan } from "@/lib/goalLab/useGoalLabPlan";
-import type { GoalLabRankedScenario } from "@/lib/goalLab/orchestrator";
+import type { GoalLabPlanOutput } from "@/lib/goalLab/orchestrator";
+import { selectMonteCarloProjection } from "@/lib/actionRoadmap/montecarloProjection";
+import { analyzeRoadmapRisk } from "@/lib/actionRoadmap/roadmapRiskAnalyzer";
+import type { FanPoint } from "@/lib/scenarioV2/types";
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Local helpers                                                              */
@@ -534,53 +537,19 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
           The engine evaluated {plan!.templatesEvaluatedIds.length} scenarios for your profile but found no path that survived current safety ceilings. Loosen risk tolerance or revisit FIRE targets in Goal Lab.
         </p>
       ) : picks ? (
-        <div className="space-y-5">
-          {/* Primary recommendation — large emphasised block. */}
-          <div ref={recommendedRef}>
-            <RecommendedPathCard
-              pick={picks.recommended}
-              rationale={picks.recommendedRationale}
-            />
+        <div ref={recommendedRef} className="space-y-3">
+          {/* Sprint 28 — pure comparison surface. No "winner" highlighting, no
+              probability badges, no execution detail. The Action Roadmap page
+              owns the recommendation handoff. */}
+          <CompareStrategiesTable plan={plan!} />
+          <div className="pt-2">
+            <Link href="/action-roadmap">
+              <Button size="sm" data-testid="dl-open-action-roadmap-cta" className="gap-1.5">
+                Open Action Roadmap for the recommended strategy
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
           </div>
-
-          {/* Alternatives — trade-off cards, NOT competing recommendations. */}
-          {(() => {
-            const recId = picks.recommended?.templateId ?? null;
-            const altsRaw: Array<{ pick: GoalLabRankedScenario | null; tone: AlternativeTone; intent: AltIntent }> = [
-              { pick: picks.safest,             tone: "emerald", intent: "safest" },
-              { pick: picks.fastest,            tone: "amber",   intent: "fastest" },
-              { pick: picks.bestHybrid,         tone: "rose",    intent: "hybrid" },
-              { pick: picks.bestCashflow,       tone: "teal",    intent: "cashflow" },
-              { pick: picks.highestProbability, tone: "blue",    intent: "probability" },
-            ];
-            const alts = altsRaw
-              .filter((a) => a.pick && a.pick.templateId !== recId)
-              // de-dup picks that point to the same template
-              .filter((a, i, arr) => arr.findIndex((b) => b.pick!.templateId === a.pick!.templateId) === i);
-            if (alts.length === 0) return null;
-            return (
-              <div className="space-y-3" data-testid="dl-goal-lab-alternatives">
-                <div className="flex items-baseline justify-between">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Alternative paths
-                  </div>
-                  <div className="text-[10px] text-muted-foreground">
-                    Trade-offs against the recommended path — not competing picks
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 gap-3">
-                  {alts.map((a) => (
-                    <AlternativePathCard
-                      key={a.intent}
-                      pick={a.pick!}
-                      tone={a.tone}
-                      intent={a.intent}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
         </div>
       ) : null}
     </section>
@@ -1056,318 +1025,93 @@ function humaniseTraceError(error: string | null, stepIdx: number): string {
   return error ? `${stepHints[stepIdx] ?? ""} (${error})`.trim() : (stepHints[stepIdx] ?? "Data is missing for this step.");
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Sprint 25 — Recommended / Alternative path cards
-// ────────────────────────────────────────────────────────────────────────────
 
-type AlternativeTone = "emerald" | "amber" | "blue" | "teal" | "rose";
-type AltIntent = "safest" | "fastest" | "hybrid" | "cashflow" | "probability";
+// ────────────────────────────────────────────────────────────────────────────
+// Sprint 28 — pure comparison surface (no winner highlighting, no probability)
+// ────────────────────────────────────────────────────────────────────────────
 
 /**
- * The big primary recommendation block. Designed to make the user feel: this
- * is the chosen path. Surfaces the engine’s “why” as concrete bullets, plus a
- * confidence read built from the engine’s probabilityP50 when available, or a
- * friendly “confidence not yet available” otherwise.
+ * One row per ranked strategy. Each row shows:
+ *   - name
+ *   - MC P50 FIRE age (from selectMonteCarloProjection on this candidate's fan)
+ *   - MC P50 net worth at FIRE
+ *   - overall risk band (from analyzeRoadmapRisk)
+ *
+ * No probability column. No "Recommended" / "Winner" highlighting. The
+ * recommendation handoff lives on /action-roadmap.
+ *
+ * Honesty: every cell renders the literal phrase "Not modelled yet" when
+ * the engine produced no value for it.
  */
-function RecommendedPathCard({
-  pick,
-  rationale,
-}: {
-  pick: GoalLabRankedScenario | null;
-  rationale: string | null;
-}) {
-  if (!pick) {
+function CompareStrategiesTable({ plan }: { plan: GoalLabPlanOutput }) {
+  const fireNumber: number | null = (() => {
+    const { targetPassiveAnnual, swrPct } = plan.profile.fire;
+    if (targetPassiveAnnual == null || swrPct == null || swrPct <= 0) return null;
+    return targetPassiveAnnual / (swrPct / 100);
+  })();
+  const startAge = plan.profile.fire.currentAge;
+  const swrPct = plan.profile.fire.swrPct;
+  const simulationCount = plan.metrics.simulationCount ?? 0;
+
+  const rows = plan.rankedScenarios
+    .filter((s) => s.winner != null)
+    .map((s) => {
+      const fan: FanPoint[] = (s.winner!.result?.netWorthFan as FanPoint[] | undefined) ?? [];
+      const mc = selectMonteCarloProjection({
+        fan,
+        startAge,
+        fireTarget: fireNumber,
+        swrPct,
+        simulationCount,
+      });
+      const risk = analyzeRoadmapRisk(s);
+      return { scenario: s, mc, risk };
+    });
+
+  if (rows.length === 0) {
     return (
-      <div
-        data-testid="dl-goal-lab-recommended-card"
-        className="rounded-2xl border-2 border-dashed border-violet-400/60 bg-violet-50 p-4 dark:border-violet-400/60 dark:bg-violet-950/70"
-      >
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-violet-800 dark:text-violet-200">
-          Recommended path
-        </div>
-        <div className="mt-1 text-sm text-slate-800 dark:text-slate-100">
-          No matching path yet. Run the plan once your ledger and FIRE goal are set.
-        </div>
-      </div>
+      <p className="text-sm text-muted-foreground" data-testid="dl-compare-empty">
+        No strategies have been modelled yet.
+      </p>
     );
   }
-  const why = whyBulletsFor(pick);
-  const confidence = confidenceLabelFor(pick);
+
   return (
-    <div
-      data-testid="dl-goal-lab-recommended-card"
-      className="rounded-2xl border-2 border-violet-500/70 bg-gradient-to-br from-violet-50 to-violet-100 p-5 shadow-sm dark:border-violet-400/70 dark:from-violet-900/80 dark:to-violet-950/90"
-    >
-      <div className="flex items-center gap-2">
-        <Star className="h-4 w-4 text-violet-700 dark:text-violet-200" />
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-violet-800 dark:text-violet-200">
-          Recommended path
-        </div>
+    <div className="space-y-2" data-testid="dl-compare-strategies">
+      <div className="grid grid-cols-12 gap-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="col-span-5 sm:col-span-4">Strategy</div>
+        <div className="col-span-3 sm:col-span-3">FIRE age (P50)</div>
+        <div className="col-span-2 sm:col-span-3">Net worth at FIRE (P50)</div>
+        <div className="col-span-2 sm:col-span-2">Risk</div>
       </div>
-      <div className="mt-2 text-lg font-semibold text-slate-900 dark:text-slate-50">
-        {pick.templateLabel}
-      </div>
-      <div className="mt-0.5 text-sm text-slate-700 dark:text-slate-200">
-        {pick.promise}
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto]">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-violet-800 dark:text-violet-200">
-            Why this is recommended
-          </div>
-          <ul className="mt-1.5 space-y-1.5">
-            {why.map((w, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-slate-800 dark:text-slate-100">
-                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-700 dark:text-emerald-300" />
-                <span>{w}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <ConfidenceBadge confidence={confidence} />
-      </div>
-
-      {rationale ? (
-        <p
-          data-testid="dl-goal-lab-recommended-rationale"
-          className="mt-4 rounded-md border border-violet-400/60 bg-white px-3 py-2 text-xs leading-relaxed text-violet-900 dark:border-violet-400/60 dark:bg-violet-950/80 dark:text-violet-50"
+      {rows.map(({ scenario, mc, risk }) => (
+        <div
+          key={scenario.templateId}
+          data-testid={`dl-compare-row-${scenario.templateId}`}
+          className="grid grid-cols-12 gap-2 rounded-lg border border-border/60 bg-background/60 px-2 py-2 text-sm"
         >
-          <span className="font-semibold">Why this is primary: </span>
-          {rationale}
-        </p>
-      ) : null}
+          <div className="col-span-5 sm:col-span-4">
+            <div className="font-medium text-foreground">{scenario.templateLabel}</div>
+            <div className="text-[11px] text-muted-foreground">{scenario.promise}</div>
+          </div>
+          <div className="col-span-3 sm:col-span-3 self-center text-foreground">
+            {mc.fireAge.p50 != null
+              ? mc.fireAge.p50
+              : <span className="text-muted-foreground">Not modelled yet</span>}
+          </div>
+          <div className="col-span-2 sm:col-span-3 self-center text-foreground">
+            {mc.netWorthAtFire.p50 != null
+              ? formatCurrency(mc.netWorthAtFire.p50)
+              : <span className="text-muted-foreground">Not modelled yet</span>}
+          </div>
+          <div className="col-span-2 sm:col-span-2 self-center">
+            <span className="inline-flex items-center gap-1 text-xs text-foreground">
+              <ShieldCheck className="h-3 w-3 text-muted-foreground" aria-hidden />
+              {risk.overall === "unknown" ? "—" : risk.overall}
+            </span>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
-
-/**
- * Alternative path card. Always renders as a trade-off (Pros / Cons), never as
- * a competing recommendation. The intent label tells the user what KIND of
- * alternative this is (Safer, Faster, etc.) so the comparison is concrete.
- */
-function AlternativePathCard({
-  pick,
-  tone,
-  intent,
-}: {
-  pick: GoalLabRankedScenario;
-  tone: AlternativeTone;
-  intent: AltIntent;
-}) {
-  const intentMeta = INTENT_META[intent];
-  const toneStyles = ALT_TONE_STYLES[tone];
-  const { pros, cons } = prosConsFor(pick, intent);
-  return (
-    <div
-      data-testid={`dl-goal-lab-alt-${intent}`}
-      className={`rounded-xl border p-4 ${toneStyles.card}`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${toneStyles.label}`}>
-            <intentMeta.Icon className="h-3 w-3" />
-            {intentMeta.label}
-          </div>
-          <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-50">
-            {pick.templateLabel}
-          </div>
-          <div className="mt-0.5 text-xs text-slate-700 dark:text-slate-200">
-            {pick.promise}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-800 dark:text-emerald-200">
-            Pros
-          </div>
-          <ul className="mt-1 space-y-1">
-            {pros.map((p, i) => (
-              <li key={i} className="flex items-start gap-1.5 text-xs text-slate-800 dark:text-slate-100">
-                <Check className="mt-0.5 h-3 w-3 shrink-0 text-emerald-700 dark:text-emerald-300" />
-                <span>{p}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-800 dark:text-rose-200">
-            Cons
-          </div>
-          <ul className="mt-1 space-y-1">
-            {cons.map((c, i) => (
-              <li key={i} className="flex items-start gap-1.5 text-xs text-slate-800 dark:text-slate-100">
-                <X className="mt-0.5 h-3 w-3 shrink-0 text-rose-700 dark:text-rose-300" />
-                <span>{c}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ConfidenceBadge({
-  confidence,
-}: {
-  confidence:
-    | { kind: "value"; pct: number; label: string; tone: "emerald" | "amber" | "rose" }
-    | { kind: "unmodelled" };
-}) {
-  if (confidence.kind === "unmodelled") {
-    return (
-      <div
-        data-testid="dl-goal-lab-confidence-unmodelled"
-        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-center sm:min-w-[150px] dark:border-slate-600 dark:bg-slate-900"
-      >
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-          Confidence
-        </div>
-        <div className="mt-1 text-xs text-slate-700 dark:text-slate-200">
-          Scenario confidence not yet available
-        </div>
-      </div>
-    );
-  }
-  const ring =
-    confidence.tone === "emerald" ? "border-emerald-500/70 bg-emerald-50 dark:bg-emerald-950/70 dark:border-emerald-400/70" :
-    confidence.tone === "amber"   ? "border-amber-500/70 bg-amber-50 dark:bg-amber-950/70 dark:border-amber-400/70" :
-                                    "border-rose-500/70 bg-rose-50 dark:bg-rose-950/70 dark:border-rose-400/70";
-  const text =
-    confidence.tone === "emerald" ? "text-emerald-800 dark:text-emerald-100" :
-    confidence.tone === "amber"   ? "text-amber-800 dark:text-amber-100" :
-                                    "text-rose-800 dark:text-rose-100";
-  return (
-    <div
-      data-testid="dl-goal-lab-confidence-value"
-      className={`rounded-lg border px-3 py-2 text-center sm:min-w-[150px] ${ring}`}
-    >
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-200">
-        Confidence
-      </div>
-      <div className={`mt-0.5 text-2xl font-bold leading-none ${text}`}>
-        {confidence.pct}%
-      </div>
-      <div className="mt-0.5 text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-300">
-        {confidence.label}
-      </div>
-    </div>
-  );
-}
-
-const INTENT_META: Record<AltIntent, { label: string; Icon: typeof ShieldCheck }> = {
-  safest:       { label: "Safer alternative",         Icon: ShieldCheck },
-  fastest:      { label: "Faster alternative",        Icon: Zap },
-  hybrid:       { label: "Diversified alternative",   Icon: Scale },
-  cashflow:     { label: "Cashflow alternative",      Icon: TrendingUp },
-  probability:  { label: "Highest-confidence option", Icon: ShieldCheck },
-};
-
-const ALT_TONE_STYLES: Record<AlternativeTone, { card: string; label: string }> = {
-  emerald: { card: "border-emerald-400/70 bg-emerald-50 dark:border-emerald-400/50 dark:bg-emerald-950/60", label: "text-emerald-800 dark:text-emerald-200" },
-  amber:   { card: "border-amber-400/70 bg-amber-50 dark:border-amber-400/50 dark:bg-amber-950/60",       label: "text-amber-800 dark:text-amber-200" },
-  blue:    { card: "border-blue-400/70 bg-blue-50 dark:border-blue-400/50 dark:bg-blue-950/60",           label: "text-blue-800 dark:text-blue-200" },
-  teal:    { card: "border-teal-400/70 bg-teal-50 dark:border-teal-400/50 dark:bg-teal-950/60",           label: "text-teal-800 dark:text-teal-200" },
-  rose:    { card: "border-rose-400/70 bg-rose-50 dark:border-rose-400/50 dark:bg-rose-950/60",           label: "text-rose-800 dark:text-rose-200" },
-};
-
-/**
- * Build the "Why this is recommended" bullets from the pick's metrics. We do
- * NOT invent reasons — each bullet is anchored to a concrete engine output.
- */
-function whyBulletsFor(pick: GoalLabRankedScenario): string[] {
-  const out: string[] = [];
-  if (pick.scoreP50 != null) {
-    out.push(`Highest overall score across the paths we evaluated (${pick.scoreP50.toFixed(0)}/100).`);
-  } else {
-    out.push("Top-ranked across the paths we evaluated for your profile.");
-  }
-  out.push(`Aligns with your FIRE goal: ${pick.promise.toLowerCase()}.`);
-  if (SAFE_TEMPLATE_IDS.has(pick.templateId)) {
-    out.push("Fits a cautious risk profile \u2014 builds safety before adding new risk.");
-  } else if (AGGRESSIVE_TEMPLATE_IDS.has(pick.templateId)) {
-    out.push("Uses your current borrowing and savings capacity for faster progress.");
-  } else {
-    out.push("Balances growth potential with downside protection.");
-  }
-  if (pick.probabilityP50 != null) {
-    const pct = Math.round(pick.probabilityP50 * 100);
-    out.push(`Modelled scenario confidence: ${pct}%.`);
-  }
-  return out;
-}
-
-function confidenceLabelFor(pick: GoalLabRankedScenario):
-  | { kind: "value"; pct: number; label: string; tone: "emerald" | "amber" | "rose" }
-  | { kind: "unmodelled" } {
-  if (pick.probabilityP50 == null) return { kind: "unmodelled" };
-  const pct = Math.round(pick.probabilityP50 * 100);
-  const tone: "emerald" | "amber" | "rose" = pct >= 70 ? "emerald" : pct >= 50 ? "amber" : "rose";
-  const label = pct >= 70 ? "Strong" : pct >= 50 ? "Moderate" : "Tentative";
-  return { kind: "value", pct, label, tone };
-}
-
-/**
- * Pros / Cons relative to the recommended pick. Anchored to the alternative's
- * archetype — not invented per-run.
- */
-function prosConsFor(
-  pick: GoalLabRankedScenario,
-  intent: AltIntent,
-): { pros: string[]; cons: string[] } {
-  const isSafe = SAFE_TEMPLATE_IDS.has(pick.templateId);
-  const isAggro = AGGRESSIVE_TEMPLATE_IDS.has(pick.templateId);
-
-  switch (intent) {
-    case "safest":
-      return {
-        pros: ["Lower downside risk", "Stronger cash buffer and liquidity"],
-        cons: ["Slower progress to FIRE", "Less compounding from new positions"],
-      };
-    case "fastest":
-      return {
-        pros: ["Faster path to FIRE if everything holds", "Uses borrowing capacity actively"],
-        cons: ["Higher drawdown sensitivity", "Less margin if income drops or rates rise"],
-      };
-    case "hybrid":
-      return {
-        pros: ["Diversifies across property and ETFs", "Spreads single-asset risk"],
-        cons: ["Slower equity growth than concentrated bets", "More positions to manage"],
-      };
-    case "cashflow":
-      return {
-        pros: ["Protects monthly cashflow", "Lower serviceability risk"],
-        cons: ["Slower net-worth growth", "Less leverage applied to your goal"],
-      };
-    case "probability":
-      return {
-        pros: ["Highest modelled confidence of hitting the goal", "Most robust to bad scenarios"],
-        cons: [
-          isAggro ? "May still feel aggressive day-to-day" : "Often slower than the headline pick",
-          isSafe  ? "Trades upside for stability"           : "Optimised for survivability, not speed",
-        ],
-      };
-  }
-}
-
-/**
- * Safe / aggressive template IDs — kept in sync with orchestrator.ts. We
- * duplicate the set locally to keep this file UI-only and avoid a deeper
- * import cycle.
- */
-const SAFE_TEMPLATE_IDS = new Set([
-  "delay-ip",
-  "debt-reduction",
-  "liquidity-preservation",
-  "offset-optimisation",
-  "lower-target-or-extend",
-]);
-const AGGRESSIVE_TEMPLATE_IDS = new Set([
-  "buy-ip-now",
-  "etf-acceleration",
-  "debt-recycling",
-]);
