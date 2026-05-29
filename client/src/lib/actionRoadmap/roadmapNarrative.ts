@@ -54,7 +54,15 @@ export function buildRoadmapNarrative(
   let headline = "Not modelled yet.";
   let headlineSource: RoadmapNarrative["audit"]["headlineSource"] = "fallback_not_modelled";
 
-  if (completion.status !== "NOT_MODELLED") {
+  // Partial-engine-output case: status is NOT_MODELLED (typically because the
+  // canonical FIRE number is unset on the goal) but the engine DID produce a
+  // real terminal net worth on this path. We surface a neutral, factual
+  // headline anchored to the engine value — never a probability or success
+  // claim — so the panel doesn't contradict the bullets below.
+  if (completion.status === "NOT_MODELLED" && completion.expectedNetWorth != null) {
+    headlineSource = "path_completion";
+    headline = `Engine projects median net worth of $${fmt(completion.expectedNetWorth)} at horizon end. FIRE comparison not modelled — set a FIRE target to evaluate completion.`;
+  } else if (completion.status !== "NOT_MODELLED") {
     headlineSource = "path_completion";
     if (completion.status === "ON_TRACK") {
       const age = completion.expectedFireAge;

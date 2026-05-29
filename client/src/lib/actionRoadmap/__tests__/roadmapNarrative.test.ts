@@ -123,5 +123,20 @@ const roadmap: ActionRoadmap = {
 const r11 = buildRoadmapNarrative(sc(null), roadmap, onTrack(), lowRisk());
 check("milestone-count bullet present", r11.bullets.some((b) => b.includes("5 engine-modelled milestone")));
 
+// 12. Partial-engine case: status NOT_MODELLED but expectedNetWorth IS real
+//     (engine produced a fan terminal but FIRE number missing from goal).
+//     Headline must NOT be the generic "Not modelled yet." — it must surface
+//     the real engine value while clearly stating FIRE comparison is missing.
+const partialEngineNotModelled: PathCompletion = {
+  ...notModelled(),
+  expectedNetWorth: 11_530_286,
+  expectedNetWorthRange: { p25: 10_576_051, p75: 13_025_493 },
+};
+const r12 = buildRoadmapNarrative(sc(null), null, partialEngineNotModelled, lowRisk());
+check("partial-engine NOT_MODELLED w/ real NW: headline shows the real $ amount", r12.headline.includes("11,530,286"));
+check("partial-engine: headline clarifies FIRE comparison missing", /FIRE comparison not modelled/i.test(r12.headline));
+check("partial-engine: audit headlineSource is path_completion (not fallback)", r12.audit.headlineSource === "path_completion");
+check("partial-engine: NW bullet still emitted", r12.bullets.some((b) => b.includes("11,530,286")));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

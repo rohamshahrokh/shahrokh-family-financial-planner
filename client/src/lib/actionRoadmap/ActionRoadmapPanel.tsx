@@ -182,7 +182,12 @@ function MilestonesSection(props: { roadmap: ActionRoadmap | null }) {
 function PathCompletionSection(props: { completion: PathCompletion }) {
   const c = props.completion;
   const status = completionStatusLabel(c.status);
-  const isModelled = c.status !== "NOT_MODELLED";
+  // Render the tile grid whenever ANY underlying engine value is real. Each
+  // individual tile still surfaces "Not modelled yet" for its own missing
+  // input. We only fall back to the whole-section empty state when literally
+  // nothing is available (no median NW AND no FIRE age).
+  const hasAnyRealValue =
+    c.expectedNetWorth != null || c.expectedFireAge != null || c.expectedMonthlyPassiveIncome != null;
 
   return (
     <div className="space-y-2">
@@ -191,7 +196,7 @@ function PathCompletionSection(props: { completion: PathCompletion }) {
         <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${status.toneClasses}`}>{status.label}</span>
       </div>
 
-      {!isModelled ? (
+      {!hasAnyRealValue ? (
         <div className="rounded-lg border border-dashed border-border/60 p-3 text-sm text-muted-foreground">
           Not modelled yet. Run a plan from <Link href="/decision-lab" className="font-medium text-violet-600 underline-offset-2 hover:underline dark:text-violet-300">Decision Lab</Link> to populate this section.
         </div>
@@ -238,16 +243,23 @@ function PathCompletionSection(props: { completion: PathCompletion }) {
         </div>
       )}
 
-      {isModelled && c.why.length > 0 && (
-        <ul className="space-y-1 text-xs text-muted-foreground">
-          {c.why.slice(0, 3).map((w, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <span aria-hidden className="mt-1.5 inline-block h-1 w-1 flex-none rounded-full bg-muted-foreground/60" />
-              <span>{w}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {hasAnyRealValue && (() => {
+        // Drop the generic "engine has not produced a forecast" placeholder when
+        // we do have real numbers but the status remains NOT_MODELLED for a
+        // specific reason (e.g. fireNumber missing).
+        const filtered = c.why.filter((w) => w !== "The engine has not produced a forecast for this path yet.");
+        if (filtered.length === 0) return null;
+        return (
+          <ul className="space-y-1 text-xs text-muted-foreground">
+            {filtered.slice(0, 3).map((w, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <span aria-hidden className="mt-1.5 inline-block h-1 w-1 flex-none rounded-full bg-muted-foreground/60" />
+                <span>{w}</span>
+              </li>
+            ))}
+          </ul>
+        );
+      })()}
     </div>
   );
 }
