@@ -66,6 +66,7 @@ import {
   useGoalProfileStore,
   type ConstraintOverride as StoreConstraintOverride,
 } from "@/lib/goalLab/goalProfileStore";
+import { ActionRoadmapPanel } from "@/lib/actionRoadmap/ActionRoadmapPanel";
 
 /**
  * Sprint 23 — page→store constraint mapper.
@@ -1003,6 +1004,8 @@ export default function GoalLabPage() {
           />
           {/* Sprint 26 P1 — Real confidence (replaces fake placeholder) */}
           <ConfidencePanel confidence={confidence} />
+          {/* Sprint 27 — Action Roadmap (Goal Lab orchestrator → roadmap, completion, risk, narrative) */}
+          <ActionRoadmapPanel goal={goal ?? null} fire={fire} currentAge={currentAge} />
           <SummaryPanel
             completed={completed}
             confirmed={confirmed}
