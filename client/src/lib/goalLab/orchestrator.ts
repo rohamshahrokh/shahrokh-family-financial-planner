@@ -291,6 +291,16 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
     // template-faithful winner among already-scored candidates. If no
     // candidate passes the filter, fall back to ranked[0] (the engine's
     // raw top pick) and flag the scenario so the UI can disclose it.
+    //
+    // FWL-078 Phase A — When the template advertises a specific intent
+    // (e.g. buy-ip-now → ip_now) but ALL intent-matching blueprints were
+    // discarded as non-overridable hard blockers (e.g. DSR critical), the
+    // template's promise is provably infeasible for this household.
+    // Falling back to ranked[0] would surface a label ("Buy investment
+    // property now") with a winner that does the opposite (defer-ETF).
+    // The honest behaviour is to DROP the scenario so it never reaches
+    // pickNamedPaths or the UI. The user sees the next-best feasible
+    // template instead.
     let winner: RankedCandidate | null = engineTop;
     let winnerSelectedByIntentFilter = false;
     if (t.intentFilter && out.ranked.length > 0) {
@@ -298,6 +308,19 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
       if (faithful) {
         winner = faithful;
         winnerSelectedByIntentFilter = true;
+      } else {
+        // No intent-faithful candidate survived scoring. Check whether the
+        // intent blueprints were rejected on non-overridable hard ceilings.
+        const intentBlocked = out.discarded.some(
+          (d) =>
+            t.intentFilter!(d.id)
+            && d.severity === "hard_blocker"
+            && d.override?.possible !== true,
+        );
+        if (intentBlocked) {
+          // Template is structurally infeasible for this household — skip it.
+          continue;
+        }
       }
     }
     const alternates = winner
