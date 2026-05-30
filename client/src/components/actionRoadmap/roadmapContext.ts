@@ -23,6 +23,7 @@ import type { LaneEvent } from "@/lib/actionRoadmap/engineEventLanes";
 import type { DependencyEdge } from "@/lib/actionRoadmap/milestoneDependencies";
 import type { McRiskValidationResult } from "@/lib/actionRoadmap/mcRiskValidation";
 import type { TraceabilityResult } from "@/lib/actionRoadmap/eventTraceability";
+import type { YearByYearRoadmap } from "@/lib/actionRoadmap/yearByYearRoadmap";
 
 export interface RoadmapSectionProps {
   /**
@@ -65,5 +66,7 @@ export interface RoadmapSectionProps {
   /** Sprint 30A addendum A2 — event traceability validator result. Wired into
    *  the page header chip + Timeline empty-lane filter. */
   traceability: TraceabilityResult;
+  /** Sprint 30C — year-by-year roadmap (acquisitions, refis, debt, FIRE, passive). */
+  yearByYear: YearByYearRoadmap;
   auditMode: boolean;
 }

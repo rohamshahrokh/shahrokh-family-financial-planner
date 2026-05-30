@@ -39,7 +39,8 @@ import { selectEngineEventLanes } from "@/lib/actionRoadmap/engineEventLanes";
 import { buildDependencyChain } from "@/lib/actionRoadmap/milestoneDependencies";
 import { validateMcRiskOutputs } from "@/lib/actionRoadmap/mcRiskValidation";
 import { validateTraceability } from "@/lib/actionRoadmap/eventTraceability";
-import type { FanPoint, PortfolioState, ScenarioEvent } from "@/lib/scenarioV2/types";
+import { selectYearByYearRoadmap } from "@/lib/actionRoadmap/yearByYearRoadmap";
+import type { FanPoint, PortfolioState, ScenarioEvent, ScenarioDelta } from "@/lib/scenarioV2/types";
 
 import { ExplainabilityToggle } from "@/components/actionRoadmap/ExplainabilityToggle";
 import { ExecutiveDecision } from "@/components/actionRoadmap/ExecutiveDecision";
@@ -52,6 +53,7 @@ import { MonteCarloOutlook } from "@/components/actionRoadmap/MonteCarloOutlook"
 import { RisksFailurePoints } from "@/components/actionRoadmap/RisksFailurePoints";
 import { AlternativeStrategies } from "@/components/actionRoadmap/AlternativeStrategies";
 import { NextActionsPanel } from "@/components/actionRoadmap/NextActionsPanel";
+import { YearByYearRoadmap } from "@/components/actionRoadmap/YearByYearRoadmap";
 import type { RoadmapSectionProps } from "@/components/actionRoadmap/roadmapContext";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -232,6 +234,18 @@ export default function ActionRoadmapPage() {
   // Outside Audit Mode a console.warn fires on any failure; the chip shows
   // only when Audit Mode is on.
   const traceability = validateTraceability(enrichedMilestones, laneEvents);
+
+  // Sprint 30C — year-by-year roadmap (acquisitions, refis, debt, FIRE, passive).
+  const winnerDeltas: ScenarioDelta[] = (recommended?.winner?.events as ScenarioDelta[] | undefined) ?? [];
+  const yearByYear = selectYearByYearRoadmap({
+    events: winnerDeltas,
+    fan,
+    startMonth,
+    fireNumber,
+    swrPct,
+    targetPassiveMonthly: fire?.targetMonthlyIncome ?? null,
+    now: new Date(),
+  });
   if (typeof window !== "undefined" && traceability.status === "fail" && !auditMode) {
     // eslint-disable-next-line no-console
     console.warn("[action-roadmap] traceability failed", traceability.failures);
@@ -302,6 +316,7 @@ export default function ActionRoadmapPage() {
     dependencyEdges,
     riskValidation,
     traceability,
+    yearByYear,
     auditMode,
   };
 
@@ -345,6 +360,7 @@ export default function ActionRoadmapPage() {
         <ExecutiveDecision {...ctx} />
         <RecommendationExplainabilityPanel explanation={recommendationExplanation} />
         <FireJourneyRoadmap {...ctx} />
+        <YearByYearRoadmap {...ctx} yearByYear={yearByYear} />
         <WealthTimelineGantt {...ctx} />
         <NetWorthAttribution {...ctx} />
         <MonteCarloOutlook {...ctx} />
@@ -374,6 +390,7 @@ export default function ActionRoadmapPage() {
             <FireJourneyRoadmap {...ctx} />
           </TabsContent>
           <TabsContent value="timeline" className="mt-4 space-y-4">
+            <YearByYearRoadmap {...ctx} yearByYear={yearByYear} />
             <WealthTimelineGantt {...ctx} />
           </TabsContent>
           <TabsContent value="risks" className="mt-4 space-y-4">
