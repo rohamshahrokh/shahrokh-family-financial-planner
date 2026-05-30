@@ -374,14 +374,17 @@ export default function GoalLabPage() {
   const fireSettingsQ = useQuery<any>({ queryKey: ["/api/mc-fire-settings"], queryFn: async () => (await apiRequest("GET", "/api/mc-fire-settings")).json() });
 
   const dashboardInputs: DashboardInputs = React.useMemo(() => ({
-    snapshot:      snapQ.data ?? null,
-    properties:    propsQ.data ?? [],
-    stocks:        stocksQ.data ?? [],
-    cryptos:       cryptosQ.data ?? [],
-    holdingsRaw:   holdingsQ.data ?? [],
-    incomeRecords: incomeQ.data ?? [],
-    expenses:      expensesQ.data ?? [],
-  }), [snapQ.data, propsQ.data, stocksQ.data, cryptosQ.data, holdingsQ.data, incomeQ.data, expensesQ.data]);
+    snapshot:       snapQ.data ?? null,
+    properties:     propsQ.data ?? [],
+    stocks:         stocksQ.data ?? [],
+    cryptos:        cryptosQ.data ?? [],
+    holdingsRaw:    holdingsQ.data ?? [],
+    incomeRecords:  incomeQ.data ?? [],
+    expenses:       expensesQ.data ?? [],
+    // Sprint 31D — thread mc_fire_settings so selectMortgageRepayment can
+    // fall back to mean_mortgage_rate when sf_snapshot lacks mortgage_rate.
+    mcFireSettings: fireSettingsQ.data ?? null,
+  }), [snapQ.data, propsQ.data, stocksQ.data, cryptosQ.data, holdingsQ.data, incomeQ.data, expensesQ.data, fireSettingsQ.data]);
 
   const ledgerReady = !!snapQ.data;
   const headline = React.useMemo(

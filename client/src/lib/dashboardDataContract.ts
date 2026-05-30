@@ -243,6 +243,16 @@ export interface DashboardInputs {
   incomeRecords: any[] | undefined;
   /** sf_expenses rows */
   expenses: any[] | undefined;
+  /**
+   * Sprint 31D — optional mc_fire_settings row. Used by
+   * `selectMortgageRepayment` ONLY as a fallback source for `mean_mortgage_rate`
+   * when the snapshot does not carry `mortgage_rate` (the current schema does
+   * not have a mortgage_rate column, so this fallback is the only practical
+   * way to compute PPOR P&I without a database migration). The fallback is
+   * transparent: `selectMortgageInputState()` reports `rateSource = "fire_settings"`
+   * when this path is taken, so callers can flag the assumption.
+   */
+  mcFireSettings?: Record<string, unknown> | null;
   /** ISO date string YYYY-MM-DD; defaults to today */
   todayIso?: string;
 }
@@ -468,12 +478,33 @@ export function selectMonthlyExpensesLedger(i: DashboardInputs): number {
  *  - IO: interest-only `P × r/12` for the IO window, then P&I over remaining
  *        term once the IO window closes.
  */
+/**
+ * Sprint 31D — documented default mortgage term used as a last-resort fallback
+ * when the snapshot does not carry `mortgage_term_years` AND no other source
+ * is available. 30y is the Australian residential market norm. Surfaced via
+ * `selectMortgageInputState.termSource = "default_30y"` so callers can flag.
+ */
+const DEFAULT_MORTGAGE_TERM_YEARS = 30;
+
 export function selectMortgageRepayment(i: DashboardInputs): number {
   const s = i.snapshot ?? {};
+  const fire = (i.mcFireSettings ?? {}) as Record<string, unknown>;
   const principal = num(s.mortgage);
-  const annualRate = num(s.mortgage_rate);
-  const termYears = num(s.mortgage_term_years);
-  if (principal <= 0 || annualRate <= 0 || termYears <= 0) return 0;
+  if (principal <= 0) return 0;
+
+  // Rate resolution order: snapshot.mortgage_rate → mc_fire_settings.mean_mortgage_rate.
+  // Sprint 4A forbade fabricating a hardcoded household rate; Sprint 31D allows
+  // a user-controllable Monte-Carlo assumption (`mean_mortgage_rate`) because
+  // that figure is set by the household, not invented by the code.
+  const snapRate = num(s.mortgage_rate);
+  const fireRate = num((fire as any).mean_mortgage_rate);
+  const annualRate = snapRate > 0 ? snapRate : fireRate;
+  if (annualRate <= 0) return 0;
+
+  // Term resolution order: snapshot.mortgage_term_years → default 30y.
+  const snapTerm = num(s.mortgage_term_years);
+  const termYears = snapTerm > 0 ? snapTerm : DEFAULT_MORTGAGE_TERM_YEARS;
+
   const loanType = String(s.mortgage_loan_type ?? '').toUpperCase() === 'IO' ? 'IO' : 'PI';
   const ioYears = Math.max(0, num(s.mortgage_io_years));
   if (loanType === 'IO' && ioYears > 0) {
@@ -492,21 +523,41 @@ export function selectMortgageRepayment(i: DashboardInputs): number {
  * Reports whether the snapshot has the inputs needed to compute the PPOR
  * mortgage repayment. Used by reconciliation utilities to flag missing data
  * rather than silently fabricating a default repayment.
+ *
+ * Sprint 31D — extended with `rateSource` and `termSource` so the UI can
+ * disclose when a Monte-Carlo assumption or default term is being used.
  */
 export function selectMortgageInputState(i: DashboardInputs): {
   hasPrincipal: boolean;
   hasRate: boolean;
   hasTerm: boolean;
   ready: boolean;
+  rateSource: "snapshot" | "fire_settings" | "missing";
+  termSource: "snapshot" | "default_30y" | "missing";
 } {
   const s = i.snapshot ?? {};
+  const fire = (i.mcFireSettings ?? {}) as Record<string, unknown>;
   const hasPrincipal = num(s.mortgage) > 0;
-  const hasRate = num(s.mortgage_rate) > 0;
+  const snapRate = num(s.mortgage_rate);
+  const fireRate = num((fire as any).mean_mortgage_rate);
+  // `hasRate` and `hasTerm` continue to report whether the *snapshot itself*
+  // carries the field — callers that use these flags to surface "missing data"
+  // banners must keep working. The fallback path is reported separately via
+  // `rateSource` / `termSource`. A mortgage with no snapshot rate AND no
+  // fire-settings rate is still "missing".
+  const hasRate = snapRate > 0;
   const hasTerm = num(s.mortgage_term_years) > 0;
-  // Pure incomplete-data signal: a household with no mortgage is `ready`
-  // because the repayment is legitimately 0.
-  const ready = !hasPrincipal || (hasPrincipal && hasRate && hasTerm);
-  return { hasPrincipal, hasRate, hasTerm, ready };
+  // `ready` now also considers the fire-settings fallback so that callers that
+  // only care about "can we compute a non-zero repayment?" do not block when
+  // the snapshot is missing rate but mc_fire_settings has mean_mortgage_rate.
+  // Empty-mortgage households remain ready (0 repayment is legitimate).
+  const ready = !hasPrincipal || (snapRate > 0 || fireRate > 0);
+  const rateSource: "snapshot" | "fire_settings" | "missing" =
+    snapRate > 0 ? "snapshot" : fireRate > 0 ? "fire_settings" : "missing";
+  const termSource: "snapshot" | "default_30y" | "missing" =
+    !hasPrincipal ? "missing" :
+    num(s.mortgage_term_years) > 0 ? "snapshot" : "default_30y";
+  return { hasPrincipal, hasRate, hasTerm, ready, rateSource, termSource };
 }
 
 /**

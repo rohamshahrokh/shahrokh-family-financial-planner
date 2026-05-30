@@ -753,6 +753,15 @@ export default function DashboardPage() {
     staleTime: 0,
   });
 
+  // Sprint 31D — mc_fire_settings row is threaded into DashboardInputs so
+  // `selectMortgageRepayment` can fall back to `mean_mortgage_rate` when the
+  // snapshot lacks `mortgage_rate`. Without this, monthly_debt_service
+  // collapses to ~$250 (other_debts minimum only) on real households.
+  const { data: mcFireSettingsRow = null } = useQuery<any>({
+    queryKey: ["/api/mc-fire-settings"],
+    queryFn: () => apiRequest("GET", "/api/mc-fire-settings").then((r) => r.json()),
+  });
+
   const updateSnap = useMutation({
     mutationFn: (data: any) => apiRequest("PUT", "/api/snapshot", data).then((r) => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/snapshot"] }),
@@ -918,7 +927,8 @@ export default function DashboardPage() {
   const _contractInputs: DashboardInputs = useMemo(() => ({
     snapshot, properties, stocks, cryptos,
     holdingsRaw, incomeRecords, expenses,
-  }), [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses]);
+    mcFireSettings: mcFireSettingsRow,
+  }), [snapshot, properties, stocks, cryptos, holdingsRaw, incomeRecords, expenses, mcFireSettingsRow]);
 
   // Sprint 4A Final Closure — canonical headline figures.
   // Net worth, monthly income, monthly expenses, monthly surplus, monthly debt

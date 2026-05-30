@@ -160,8 +160,12 @@ export function inferRiskCapacity(
   if (nw.netWorth <= 0 || monthlyExpenses <= 0) return null;
 
   // Drawdown plan can absorb: liquid buffer relative to invested base.
+  // Sprint 31D: use canonical NW (nw.assets.ppor) instead of the stale
+  // `snapshot.ppor_value` field which does not exist in sf_snapshot.
+  // The previous misspelled key caused PPOR equity to be counted as invested,
+  // collapsing drawdownP and pinning risk capacity to "low" on real households.
   const invested = Math.max(
-    nw.totalAssets - liquidity - (inputs.snapshot.ppor_value ?? 0),
+    nw.totalAssets - liquidity - nw.assets.ppor,
     1,
   );
   const drawdownP = Math.min(0.6, Math.max(0.1, liquidity / invested));
