@@ -67,6 +67,22 @@ export interface ExplanationPathRow {
   leverageAxis: number | null;     // leverage-quality axis (worstIpLvr)
   finalStatus: "selected" | "rejected" | "alternate";
   rejectionReason: string | null;  // null when selected; deterministic string when rejected
+  /**
+   * Sprint 30B Step 3 — winner-event signature collision metadata. When
+   * non-empty, this row produces an IDENTICAL Monte Carlo forecast to the
+   * listed sibling templates because they all select the same blueprint with
+   * the same params. The UI uses this to add an "Equivalent to: X" chip so
+   * users see that scores/NW matching across rows is honest, not a bug.
+   */
+  equivalentTemplateIds: string[];
+  /**
+   * Sprint 30B Step 3 — true when the template's intent filter selected a
+   * blueprint other than the engine's raw `ranked[0]`. When false, the
+   * winner is either the raw engine top OR fell back to it because no
+   * candidate matched the template's intent. The UI shows a small "intent-
+   * filtered" chip on rows where this is true.
+   */
+  winnerSelectedByIntentFilter: boolean;
 }
 
 export interface RecommendationExplanation {
@@ -222,6 +238,13 @@ function buildRow(
     leverageAxis,
     finalStatus,
     rejectionReason,
+    // Sprint 30B Step 3 — pass through orchestrator-stamped differentiation
+    // metadata. Defensive defaults preserve the contract when an older
+    // scenario shape is rehydrated.
+    equivalentTemplateIds: Array.isArray(scenario.equivalentTemplateIds)
+      ? scenario.equivalentTemplateIds
+      : [],
+    winnerSelectedByIntentFilter: Boolean(scenario.winnerSelectedByIntentFilter),
   };
 }
 

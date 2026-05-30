@@ -86,6 +86,37 @@ export interface GoalLabRankedScenario {
   scoreP50: number | null;
   /** Engine's underlying QuickDecisionOutput for audit / explainability. */
   raw: QuickDecisionOutput;
+  /**
+   * Sprint 30B Step 3 — records whether the winner above was selected by
+   * the template's `intentFilter` (true) or fell back to `ranked[0]` because
+   * no candidate matched the intent filter (false). When false, the
+   * Explainability panel surfaces "intent fallback" so users know the
+   * winner is the engine's raw top pick rather than a template-faithful path.
+   */
+  winnerSelectedByIntentFilter: boolean;
+  /**
+   * Sprint 30B Step 3 — the engine's raw `ranked[0]` (before any intent
+   * filtering). When `winnerSelectedByIntentFilter` is true and this differs
+   * from `winner`, the Explainability panel can show "Template-faithful pick
+   * vs raw engine top" side-by-side.
+   */
+  engineTopWinner: RankedCandidate | null;
+  /**
+   * Sprint 30B Step 3 — stable hash of the winner's event stream
+   * (deltaType + activationMonth + params). Two scenarios with identical
+   * `eventSignature` produce IDENTICAL Monte Carlo fans — they describe the
+   * exact same household action. The Explainability panel uses this to
+   * collapse / annotate duplicate rows so the user sees honest variety,
+   * not pseudo-variety.
+   */
+  eventSignature: string;
+  /**
+   * Sprint 30B Step 3 — ids of OTHER templates that share this scenario's
+   * `eventSignature`. Empty when the winner is unique to this template.
+   * Surfaced by the Explainability UI as "Equivalent to: X, Y" so the user
+   * understands why their forecast numbers match across rows.
+   */
+  equivalentTemplateIds: string[];
 }
 
 /**
@@ -254,8 +285,24 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
     const r = settled[i];
     if (!r || r.status !== "fulfilled") continue;
     const out = r.value;
-    const winner = out.ranked[0] ?? null;
-    const alternates = out.ranked.slice(1);
+    const engineTop = out.ranked[0] ?? null;
+
+    // Sprint 30B Step 3 — apply the template's intent filter to choose a
+    // template-faithful winner among already-scored candidates. If no
+    // candidate passes the filter, fall back to ranked[0] (the engine's
+    // raw top pick) and flag the scenario so the UI can disclose it.
+    let winner: RankedCandidate | null = engineTop;
+    let winnerSelectedByIntentFilter = false;
+    if (t.intentFilter && out.ranked.length > 0) {
+      const faithful = out.ranked.find((c) => t.intentFilter!(c.id));
+      if (faithful) {
+        winner = faithful;
+        winnerSelectedByIntentFilter = true;
+      }
+    }
+    const alternates = winner
+      ? out.ranked.filter((c) => c.id !== winner!.id)
+      : out.ranked.slice(1);
 
     rankedScenarios.push({
       templateId:    t.id,
@@ -266,7 +313,28 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
       probabilityP50: extractProbabilityP50(winner),
       scoreP50:       winner ? winner.score.score : null,
       raw: out,
+      winnerSelectedByIntentFilter,
+      engineTopWinner: engineTop,
+      eventSignature: "",        // populated below after all scenarios collected
+      equivalentTemplateIds: [], // populated below after all scenarios collected
     });
+  }
+
+  // Sprint 30B Step 3 — compute event-signature dedup metadata. Two scenarios
+  // with identical winner-event signatures produce identical MC fans. The UI
+  // uses this to annotate rows ("Same plan as X") rather than pretend the
+  // numbers are independent observations.
+  const sigBuckets = new Map<string, string[]>();
+  for (const s of rankedScenarios) {
+    const sig = computeEventSignature(s.winner);
+    s.eventSignature = sig;
+    const bucket = sigBuckets.get(sig) ?? [];
+    bucket.push(s.templateId);
+    sigBuckets.set(sig, bucket);
+  }
+  for (const s of rankedScenarios) {
+    const bucket = sigBuckets.get(s.eventSignature) ?? [];
+    s.equivalentTemplateIds = bucket.filter((id) => id !== s.templateId);
   }
 
   // Cross-template ordering: descending by winner score.total. Null scores
@@ -536,6 +604,30 @@ function riskToleranceToBehavioural(profile: CanonicalGoalProfile): Partial<Reco
  *
  * Surfaces MUST render null as "Not modelled yet" — never 0%.
  */
+/**
+ * Sprint 30B Step 3 — stable hash of a winner's event stream.
+ *
+ * Two winners with the same deltaType + activationMonth + params produce
+ * identical Monte Carlo fans. We canonicalise by sorting on a tuple key, then
+ * JSON-stringifying with sorted object keys per delta. The resulting string is
+ * pure and deterministic across runs.
+ *
+ * No financial math — just a fingerprint over already-generated deltas.
+ */
+function computeEventSignature(winner: RankedCandidate | null): string {
+  if (!winner || winner.events.length === 0) return "\u2205";
+  const parts = winner.events.map((e) => {
+    const params = e.params ?? {};
+    const sortedKeys = Object.keys(params).sort();
+    const paramStr = sortedKeys
+      .map((k) => `${k}=${JSON.stringify((params as Record<string, unknown>)[k])}`)
+      .join(",");
+    return `${e.deltaType}@${e.activationMonth}{${paramStr}}`;
+  });
+  parts.sort();
+  return parts.join("|");
+}
+
 function extractProbabilityP50(winner: RankedCandidate | null): number | null {
   if (!winner) return null;
   // The engine surfaces survivability on result.riskMetrics.survivability.p50

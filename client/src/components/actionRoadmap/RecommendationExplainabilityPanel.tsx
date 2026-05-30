@@ -287,6 +287,25 @@ export function RecommendationExplainabilityPanel({ explanation, className }: Pr
                             safe
                           </span>
                         )}
+                        {/* Sprint 30B Step 3 — intent-filter + equivalency chips */}
+                        {row.winnerSelectedByIntentFilter && (
+                          <span
+                            className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-800 ring-1 ring-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-violet-400/25"
+                            title="Winner picked by template intent filter, not the raw optimizer top."
+                            data-testid={`ar-rec-row-intent-filtered-${row.templateId}`}
+                          >
+                            intent-filtered
+                          </span>
+                        )}
+                        {row.equivalentTemplateIds.length > 0 && (
+                          <span
+                            className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 ring-1 ring-slate-300 dark:bg-slate-500/15 dark:text-slate-300 dark:ring-slate-400/25"
+                            title={`Identical forecast to: ${row.equivalentTemplateIds.join(", ")}`}
+                            data-testid={`ar-rec-row-equivalent-${row.templateId}`}
+                          >
+                            equivalent to: {row.equivalentTemplateIds.join(", ")}
+                          </span>
+                        )}
                       </div>
                     </Td>
                     <Td className="font-mono">{fmtScore(row.score)}</Td>
@@ -326,6 +345,23 @@ export function RecommendationExplainabilityPanel({ explanation, className }: Pr
           the engine's score breakdown for each template's winning candidate.
           FIRE age / NW / passive income are P50 from each template's own Monte Carlo fan.
         </p>
+        {/* Sprint 30B Step 3 — differentiation note. Only renders when at least
+            one row has either an intent-filter pick or an equivalency collision. */}
+        {rankedTable.some(
+          (r) => r.winnerSelectedByIntentFilter || r.equivalentTemplateIds.length > 0,
+        ) && (
+          <p
+            className="mt-1 text-[11px] text-muted-foreground"
+            data-testid="ar-rec-explain-differentiation-note"
+          >
+            Each template routes through its own intent filter, so the winning
+            candidate honours the template's promise rather than always falling
+            back to the optimizer top. When two templates share an intent (for
+            example, debt reduction and liquidity preservation both deposit into
+            the offset), their forecasts are intentionally identical and flagged
+            via the “equivalent to” chip.
+          </p>
+        )}
       </div>
 
       {/* Why selected / Why rejected / What changed the ranking */}

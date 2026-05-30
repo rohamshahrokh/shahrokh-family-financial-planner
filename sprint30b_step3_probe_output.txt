@@ -1,0 +1,209 @@
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Sprint 30B — Step 3 — Scenario Differentiation Probe
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  profile.resolved.preferredEngine = property
+  profile.resolved.riskTolerance   = low
+  profile.resolved.primaryConstraint = liquidity
+  fire.targetFireAge = 45
+  fire.currentAge    = 38
+  fire.swrPct        = 4
+  fire.targetPassiveAnnual = 108000
+
+  Running runGoalLabPlan() (publishToAdapter=false, 200 sims)…
+  Done in 26238 ms — 7 ranked scenarios.
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Per-template winner detail
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template:  lower-target-or-extend  —  "Lower target / extend timeline"
+  Promise:   Test a softer FIRE target to recover feasibility headroom.
+  Winner:    super_now  —  "100% Concessional super (tax-advantaged)"
+  Score:     90.80   axes:
+    • survivalProbability           value=—  weight=0.43  contribution=42.619
+    • liquidityFactor               value=—  weight=0.32  contribution=31.828
+    • riskAdjustedReturn            value=—  weight=0.13  contribution=12.458
+    • fireAcceleration              value=—  weight=0.05  contribution=0.000
+    • terminalNetWorth              value=—  weight=0.08  contribution=3.899
+    • worstInvestmentLvr            value=—  weight=0.00  contribution=0.000
+  Events:    1
+    [2026-05] etf_lump_sum           {"amount":30000,"targetAsset":"super"}
+  Type mix:  etf_lump_sum×1
+  NW fan (P10/P50/P90):
+    month 0:   $657,484 / $689,808 / $717,249
+    midpoint:  $3,491,452 / $4,167,290 / $5,084,211
+    final:     $9,862,955 / $11,748,962 / $14,380,007
+  result.survivalProbability:  —
+  probabilityP50:              —
+  scoreP50:                    90.80
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template:  offset-optimisation  —  "Offset optimisation"
+  Promise:   Park surplus in offset to reduce interest before allocating.
+  Winner:    offset50_etf50  —  "50/50 Offset/ETF"
+  Score:     90.63   axes:
+    • survivalProbability           value=—  weight=0.43  contribution=42.619
+    • liquidityFactor               value=—  weight=0.32  contribution=31.828
+    • riskAdjustedReturn            value=—  weight=0.13  contribution=12.213
+    • fireAcceleration              value=—  weight=0.05  contribution=0.000
+    • terminalNetWorth              value=—  weight=0.08  contribution=3.975
+    • worstInvestmentLvr            value=—  weight=0.00  contribution=0.000
+  Events:    2
+    [2026-05] offset_deposit         {"amount":25000}
+    [2026-05] etf_lump_sum           {"amount":25000}
+  Type mix:  offset_deposit×1, etf_lump_sum×1
+  NW fan (P10/P50/P90):
+    month 0:   $631,595 / $660,956 / $688,728
+    midpoint:  $3,383,221 / $4,254,228 / $5,122,864
+    final:     $9,785,055 / $11,977,620 / $14,488,497
+  result.survivalProbability:  —
+  probabilityP50:              —
+  scoreP50:                    90.63
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template:  current-plan  —  "Current plan — no action"
+  Promise:   Baseline against which every other scenario is compared.
+  Winner:    offset_now  —  "100% Offset (max cash defence)"
+  Score:     90.55   axes:
+    • survivalProbability           value=—  weight=0.43  contribution=42.619
+    • liquidityFactor               value=—  weight=0.32  contribution=31.828
+    • riskAdjustedReturn            value=—  weight=0.13  contribution=12.161
+    • fireAcceleration              value=—  weight=0.05  contribution=0.000
+    • terminalNetWorth              value=—  weight=0.08  contribution=3.944
+    • worstInvestmentLvr            value=—  weight=0.00  contribution=0.000
+  Events:    1
+    [2026-05] offset_deposit         {"amount":50000}
+  Type mix:  offset_deposit×1
+  NW fan (P10/P50/P90):
+    month 0:   $613,580 / $643,570 / $668,347
+    midpoint:  $3,438,880 / $4,215,336 / $5,049,821
+    final:     $9,583,698 / $11,886,252 / $14,580,425
+  result.survivalProbability:  —
+  probabilityP50:              —
+  scoreP50:                    90.55
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template:  debt-reduction  —  "Debt reduction first"
+  Promise:   Eliminate non-deductible debt before adding new positions.
+  Winner:    offset_now  —  "100% Offset (pay down mortgage cost)"
+  Score:     90.55   axes:
+    • survivalProbability           value=—  weight=0.43  contribution=42.619
+    • liquidityFactor               value=—  weight=0.32  contribution=31.828
+    • riskAdjustedReturn            value=—  weight=0.13  contribution=12.161
+    • fireAcceleration              value=—  weight=0.05  contribution=0.000
+    • terminalNetWorth              value=—  weight=0.08  contribution=3.944
+    • worstInvestmentLvr            value=—  weight=0.00  contribution=0.000
+  Events:    1
+    [2026-05] offset_deposit         {"amount":50000}
+  Type mix:  offset_deposit×1
+  NW fan (P10/P50/P90):
+    month 0:   $613,580 / $643,570 / $668,347
+    midpoint:  $3,438,880 / $4,215,336 / $5,049,821
+    final:     $9,583,698 / $11,886,252 / $14,580,425
+  result.survivalProbability:  —
+  probabilityP50:              —
+  scoreP50:                    90.55
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template:  liquidity-preservation  —  "Liquidity preservation"
+  Promise:   Hold investable cash; defer commitments until buffers thicken.
+  Winner:    offset_now  —  "100% Offset (max cash defence)"
+  Score:     90.55   axes:
+    • survivalProbability           value=—  weight=0.43  contribution=42.619
+    • liquidityFactor               value=—  weight=0.32  contribution=31.828
+    • riskAdjustedReturn            value=—  weight=0.13  contribution=12.161
+    • fireAcceleration              value=—  weight=0.05  contribution=0.000
+    • terminalNetWorth              value=—  weight=0.08  contribution=3.944
+    • worstInvestmentLvr            value=—  weight=0.00  contribution=0.000
+  Events:    1
+    [2026-05] offset_deposit         {"amount":50000}
+  Type mix:  offset_deposit×1
+  NW fan (P10/P50/P90):
+    month 0:   $613,580 / $643,570 / $668,347
+    midpoint:  $3,438,880 / $4,215,336 / $5,049,821
+    final:     $9,583,698 / $11,886,252 / $14,580,425
+  result.survivalProbability:  —
+  probabilityP50:              —
+  scoreP50:                    90.55
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template:  hybrid-property-etf  —  "Hybrid: property + ETF"
+  Promise:   Split surplus between IP deposit build-up and ETF DCA.
+  Winner:    etf70_offset30_now  —  "70/30 ETF/Offset (now)"
+  Score:     90.26   axes:
+    • survivalProbability           value=—  weight=0.43  contribution=42.299
+    • liquidityFactor               value=—  weight=0.32  contribution=31.828
+    • riskAdjustedReturn            value=—  weight=0.13  contribution=12.223
+    • fireAcceleration              value=—  weight=0.05  contribution=0.000
+    • terminalNetWorth              value=—  weight=0.08  contribution=3.912
+    • worstInvestmentLvr            value=—  weight=0.00  contribution=0.000
+  Events:    2
+    [2026-05] etf_lump_sum           {"amount":35000}
+    [2026-05] offset_deposit         {"amount":15000}
+  Type mix:  etf_lump_sum×1, offset_deposit×1
+  NW fan (P10/P50/P90):
+    month 0:   $637,874 / $670,075 / $698,633
+    midpoint:  $3,392,513 / $4,241,767 / $4,992,252
+    final:     $9,911,385 / $11,790,338 / $14,663,997
+  result.survivalProbability:  —
+  probabilityP50:              —
+  scoreP50:                    90.26
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template:  delay-ip  —  "Delay property 6–12 months"
+  Promise:   Build cash buffer first, then re-test borrowing capacity.
+  Winner:    offset_first_then_ip  —  "Offset buffer first → IP in 18mo"
+  Score:     81.38   axes:
+    • survivalProbability           value=—  weight=0.43  contribution=42.512
+    • liquidityFactor               value=—  weight=0.32  contribution=23.284
+    • riskAdjustedReturn            value=—  weight=0.13  contribution=11.841
+    • fireAcceleration              value=—  weight=0.05  contribution=0.000
+    • terminalNetWorth              value=—  weight=0.08  contribution=3.741
+    • worstInvestmentLvr            value=—  weight=0.00  contribution=0.000
+  Events:    1
+    [2026-05] offset_deposit         {"amount":50000}
+  Type mix:  offset_deposit×1
+  NW fan (P10/P50/P90):
+    month 0:   $613,799 / $641,954 / $677,292
+    midpoint:  $3,359,326 / $4,066,138 / $4,861,596
+    final:     $9,224,147 / $11,272,993 / $14,158,588
+  result.survivalProbability:  —
+  probabilityP50:              —
+  scoreP50:                    81.38
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Cross-template comparison (winner per template)
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  tid                       winner                          score      NW final P50      NW final P10      NW final P90    survival   events
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  lower-target-or-extend    super_now                       90.80       $11,748,962        $9,862,955       $14,380,007           —        1
+  offset-optimisation       offset50_etf50                  90.63       $11,977,620        $9,785,055       $14,488,497           —        2
+  current-plan              offset_now                      90.55       $11,886,252        $9,583,698       $14,580,425           —        1
+  debt-reduction            offset_now                      90.55       $11,886,252        $9,583,698       $14,580,425           —        1
+  liquidity-preservation    offset_now                      90.55       $11,886,252        $9,583,698       $14,580,425           —        1
+  hybrid-property-etf       etf70_offset30_now              90.26       $11,790,338        $9,911,385       $14,663,997           —        2
+  delay-ip                  offset_first_then_ip            81.38       $11,272,993        $9,224,147       $14,158,588           —        1
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Convergence analysis
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Score range across templates:        min=81.38  max=90.80  spread=9.43
+  NW@FIRE-horizon range:               min=$11,272,993  max=$11,977,620  spread=$704,626 (6.0% of mean)
+
+  Event-signature collisions:
+    DUPLICATE event stream shared by 4 templates: current-plan/offset_now, debt-reduction/offset_now, liquidity-preservation/offset_now, delay-ip/offset_first_then_ip
+      signature (first 200 chars): offset_deposit@2026-05:{"amount":50000}
+
+  Final-NW-P50 collisions (within 1%):
+    lower-target-or-extend ↔ hybrid-property-etf     |Δ|/max = 0.35%
+    offset-optimisation    ↔ current-plan            |Δ|/max = 0.76%
+    offset-optimisation    ↔ debt-reduction          |Δ|/max = 0.76%
+    offset-optimisation    ↔ liquidity-preservation  |Δ|/max = 0.76%
+    current-plan           ↔ debt-reduction          |Δ|/max = 0.00%
+    current-plan           ↔ liquidity-preservation  |Δ|/max = 0.00%
+    current-plan           ↔ hybrid-property-etf     |Δ|/max = 0.81%
+    debt-reduction         ↔ liquidity-preservation  |Δ|/max = 0.00%
+    debt-reduction         ↔ hybrid-property-etf     |Δ|/max = 0.81%
+    liquidity-preservation ↔ hybrid-property-etf     |Δ|/max = 0.81%
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Done
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
