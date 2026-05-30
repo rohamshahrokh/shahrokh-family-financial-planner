@@ -51,6 +51,8 @@ import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics"
 import { selectCanonicalFire, isFireGoalExplicitlySet } from "@/lib/canonicalFire";
 import { formatCurrency } from "@/lib/finance";
 import { readLatestGoalLabPlan } from "@/lib/goalLab/orchestrator";
+import { buildRecommendationExplanation } from "@/lib/actionRoadmap/recommendationExplanation";
+import { RecommendationExplainabilityPanel } from "@/components/actionRoadmap/RecommendationExplainabilityPanel";
 import {
   computeGoalLabConfidence,
   type ConfidenceResult,
@@ -1011,6 +1013,24 @@ export default function GoalLabPage() {
             <RecommendedStrategyCard
               pick={latestPlan.picks.recommended}
               rationale={latestPlan.picks.recommendedRationale}
+            />
+          ) : null}
+          {/* Sprint 30B Step 2 — Recommendation Explainability mounted from the
+              SAME plan object. Goal Lab, Decision Lab, and Action Roadmap all
+              read from one source so the surfaces cannot drift. */}
+          {latestPlan ? (
+            <RecommendationExplainabilityPanel
+              explanation={buildRecommendationExplanation({
+                plan: latestPlan,
+                startAge: latestPlan.profile.fire.currentAge ?? null,
+                fireTarget:
+                  latestPlan.profile.fire.targetPassiveAnnual != null &&
+                  latestPlan.profile.fire.swrPct != null &&
+                  latestPlan.profile.fire.swrPct > 0
+                    ? latestPlan.profile.fire.targetPassiveAnnual / (latestPlan.profile.fire.swrPct / 100)
+                    : null,
+                swrPct: latestPlan.profile.fire.swrPct ?? null,
+              })}
             />
           ) : null}
           <SummaryPanel

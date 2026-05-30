@@ -49,6 +49,8 @@ import { ArrowRight, Scale, Target, PieChart, Sparkles, Loader2, Check, X, Shiel
 import { useCanonicalGoalProfile } from "@/lib/goalLab/useCanonicalGoalProfile";
 import { useGoalLabPlan } from "@/lib/goalLab/useGoalLabPlan";
 import type { GoalLabPlanOutput } from "@/lib/goalLab/orchestrator";
+import { buildRecommendationExplanation } from "@/lib/actionRoadmap/recommendationExplanation";
+import { RecommendationExplainabilityPanel } from "@/components/actionRoadmap/RecommendationExplainabilityPanel";
 import { selectMonteCarloProjection } from "@/lib/actionRoadmap/montecarloProjection";
 import { analyzeRoadmapRisk } from "@/lib/actionRoadmap/roadmapRiskAnalyzer";
 import type { FanPoint } from "@/lib/scenarioV2/types";
@@ -542,6 +544,22 @@ function GoalLabPlanSummaryInner({ ledger, auditMode }: { ledger: DashboardInput
               probability badges, no execution detail. The Action Roadmap page
               owns the recommendation handoff. */}
           <CompareStrategiesTable plan={plan!} />
+          {/* Sprint 30B Step 2 — same recommendation-explainability panel that
+              ships on Action Roadmap, fed from the same plan object so the
+              two surfaces cannot disagree. */}
+          <RecommendationExplainabilityPanel
+            explanation={buildRecommendationExplanation({
+              plan: plan!,
+              startAge: plan!.profile.fire.currentAge ?? null,
+              fireTarget:
+                plan!.profile.fire.targetPassiveAnnual != null &&
+                plan!.profile.fire.swrPct != null &&
+                plan!.profile.fire.swrPct > 0
+                  ? plan!.profile.fire.targetPassiveAnnual / (plan!.profile.fire.swrPct / 100)
+                  : null,
+              swrPct: plan!.profile.fire.swrPct ?? null,
+            })}
+          />
           <div className="pt-2">
             <Link href="/action-roadmap">
               <Button size="sm" data-testid="dl-open-action-roadmap-cta" className="gap-1.5">

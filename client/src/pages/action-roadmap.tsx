@@ -43,6 +43,8 @@ import type { FanPoint, PortfolioState, ScenarioEvent } from "@/lib/scenarioV2/t
 
 import { ExplainabilityToggle } from "@/components/actionRoadmap/ExplainabilityToggle";
 import { ExecutiveDecision } from "@/components/actionRoadmap/ExecutiveDecision";
+import { RecommendationExplainabilityPanel } from "@/components/actionRoadmap/RecommendationExplainabilityPanel";
+import { buildRecommendationExplanation } from "@/lib/actionRoadmap/recommendationExplanation";
 import { FireJourneyRoadmap } from "@/components/actionRoadmap/FireJourneyRoadmap";
 import { WealthTimelineGantt } from "@/components/actionRoadmap/WealthTimelineGantt";
 import { NetWorthAttribution } from "@/components/actionRoadmap/NetWorthAttribution";
@@ -256,6 +258,19 @@ export default function ActionRoadmapPage() {
     horizonYears: HORIZON_YEARS_DEFAULT,
   });
 
+  // Sprint 30B Step 2 — single-source recommendation explainability view-model.
+  // Pure selector over the same `plan` object the rest of the page reads from.
+  const recommendationExplanation = React.useMemo(
+    () =>
+      buildRecommendationExplanation({
+        plan,
+        startAge: currentAge,
+        fireTarget: fireNumber,
+        swrPct,
+      }),
+    [plan, currentAge, fireNumber, swrPct],
+  );
+
   const confidence = computeGoalLabConfidence({
     goal: goal ?? null,
     hasLedger: !!canonicalLedger,
@@ -328,6 +343,7 @@ export default function ActionRoadmapPage() {
       {/* Desktop ≥ sm — full vertical stack of 8 sections (Sprint 28B layout) */}
       <div className="hidden space-y-4 sm:block" data-testid="ar-desktop-stack">
         <ExecutiveDecision {...ctx} />
+        <RecommendationExplainabilityPanel explanation={recommendationExplanation} />
         <FireJourneyRoadmap {...ctx} />
         <WealthTimelineGantt {...ctx} />
         <NetWorthAttribution {...ctx} />
@@ -352,6 +368,7 @@ export default function ActionRoadmapPage() {
           </TabsList>
           <TabsContent value="summary" className="mt-4 space-y-4">
             <ExecutiveDecision {...ctx} />
+            <RecommendationExplainabilityPanel explanation={recommendationExplanation} />
           </TabsContent>
           <TabsContent value="roadmap" className="mt-4 space-y-4">
             <FireJourneyRoadmap {...ctx} />
