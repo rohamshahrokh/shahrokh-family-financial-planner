@@ -15,7 +15,7 @@
     Approx NSR           = 4.04
 
   Running runGoalLabPlan() (publishToAdapter=false, 200 sims, preferredEngine=property)…
-  Done in 48615 ms — 12 ranked scenarios.
+  Done in 48848 ms — 12 ranked scenarios.
 
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Ranked scenarios (templates that ran)

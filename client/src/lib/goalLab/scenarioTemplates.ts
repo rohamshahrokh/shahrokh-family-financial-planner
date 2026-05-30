@@ -384,6 +384,11 @@ export function selectActiveTemplates(
 
 function matchesPreferredEngine(t: ScenarioTemplate, p: CanonicalGoalProfile): boolean {
   const pref = p.resolved.preferredEngine;
+  // Sprint 31A — the 5 property-acquisition pathways are CONTRACTED to be
+  // evaluated regardless of preferredEngine. They can be ranked low or
+  // discarded by the engine's own scoring — but they must be visible in
+  // the ranked candidate list so users can see WHY property isn't chosen.
+  if (PROPERTY_ACQUISITION_TEMPLATE_IDS.has(t.id)) return true;
   // "unsure" — user explicitly does not have a preference → run everything
   // that passes other gates. The engine ranking will pick.
   if (pref === "unsure" || pref === "hybrid") return true;
@@ -414,6 +419,12 @@ function matchesPreferredEngine(t: ScenarioTemplate, p: CanonicalGoalProfile): b
 function matchesRiskTolerance(t: ScenarioTemplate, p: CanonicalGoalProfile): boolean {
   const tol = p.resolved.riskTolerance;
   if (tol === "low") {
+    // Sprint 31A — the 5 property-acquisition pathways are CONTRACTED to be
+    // evaluated by the Decision Engine and surfaced in the ranked candidates,
+    // even for low-risk households. The downstream safety-override rule
+    // (rule1_safety_override) still prevents aggressive paths from being
+    // recommended as the top pick — it just lets the user SEE them ranked.
+    if (PROPERTY_ACQUISITION_TEMPLATE_IDS.has(t.id)) return true;
     // Suppress wealth_max + aggressive paths.
     return t.investorProfile !== "wealth_max" && t.investorProfile !== "aggressive";
   }
@@ -424,3 +435,16 @@ function matchesRiskTolerance(t: ScenarioTemplate, p: CanonicalGoalProfile): boo
   // "moderate" — no extra restriction.
   return true;
 }
+
+/**
+ * Sprint 31A — the 5 property-acquisition pathways the Decision Engine is
+ * required to evaluate, regardless of risk tolerance. Risk-tolerance still
+ * governs the FINAL pick via the orchestrator's safety override.
+ */
+const PROPERTY_ACQUISITION_TEMPLATE_IDS = new Set<string>([
+  "buy-ip-now",
+  "delay-ip",
+  "equity-release-ip",
+  "refinance-rate-save",
+  "multi-property-ladder",
+]);
