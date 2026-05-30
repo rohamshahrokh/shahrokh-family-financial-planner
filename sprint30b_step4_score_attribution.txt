@@ -1,0 +1,268 @@
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Sprint 30B — Step 4 — Decision Engine Score Attribution Audit
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  profile.resolved.preferredEngine = property
+  profile.resolved.riskTolerance   = low
+  profile.resolved.primaryConstraint = liquidity
+  fire.targetFireAge = 45
+  fire.currentAge    = 38
+  fire.swrPct        = 4
+
+  Running runGoalLabPlan() (publishToAdapter=false, 200 sims)…
+  Done in 26888 ms — 7 ranked scenarios.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  1. Investor profile registry — weight vectors that turn axes into contributions
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Source file: client/src/lib/scenarioV2/registry/scoring.ts (PROFILE_REGISTRY).
+  balanced         conv: surv=0.35 liq=0.25 riskAdj=0.20 fire=0.12 terminalNw=0.08  ;  pen: refi=0.10 lev=0.15
+  conservative     conv: surv=0.40 liq=0.30 riskAdj=0.15 fire=0.05 terminalNw=0.10  ;  pen: refi=0.15 lev=0.20
+  aggressive       conv: surv=0.20 liq=0.10 riskAdj=0.35 fire=0.15 terminalNw=0.20  ;  pen: refi=0.05 lev=0.08
+  fire_focused     conv: surv=0.30 liq=0.20 riskAdj=0.15 fire=0.25 terminalNw=0.10  ;  pen: refi=0.10 lev=0.15
+  wealth_max       conv: surv=0.20 liq=0.10 riskAdj=0.20 fire=0.10 terminalNw=0.40  ;  pen: refi=0.06 lev=0.10
+  cashflow_safe    conv: surv=0.30 liq=0.35 riskAdj=0.15 fire=0.05 terminalNw=0.15  ;  pen: refi=0.20 lev=0.25
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2. Score-axis source map
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  survivalProbability     engine: MonteCarloEngine
+                          selector: candidateGenerator.ts:1352  survivalProbability({ totalPaths=simulationCount, defaultedPaths=defaultProb*N, forcedSalePaths=liquidityStressProb*N })
+  liquidityFactor         engine: Risk-band aggregator (derived from MC)
+                          selector: candidateGenerator.ts:1359  min(bands.liquidityRatioMin / bands.liquidityFloor, 1)
+  riskAdjustedReturn      engine: MC NW fan + downside()
+                          selector: candidateGenerator.ts:1374  riskAdjustedReturn({ cagr=(P50/initial)^(1/y)-1, downside=downside(P10,P50), sequenceRisk=sequenceDispersion.cv })
+  fireAcceleration        engine: fireCoverage() formula (synth from MC NW fan)
+                          selector: candidateGenerator.ts:1381  (candidateFire − baseFire) × 5,  invested≈P50×0.5, propertyEquity≈P50×0.3, swr=0.04, expenses=12×surplus or $80k
+  terminalNetWorth        engine: MC NW fan, final P50
+                          selector: candidateGenerator.ts:1404  result.netWorthFan[last].p50
+  worstInvestmentLvr      engine: Risk-band aggregator
+                          selector: candidateGenerator.ts:1406  bands.worstLvr  (weight=0 by design — surfaces via leveragePenalty)
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  3. Per-template winner — full score decomposition
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template: lower-target-or-extend        →  Winner: etf_dca24_now
+  Score: 93.05   BaseScore (pre-penalty): 93.05
+  Investor profile applied: "conservative"
+
+  axis                    | rawValue        | normalised | weight  | contribution | source engine
+  ------------------------------------------------------------------------------------------------------------
+  survivalProbability     | 100.0%          | 1.0000     | 0.43    | 42.619       | MonteCarloEngine
+  liquidityFactor         | 100.0%          | 1.0000     | 0.32    | 31.828       | Risk-band aggregator (derived from MC)
+  riskAdjustedReturn      | 0.0944          | 0.9444     | 0.13    | 12.408       | MC NW fan + downside()
+  fireAcceleration        | -0.01y          | 0.4987     | 0.05    | 2.251        | fireCoverage() formula (synth from MC NW fan)
+  terminalNetWorth        | $11,881,046     | 0.4990     | 0.08    | 3.942        | MC NW fan, final P50
+  worstInvestmentLvr      | 0.0%            | 1.0000     | 0.00    | 0.000        | Risk-band aggregator
+
+  Penalties:
+    [refinancePressure]  band=none  value=n/a  magnitude=−0.00 pts  reason=no penalty (band ≤ mild)
+    [leverageQuality]  band=n/a  value=0.000  magnitude=−0.00 pts  reason=IP LVR 0% — within healthy band (≤80%)
+
+  Engine inputs that produced these rawValues:
+    simulationCount               = 200
+    defaultProbability            = 0.0%   (defaultedPaths ≈ 0)
+    liquidityStressProbability    = 0.0%   (forcedSalePaths ≈ 0)
+    sequenceDispersion.cv         = 0.1555
+    initialNetWorth               = $659,000
+    netWorthFan[last] P10/P50/P90 = $9,789,217 / $11,881,046 / $14,075,435
+    reconciledMonthlySurplus      = $15,633
+    dashboardMonthlySurplus       = $15,633
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template: offset-optimisation           →  Winner: offset50_etf50
+  Score: 92.91   BaseScore (pre-penalty): 92.91
+  Investor profile applied: "conservative"
+
+  axis                    | rawValue        | normalised | weight  | contribution | source engine
+  ------------------------------------------------------------------------------------------------------------
+  survivalProbability     | 100.0%          | 1.0000     | 0.43    | 42.619       | MonteCarloEngine
+  liquidityFactor         | 100.0%          | 1.0000     | 0.32    | 31.828       | Risk-band aggregator (derived from MC)
+  riskAdjustedReturn      | 0.0930          | 0.9296     | 0.13    | 12.213       | MC NW fan + downside()
+  fireAcceleration        | 0.04y           | 0.5041     | 0.05    | 2.276        | fireCoverage() formula (synth from MC NW fan)
+  terminalNetWorth        | $11,977,620     | 0.5031     | 0.08    | 3.975        | MC NW fan, final P50
+  worstInvestmentLvr      | 0.0%            | 1.0000     | 0.00    | 0.000        | Risk-band aggregator
+
+  Penalties:
+    [refinancePressure]  band=none  value=n/a  magnitude=−0.00 pts  reason=no penalty (band ≤ mild)
+    [leverageQuality]  band=n/a  value=0.000  magnitude=−0.00 pts  reason=IP LVR 0% — within healthy band (≤80%)
+
+  Engine inputs that produced these rawValues:
+    simulationCount               = 200
+    defaultProbability            = 0.0%   (defaultedPaths ≈ 0)
+    liquidityStressProbability    = 0.0%   (forcedSalePaths ≈ 0)
+    sequenceDispersion.cv         = 0.1681
+    initialNetWorth               = $659,000
+    netWorthFan[last] P10/P50/P90 = $9,785,055 / $11,977,620 / $14,488,497
+    reconciledMonthlySurplus      = $15,633
+    dashboardMonthlySurplus       = $15,633
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template: current-plan                  →  Winner: offset_now
+  Score: 92.80   BaseScore (pre-penalty): 92.80
+  Investor profile applied: "conservative"
+
+  axis                    | rawValue        | normalised | weight  | contribution | source engine
+  ------------------------------------------------------------------------------------------------------------
+  survivalProbability     | 100.0%          | 1.0000     | 0.43    | 42.619       | MonteCarloEngine
+  liquidityFactor         | 100.0%          | 1.0000     | 0.32    | 31.828       | Risk-band aggregator (derived from MC)
+  riskAdjustedReturn      | 0.0926          | 0.9256     | 0.13    | 12.161       | MC NW fan + downside()
+  fireAcceleration        | -0.01y          | 0.4990     | 0.05    | 2.253        | fireCoverage() formula (synth from MC NW fan)
+  terminalNetWorth        | $11,886,252     | 0.4992     | 0.08    | 3.944        | MC NW fan, final P50
+  worstInvestmentLvr      | 0.0%            | 1.0000     | 0.00    | 0.000        | Risk-band aggregator
+
+  Penalties:
+    [refinancePressure]  band=none  value=n/a  magnitude=−0.00 pts  reason=no penalty (band ≤ mild)
+    [leverageQuality]  band=n/a  value=0.000  magnitude=−0.00 pts  reason=IP LVR 0% — within healthy band (≤80%)
+
+  Engine inputs that produced these rawValues:
+    simulationCount               = 200
+    defaultProbability            = 0.0%   (defaultedPaths ≈ 0)
+    liquidityStressProbability    = 0.0%   (forcedSalePaths ≈ 0)
+    sequenceDispersion.cv         = 0.1644
+    initialNetWorth               = $659,000
+    netWorthFan[last] P10/P50/P90 = $9,583,698 / $11,886,252 / $14,580,425
+    reconciledMonthlySurplus      = $15,633
+    dashboardMonthlySurplus       = $15,633
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template: debt-reduction                →  Winner: offset_now
+  Score: 92.80   BaseScore (pre-penalty): 92.80
+  Investor profile applied: "conservative"
+
+  axis                    | rawValue        | normalised | weight  | contribution | source engine
+  ------------------------------------------------------------------------------------------------------------
+  survivalProbability     | 100.0%          | 1.0000     | 0.43    | 42.619       | MonteCarloEngine
+  liquidityFactor         | 100.0%          | 1.0000     | 0.32    | 31.828       | Risk-band aggregator (derived from MC)
+  riskAdjustedReturn      | 0.0926          | 0.9256     | 0.13    | 12.161       | MC NW fan + downside()
+  fireAcceleration        | -0.01y          | 0.4990     | 0.05    | 2.253        | fireCoverage() formula (synth from MC NW fan)
+  terminalNetWorth        | $11,886,252     | 0.4992     | 0.08    | 3.944        | MC NW fan, final P50
+  worstInvestmentLvr      | 0.0%            | 1.0000     | 0.00    | 0.000        | Risk-band aggregator
+
+  Penalties:
+    [refinancePressure]  band=none  value=n/a  magnitude=−0.00 pts  reason=no penalty (band ≤ mild)
+    [leverageQuality]  band=n/a  value=0.000  magnitude=−0.00 pts  reason=IP LVR 0% — within healthy band (≤80%)
+
+  Engine inputs that produced these rawValues:
+    simulationCount               = 200
+    defaultProbability            = 0.0%   (defaultedPaths ≈ 0)
+    liquidityStressProbability    = 0.0%   (forcedSalePaths ≈ 0)
+    sequenceDispersion.cv         = 0.1644
+    initialNetWorth               = $659,000
+    netWorthFan[last] P10/P50/P90 = $9,583,698 / $11,886,252 / $14,580,425
+    reconciledMonthlySurplus      = $15,633
+    dashboardMonthlySurplus       = $15,633
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template: liquidity-preservation        →  Winner: offset_now
+  Score: 92.80   BaseScore (pre-penalty): 92.80
+  Investor profile applied: "conservative"
+
+  axis                    | rawValue        | normalised | weight  | contribution | source engine
+  ------------------------------------------------------------------------------------------------------------
+  survivalProbability     | 100.0%          | 1.0000     | 0.43    | 42.619       | MonteCarloEngine
+  liquidityFactor         | 100.0%          | 1.0000     | 0.32    | 31.828       | Risk-band aggregator (derived from MC)
+  riskAdjustedReturn      | 0.0926          | 0.9256     | 0.13    | 12.161       | MC NW fan + downside()
+  fireAcceleration        | -0.01y          | 0.4990     | 0.05    | 2.253        | fireCoverage() formula (synth from MC NW fan)
+  terminalNetWorth        | $11,886,252     | 0.4992     | 0.08    | 3.944        | MC NW fan, final P50
+  worstInvestmentLvr      | 0.0%            | 1.0000     | 0.00    | 0.000        | Risk-band aggregator
+
+  Penalties:
+    [refinancePressure]  band=none  value=n/a  magnitude=−0.00 pts  reason=no penalty (band ≤ mild)
+    [leverageQuality]  band=n/a  value=0.000  magnitude=−0.00 pts  reason=IP LVR 0% — within healthy band (≤80%)
+
+  Engine inputs that produced these rawValues:
+    simulationCount               = 200
+    defaultProbability            = 0.0%   (defaultedPaths ≈ 0)
+    liquidityStressProbability    = 0.0%   (forcedSalePaths ≈ 0)
+    sequenceDispersion.cv         = 0.1644
+    initialNetWorth               = $659,000
+    netWorthFan[last] P10/P50/P90 = $9,583,698 / $11,886,252 / $14,580,425
+    reconciledMonthlySurplus      = $15,633
+    dashboardMonthlySurplus       = $15,633
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template: hybrid-property-etf           →  Winner: etf70_offset30_now
+  Score: 92.49   BaseScore (pre-penalty): 92.49
+  Investor profile applied: "conservative"
+
+  axis                    | rawValue        | normalised | weight  | contribution | source engine
+  ------------------------------------------------------------------------------------------------------------
+  survivalProbability     | 99.3%           | 0.9925     | 0.43    | 42.299       | MonteCarloEngine
+  liquidityFactor         | 100.0%          | 1.0000     | 0.32    | 31.828       | Risk-band aggregator (derived from MC)
+  riskAdjustedReturn      | 0.0930          | 0.9304     | 0.13    | 12.223       | MC NW fan + downside()
+  fireAcceleration        | -0.06y          | 0.4936     | 0.05    | 2.229        | fireCoverage() formula (synth from MC NW fan)
+  terminalNetWorth        | $11,790,338     | 0.4952     | 0.08    | 3.912        | MC NW fan, final P50
+  worstInvestmentLvr      | 3.0%            | 1.0000     | 0.00    | 0.000        | Risk-band aggregator
+
+  Penalties:
+    [refinancePressure]  band=none  value=n/a  magnitude=−0.00 pts  reason=no penalty (band ≤ mild)
+    [leverageQuality]  band=n/a  value=0.030  magnitude=−0.00 pts  reason=IP LVR 3% — within healthy band (≤80%)
+
+  Engine inputs that produced these rawValues:
+    simulationCount               = 200
+    defaultProbability            = 0.0%   (defaultedPaths ≈ 0)
+    liquidityStressProbability    = 1.5%   (forcedSalePaths ≈ 3)
+    sequenceDispersion.cv         = 0.1733
+    initialNetWorth               = $659,000
+    netWorthFan[last] P10/P50/P90 = $9,911,385 / $11,790,338 / $14,663,997
+    reconciledMonthlySurplus      = $15,633
+    dashboardMonthlySurplus       = $15,633
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Template: delay-ip                      →  Winner: offset_first_then_ip
+  Score: 83.48   BaseScore (pre-penalty): 83.48
+  Investor profile applied: "conservative"
+
+  axis                    | rawValue        | normalised | weight  | contribution | source engine
+  ------------------------------------------------------------------------------------------------------------
+  survivalProbability     | 99.8%           | 0.9975     | 0.43    | 42.512       | MonteCarloEngine
+  liquidityFactor         | 73.2%           | 0.7315     | 0.32    | 23.284       | Risk-band aggregator (derived from MC)
+  riskAdjustedReturn      | 0.0901          | 0.9013     | 0.13    | 11.841       | MC NW fan + downside()
+  fireAcceleration        | -0.35y          | 0.4649     | 0.05    | 2.099        | fireCoverage() formula (synth from MC NW fan)
+  terminalNetWorth        | $11,272,993     | 0.4735     | 0.08    | 3.741        | MC NW fan, final P50
+  worstInvestmentLvr      | 0.0%            | 1.0000     | 0.00    | 0.000        | Risk-band aggregator
+
+  Penalties:
+    [refinancePressure]  band=none  value=n/a  magnitude=−0.00 pts  reason=no penalty (band ≤ mild)
+    [leverageQuality]  band=n/a  value=0.000  magnitude=−0.00 pts  reason=IP LVR 0% — within healthy band (≤80%)
+
+  Engine inputs that produced these rawValues:
+    simulationCount               = 200
+    defaultProbability            = 0.0%   (defaultedPaths ≈ 0)
+    liquidityStressProbability    = 0.5%   (forcedSalePaths ≈ 1)
+    sequenceDispersion.cv         = 0.1758
+    initialNetWorth               = $659,000
+    netWorthFan[last] P10/P50/P90 = $9,224,147 / $11,272,993 / $14,158,588
+    reconciledMonthlySurplus      = $15,633
+    dashboardMonthlySurplus       = $15,633
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Axis activity audit across all winners
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  survivalProbability     raw[99.3%..100.0%]   norm[0.993..1.000]   weight=0.43   contrib[42.299..42.619]   →  ACTIVE and DIFFERENTIATING
+  liquidityFactor         raw[73.2%..100.0%]   norm[0.732..1.000]   weight=0.32   contrib[23.284..31.828]   →  ACTIVE and DIFFERENTIATING
+  riskAdjustedReturn      raw[0.0901..0.0944]   norm[0.901..0.944]   weight=0.13   contrib[11.841..12.408]   →  ACTIVE and DIFFERENTIATING
+  fireAcceleration        raw[-0.35y..0.04y]   norm[0.465..0.504]   weight=0.05   contrib[2.099..2.276]   →  ACTIVE and DIFFERENTIATING
+  terminalNetWorth        raw[$11,272,993..$11,977,620]   norm[0.473..0.503]   weight=0.08   contrib[3.741..3.975]   →  ACTIVE and DIFFERENTIATING
+  worstInvestmentLvr      raw[0.0%..3.0%]   norm[1.000..1.000]   weight=0.00   contrib[0.000..0.000]   →  WEIGHT=0 — intentional (penalty-only axis)
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. fireAcceleration deep-dive — why contribution = 0 across the board?
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Formula: rawValue = (candidateFire − baseFire) × 5   ;   norm = clamp01((years + 5) / 10)
+  → norm = 0 requires `years` ≤ −5  ⇔  candidateFire ≤ baseFire − 1.0  (coverage gap of 1.0).
+
+  lower-target-or-extend        rawValue=-0.013y  norm=0.499  weight=0.05  contribution=2.251
+  offset-optimisation           rawValue=0.041y  norm=0.504  weight=0.05  contribution=2.276
+  current-plan                  rawValue=-0.010y  norm=0.499  weight=0.05  contribution=2.253
+  debt-reduction                rawValue=-0.010y  norm=0.499  weight=0.05  contribution=2.253
+  liquidity-preservation        rawValue=-0.010y  norm=0.499  weight=0.05  contribution=2.253
+  hybrid-property-etf           rawValue=-0.064y  norm=0.494  weight=0.05  contribution=2.229
+  delay-ip                      rawValue=-0.351y  norm=0.465  weight=0.05  contribution=2.099
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Done
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────

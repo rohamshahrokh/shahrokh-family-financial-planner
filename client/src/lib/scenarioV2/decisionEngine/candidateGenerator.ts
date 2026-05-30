@@ -1347,6 +1347,11 @@ function buildScoreInputs(
   },
   baseResult: ExtendedScenarioResult,
   horizonMonths: number,
+  // Sprint 30B Step 4 fix — use the user's real monthly expenses on BOTH
+  // sides of the fireAcceleration comparison instead of (a) candidate-side
+  // "12 × surplus" (which mis-uses surplus as expenses) and (b) a hard-coded
+  // $80,000 base. Threaded from ctx.monthlyExpenses at the caller.
+  monthlyExpenses: number,
 ): ScoreInputs {
   // Survival
   const survival = survivalProbability({
@@ -1377,22 +1382,28 @@ function buildScoreInputs(
     sequenceRisk: seq,
   });
 
-  // FIRE acceleration: improvement in fire coverage at horizon, expressed in years pulled in
+  // FIRE acceleration: improvement in fire coverage at horizon, expressed in years pulled in.
+  //
+  // Sprint 30B Step 4 fix:
+  //   Previously the candidate side used `12 × (reconciledSurplus + dashboardSurplus)` (~$375k/yr
+  //   on the demo profile) and the base side used a hard-coded $80,000/yr. That mismatch made every
+  //   candidate look ~12 years worse than base, pinning the normaliser at 0 for every row.
+  //   Both sides now use the user's actual annual expenses (ctx.monthlyExpenses × 12), so the axis
+  //   measures genuine coverage-ratio improvement on a like-for-like basis.
+  const annualExpenses = Math.max(1, monthlyExpenses * 12);
   const candidateFire = fireCoverage({
     investedLiquid: finalP50 * 0.50,  // approximation: half terminal NW assumed liquid
     propertyEquity: finalP50 * 0.30,
     netRentalIncome: 0,
     swr: 0.04,
-    annualExpenses: result.dashboardMonthlySurplus > 0
-      ? 12 * Math.max(1, (result.reconciledMonthlySurplus + result.dashboardMonthlySurplus))
-      : 80_000,
+    annualExpenses,
   });
   const baseFire = fireCoverage({
     investedLiquid: (baseResult.netWorthFan[baseResult.netWorthFan.length - 1]?.p50 ?? initial) * 0.50,
     propertyEquity: (baseResult.netWorthFan[baseResult.netWorthFan.length - 1]?.p50 ?? initial) * 0.30,
     netRentalIncome: 0,
     swr: 0.04,
-    annualExpenses: 80_000,
+    annualExpenses,
   });
   const fireAccel = (candidateFire - baseFire) * 5;  // each 0.1 of coverage gap ≈ 0.5y
 
@@ -2099,7 +2110,7 @@ export async function generateQuickDecisionCandidates(
       isHighRisk = true;
     }
 
-    const scoreInputs = buildScoreInputs(result, safety.bands, baseResult, horizonMonths);
+    const scoreInputs = buildScoreInputs(result, safety.bands, baseResult, horizonMonths, ctx.monthlyExpenses);
     const score = compositeScore(scoreInputs, profileWeights);
     const traceAssumptions: BasePlanAssumptions = {
       inflation: 0.03, incomeGrowth: 0.035, expenseGrowth: 0.03,
