@@ -1,0 +1,139 @@
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Sprint 31A — Property Acquisition Probe
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Household snapshot:
+    PPOR value           = $1,510,000
+    PPOR mortgage        = $1,200,000
+    PPOR raw equity      = $310,000
+    PPOR useable @ 80%   = $8,000
+    PPOR LVR             = 79.5%
+    Cash today           = $40,000
+    Monthly income       = $30,633
+    Monthly expenses     = $15,000
+    Approx debt service  = $7,585
+    Approx NSR           = 4.04
+
+  Running runGoalLabPlan() (publishToAdapter=false, 200 sims, preferredEngine=property)…
+  Done in 48615 ms — 12 ranked scenarios.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Ranked scenarios (templates that ran)
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  • buy-ip-now                 → winner=(none)                     score=89.419
+  • multi-property-ladder      → winner=(none)                     score=89.419
+  • lower-target-or-extend     → winner=(none)                     score=89.145
+  • debt-recycling             → winner=(none)                     score=89.145
+  • offset-optimisation        → winner=(none)                     score=89.010
+  • current-plan               → winner=(none)                     score=88.868
+  • debt-reduction             → winner=(none)                     score=88.868
+  • liquidity-preservation     → winner=(none)                     score=88.868
+  • hybrid-property-etf        → winner=(none)                     score=88.627
+  • refinance-rate-save        → winner=(none)                     score=85.030
+  • equity-release-ip          → winner=(none)                     score=81.817
+  • delay-ip                   → winner=(none)                     score=78.475
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Required-pathway coverage
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [✓] buy-ip-now
+  [✓] delay-ip
+  [✓] equity-release-ip
+  [✓] refinance-rate-save
+  [✓] multi-property-ladder
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Acquisition schedule per scenario (2026–2032)
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  ── buy-ip-now  (Buy investment property now)
+     winner blueprintId = (none)
+     winner deltas      = 2
+     (no acquisitions: Recommended scenario contains no acquisition / refinance events (offset- or ETF-only path).)
+
+  ── multi-property-ladder  (Multi-property ladder (IP1 → equity → IP2))
+     winner blueprintId = (none)
+     winner deltas      = 2
+     (no acquisitions: Recommended scenario contains no acquisition / refinance events (offset- or ETF-only path).)
+
+  ── lower-target-or-extend  (Lower target / extend timeline)
+     winner blueprintId = (none)
+     winner deltas      = 1
+     (no acquisitions: Recommended scenario contains no acquisition / refinance events (offset- or ETF-only path).)
+
+  ── debt-recycling  (Debt recycling)
+     winner blueprintId = (none)
+     winner deltas      = 1
+     (no acquisitions: Recommended scenario contains no acquisition / refinance events (offset- or ETF-only path).)
+
+  ── offset-optimisation  (Offset optimisation)
+     winner blueprintId = (none)
+     winner deltas      = 2
+     (no acquisitions: Recommended scenario contains no acquisition / refinance events (offset- or ETF-only path).)
+
+  ── current-plan  (Current plan — no action)
+     winner blueprintId = (none)
+     winner deltas      = 1
+     (no acquisitions: Recommended scenario contains no acquisition / refinance events (offset- or ETF-only path).)
+
+  ── debt-reduction  (Debt reduction first)
+     winner blueprintId = (none)
+     winner deltas      = 1
+     (no acquisitions: Recommended scenario contains no acquisition / refinance events (offset- or ETF-only path).)
+
+  ── liquidity-preservation  (Liquidity preservation)
+     winner blueprintId = (none)
+     winner deltas      = 1
+     (no acquisitions: Recommended scenario contains no acquisition / refinance events (offset- or ETF-only path).)
+
+  ── hybrid-property-etf  (Hybrid: property + ETF)
+     winner blueprintId = (none)
+     winner deltas      = 2
+     (no acquisitions: Recommended scenario contains no acquisition / refinance events (offset- or ETF-only path).)
+
+  ── refinance-rate-save  (Refinance PPOR (rate save))
+     winner blueprintId = (none)
+     winner deltas      = 2
+     • [2026-05] [refi                ] Refinance @ 6.00%
+        reason: Engine refinances PPOR at 2026-05 to improve serviceability; no equity released and no new loan balance taken on.
+        trigger: NSR 4.04 (above 1.05 safety buffer) — household services existing + new debt.
+        trigger: No cash-out drawn — pure rate / term improvement on existing PPOR loan.
+
+  ── equity-release-ip  (Equity release → IP)
+     winner blueprintId = (none)
+     winner deltas      = 3
+     • [2026-05] [equity_release      ] Equity release — $8,000
+        reason: Refinance at 2026-05 releases $8,000 of PPOR equity. Triggers: useable equity covers the draw; NSR remains serviceable.
+        trigger: Useable PPOR equity at 80% LVR ($8,000) covers the $8,000 cash-out.
+        trigger: NSR 4.04 (above 1.05 safety buffer) — household services existing + new debt.
+        trigger: PPOR LVR 79% is below the 80% refi ceiling, leaving room to release equity.
+     • [2026-05] [refi                ] Refinance @ 6.50%
+        reason: Engine refinances PPOR at 2026-05 to enable the $8,000 cash-out above.
+        trigger: NSR 4.04 (above 1.05 safety buffer) — household services existing + new debt.
+     • [2026-06] [buy                 ] Buy IP — $232,000
+        reason: Engine schedules the first acquisition at 2026-06: deposit $58,000, purchase price $232,000. Buffer + NSR triggers above all met.
+        trigger: Deposit drawn from PPOR equity rather than cash — cash buffer remains $40,000 (2.7 months of expenses).
+        trigger: NSR 4.04 (above 1.05 safety buffer) — household services existing + new debt.
+        trigger: Existing IP LVR 0% leaves headroom under 65% serviceability ceiling.
+
+  ── delay-ip  (Delay property 6–12 months)
+     winner blueprintId = (none)
+     winner deltas      = 1
+     (no acquisitions: Recommended scenario contains no acquisition / refinance events (offset- or ETF-only path).)
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Year-by-Year cross-check (top-ranked scenario)
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Top scenario: buy-ip-now
+  Years rendered: 7
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Summary
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Ranked scenarios:            12
+  Required templates present:  5 / 5
+  Scenarios with acquisitions: 2
+  Equity-release events seen:  1
+  Portfolio-expansion events:  0 
+  Probe output written to /home/user/workspace/fwl/sprint31a_acquisition_probe_output.txt
+  ✅ Probe PASSED

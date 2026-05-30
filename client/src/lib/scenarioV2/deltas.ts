@@ -150,6 +150,9 @@ function translateRefinance(d: ScenarioDelta): ScenarioEvent[] {
       targetPropertyId: str(d.params, "targetPropertyId", ""),
       newRate: num(d.params, "newRate", -1),
       newTermYears: num(d.params, "newTermYears", -1),
+      // Sprint 31A — forward cashOut so downstream timeline lanes
+      // (engineEventLanes → equity_release) can render the real $ amount.
+      cashOut: num(d.params, "cashOut", 0),
     },
   }];
 }
