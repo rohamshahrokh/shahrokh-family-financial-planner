@@ -50,7 +50,9 @@ import type {
 import type {
   BasePlanAssumptions,
   MonthKey,
+  PortfolioState,
   ScenarioDelta,
+  ScenarioEvent,
   ScenarioResult,
 } from "./types";
 
@@ -134,6 +136,20 @@ export interface ExtendedScenarioResult extends ScenarioResult {
   survival: SurvivalMetrics;
   /** Sprint 2B — Forced sale reporting derived from MC final states. */
   forcedSaleReport: ForcedSaleReport;
+  /**
+   * Sprint 28B — terminal portfolio state from the median-best Monte Carlo
+   * sim. Surfaced (read-only) so the Action Roadmap's Net Worth Attribution
+   * panel can break down the engine's NW into asset classes without re-running
+   * the engine. Sourced directly from `mc.medianFinalState`.
+   */
+  medianFinalState: PortfolioState;
+  /**
+   * Sprint 29 §7 — full sorted event store, surfaced (read-only) so the
+   * Action Roadmap's engine-event timeline + professional Gantt can group
+   * events by category without re-running the engine. Sourced directly from
+   * the local `events` variable built via `buildEventStore`.
+   */
+  events?: ScenarioEvent[];
 }
 
 export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
@@ -290,6 +306,8 @@ export function runScenarioV2(input: RunScenarioInput): ExtendedScenarioResult {
     warnings,
     survival,
     forcedSaleReport,
+    medianFinalState: mc.medianFinalState,
+    events,
   };
 }
 

@@ -29,6 +29,7 @@ import {
   getDemoDataset,
   DEMO_FIRE_SETTINGS, DEMO_FIRE_SCENARIO_CONFIG, DEMO_APP_SETTINGS, DEMO_TAX_PROFILE,
   DEMO_ALERT_LOGS, DEMO_FAMILY_MSG, DEMO_PLANNED_INVESTMENTS, DEMO_SCENARIOS,
+  getDemoMCFireSettingsBaseline,
 } from "./demoData";
 
 // ─── Detect deployment mode ───────────────────────────────────────────────────
@@ -384,8 +385,20 @@ async function handleDemoRequest(method: string, path: string, body?: unknown): 
     if (m === "PUT") return { success: true };
   }
   if (path === "/api/mc-fire-settings") {
-    if (m === "GET") return {};
-    if (m === "PUT") return {};
+    // Sprint 30A.1 — see getDemoMCFireSettingsBaseline() for the rationale.
+    // The demo handler must surface `current_age` so MC startAge resolves,
+    // and the full goal row (target_fire_age, target_passive_monthly, swr_pct,
+    // goals_set:true) so canonical-goal derives status=SET and downstream
+    // selectors compute a real fireNumber. Goal Lab UI itself is untouched.
+    const dsAny = ds as any;
+    if (!dsAny.mcFireSettings) {
+      dsAny.mcFireSettings = getDemoMCFireSettingsBaseline();
+    }
+    if (m === "GET") return dsAny.mcFireSettings;
+    if (m === "PUT") {
+      dsAny.mcFireSettings = { ...dsAny.mcFireSettings, ...(body as any), updated_at: new Date().toISOString() };
+      return dsAny.mcFireSettings;
+    }
   }
   if (path === "/api/mc-fire-results") {
     if (m === "GET") return null;
@@ -394,10 +407,20 @@ async function handleDemoRequest(method: string, path: string, body?: unknown): 
   if (path === "/api/mc-fire-presets") {
     if (m === "GET") return [];
   }
-  // ── Canonical Goal — demo always reports NOT_SET (no real user goal saved).
+  // ── Canonical Goal — Sprint 30A.1
+  // The demo persona has a fully-specified FIRE plan in DEMO_FIRE_SETTINGS,
+  // surfaced through /api/mc-fire-settings via the baseline. Derive the
+  // canonical goal from the same mc-fire-settings row that real users hit
+  // (reusing the shared deriveCanonicalGoalFromRow helper). This unblocks
+  // fireNumber > 0 → selectMonteCarloProjection returns real percentile
+  // crossings → FIRE Age, Passive Income, alt-strategy cards all render
+  // honest engine outputs. Goal Lab UI is untouched; users can still edit
+  // their goal via Goal Lab and the in-memory store merges the write.
   if (path === "/api/canonical-goal") {
     if (m === "GET") {
-      return { status: "NOT_SET", reason: "demo mode — no canonical goal saved" };
+      const dsAny = ds as any;
+      const row = dsAny.mcFireSettings ?? getDemoMCFireSettingsBaseline();
+      return deriveCanonicalGoalFromRow(row);
     }
   }
   if (path === "/api/forecast-freshness") {

@@ -104,6 +104,7 @@ export interface CanonicalMCReconciliation {
     crypto: number;
     cars: number;
     iran_property: number;
+    other_assets: number;
     mortgage: number;
     other_debts: number;
     monthly_income: number;
@@ -150,10 +151,13 @@ export function buildCanonicalMonteCarloInput(
   const snap: any = ledger.snapshot ?? {};
 
   // Engine's flat snapshot — every number routed through canonical selectors.
-  // The engine sums (ppor + cash + super + stocks + crypto + cars + iran)
+  // The engine (see scenarioV2/basePlan.ts:202-220 + scenarioV2/tick.ts:842-855)
+  // sums (ppor + cash + super + stocks + crypto + cars + iran + other_assets)
   // and subtracts (mortgage + other_debts) PLUS each settled IP value/loan
-  // (passed via the `properties` array). The reconciliation below proves the
-  // combined number matches `canonical.netWorth` to the dollar.
+  // (passed via the `properties` array). Sprint 30A.3: cars are now held at
+  // 100% by the engine (the historical 0.8 haircut was removed in audit fix
+  // P1.1) and `other_assets` is seeded from snapshot. The reconciliation below
+  // therefore matches canonical.netWorth to the dollar.
   const engineSnapshot = {
     ppor:             canonical.assets.ppor,
     cash:             canonical.assets.cashOffset, // includes offset + all cash buckets
@@ -162,24 +166,18 @@ export function buildCanonicalMonteCarloInput(
     crypto,
     cars:             canonical.assets.cars,
     iran_property:    canonical.assets.iranProperty,
+    other_assets:     canonical.assets.otherAssets,
     mortgage:         canonical.liabilities.ppoMortgage,
     other_debts:      canonical.liabilities.otherDebts,
     monthly_income:   income.monthlyGross,
     monthly_expenses: monthlyExpensesForEngine,
   };
 
-  // The MC engine starts each sim with:
-  //   ppor + cash + super + (stocks + holdings overlay) + (crypto + overlay)
-  //   + cars*0.8 + iran_property + sum(settled IP values) - mortgage
-  //   - other_debts - sum(settled IP loans)
-  //
-  // We replicate that summation here (with `cars * 0.8`) for the reconciliation
-  // diagnostic. The engine itself separately applies the 0.8 haircut on cars.
-  //
-  // NOTE: settled IP values/loans flow through canonical.settledIpValue /
-  // canonical.settledIpLoans — the engine's `properties` array contributes the
-  // same numbers, so the sum still equals canonical.netWorth less the cars
-  // haircut.
+  // The MC engine starts each sim with the canonical net worth, component by
+  // component (cars at 100%, other_assets included). Settled IP values/loans
+  // flow through canonical.settledIpValue / canonical.settledIpLoans and the
+  // engine's `properties` array contributes the same numbers, so the sum here
+  // equals canonical.netWorth to the dollar.
   const settledIpValue = canonical.assets.settledIpValue;
   const settledIpLoans = canonical.liabilities.settledIpLoans;
 
@@ -189,21 +187,20 @@ export function buildCanonicalMonteCarloInput(
     engineSnapshot.super_balance +
     engineSnapshot.stocks +
     engineSnapshot.crypto +
-    engineSnapshot.cars * 0.8 +
+    engineSnapshot.cars +
     engineSnapshot.iran_property +
+    engineSnapshot.other_assets +
     settledIpValue -
     engineSnapshot.mortgage -
     engineSnapshot.other_debts -
     settledIpLoans;
 
-  // Account for the cars haircut: dashboard NW counts cars at 100%, engine
-  // applies a 20% haircut on each NW snapshot. Both are valid — the
-  // reconciliation reports the gap so users see WHY.
-  const carsHaircut = engineSnapshot.cars * 0.2; // dashboard - engine
-  const expectedDiff = carsHaircut;
+  // Sprint 30A.3 reconciliation contract: engineStartingNetWorth should equal
+  // canonical.netWorth to within $1 (rounding). No haircut allowance — the
+  // engine no longer applies one. The previous diagnostic falsely reported a
+  // $11k cars haircut + $12k other_assets gap; both have been corrected here.
+  const expectedDiff = 0;
   const actualDiff = canonical.netWorth - engineStartingNetWorth;
-  // Engine NW is intentionally lower by `carsHaircut`; the reconciliation
-  // passes when the gap matches that haircut to within $1.
   const reconcileOk = Math.abs(actualDiff - expectedDiff) <= 1;
 
   const reconciliation: CanonicalMCReconciliation = {

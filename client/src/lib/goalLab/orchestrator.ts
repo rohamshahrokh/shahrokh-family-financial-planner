@@ -86,6 +86,37 @@ export interface GoalLabRankedScenario {
   scoreP50: number | null;
   /** Engine's underlying QuickDecisionOutput for audit / explainability. */
   raw: QuickDecisionOutput;
+  /**
+   * Sprint 30B Step 3 — records whether the winner above was selected by
+   * the template's `intentFilter` (true) or fell back to `ranked[0]` because
+   * no candidate matched the intent filter (false). When false, the
+   * Explainability panel surfaces "intent fallback" so users know the
+   * winner is the engine's raw top pick rather than a template-faithful path.
+   */
+  winnerSelectedByIntentFilter: boolean;
+  /**
+   * Sprint 30B Step 3 — the engine's raw `ranked[0]` (before any intent
+   * filtering). When `winnerSelectedByIntentFilter` is true and this differs
+   * from `winner`, the Explainability panel can show "Template-faithful pick
+   * vs raw engine top" side-by-side.
+   */
+  engineTopWinner: RankedCandidate | null;
+  /**
+   * Sprint 30B Step 3 — stable hash of the winner's event stream
+   * (deltaType + activationMonth + params). Two scenarios with identical
+   * `eventSignature` produce IDENTICAL Monte Carlo fans — they describe the
+   * exact same household action. The Explainability panel uses this to
+   * collapse / annotate duplicate rows so the user sees honest variety,
+   * not pseudo-variety.
+   */
+  eventSignature: string;
+  /**
+   * Sprint 30B Step 3 — ids of OTHER templates that share this scenario's
+   * `eventSignature`. Empty when the winner is unique to this template.
+   * Surfaced by the Explainability UI as "Equivalent to: X, Y" so the user
+   * understands why their forecast numbers match across rows.
+   */
+  equivalentTemplateIds: string[];
 }
 
 /**
@@ -157,6 +188,13 @@ export interface GoalLabPlanOutput {
     rankingMs: number;
     /** Number of templates that were evaluated. */
     templatesCount: number;
+    /**
+     * Sprint 28 — Monte Carlo simulations per template used for this run. The
+     * Action Roadmap's S3 (Monte Carlo Projection) cites this in audit mode
+     * via metricSourceAttribution. Source of truth: the `simulationCount`
+     * argument passed into `runGoalLabPlan` (default 300). Adds no new math.
+     */
+    simulationCount: number;
   };
 }
 
@@ -247,8 +285,24 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
     const r = settled[i];
     if (!r || r.status !== "fulfilled") continue;
     const out = r.value;
-    const winner = out.ranked[0] ?? null;
-    const alternates = out.ranked.slice(1);
+    const engineTop = out.ranked[0] ?? null;
+
+    // Sprint 30B Step 3 — apply the template's intent filter to choose a
+    // template-faithful winner among already-scored candidates. If no
+    // candidate passes the filter, fall back to ranked[0] (the engine's
+    // raw top pick) and flag the scenario so the UI can disclose it.
+    let winner: RankedCandidate | null = engineTop;
+    let winnerSelectedByIntentFilter = false;
+    if (t.intentFilter && out.ranked.length > 0) {
+      const faithful = out.ranked.find((c) => t.intentFilter!(c.id));
+      if (faithful) {
+        winner = faithful;
+        winnerSelectedByIntentFilter = true;
+      }
+    }
+    const alternates = winner
+      ? out.ranked.filter((c) => c.id !== winner!.id)
+      : out.ranked.slice(1);
 
     rankedScenarios.push({
       templateId:    t.id,
@@ -259,7 +313,28 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
       probabilityP50: extractProbabilityP50(winner),
       scoreP50:       winner ? winner.score.score : null,
       raw: out,
+      winnerSelectedByIntentFilter,
+      engineTopWinner: engineTop,
+      eventSignature: "",        // populated below after all scenarios collected
+      equivalentTemplateIds: [], // populated below after all scenarios collected
     });
+  }
+
+  // Sprint 30B Step 3 — compute event-signature dedup metadata. Two scenarios
+  // with identical winner-event signatures produce identical MC fans. The UI
+  // uses this to annotate rows ("Same plan as X") rather than pretend the
+  // numbers are independent observations.
+  const sigBuckets = new Map<string, string[]>();
+  for (const s of rankedScenarios) {
+    const sig = computeEventSignature(s.winner);
+    s.eventSignature = sig;
+    const bucket = sigBuckets.get(sig) ?? [];
+    bucket.push(s.templateId);
+    sigBuckets.set(sig, bucket);
+  }
+  for (const s of rankedScenarios) {
+    const bucket = sigBuckets.get(s.eventSignature) ?? [];
+    s.equivalentTemplateIds = bucket.filter((id) => id !== s.templateId);
   }
 
   // Cross-template ordering: descending by winner score.total. Null scores
@@ -290,6 +365,7 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
       scenarioAndMonteCarloMs: candidateGenerationMs, // wrapped inside candidateGenerator
       rankingMs,
       templatesCount: templates.length,
+      simulationCount,
     },
   };
 
@@ -308,31 +384,116 @@ export async function runGoalLabPlan(args: RunGoalLabPlanArgs): Promise<GoalLabP
   return output;
 }
 
-// ─── In-memory cache for the full GoalLabPlanOutput ────────────────────────
+// ─── Cache for the full GoalLabPlanOutput ──────────────────────────────────
 //
 // canonicalAdapter only stores the recommended QuickDecisionOutput (one
 // scenario's ranking). The full multi-scenario summary surfaces /decision-lab
-// and /action-plan want lives here. Session-scoped, intentionally simple.
+// and /action-plan want lives here.
+//
+// Sprint 30B Step 1 (sessionStorage mirror, no math change):
+//   The original cache was a module-level variable that did NOT survive a
+//   full page reload. /action-roadmap reads via `readLatestGoalLabPlan()`,
+//   so any reload landed on the empty-state path ("Not modelled yet"),
+//   which then cascaded into "Reconciliation failed" downstream because
+//   `finalState` was null. This mirror writes the plan to sessionStorage on
+//   every set, and rehydrates the module variable on first read after a
+//   reload. SSR-safe: when `window` is undefined the mirror is a no-op and
+//   behaviour is identical to the pre-Sprint-30B in-memory cache.
+//
+//   No financial math is changed. No Monte Carlo / Forecast / FIRE /
+//   Scenario / Goal Lab calculations are touched. The serialised payload is
+//   a plain JSON copy of the existing `GoalLabPlanOutput` shape — the same
+//   object the in-memory cache already held.
+
+const SS_KEY = "fwl.goalLab.latestPlan.v1";
+/** Plans older than this are discarded on rehydrate to avoid stale ledgers. */
+const SS_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
 
 let _latestPlan: GoalLabPlanOutput | null = null;
 let _latestPlanGeneratedAt: string | null = null;
+/** True after the first read attempt has tried sessionStorage rehydration. */
+let _hydrated = false;
+
+function hasWindow(): boolean {
+  return typeof window !== "undefined" && typeof window.sessionStorage !== "undefined";
+}
+
+function persistToSessionStorage(plan: GoalLabPlanOutput): void {
+  if (!hasWindow()) return;
+  try {
+    window.sessionStorage.setItem(SS_KEY, JSON.stringify(plan));
+  } catch {
+    // Quota / serialisation errors are non-fatal: the in-memory cache still
+    // works for the current tab. We intentionally do not log to keep the
+    // console clean in production.
+  }
+}
+
+function rehydrateFromSessionStorage(): GoalLabPlanOutput | null {
+  if (!hasWindow()) return null;
+  try {
+    const raw = window.sessionStorage.getItem(SS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as GoalLabPlanOutput | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    // Age guard — drop plans older than SS_MAX_AGE_MS so a stale ledger
+    // cannot resurrect itself across days.
+    const gen = typeof parsed.generatedAt === "string" ? Date.parse(parsed.generatedAt) : NaN;
+    if (Number.isFinite(gen) && Date.now() - gen > SS_MAX_AGE_MS) {
+      try { window.sessionStorage.removeItem(SS_KEY); } catch { /* ignore */ }
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 function setLatestGoalLabPlan(plan: GoalLabPlanOutput): void {
   _latestPlan = plan;
   _latestPlanGeneratedAt = plan.generatedAt;
+  _hydrated = true;
+  persistToSessionStorage(plan);
 }
 
 export function readLatestGoalLabPlan(): GoalLabPlanOutput | null {
+  if (_latestPlan == null && !_hydrated) {
+    _hydrated = true;
+    const restored = rehydrateFromSessionStorage();
+    if (restored) {
+      _latestPlan = restored;
+      _latestPlanGeneratedAt = restored.generatedAt;
+    }
+  }
   return _latestPlan;
 }
 
 export function readLatestGoalLabPlanGeneratedAt(): string | null {
+  // Ensure we have attempted rehydration before answering.
+  if (_latestPlan == null && !_hydrated) {
+    void readLatestGoalLabPlan();
+  }
   return _latestPlanGeneratedAt;
 }
 
 export function clearLatestGoalLabPlan(): void {
   _latestPlan = null;
   _latestPlanGeneratedAt = null;
+  _hydrated = true; // "intentionally cleared" — don't auto-rehydrate next read
+  if (hasWindow()) {
+    try { window.sessionStorage.removeItem(SS_KEY); } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Sprint 30B Step 1 — test hook. Resets the module-level cache state to its
+ * pre-rehydration condition so unit tests can simulate "fresh page load"
+ * without spawning a new module context. Not exported for production use.
+ */
+export function __resetGoalLabPlanCacheForTests(): void {
+  _latestPlan = null;
+  _latestPlanGeneratedAt = null;
+  _hydrated = false;
 }
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
@@ -443,6 +604,30 @@ function riskToleranceToBehavioural(profile: CanonicalGoalProfile): Partial<Reco
  *
  * Surfaces MUST render null as "Not modelled yet" — never 0%.
  */
+/**
+ * Sprint 30B Step 3 — stable hash of a winner's event stream.
+ *
+ * Two winners with the same deltaType + activationMonth + params produce
+ * identical Monte Carlo fans. We canonicalise by sorting on a tuple key, then
+ * JSON-stringifying with sorted object keys per delta. The resulting string is
+ * pure and deterministic across runs.
+ *
+ * No financial math — just a fingerprint over already-generated deltas.
+ */
+function computeEventSignature(winner: RankedCandidate | null): string {
+  if (!winner || winner.events.length === 0) return "\u2205";
+  const parts = winner.events.map((e) => {
+    const params = e.params ?? {};
+    const sortedKeys = Object.keys(params).sort();
+    const paramStr = sortedKeys
+      .map((k) => `${k}=${JSON.stringify((params as Record<string, unknown>)[k])}`)
+      .join(",");
+    return `${e.deltaType}@${e.activationMonth}{${paramStr}}`;
+  });
+  parts.sort();
+  return parts.join("|");
+}
+
 function extractProbabilityP50(winner: RankedCandidate | null): number | null {
   if (!winner) return null;
   // The engine surfaces survivability on result.riskMetrics.survivability.p50

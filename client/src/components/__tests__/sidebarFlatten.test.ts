@@ -147,12 +147,13 @@ const CHILDREN: Array<{ label: string; route: string }> = [
   { label: "Stocks",              route: "/stocks"             },
   { label: "Crypto",              route: "/crypto"             },
   { label: "Debt Strategy",       route: "/debt-strategy"      },
-  { label: "Tax Strategy",        route: "/tax-strategy"       },
+  { label: "Tax Strategy",        route: "/tax"                },
   { label: "CGT Simulator",       route: "/cgt-simulator"      },
   { label: "Net Worth Timeline",  route: "/timeline"           },
   { label: "Forecast Engine",     route: "/ai-forecast-engine" },
   { label: "Scenario Compare",    route: "/scenario-compare"   },
-  { label: "Action Plan",         route: "/action-plan"        },
+  // Sprint 30A A1: "Action Plan" removed from the sidebar (was duplicating
+  // Decision Lab / Action Roadmap). The Decision Lab entry remains.
   { label: "Decision Lab",        route: "/decision-lab"       },
 ];
 

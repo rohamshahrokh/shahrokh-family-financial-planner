@@ -51,6 +51,8 @@ import { computeCanonicalHeadlineMetrics } from "@/lib/canonicalHeadlineMetrics"
 import { selectCanonicalFire, isFireGoalExplicitlySet } from "@/lib/canonicalFire";
 import { formatCurrency } from "@/lib/finance";
 import { readLatestGoalLabPlan } from "@/lib/goalLab/orchestrator";
+import { buildRecommendationExplanation } from "@/lib/actionRoadmap/recommendationExplanation";
+import { RecommendationExplainabilityPanel } from "@/components/actionRoadmap/RecommendationExplainabilityPanel";
 import {
   computeGoalLabConfidence,
   type ConfidenceResult,
@@ -66,6 +68,7 @@ import {
   useGoalProfileStore,
   type ConstraintOverride as StoreConstraintOverride,
 } from "@/lib/goalLab/goalProfileStore";
+import { RecommendedStrategyCard } from "@/components/RecommendedStrategyCard";
 
 /**
  * Sprint 23 — page→store constraint mapper.
@@ -1003,6 +1006,33 @@ export default function GoalLabPage() {
           />
           {/* Sprint 26 P1 — Real confidence (replaces fake placeholder) */}
           <ConfidencePanel confidence={confidence} />
+          {/* Sprint 28 — Recommended Strategy handoff to /action-roadmap.
+              Goal Lab no longer renders milestones, accelerators, risk axes, or
+              path-completion — those live exclusively on the Action Roadmap. */}
+          {latestPlan?.picks?.recommended ? (
+            <RecommendedStrategyCard
+              pick={latestPlan.picks.recommended}
+              rationale={latestPlan.picks.recommendedRationale}
+            />
+          ) : null}
+          {/* Sprint 30B Step 2 — Recommendation Explainability mounted from the
+              SAME plan object. Goal Lab, Decision Lab, and Action Roadmap all
+              read from one source so the surfaces cannot drift. */}
+          {latestPlan ? (
+            <RecommendationExplainabilityPanel
+              explanation={buildRecommendationExplanation({
+                plan: latestPlan,
+                startAge: latestPlan.profile.fire.currentAge ?? null,
+                fireTarget:
+                  latestPlan.profile.fire.targetPassiveAnnual != null &&
+                  latestPlan.profile.fire.swrPct != null &&
+                  latestPlan.profile.fire.swrPct > 0
+                    ? latestPlan.profile.fire.targetPassiveAnnual / (latestPlan.profile.fire.swrPct / 100)
+                    : null,
+                swrPct: latestPlan.profile.fire.swrPct ?? null,
+              })}
+            />
+          ) : null}
           <SummaryPanel
             completed={completed}
             confirmed={confirmed}

@@ -69,7 +69,33 @@ export interface ScenarioTemplate {
    * this returns true. Implementations MUST be pure and side-effect-free.
    */
   gate: (inputs: DashboardInputs, profile: CanonicalGoalProfile) => boolean;
+  /**
+   * Sprint 30B Step 3 — winner-intent filter.
+   *
+   * The candidate generator returns a ranked list of blueprints scored by
+   * survival + liquidity + risk-adjusted return. Without an intent filter,
+   * the orchestrator blindly takes `ranked[0]` — which on a healthy household
+   * is almost always the highest-survival path (a $30k super top-up). The
+   * result is that templates with very different promises ("debt reduction",
+   * "offset optimisation", "liquidity preservation") all win on the same
+   * super-top-up blueprint, collapsing the ranked table.
+   *
+   * `intentFilter` accepts a candidate id and returns true when that blueprint
+   * faithfully expresses the template's promise. The orchestrator picks the
+   * highest-scoring candidate that passes; if NONE pass, it falls back to
+   * `ranked[0]` and flags the scenario with `winnerSelectedByIntentFilter:
+   * false` so explainability can disclose the fallback.
+   *
+   * This is a pure post-filter over already-scored candidates. No new math,
+   * no new MC runs, no change to the engine itself.
+   */
+  intentFilter?: (candidateId: string) => boolean;
 }
+
+// ─── Intent-filter helpers (pure id-substring matchers) ────────────────────
+
+const includesAny = (haystack: string, needles: readonly string[]): boolean =>
+  needles.some((n) => haystack.includes(n));
 
 // ─── Tiny pure gate helpers (read canonical selectors only) ─────────────────
 
@@ -116,6 +142,8 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     investorProfile: "balanced",
     riskMode: "balanced",
     gate: () => true,
+    // Baseline = hold offset / status-quo. Accept any pure-offset path.
+    intentFilter: (id) => id === "offset_now" || id.startsWith("offset_now"),
   },
   {
     id: "buy-ip-now",
@@ -125,6 +153,7 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     investorProfile: "wealth_max",
     riskMode: "balanced",
     gate: (_inputs, p) => hasIpHeadroom(p),
+    intentFilter: (id) => id === "ip_now",
   },
   {
     id: "delay-ip",
@@ -134,6 +163,7 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     investorProfile: "cashflow_safe",
     riskMode: "conservative",
     gate: (_inputs, p) => hasIpHeadroom(p),
+    intentFilter: (id) => id === "ip_6mo" || id === "ip_18mo" || id === "offset_first_then_ip",
   },
   {
     id: "etf-acceleration",
@@ -143,6 +173,8 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     investorProfile: "fire_focused",
     riskMode: "balanced",
     gate: (_inputs, p) => hasInvestableCash(p),
+    // Must be ETF-heavy: lump, DCA, or 70/30 ETF tilt. Exclude pure-super.
+    intentFilter: (id) => includesAny(id, ["etf_lump", "etf_dca", "etf70_offset30", "etf_then"]),
   },
   {
     id: "debt-reduction",
@@ -152,6 +184,8 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     investorProfile: "cashflow_safe",
     riskMode: "conservative",
     gate: (_inputs, p) => hasDebtToReduce(p),
+    // Must be offset-heavy (offset funnels into mortgage). Reject pure super/ETF.
+    intentFilter: (id) => includesAny(id, ["offset_now", "offset_6mo", "offset_then"]),
   },
   {
     id: "offset-optimisation",
@@ -161,6 +195,7 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     investorProfile: "balanced",
     riskMode: "conservative",
     gate: (_inputs, p) => hasDebtToReduce(p),
+    intentFilter: (id) => includesAny(id, ["offset_now", "offset50_etf50", "offset_then"]),
   },
   {
     id: "super-contributions",
@@ -170,6 +205,7 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     investorProfile: "fire_focused",
     riskMode: "balanced",
     gate: () => true,
+    intentFilter: (id) => includesAny(id, ["super_full", "super_now", "etf30_super70", "etf50_super50"]),
   },
   {
     id: "hybrid-property-etf",
@@ -179,6 +215,9 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     investorProfile: "balanced",
     riskMode: "balanced",
     gate: (_inputs, p) => hasInvestableCash(p) || hasIpHeadroom(p),
+    // Hybrid = property AND ETF in the same path → sequenced offset→IP, or
+    // a multi-allocation candidate that explicitly mixes asset classes.
+    intentFilter: (id) => includesAny(id, ["offset_then_ip", "property_18mo", "etf70_offset30", "etf40_super40_crypto20"]),
   },
   {
     id: "lower-target-or-extend",
@@ -188,6 +227,8 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     investorProfile: "conservative",
     riskMode: "conservative",
     gate: () => true,
+    // Softer target = conservative DCA / offset blends rather than max-growth.
+    intentFilter: (id) => includesAny(id, ["etf_dca24", "offset50_etf50", "super_now"]),
   },
   {
     id: "liquidity-preservation",
@@ -197,6 +238,8 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     investorProfile: "cashflow_safe",
     riskMode: "conservative",
     gate: () => true,
+    // Liquidity-first = pure offset (offset balance IS the cash buffer).
+    intentFilter: (id) => includesAny(id, ["offset_now", "offset_6mo"]),
   },
   {
     id: "debt-recycling",
@@ -206,6 +249,7 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     investorProfile: "wealth_max",
     riskMode: "balanced",
     gate: (_inputs, p) => hasIpsForRecycling(p),
+    intentFilter: (id) => includesAny(id, ["etf_lump", "etf_dca", "offset_then_etf"]),
   },
 ];
 

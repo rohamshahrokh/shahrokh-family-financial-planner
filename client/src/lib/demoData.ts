@@ -547,6 +547,47 @@ export const DEMO_FIRE_SETTINGS = {
   updated_at: new Date().toISOString(),
 };
 
+/**
+ * Sprint 30A.1 — baseline row for the demo `/api/mc-fire-settings` endpoint.
+ *
+ * The demo persona has a fully-specified FIRE plan baked into
+ * DEMO_FIRE_SETTINGS (target_fire_age=55, target_monthly_income=9_000,
+ * safe_withdrawal_rate=4.0, current_age=37). The baseline below surfaces
+ * those values through `/api/mc-fire-settings` so:
+ *   - `current_age` resolves the MC selectors' `startAge`
+ *     (Action Roadmap, FIRE Age, Passive Income, alt-strategy cards).
+ *   - `target_fire_age` + `target_passive_monthly` + `swr_pct` drive the
+ *     canonical-goal selector to status="SET" → fireNumber > 0 → MC
+ *     percentile crossings render real ages and dollar values rather than
+ *     "Not modelled yet".
+ *   - `goals_set: true` lets `isFireGoalExplicitlySet()` return true so
+ *     Recommended + Alt strategy cards render their numerical metrics.
+ *
+ * Goal Lab UI itself is untouched. Once Goal Lab PUTs to
+ * /api/mc-fire-settings, the demo handler merges the write into the
+ * in-memory store; subsequent reads reflect the user's edits.
+ */
+export function getDemoMCFireSettingsBaseline(): {
+  current_age: number;
+  target_fire_age: number;
+  target_passive_monthly: number;
+  swr_pct: number;
+  goals_set: true;
+  goal_set_timestamp: string;
+  updated_at: string;
+} {
+  const now = new Date().toISOString();
+  return {
+    current_age: DEMO_FIRE_SETTINGS.current_age,
+    target_fire_age: DEMO_FIRE_SETTINGS.target_fire_age,
+    target_passive_monthly: DEMO_FIRE_SETTINGS.target_monthly_income,
+    swr_pct: DEMO_FIRE_SETTINGS.safe_withdrawal_rate,
+    goals_set: true,
+    goal_set_timestamp: now,
+    updated_at: now,
+  };
+}
+
 // ─── App Settings ─────────────────────────────────────────────────────────────
 
 export const DEMO_APP_SETTINGS: Record<string, any> = {
