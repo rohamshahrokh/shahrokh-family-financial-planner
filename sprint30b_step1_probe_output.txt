@@ -1,0 +1,69 @@
+
+══════════════════════════════════════════════════════════════════════════════
+  Sprint 30B · Step 1 · Session Mirror Probe (in-process)
+══════════════════════════════════════════════════════════════════════════════
+  No source files modified by this script. No financial math touched.
+  Probe date: 2026-05-29T23:13:20.991Z
+
+──────────────────────────────────────────────────────────────────────────────
+  Pre-flight: starting from a clean cache
+──────────────────────────────────────────────────────────────────────────────
+  [PASS] readLatestGoalLabPlan() === null when nothing was ever written
+  [PASS] readLatestGoalLabPlanGeneratedAt() === null when no plan
+  [PASS] buildEventStore returned non-empty stream (27 events)
+  [PASS] Test plan has a non-null recommended winner
+
+──────────────────────────────────────────────────────────────────────────────
+  Simulate /decision-lab Run Plan (writes sessionStorage)
+──────────────────────────────────────────────────────────────────────────────
+  [PASS] sessionStorage has plan JSON (16045 chars)
+  [PASS] Serialised JSON contains an `events` array
+
+──────────────────────────────────────────────────────────────────────────────
+  Simulate Cmd+R / full page reload on /action-roadmap
+──────────────────────────────────────────────────────────────────────────────
+  [PASS] readLatestGoalLabPlan() rehydrated from sessionStorage
+  [PASS] rehydrated plan has non-null recommended
+  [PASS] winner.result.events is an array after rehydrate
+  [PASS] winner.result.events.length > 0 after reload (27 events)
+  [PASS] event count preserved exactly (27 === 27)
+  [PASS] asset.buy_property payload.purchasePrice preserved ($650,000)
+  [PASS] contribution.etf_dca payload.amount preserved ($2,000)
+  [PASS] generatedAt timestamp preserved across reload
+
+──────────────────────────────────────────────────────────────────────────────
+  Subsequent reads return the same plan (no double rehydrate)
+──────────────────────────────────────────────────────────────────────────────
+  [PASS] second read returns the same in-memory object (no JSON re-parse on hot cache)
+
+──────────────────────────────────────────────────────────────────────────────
+  clearLatestGoalLabPlan removes both in-memory and sessionStorage
+──────────────────────────────────────────────────────────────────────────────
+  [PASS] in-memory cache cleared
+  [PASS] sessionStorage cleared
+
+──────────────────────────────────────────────────────────────────────────────
+  Stale plans are discarded by the age guard
+──────────────────────────────────────────────────────────────────────────────
+  [PASS] 25h-old plan is NOT rehydrated
+  [PASS] stale plan was removed from sessionStorage
+
+──────────────────────────────────────────────────────────────────────────────
+  Plans newer than 24h ARE rehydrated
+──────────────────────────────────────────────────────────────────────────────
+  [PASS] 1-min-old plan IS rehydrated
+
+──────────────────────────────────────────────────────────────────────────────
+  SSR-safety: behaviour with no `window`
+──────────────────────────────────────────────────────────────────────────────
+  [PASS] readLatestGoalLabPlan does not throw when window is undefined
+
+──────────────────────────────────────────────────────────────────────────────
+  SUMMARY
+──────────────────────────────────────────────────────────────────────────────
+  21 passed · 0 failed
+
+  All Step 1 assertions PASS.
+  → sessionStorage mirror restores GoalLabPlanOutput across a simulated reload.
+  → recommended.winner.result.events survives the round-trip intact.
+  → No financial math was touched.

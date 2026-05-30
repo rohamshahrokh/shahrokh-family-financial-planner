@@ -857,12 +857,21 @@ function mk(
 }
 
 // Property timing decision — buy now vs build buffer first vs wait
+//
+// Sprint 31A — extended to include three additional pathways:
+//   • equity_release_ip   — refi PPOR for cash-out + buy IP with released equity
+//   • refi_rate_save      — refinance-only (no cash-out) to lower rate / lengthen term
+//   • multi_ip_ladder     — IP1 now + refi cash-out at 24mo + IP2 at 30mo
+// All three are `composite=true` because they emit multiple coupled deltas.
 function blueprintsForBuyProperty(): CandidateBlueprint[] {
   return [
     mk("ip_now",                "Buy IP now (full deposit)",                "IP now",          "property_deposit_100",  "now"),
     mk("ip_6mo",                "Buy IP in 6mo (build small buffer)",       "IP @ 6mo",        "property_deposit_100",  "month6"),
     mk("ip_18mo",               "Buy IP in 18mo (build full buffer)",       "IP @ 18mo",       "property_deposit_100",  "month18"),
     mk("offset_first_then_ip",  "Offset buffer first → IP in 18mo",          "Offset → IP",     "offset_100",            "now", true),
+    mk("equity_release_ip",     "Equity release → IP (cash-out refi)",       "Equity → IP",     "offset_100",            "now", true),
+    mk("refi_rate_save",        "Refinance PPOR (rate + term improvement)",  "Refi only",       "offset_100",            "now", true),
+    mk("multi_ip_ladder",       "IP1 now → equity release → IP2 at 30mo",    "Multi-IP",        "property_deposit_100",  "now", true),
     mk("defer_offset_only",     "Defer property: offset only",              "Offset only",     "offset_100",            "now"),
     mk("defer_etf_dca",         "Defer property: ETF DCA 24mo",             "ETF DCA",         "etf_dca24_100",         "dca24"),
     mk("defer_50_50_etf_off",   "Defer property: 50/50 ETF/Offset",         "ETF 50 / Off 50", "offset50_etf50",        "now"),
@@ -994,6 +1003,21 @@ interface DerivedContext {
   ttmIncomeAnnual: number;
   totalLvrToday: number;
   illiquidShareToday: number;
+  // ── Sprint 31A — Property acquisition planner inputs ───────────────────
+  /** PPOR market value from snapshot (0 if no PPOR). */
+  pporValue: number;
+  /** PPOR loan balance from snapshot. */
+  pporMortgageBalance: number;
+  /** PPOR raw equity = max(0, pporValue - pporMortgageBalance). */
+  pporEquity: number;
+  /** PPOR LVR = pporMortgageBalance / pporValue, 0 if no PPOR. */
+  pporLvr: number;
+  /**
+   * Useable equity at 80% LVR refinance:
+   *   max(0, 0.80 * pporValue - pporMortgageBalance)
+   * This is the standard lender ceiling for cash-out equity release.
+   */
+  pporUseableEquityAt80Lvr: number;
 }
 
 function buildBlueprintEvents(
@@ -1137,6 +1161,104 @@ function buildBlueprintEvents(
         monthly: ctx.capital * 0.50 / 12,
         months: 12,
       }, 400));
+    }
+
+    // ── Sprint 31A ── Equity release → IP
+    //
+    // Base allocation ("offset_100") parked `ctx.capital` in offset at month 0.
+    // We then emit:
+    //   1. `refinance` at month 0 with `cashOut = pporUseableEquityAt80Lvr`
+    //      capped at a sane deposit ceiling (deposit must be enough for a
+    //      $purchasePrice property at ~25% deposit equivalent).
+    //   2. `property_deposit_boost` at month 1 using cashOut+capital as the
+    //      deposit. Honest: the delta's $ value is the equity we released.
+    if (blueprint.id === "equity_release_ip") {
+      // Cash-out we can responsibly draw from PPOR equity (lender ceiling).
+      // Cap individually at $300k so we don't model a fantasy refinance.
+      const cashOut = Math.min(ctx.pporUseableEquityAt80Lvr, 300_000);
+      // Refi event — records the cashOut so the timeline can render an
+      // equity_release milestone with the real $ amount.
+      out.push(makeDelta(blueprint.id, "refi", "refinance", ctx.start, {
+        targetPropertyId: "ppor",
+        newRate: ctx.mortgageRatePct / 100,        // unchanged rate — pure cash-out
+        newTermYears: 30,
+        cashOut,
+      }, 500));
+      // IP purchase one month after the refi (typical settlement gap).
+      const totalDeposit = cashOut + ctx.capital;
+      const purchasePrice = totalDeposit * 4;     // 25% deposit equivalent
+      const weeklyRent = Math.round((purchasePrice * 0.045) / 52);
+      const ipMonth = addMonths(ctx.start, 1);
+      out.push(makeDelta(blueprint.id, "ipfromequity", "property_deposit_boost", ipMonth, {
+        extraDeposit: totalDeposit,
+        purchasePrice,
+        weeklyRent,
+        rate: ctx.mortgageRatePct,
+        loanTermYears: 30,
+        vacancyRate: 0.04,
+        managementFee: 0.08,
+      }, 600));
+    }
+
+    // ── Sprint 31A ── Refinance-only (rate + term improvement)
+    //
+    // Emits a single `refinance` delta at month 0 with no cash-out. New rate
+    // is conservatively modelled as 0.50% below current (a typical
+    // refi-shopping outcome on a competitive PPOR loan; we do NOT invent
+    // numbers — this is a documented rate-improvement assumption).
+    if (blueprint.id === "refi_rate_save") {
+      const newRateDecimal = Math.max(0.025, (ctx.mortgageRatePct / 100) - 0.005);
+      out.push(makeDelta(blueprint.id, "refi", "refinance", ctx.start, {
+        targetPropertyId: "ppor",
+        newRate: newRateDecimal,
+        newTermYears: 30,
+        cashOut: 0,
+      }, 500));
+    }
+
+    // ── Sprint 31A ── Multi-IP ladder (IP1 → equity release → IP2)
+    //
+    // Base allocation ("property_deposit_100") already emitted IP1 at
+    // month 0 using `ctx.capital` as the deposit. We then add:
+    //   2. `refinance` at month 24 with cashOut derived from accumulated
+    //      PPOR equity (today's useable equity + 24mo of capital growth).
+    //   3. `property_deposit_boost` at month 30 (6mo lender wait) using
+    //      the cashOut as deposit for IP2.
+    //
+    // The 24mo capital-growth estimate uses the base-plan property growth
+    // assumption (~6%/yr). This stays inside the engine's own assumption
+    // set — no new growth math invented here.
+    if (blueprint.id === "multi_ip_ladder") {
+      // Year-2 PPOR value at base-plan growth (6%/yr default).
+      const yearsTo24mo = 2;
+      const propertyGrowthAnnual = 0.06;
+      const pporValue24mo = ctx.pporValue * Math.pow(1 + propertyGrowthAnnual, yearsTo24mo);
+      // Mortgage amortises slightly — conservative estimate, treat as
+      // unchanged (over-estimates LVR — fine, makes us more conservative).
+      const useableAt24mo = Math.max(0, 0.80 * pporValue24mo - ctx.pporMortgageBalance);
+      const cashOut2 = Math.min(useableAt24mo, 300_000);
+
+      out.push(makeDelta(blueprint.id, "refi24", "refinance", addMonths(ctx.start, 24), {
+        targetPropertyId: "ppor",
+        newRate: ctx.mortgageRatePct / 100,
+        newTermYears: 30,
+        cashOut: cashOut2,
+      }, 500));
+
+      // IP2 at month 30 (6mo settlement / borrower-capacity refresh window).
+      if (cashOut2 > 50_000) {
+        const purchasePrice2 = cashOut2 * 4;
+        const weeklyRent2 = Math.round((purchasePrice2 * 0.045) / 52);
+        out.push(makeDelta(blueprint.id, "ip2", "property_deposit_boost", addMonths(ctx.start, 30), {
+          extraDeposit: cashOut2,
+          purchasePrice: purchasePrice2,
+          weeklyRent: weeklyRent2,
+          rate: ctx.mortgageRatePct,
+          loanTermYears: 30,
+          vacancyRate: 0.04,
+          managementFee: 0.08,
+        }, 600));
+      }
     }
   }
 
@@ -1347,6 +1469,11 @@ function buildScoreInputs(
   },
   baseResult: ExtendedScenarioResult,
   horizonMonths: number,
+  // Sprint 30B Step 4 fix — use the user's real monthly expenses on BOTH
+  // sides of the fireAcceleration comparison instead of (a) candidate-side
+  // "12 × surplus" (which mis-uses surplus as expenses) and (b) a hard-coded
+  // $80,000 base. Threaded from ctx.monthlyExpenses at the caller.
+  monthlyExpenses: number,
 ): ScoreInputs {
   // Survival
   const survival = survivalProbability({
@@ -1377,22 +1504,28 @@ function buildScoreInputs(
     sequenceRisk: seq,
   });
 
-  // FIRE acceleration: improvement in fire coverage at horizon, expressed in years pulled in
+  // FIRE acceleration: improvement in fire coverage at horizon, expressed in years pulled in.
+  //
+  // Sprint 30B Step 4 fix:
+  //   Previously the candidate side used `12 × (reconciledSurplus + dashboardSurplus)` (~$375k/yr
+  //   on the demo profile) and the base side used a hard-coded $80,000/yr. That mismatch made every
+  //   candidate look ~12 years worse than base, pinning the normaliser at 0 for every row.
+  //   Both sides now use the user's actual annual expenses (ctx.monthlyExpenses × 12), so the axis
+  //   measures genuine coverage-ratio improvement on a like-for-like basis.
+  const annualExpenses = Math.max(1, monthlyExpenses * 12);
   const candidateFire = fireCoverage({
     investedLiquid: finalP50 * 0.50,  // approximation: half terminal NW assumed liquid
     propertyEquity: finalP50 * 0.30,
     netRentalIncome: 0,
     swr: 0.04,
-    annualExpenses: result.dashboardMonthlySurplus > 0
-      ? 12 * Math.max(1, (result.reconciledMonthlySurplus + result.dashboardMonthlySurplus))
-      : 80_000,
+    annualExpenses,
   });
   const baseFire = fireCoverage({
     investedLiquid: (baseResult.netWorthFan[baseResult.netWorthFan.length - 1]?.p50 ?? initial) * 0.50,
     propertyEquity: (baseResult.netWorthFan[baseResult.netWorthFan.length - 1]?.p50 ?? initial) * 0.30,
     netRentalIncome: 0,
     swr: 0.04,
-    annualExpenses: 80_000,
+    annualExpenses,
   });
   const fireAccel = (candidateFire - baseFire) * 5;  // each 0.1 of coverage gap ≈ 0.5y
 
@@ -1554,6 +1687,17 @@ function deriveCtx(input: QuickDecisionInput): DerivedContext {
   const monthlyExpenses = derived.ttmExpenseLedger / 12
     + (derived.expensesIncludeDebt ? 0 : derived.monthlyDebtService);
 
+  // ── Sprint 31A — read PPOR market value + mortgage straight from the snapshot.
+  // The base-plan derivation already separated these so we can use them for
+  // equity-release / refinance trigger logic.
+  const snap = (input.dashboardInputs as unknown as { snapshot?: { ppor?: number; mortgage?: number } })?.snapshot;
+  const pporValue = Math.max(0, Number(snap?.ppor ?? 0));
+  const pporMortgageBalance = Math.max(0, Number(snap?.mortgage ?? 0));
+  const pporEquity = Math.max(0, pporValue - pporMortgageBalance);
+  const pporLvr = pporValue > 0 ? Math.min(1, pporMortgageBalance / pporValue) : 0;
+  // Standard cash-out ceiling: 80% LVR refinance.
+  const pporUseableEquityAt80Lvr = Math.max(0, 0.80 * pporValue - pporMortgageBalance);
+
   return {
     start,
     capital: input.question.capital ?? 50_000,
@@ -1565,6 +1709,11 @@ function deriveCtx(input: QuickDecisionInput): DerivedContext {
     ttmIncomeAnnual: derived.ttmIncome,
     totalLvrToday: lvr,
     illiquidShareToday: illiqShare,
+    pporValue,
+    pporMortgageBalance,
+    pporEquity,
+    pporLvr,
+    pporUseableEquityAt80Lvr,
   };
 }
 
@@ -2099,7 +2248,7 @@ export async function generateQuickDecisionCandidates(
       isHighRisk = true;
     }
 
-    const scoreInputs = buildScoreInputs(result, safety.bands, baseResult, horizonMonths);
+    const scoreInputs = buildScoreInputs(result, safety.bands, baseResult, horizonMonths, ctx.monthlyExpenses);
     const score = compositeScore(scoreInputs, profileWeights);
     const traceAssumptions: BasePlanAssumptions = {
       inflation: 0.03, incomeGrowth: 0.035, expenseGrowth: 0.03,

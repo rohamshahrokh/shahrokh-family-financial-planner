@@ -1,0 +1,65 @@
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Sprint 30C — Year-by-Year Roadmap Probe
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  fireNumber (derived)     = $2,700,000
+  profile.fire.swrPct      = 4
+  profile.fire.targetPassiveAnnual = $108,000
+  profile.fire.currentAge  = 38
+  profile.fire.targetFireAge = 45
+
+  Running runGoalLabPlan() (publishToAdapter=false, 200 sims)…
+  Done in 27052 ms — 7 ranked scenarios.
+
+  Winner blueprint = (none) (template lower-target-or-extend)
+  Winner deltas count = 1
+  netWorthFan length = 300 months
+  startMonth = 2026-05
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Raw winner deltas
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2026-05  etf_dca                      {"monthly":2083.3333333333335,"months":24}
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  selectYearByYearRoadmap output
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  ━━━ 2026 
+      EOY NW = $866,019   Passive/mo = $2,887   FIRE = 32.1%
+      • [investment     ] Start ETF dollar-cost averaging
+         reason: Recurring ETF contribution averages entry price and steadily compounds passive-income capacity.
+
+  ━━━ 2027 
+      EOY NW = $1,056,979   Passive/mo = $3,523   FIRE = 39.1%
+      (no engine-modelled milestones — background growth only)
+
+  ━━━ 2028 
+      EOY NW = $1,264,734   Passive/mo = $4,216   FIRE = 46.8%
+      (no engine-modelled milestones — background growth only)
+
+  ━━━ 2029 
+      EOY NW = $1,502,252   Passive/mo = $5,008   FIRE = 55.6%
+      (no engine-modelled milestones — background growth only)
+
+  ━━━ 2030 
+      EOY NW = $1,713,265   Passive/mo = $5,711   FIRE = 63.5%
+      (no engine-modelled milestones — background growth only)
+
+  ━━━ 2031 
+      EOY NW = $1,962,566   Passive/mo = $6,542   FIRE = 72.7%
+      (no engine-modelled milestones — background growth only)
+
+  ━━━ 2032 
+      EOY NW = $2,238,830   Passive/mo = $7,463   FIRE = 82.9%
+      (no engine-modelled milestones — background growth only)
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Coverage check
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Years rendered:           7 / 7
+  Years with milestones:    1
+  Years with EOY NW value:  7
+  FIRE-crossing years:      0
+  Milestones by category:
+    investment       1

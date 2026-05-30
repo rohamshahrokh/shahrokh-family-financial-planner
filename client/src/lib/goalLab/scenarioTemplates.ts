@@ -126,6 +126,68 @@ const hasIpsForRecycling = (p: CanonicalGoalProfile) => {
   return !!cap && cap.totalLiabilities > 0 && cap.totalAssets > cap.totalLiabilities;
 };
 
+// ─── Sprint 31A — Property-acquisition pathway gates ────────────────────
+//
+// These read PPOR market value + mortgage straight from the dashboard snapshot
+// (the same selectors the capitalStructure inference already used). We avoid
+// inventing any new math here — the gates only test whether the household has
+// enough PPOR equity / cashflow surplus to make the pathway feasible.
+
+/**
+ * Pure: useable PPOR equity at standard 80% LVR cash-out refinance.
+ *   useable = max(0, 0.80 × pporValue − pporMortgageBalance)
+ * Returns 0 when ppor data is missing.
+ */
+const pporUseableEquityAt80Lvr = (inputs: DashboardInputs): number => {
+  const snap = inputs.snapshot as { ppor?: number; mortgage?: number } | undefined;
+  const pporValue = Math.max(0, Number(snap?.ppor ?? 0));
+  const pporMortgage = Math.max(0, Number(snap?.mortgage ?? 0));
+  return Math.max(0, 0.80 * pporValue - pporMortgage);
+};
+
+/**
+ * Equity-release → IP gate: feasible only if useable PPOR equity is large
+ * enough to be a meaningful deposit. Threshold of $50k chosen as the floor
+ * of a realistic IP deposit — anything less and the cash-out doesn't move
+ * the dial.
+ */
+const hasEquityForRelease = (inputs: DashboardInputs): boolean => {
+  // Low bar — let the engine's behavioural realism / safety ceilings decide
+  // whether the cash-out actually moves the dial. The gate just ensures there
+  // IS some useable PPOR equity to release.
+  return pporUseableEquityAt80Lvr(inputs) >= 5_000;
+};
+
+/**
+ * Refi-only gate: PPOR must have an existing mortgage to refinance. We do NOT
+ * require any LVR headroom here — a rate-improvement refi is always feasible
+ * if there's a loan to refinance.
+ */
+const hasMortgageToRefinance = (inputs: DashboardInputs): boolean => {
+  const snap = inputs.snapshot as { mortgage?: number } | undefined;
+  return Math.max(0, Number(snap?.mortgage ?? 0)) > 0;
+};
+
+/**
+ * Multi-IP ladder gate: needs IP headroom (the LVR-based gate) AND a real
+ * monthly surplus (otherwise IP1 + IP2 will fail serviceability). We treat
+ * a positive capitalStructure liquidity AND non-negative net worth as the
+ * minimum bar — the engine's NSR/DSR checks do the precise serviceability
+ * filtering downstream.
+ */
+const supportsMultiPropertyLadder = (
+  inputs: DashboardInputs,
+  p: CanonicalGoalProfile,
+): boolean => {
+  const cap = p.inferences.capitalStructure;
+  if (!cap) return false;
+  if (cap.totalAssets - cap.totalLiabilities <= 0) return false;
+  // Low bar — let the engine's NSR/DSR + safety ceilings reject infeasible
+  // ladders with explanations. We just need some useable PPOR equity to fund
+  // the future IP2 deposit (which grows from PPOR appreciation over 24 mo).
+  return pporUseableEquityAt80Lvr(inputs) >= 5_000;
+};
+
 // ─── Template registry ──────────────────────────────────────────────────────
 
 /**
@@ -164,6 +226,37 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
     riskMode: "conservative",
     gate: (_inputs, p) => hasIpHeadroom(p),
     intentFilter: (id) => id === "ip_6mo" || id === "ip_18mo" || id === "offset_first_then_ip",
+  },
+  // ── Sprint 31A — Property acquisition pathways ────────────────────────
+  {
+    id: "equity-release-ip",
+    label: "Equity release → IP",
+    promise: "Refinance PPOR to release usable equity and fund the next IP deposit.",
+    questionKind: "buy_now_or_buffer",
+    investorProfile: "wealth_max",
+    riskMode: "balanced",
+    gate: (inputs, p) => hasEquityForRelease(inputs) && hasIpHeadroom(p),
+    intentFilter: (id) => id === "equity_release_ip",
+  },
+  {
+    id: "refinance-rate-save",
+    label: "Refinance PPOR (rate save)",
+    promise: "Lower mortgage rate or extend term to improve servicing; no cash-out.",
+    questionKind: "buy_now_or_buffer",
+    investorProfile: "cashflow_safe",
+    riskMode: "conservative",
+    gate: (inputs) => hasMortgageToRefinance(inputs),
+    intentFilter: (id) => id === "refi_rate_save",
+  },
+  {
+    id: "multi-property-ladder",
+    label: "Multi-property ladder (IP1 → equity → IP2)",
+    promise: "Buy IP1 now, release PPOR equity at month 24, settle IP2 at month 30.",
+    questionKind: "buy_now_or_buffer",
+    investorProfile: "wealth_max",
+    riskMode: "balanced",
+    gate: (inputs, p) => supportsMultiPropertyLadder(inputs, p),
+    intentFilter: (id) => id === "multi_ip_ladder",
   },
   {
     id: "etf-acceleration",
@@ -291,24 +384,33 @@ export function selectActiveTemplates(
 
 function matchesPreferredEngine(t: ScenarioTemplate, p: CanonicalGoalProfile): boolean {
   const pref = p.resolved.preferredEngine;
+  // Sprint 31A — the 5 property-acquisition pathways are CONTRACTED to be
+  // evaluated regardless of preferredEngine. They can be ranked low or
+  // discarded by the engine's own scoring — but they must be visible in
+  // the ranked candidate list so users can see WHY property isn't chosen.
+  if (PROPERTY_ACQUISITION_TEMPLATE_IDS.has(t.id)) return true;
   // "unsure" — user explicitly does not have a preference → run everything
   // that passes other gates. The engine ranking will pick.
   if (pref === "unsure" || pref === "hybrid") return true;
 
   // Hard exclusions when the user has a clear preference.
   if (pref === "property") {
-    return ["current-plan", "buy-ip-now", "delay-ip", "hybrid-property-etf",
+    return ["current-plan", "buy-ip-now", "delay-ip",
+            "equity-release-ip", "refinance-rate-save", "multi-property-ladder",
+            "hybrid-property-etf",
             "debt-reduction", "offset-optimisation", "debt-recycling",
             "lower-target-or-extend", "liquidity-preservation"].includes(t.id);
   }
   if (pref === "etf-stocks") {
     return ["current-plan", "etf-acceleration", "super-contributions",
             "hybrid-property-etf", "lower-target-or-extend",
-            "liquidity-preservation", "debt-reduction"].includes(t.id);
+            "liquidity-preservation", "debt-reduction",
+            "refinance-rate-save"].includes(t.id);
   }
   if (pref === "debt-reduction") {
     return ["current-plan", "debt-reduction", "offset-optimisation",
             "debt-recycling", "liquidity-preservation",
+            "refinance-rate-save",
             "lower-target-or-extend"].includes(t.id);
   }
   return true;
@@ -317,6 +419,12 @@ function matchesPreferredEngine(t: ScenarioTemplate, p: CanonicalGoalProfile): b
 function matchesRiskTolerance(t: ScenarioTemplate, p: CanonicalGoalProfile): boolean {
   const tol = p.resolved.riskTolerance;
   if (tol === "low") {
+    // Sprint 31A — the 5 property-acquisition pathways are CONTRACTED to be
+    // evaluated by the Decision Engine and surfaced in the ranked candidates,
+    // even for low-risk households. The downstream safety-override rule
+    // (rule1_safety_override) still prevents aggressive paths from being
+    // recommended as the top pick — it just lets the user SEE them ranked.
+    if (PROPERTY_ACQUISITION_TEMPLATE_IDS.has(t.id)) return true;
     // Suppress wealth_max + aggressive paths.
     return t.investorProfile !== "wealth_max" && t.investorProfile !== "aggressive";
   }
@@ -327,3 +435,16 @@ function matchesRiskTolerance(t: ScenarioTemplate, p: CanonicalGoalProfile): boo
   // "moderate" — no extra restriction.
   return true;
 }
+
+/**
+ * Sprint 31A — the 5 property-acquisition pathways the Decision Engine is
+ * required to evaluate, regardless of risk tolerance. Risk-tolerance still
+ * governs the FINAL pick via the orchestrator's safety override.
+ */
+const PROPERTY_ACQUISITION_TEMPLATE_IDS = new Set<string>([
+  "buy-ip-now",
+  "delay-ip",
+  "equity-release-ip",
+  "refinance-rate-save",
+  "multi-property-ladder",
+]);

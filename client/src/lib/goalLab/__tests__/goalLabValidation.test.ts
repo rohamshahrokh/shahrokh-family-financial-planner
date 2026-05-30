@@ -487,11 +487,22 @@ console.log("── Bonus: override resolution determinism ──");
   );
 
   // With riskTolerance=low, selectActiveTemplates must suppress wealth_max +
-  // aggressive templates. "buy-ip-now" uses wealth_max → suppressed.
+  // aggressive templates — EXCEPT the 5 Sprint 31A property-acquisition
+  // pathways, which are contracted to surface in the ranked candidates so
+  // users can see them (the downstream safety-override rule prevents them
+  // from being recommended as the top pick).
   const templates = selectActiveTemplates(feasibleLedger(), withOverrides);
+  // "buy-ip-now" is wealth_max but is a Sprint 31A property-acquisition
+  // pathway — it MUST still appear under low risk tolerance.
   check(
-    "riskTolerance=low suppresses wealth_max template 'buy-ip-now'",
-    !templates.some((t) => t.id === "buy-ip-now"),
+    "Sprint 31A: riskTolerance=low keeps property-acquisition pathway 'buy-ip-now' visible",
+    templates.some((t) => t.id === "buy-ip-now"),
+  );
+  // "debt-recycling" is wealth_max and NOT a Sprint 31A pathway — it must
+  // still be suppressed under low risk tolerance.
+  check(
+    "riskTolerance=low suppresses wealth_max non-pathway template 'debt-recycling'",
+    !templates.some((t) => t.id === "debt-recycling"),
   );
 
   // Determinism: same inputs → same resolved values across two calls.
