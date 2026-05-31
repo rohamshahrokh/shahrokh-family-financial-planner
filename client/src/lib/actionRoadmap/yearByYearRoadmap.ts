@@ -207,18 +207,69 @@ function mapDeltaToMilestone(d: ScenarioDelta): YearMilestone | null {
       };
     }
     case "property_deposit_boost": {
-      const amount = pickNumber(params, ["amount", "boost", "topUp"]);
+      // FWL-079: the candidate generator emits `property_deposit_boost` both
+      // as a PRIMARY property purchase (single-delta strategies like
+      // `delay-ip`, `buy-ip-now`, `hybrid-property-etf`) AND as a genuine
+      // deposit top-up inside multi-IP-ladder strategies. The delta id
+      // suffix tells us which case we're in:
+      //   _ip            primary purchase
+      //   _ipfollow      purchase after offset-buffer phase
+      //   _ipfromequity  purchase funded by equity-release refi
+      //   _ip2           second IP in multi-IP ladder (still a purchase)
+      //   <other>        genuine deposit top-up (reduce LVR on existing loan)
+      // The full $ figure surfaced to the user must be the purchasePrice (the
+      // size of the acquisition), not the deposit alone, when this is a
+      // purchase emission. delta.params.purchasePrice is always populated by
+      // the generator (see candidateGenerator.ts lines 1080, 1135, 1189, 1248).
+      const id = d.id ?? "";
+      const role: "primary" | "sequential" | "equity-funded" | "secondary" | "topup" =
+        id.endsWith("_ip2")          ? "secondary"
+        : id.endsWith("_ipfromequity") ? "equity-funded"
+        : id.endsWith("_ipfollow")     ? "sequential"
+        : id.endsWith("_ip")           ? "primary"
+        : "topup";
+
+      const price = pickNumber(params, ["purchasePrice"]);
+      const deposit = pickNumber(params, ["extraDeposit", "deposit"]);
+      const topUpAmt = pickNumber(params, ["amount", "boost", "topUp"]);
+
+      if (role !== "topup") {
+        const roleSuffix =
+          role === "sequential"    ? " (after offset buffer)"
+          : role === "equity-funded" ? " (equity-funded)"
+          : role === "secondary"   ? " — second IP (equity-funded)"
+          : "";
+        const baseLabel = role === "secondary"
+          ? `Buy second investment property${roleSuffix === " — second IP (equity-funded)" ? " (equity-funded)" : ""}`
+          : `Buy investment property${roleSuffix}`;
+        return {
+          id: d.id,
+          category: "acquisition",
+          label: price != null ? `${baseLabel} — ${fmtMoney(price)}` : baseLabel,
+          amount: price,
+          sourceDeltaId: d.id,
+          reason: price != null && deposit != null
+            ? `Engine schedules this acquisition at ${fmtMoney(price)}; ${fmtMoney(deposit)} deposit drawn from accumulated cash/equity to leverage portfolio growth.`
+            : price != null
+            ? `Engine schedules this ${fmtMoney(price)} acquisition as part of the recommended strategy — adds leveraged exposure to property growth.`
+            : "Engine schedules this acquisition as part of the recommended strategy — adds leveraged exposure to property growth.",
+          monthOfYear,
+        };
+      }
+
+      // Genuine deposit-top-up case (no purchase emitted by this delta).
+      const topUp = topUpAmt ?? deposit;
       return {
         id: d.id,
-        category: "acquisition",
-        label: amount != null
-          ? `Deposit boost — ${fmtMoney(amount)}`
-          : "Deposit boost",
-        amount,
+        category: "debt",
+        label: topUp != null
+          ? `Deposit top-up — ${fmtMoney(topUp)}`
+          : "Deposit top-up",
+        amount: topUp,
         sourceDeltaId: d.id,
-        reason: amount != null
-          ? `${fmtMoney(amount)} additional deposit reduces LVR on next acquisition, lowering interest cost over the life of the loan.`
-          : "Additional deposit reduces LVR on next acquisition, lowering interest cost over the life of the loan.",
+        reason: topUp != null
+          ? `${fmtMoney(topUp)} additional deposit reduces LVR on the next acquisition, lowering interest cost over the life of the loan.`
+          : "Additional deposit reduces LVR on the next acquisition, lowering interest cost over the life of the loan.",
         monthOfYear,
       };
     }

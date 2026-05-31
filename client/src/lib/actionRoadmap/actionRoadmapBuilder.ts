@@ -102,8 +102,8 @@ export function buildActionRoadmap(
       id: delta.id || delta.idempotencyKey || `${delta.deltaType}-${delta.activationMonth}`,
       year: yearFromMonthKey(delta.activationMonth),
       month: delta.activationMonth,
-      label: labelForDelta(delta),
-      effect: effectForDelta(delta),
+      label: labelForDelta(delta, scenario.templateId, todayKey),
+      effect: effectForDelta(delta, scenario.templateId),
       status,
       sourceTag: `scenarioDelta.${delta.deltaType}`,
       sourceTemplateId: milestoneTemplateId,
@@ -170,12 +170,27 @@ function yearFromMonthKey(mk: MonthKey): number {
   return Number.isFinite(y) ? y : 0;
 }
 
-/** Plain-English label for a delta — pure mapping over `deltaType`. */
-function labelForDelta(delta: ScenarioDelta): string {
+/**
+ * Plain-English label for a delta.
+ *
+ * FWL-079: `property_deposit_boost` deltas are emitted by the candidate
+ * generator both as PRIMARY property purchases (the deposit-boost translator
+ * doubles as the buy-property emitter — see `lib/scenarioV2/deltas.ts:29-31`)
+ * AND as genuine deposit top-ups inside multi-IP-ladder strategies. The
+ * literal "Top up property deposit" label only makes sense for the genuine
+ * top-up case. For primary purchases the label must describe what the user
+ * actually does: acquire an investment property, optionally with the
+ * activation-month wait baked in for delayed-purchase templates.
+ */
+function labelForDelta(
+  delta: ScenarioDelta,
+  recommendedTemplateId?: string,
+  todayKey?: string,
+): string {
   switch (delta.deltaType) {
     case "buy_property":              return "Acquire investment property";
     case "sell_property":             return "Sell property";
-    case "property_deposit_boost":    return "Top up property deposit";
+    case "property_deposit_boost":    return labelForPropertyDepositBoost(delta, recommendedTemplateId, todayKey);
     case "etf_lump_sum":              return "ETF lump-sum investment";
     case "etf_dca":                   return "Start ETF dollar-cost averaging";
     case "offset_deposit":            return "Deposit to offset account";
@@ -194,8 +209,73 @@ function labelForDelta(delta: ScenarioDelta): string {
   }
 }
 
+/**
+ * Classify a `property_deposit_boost` delta by the suffix the candidate
+ * generator encodes in the delta id (`${candidateId}_${suffix}`):
+ *
+ *   • `_ip`            primary IP purchase (`buy-ip-now`, `delay-ip`,
+ *                      `hybrid-property-etf`, `multi-property-ladder` first IP)
+ *   • `_ipfollow`      IP after an offset-buffer phase (`offset_then_ip`)
+ *   • `_ipfromequity`  IP funded by an equity-release refi (`equity_release_ip`)
+ *   • `_ip2`           second IP in `multi_ip_ladder`
+ *
+ * Anything else is treated as a genuine deposit top-up and keeps the original
+ * literal label.
+ */
+function propertyDepositBoostRole(
+  delta: ScenarioDelta,
+): "primary" | "sequential" | "equity-funded" | "secondary" | "topup" {
+  const id = delta.id ?? "";
+  if (id.endsWith("_ip2"))           return "secondary";
+  if (id.endsWith("_ipfromequity"))  return "equity-funded";
+  if (id.endsWith("_ipfollow"))      return "sequential";
+  if (id.endsWith("_ip"))            return "primary";
+  return "topup";
+}
+
+function labelForPropertyDepositBoost(
+  delta: ScenarioDelta,
+  recommendedTemplateId?: string,
+  todayKey?: string,
+): string {
+  const role = propertyDepositBoostRole(delta);
+  // For primary purchases on the recommended path, compute the activation-month
+  // gap so the user sees "Acquire investment property in 6 months" rather than
+  // a flat label that loses the timing axis of the chosen template.
+  if (role === "primary") {
+    const monthsAhead = monthsBetweenKeys(todayKey, delta.activationMonth);
+    if (monthsAhead != null && monthsAhead >= 1) {
+      const phrase = monthsAhead === 1
+        ? "in 1 month"
+        : monthsAhead < 12
+        ? `in ${monthsAhead} months`
+        : monthsAhead === 12
+        ? "in 12 months"
+        : `in ${Math.round(monthsAhead / 12 * 10) / 10} years`;
+      return `Acquire investment property ${phrase}`;
+    }
+    return "Acquire investment property";
+  }
+  if (role === "sequential")     return "Acquire investment property (after offset buffer)";
+  if (role === "equity-funded")  return "Acquire investment property (equity-funded)";
+  if (role === "secondary")      return "Acquire second investment property (equity-funded)";
+  // Genuine deposit-top-up case — keep the original literal so the multi-IP
+  // ladder's mid-phase top-ups still read truthfully.
+  void recommendedTemplateId;
+  return "Top up property deposit";
+}
+
+function monthsBetweenKeys(a: string | undefined, b: string | undefined): number | null {
+  if (!a || !b) return null;
+  const pa = a.split("-").map((n) => parseInt(n, 10));
+  const pb = b.split("-").map((n) => parseInt(n, 10));
+  if (pa.length < 2 || pb.length < 2) return null;
+  if (!pa.every(Number.isFinite) || !pb.every(Number.isFinite)) return null;
+  return (pb[0]! - pa[0]!) * 12 + (pb[1]! - pa[1]!);
+}
+
 /** Short effect blurb — pulls a number from params iff the engine provided it. */
-function effectForDelta(delta: ScenarioDelta): string {
+function effectForDelta(delta: ScenarioDelta, _recommendedTemplateId?: string): string {
   const p = delta.params ?? {};
   const amount = pickNumber(p, ["amount", "deposit", "lumpSum", "monthlyAmount", "purchasePrice"]);
   switch (delta.deltaType) {
@@ -203,6 +283,25 @@ function effectForDelta(delta: ScenarioDelta): string {
       return amount != null
         ? `Engine-modelled purchase at $${fmt(amount)}.`
         : "Engine-modelled property acquisition.";
+    case "property_deposit_boost": {
+      // FWL-079: when the deposit-boost stands in for a primary purchase, the
+      // user-facing effect must describe the purchase, not the deposit alone.
+      const role = propertyDepositBoostRole(delta);
+      const price = pickNumber(p, ["purchasePrice"]);
+      const deposit = pickNumber(p, ["extraDeposit", "deposit"]);
+      if (role === "primary" || role === "sequential" || role === "equity-funded" || role === "secondary") {
+        if (price != null && deposit != null) {
+          return `Engine-modelled purchase at $${fmt(price)} with $${fmt(deposit)} deposit.`;
+        }
+        if (price != null) return `Engine-modelled purchase at $${fmt(price)}.`;
+        if (deposit != null) return `Engine-modelled purchase using $${fmt(deposit)} deposit.`;
+        return "Engine-modelled property acquisition.";
+      }
+      // Genuine top-up case — keep the deposit-centric phrasing.
+      return deposit != null
+        ? `Engine-modelled additional deposit of $${fmt(deposit)}.`
+        : "Engine-modelled deposit top-up.";
+    }
     case "etf_lump_sum":
       return amount != null
         ? `Engine-modelled lump-sum of $${fmt(amount)}.`

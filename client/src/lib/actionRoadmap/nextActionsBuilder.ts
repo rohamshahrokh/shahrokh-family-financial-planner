@@ -50,10 +50,22 @@ interface ActionTemplate {
 // to 1–3 verb-led prep actions. Add entries here as new templates land in
 // the engine; never invent generic actions.
 const ACTION_TEMPLATES: ActionTemplate[] = [
-  { matcher: /buy.*property|acquire.*property/i, actions: [
+  // FWL-079 — the action-roadmap builder now produces labels like
+  // "Acquire investment property in 6 months" / "Acquire investment property
+  // (equity-funded)" / "Acquire second investment property (equity-funded)".
+  // The broader regex still catches the legacy "Buy property" wording from
+  // the Wealth Timeline Gantt path so both surfaces stay in sync.
+  { matcher: /\b(buy|acquire)\b.*property/i, actions: [
       "Speak with mortgage broker",
       "Validate borrowing capacity",
       "Build deposit structure",
+  ]},
+  // Genuine deposit top-up (only emitted for the rare deposit-only case after
+  // a multi-IP-ladder mid-phase). We keep a dedicated entry so it surfaces a
+  // verb-led prep step rather than the generic fallback.
+  { matcher: /deposit top-?up/i, actions: [
+      "Confirm offset / savings transfer",
+      "Update broker on additional deposit",
   ]},
   { matcher: /sell.*property/i, actions: [
       "Engage a sales agent",
