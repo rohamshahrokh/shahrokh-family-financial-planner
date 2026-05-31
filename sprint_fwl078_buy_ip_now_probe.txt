@@ -1,0 +1,99 @@
+════════════════════════════════════════════════════════════════════════════════════════════════
+  FWL-078 Phase A1 — Buy-IP-Now Winner Diagnostic Probe
+════════════════════════════════════════════════════════════════════════════════════════════════
+  Household:   shahrokh-family-main
+  Generated:   2026-05-30T13:39:24.551Z
+  Branch:      main
+
+Running runGoalLabPlan (this takes ~30s for 200 simulations × templates) …
+Done.
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+  1. TEMPLATE-LEVEL: was buy-ip-now evaluated by the orchestrator?
+────────────────────────────────────────────────────────────────────────────────────────────────
+  ✓ buy-ip-now appears in rankedScenarios.
+    templateId:                       "buy-ip-now"
+    winner.id (post-intent-filter):   "defer_etf_super_50"
+    winnerSelectedByIntentFilter:     false
+    engineTopWinner.id (pre-filter):  "defer_etf_super_50"
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+  2. RANKED[] — every blueprint that passed both stages of generateQuickDecisionCandidates
+────────────────────────────────────────────────────────────────────────────────────────────────
+  Total in ranked[]: 8
+     1. defer_etf_super_50           score= 70.60  isHighRisk=false  events=2
+     2. defer_50_50_etf_off          score= 68.65  isHighRisk=false  events=2
+     3. offset_first_then_ip         score= 67.18  isHighRisk=false  events=1
+     4. defer_offset_only            score= 66.90  isHighRisk=false  events=1
+     5. defer_etf_super_crypto       score= 66.78  isHighRisk=false  events=3
+     6. defer_etf_dca                score= 66.76  isHighRisk=false  events=1
+     7. refi_rate_save               score= 66.51  isHighRisk=false  events=2
+     8. multi_ip_ladder              score= 51.44  isHighRisk=false  events=3
+
+  ✗ ip_now is NOT in ranked[] — it was discarded somewhere upstream.
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+  3. DISCARDED[] — every blueprint dropped by Stage 1 or Stage 2
+────────────────────────────────────────────────────────────────────────────────────────────────
+  Total discarded: 4
+
+  Blueprint id              Stage             Reason
+  ────────────────────────  ────────────────  ──────────────────────────────────────
+  ip_now                    safety_ceiling    DSR critical
+  ip_6mo                    safety_ceiling    DSR critical
+  ip_18mo                   safety_ceiling    DSR critical
+  equity_release_ip         safety_ceiling    DSR critical
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+  4. ip_now DEEP-DIVE — why it was rejected
+────────────────────────────────────────────────────────────────────────────────────────────────
+    id:        ip_now
+    label:     Buy IP now (full deposit)
+    stage:     safety_ceiling     ← "behavioural" = pre-MC; "safety_ceiling" = post-MC
+    severity:  hard_blocker
+    reason:    DSR critical
+    detail:    Median DSR 131.1% sits in critical band (≥55%).
+    override:  {
+                 "possible": false,
+                 "mechanism": "Hard institutional ceiling — DSR ≥55% is unserviceable under APRA buffer; not overridable."
+               }
+    explanation.headline:
+      (none)
+    recovery analysis present:    {"liquidityTroughYear":1,"debtStabilisationYear":2,"refinanceRiskWindow":{"startYear":1,"endYear":5},"recoveryYears":1}…
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+  5. WINNER STATE — what the orchestrator picked for buy-ip-now
+────────────────────────────────────────────────────────────────────────────────────────────────
+  winner.id:                  "defer_etf_super_50"
+  winner.label:               "Defer property: 50/50 ETF/Super"
+  winner.score:               70.60
+  winner.events.length:       2
+     1. [2026-05] etf_lump_sum           amount=$25,000
+     2. [2026-05] etf_lump_sum           amount=$25,000 target=super
+
+════════════════════════════════════════════════════════════════════════════════════════════════
+  DIAGNOSIS HEADLINE
+════════════════════════════════════════════════════════════════════════════════════════════════
+  • ip_now was DISCARDED at stage "safety_ceiling".
+  • Reason: DSR critical — Median DSR 131.1% sits in critical band (≥55%).
+  • Fix path: safetyCeilings post-MC check OR tighten the template.gate().
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+  Bonus: every template's intent-filter outcome
+────────────────────────────────────────────────────────────────────────────────────────────────
+  buy-ip-now                 winner=defer_etf_super_50         intentFilterUsed=false  engineTop=defer_etf_super_50
+  equity-release-ip          winner=defer_etf_super_50         intentFilterUsed=false  engineTop=defer_etf_super_50
+  debt-recycling             winner=etf_lump_now               intentFilterUsed=true  engineTop=etf_lump_now
+  lower-target-or-extend     winner=super_now                  intentFilterUsed=true  engineTop=etf_lump_now
+  hybrid-property-etf        winner=etf70_offset30_now         intentFilterUsed=true  engineTop=etf_lump_now
+  offset-optimisation        winner=offset50_etf50             intentFilterUsed=true  engineTop=etf_lump_now
+  current-plan               winner=offset_now                 intentFilterUsed=true  engineTop=super_now
+  debt-reduction             winner=offset_now                 intentFilterUsed=true  engineTop=etf_lump_now
+  liquidity-preservation     winner=offset_now                 intentFilterUsed=true  engineTop=super_now
+  delay-ip                   winner=offset_first_then_ip       intentFilterUsed=true  engineTop=defer_etf_super_50
+  refinance-rate-save        winner=refi_rate_save             intentFilterUsed=true  engineTop=defer_etf_super_50
+  multi-property-ladder      winner=multi_ip_ladder            intentFilterUsed=true  engineTop=defer_etf_super_50
+
+════════════════════════════════════════════════════════════════════════════════════════════════
+  END
+════════════════════════════════════════════════════════════════════════════════════════════════

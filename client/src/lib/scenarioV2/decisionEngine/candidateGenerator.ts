@@ -1083,7 +1083,7 @@ function buildBlueprintEvents(
         extraDeposit: cap,
         purchasePrice,
         weeklyRent,
-        rate: ctx.mortgageRatePct,
+        rate: ctx.mortgageRatePct / 100,   // FWL-078 fix: decimal expected by deltas.ts/tick.ts
         loanTermYears: 30,
         vacancyRate: 0.04,
         managementFee: 0.08,
@@ -1138,7 +1138,7 @@ function buildBlueprintEvents(
         extraDeposit: ctx.capital,
         purchasePrice,
         weeklyRent,
-        rate: ctx.mortgageRatePct,
+        rate: ctx.mortgageRatePct / 100,   // FWL-078 fix: decimal expected by deltas.ts/tick.ts
         loanTermYears: 30,
         vacancyRate: 0.04,
         managementFee: 0.08,
@@ -1193,7 +1193,7 @@ function buildBlueprintEvents(
         extraDeposit: totalDeposit,
         purchasePrice,
         weeklyRent,
-        rate: ctx.mortgageRatePct,
+        rate: ctx.mortgageRatePct / 100,   // FWL-078 fix: decimal expected by deltas.ts/tick.ts
         loanTermYears: 30,
         vacancyRate: 0.04,
         managementFee: 0.08,
@@ -1253,7 +1253,7 @@ function buildBlueprintEvents(
           extraDeposit: cashOut2,
           purchasePrice: purchasePrice2,
           weeklyRent: weeklyRent2,
-          rate: ctx.mortgageRatePct,
+          rate: ctx.mortgageRatePct / 100,   // FWL-078 fix: decimal expected by deltas.ts/tick.ts
           loanTermYears: 30,
           vacancyRate: 0.04,
           managementFee: 0.08,

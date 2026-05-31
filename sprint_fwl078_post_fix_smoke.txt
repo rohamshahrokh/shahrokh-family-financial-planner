@@ -1,0 +1,101 @@
+════════════════════════════════════════════════════════════════════════════════════════════════════
+  FWL-078 PHASE A — POST-FIX PRODUCTION SMOKE
+════════════════════════════════════════════════════════════════════════════════════════════════════
+  Household:  shahrokh-family-main
+  Generated:  2026-05-30T13:51:48.468Z
+  Branch:     fix/fwl078-phase-a-intent-filter-drop  (working tree, pre-commit)
+  Fix under test:  orchestrator.ts — drop scenario when intent blueprints are hard-blocked
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  METRIC 1 — RECOMMENDED TEMPLATE
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  templateId         "debt-recycling"
+  templateLabel      "Debt recycling"
+  promise            "Convert non-deductible debt to deductible via ETF re-borrow."
+  scoreP50           69.09
+  probabilityP50     —
+  rationale          Recommended as primary because risk capacity supports it (high) and the safety signals are clear. “Safest” shows the slower-but-lower-risk alternative.
+
+  All ranked scenarios (10):
+     1. debt-recycling               score= 69.09  winner=etf_lump_now                    [ALIGN✓]
+     2. lower-target-or-extend       score= 68.96  winner=super_now                       [ALIGN✓]
+     3. hybrid-property-etf          score= 68.06  winner=etf70_offset30_now              [ALIGN✓]
+     4. offset-optimisation          score= 67.81  winner=offset50_etf50                  [ALIGN✓]
+     5. current-plan                 score= 67.47  winner=offset_now                      [ALIGN✓]
+     6. debt-reduction               score= 67.47  winner=offset_now                      [ALIGN✓]
+     7. liquidity-preservation       score= 67.47  winner=offset_now                      [ALIGN✓]
+     8. delay-ip                     score= 67.18  winner=offset_first_then_ip            [ALIGN✓]
+     9. refinance-rate-save          score= 66.51  winner=refi_rate_save                  [ALIGN✓]
+    10. multi-property-ladder        score= 51.44  winner=multi_ip_ladder                 [ALIGN✓]
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  METRIC 2 — WINNER CANDIDATE (of recommended template)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  winner.id                              "etf_lump_now"
+  winner.score                           69.09
+  winner P50                             —
+  winnerSelectedByIntentFilter           true
+  recommended.templateId === winner-aligned for intent?   ✓ YES
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  METRIC 3 — WINNER EVENTS (full dump)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total events on winner: 1
+
+  Index  Activation  DeltaType                       Id
+  ─────  ──────────  ──────────────────────────────  ────────────────────────────────────
+   1. [2026-05]  etf_lump_sum                  etf_lump_now_etflump                  amount=$50,000
+
+  Engine events (winner.result.events used by selectEngineEventLanes): 1
+     1. [?]  contribution.etf_lump         id=etf_lump_now_etflump/buy
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  METRIC 4 — ROADMAP ITEM COUNT  (buildActionRoadmap → milestones)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  buildActionRoadmap(recommended, { targetFireAge: 45 }, currentAge=36)
+  → roadmap.milestones.length = 2
+     1. [2026-05]  status=next        ETF lump-sum investment
+     2. [2035-05]  status=fire        Target FIRE at age 45
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  METRIC 5 — TIMELINE ITEM COUNT  (selectYearByYearRoadmap + selectEngineEventLanes)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  selectYearByYearRoadmap(...) → years=7, total milestones inside year-cards=1
+    Year  1  year=2026  milestones=1
+        1. investment        ETF lump sum — $50,000
+    Year  2  year=2027  milestones=0
+    Year  3  year=2028  milestones=0
+    Year  4  year=2029  milestones=0
+    Year  5  year=2030  milestones=0
+    Year  6  year=2031  milestones=0
+    Year  7  year=2032  milestones=0
+
+  selectEngineEventLanes(...) → laneEvents=1  (Gantt rows on Timeline tab)
+     1. lane=exit                
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  METRIC 6 — ACTIONS ITEM COUNT  (buildNextActions → next30 + next90 + next12mo)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  next30Days:    2
+  next90Days:    0
+  next12Months:  0
+  ─ total actions ─ 2
+
+  Detail:
+    [30d] 1. Confirm brokerage account is funded  (due 2026-05)
+    [30d] 2. Review target ETF allocation  (due 2026-05)
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+  PHASE A SUMMARY — 6 acceptance metrics
+════════════════════════════════════════════════════════════════════════════════════════════════════
+  1. Recommended template ........ "debt-recycling"
+  2. Winner candidate ............ "etf_lump_now"   [aligned=true]
+  3. Winner events ............... 1
+  4. Roadmap item count .......... 2
+  5. Timeline item count ......... 7 year-cards (1 embedded milestones) + 1 Gantt lanes
+  6. Actions item count .......... 2  (30d=2, 90d=0, 12m=0)
+
+  Buy-IP-now in ranked? NO ✓ (dropped as expected)
+  Equity-release-IP in ranked? NO ✓ (dropped as expected)
+  All survivors aligned? YES ✓
+════════════════════════════════════════════════════════════════════════════════════════════════════

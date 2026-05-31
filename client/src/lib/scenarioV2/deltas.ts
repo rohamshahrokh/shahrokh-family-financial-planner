@@ -181,7 +181,13 @@ function translateBuyProperty(d: ScenarioDelta): ScenarioEvent[] {
   // Defaults for rental yield, costs
   const yieldPct = num(d.params, "rentYieldPct", 0.045);
   const weeklyRent = num(d.params, "weeklyRent", Math.round((purchasePrice * yieldPct) / 52));
-  const rate = num(d.params, "rate", 0.065);
+  // FWL-078 defensive normaliser: amortisation expects rate as a decimal
+  // (e.g. 0.065 for 6.5%). Any caller that passes the percent form (rate > 1,
+  // e.g. 6.5) would otherwise amortise at hundreds of percent APR. The fix at
+  // candidateGenerator.ts emission sites passes decimal correctly; this guard
+  // protects against regressions and any external caller using percent.
+  const rateRaw = num(d.params, "rate", 0.065);
+  const rate = rateRaw > 1 ? rateRaw / 100 : rateRaw;
   const term = num(d.params, "loanTermYears", 30);
   const vacancy = num(d.params, "vacancyRate", 0.04);
   const mgmt = num(d.params, "managementFee", 0.08);

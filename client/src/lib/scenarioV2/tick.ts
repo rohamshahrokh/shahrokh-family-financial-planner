@@ -496,12 +496,17 @@ function applyEvent(
       const moved = Math.min(outflow, Math.max(0, state.cash));
       state.cash -= moved;
       const purchasePrice = n("purchasePrice", n("marketValue", 0));
+      // FWL-078 defensive normaliser (mirrors deltas.ts translateBuyProperty):
+      // amortisation expects decimal rate. If a caller passes percent (rate > 1)
+      // we coerce to decimal to prevent 650% APR amortisation regressions.
+      const rateRaw = n("rate", 0.065);
+      const rateDecimal = rateRaw > 1 ? rateRaw / 100 : rateRaw;
       const newProp: PropertyState = {
         id: `ip-${state.properties.length + 1}-${e.sourceDeltaId ?? "x"}`,
         marketValue: n("marketValue", purchasePrice),
         loanBalance: n("loanBalance", 0),
-        rate: n("rate", 0.065),
-        monthlyRepayment: amort(n("loanBalance", 0), n("rate", 0.065), n("termYears", 30)),
+        rate: rateDecimal,
+        monthlyRepayment: amort(n("loanBalance", 0), rateDecimal, n("termYears", 30)),
         monthlyRent: weeklyToMonthlyRent(
           n("weeklyRent", 0),
           n("vacancyRate", 0.04),
