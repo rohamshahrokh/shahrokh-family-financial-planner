@@ -2,6 +2,18 @@
 
 A production-ready private wealth dashboard for the Shahrokh family. Built as a premium family office financial planning platform.
 
+Now operating as **Family Wealth Lab (FWL)** — production at https://familywealthlab.net.
+
+## AI Assistant Handover
+
+If you are a new AI coding assistant (Claude Opus / Sonnet, or any other) opening this repo:
+
+- Start with [CLAUDE.md](./CLAUDE.md) at the repo root — single entry point.
+- Then read the handover pack at [docs/ai-handover/](./docs/ai-handover/) in the order defined by [docs/ai-handover/README.md](./docs/ai-handover/README.md).
+- All docs are table-first, under 250 lines, with file-path citations.
+
+Baseline tag: `v0.1.0-docs-baseline` (commit `a272b97`).
+
 ## Features
 
 - **Secure Login** — Username: `Roham` / Password: `YaraJana2025`
