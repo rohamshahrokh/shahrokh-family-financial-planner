@@ -43,6 +43,13 @@ function section(title: string): void {
   console.log(`\n── ${title} ──`);
 }
 
+if (typeof globalThis.location === "undefined") {
+  Object.defineProperty(globalThis, "location", {
+    value: { pathname: "/portfolio-lab", search: "", hash: "" },
+    configurable: true,
+  });
+}
+
 // ─── (a) SourceTag variants ───────────────────────────────────────────────
 
 section("(a) SourceTag renders each variant");
@@ -130,11 +137,11 @@ check(
 check(
   "goal-not-set hero CTA reads 'Set FIRE goal'",
   heroHtml.includes("Set FIRE goal"),
-  heroHtml.slice(heroHtml.indexOf("pl-fire-gap-empty-cta") - 10, heroHtml.indexOf("pl-fire-gap-empty-cta") + 240),
+  heroHtml.slice(heroHtml.indexOf("fire-goal-empty-portfolio-lab-cta") - 10, heroHtml.indexOf("fire-goal-empty-portfolio-lab-cta") + 240),
 );
 check(
   "goal-not-set hero CTA testid present",
-  heroHtml.includes('data-testid="pl-fire-gap-empty-cta"'),
+  heroHtml.includes('data-testid="fire-goal-empty-portfolio-lab-cta"'),
 );
 check(
   "goal-not-set hero attaches a SourceTag(ledger) to the Current NW value",

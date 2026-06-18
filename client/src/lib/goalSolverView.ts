@@ -74,14 +74,12 @@ export function selectFireGapSummary(
   // REMEDIATION B-1: Current NW MUST come from the ledger. The earlier code
   // fell back to `best.netWorthP50` (the target-year forecast median), which
   // produced the smoking-gun bug where displayed Current NW = $3.15M but the
-  // actual ledger NW = $856,500. The gap-row "actual" is also OK to use ONLY
-  // when ledger is unavailable, because that actual was itself sourced from
-  // the ledger upstream; but the forecast fallback is removed entirely.
+  // actual ledger NW = $856,500. Keep this selector strict: if callers do not
+  // thread the canonical ledger through, the UI must show an empty value rather
+  // than infer a "current" number from engine output.
   const currentNetWorth: number | null = finite(ctx.ledgerNetWorth)
     ? (ctx.ledgerNetWorth as number)
-    : finite(nwGap?.actual)
-      ? (nwGap!.actual as number)
-      : null;
+    : null;
 
   const targetNetWorth = finite(targets.targetNetWorth)
     ? (targets.targetNetWorth as number)
