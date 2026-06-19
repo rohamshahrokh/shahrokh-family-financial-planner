@@ -58,6 +58,22 @@ import WealthDecisionCenter from '@/components/WealthDecisionCenter';
 import ProjectionCardListMobile from '@/components/ProjectionCardListMobile';
 import type { CanonicalRiskSurface as CanonicalRiskSurfaceData } from '@/lib/canonicalRiskSurface';
 import type { WealthLayers } from '@/lib/canonicalWealth';
+import { AuditableMetric } from '@/components/auditMode/AuditableMetric';
+import { registerTrace } from '@/lib/auditMode/auditRegistry';
+import {
+  buildNetWorthTrace,
+  buildMonthlySurplusTrace,
+  buildRiskStateTrace,
+  buildFireTimelineTrace,
+  buildWealthLayerTraces,
+  buildProjectionRowTraces,
+  buildRiskAxisTraces,
+  buildFireFragilityTrace,
+} from '@/lib/auditMode/traceFactories';
+import {
+  buildAllFinancialHealthTraces,
+  buildAllForecastHeadlineTraces,
+} from '@/lib/auditMode/engineTraces';
 
 // ─── Public props ────────────────────────────────────────────────────────────
 
@@ -365,7 +381,9 @@ function ExecutiveHeroSnapshot(p: HeroProps) {
             <MetricExplainer metricId="net-worth-reconciliation" size={11} />
           </div>
           <div className="text-2xl md:text-3xl font-extrabold tabular-nums leading-none" style={{ color: 'hsl(var(--gold))' }}>
-            {mv(formatCurrency(p.netWorth, true))}
+            <AuditableMetric traceId="dashboard:net-worth" testId="hero-net-worth-value">
+              {mv(formatCurrency(p.netWorth, true))}
+            </AuditableMetric>
           </div>
           <div className="text-[10px] text-muted-foreground mt-2">Brisbane, QLD · AUD</div>
         </div>
@@ -381,7 +399,9 @@ function ExecutiveHeroSnapshot(p: HeroProps) {
             data-testid="hero-surplus-value"
           >
             {surplusPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-            {mv(formatCurrency(p.surplus, true))}
+            <AuditableMetric traceId="dashboard:monthly-surplus">
+              {mv(formatCurrency(p.surplus, true))}
+            </AuditableMetric>
           </div>
           <div className="text-[10px] text-muted-foreground mt-2">{mv(formatCurrency(p.surplus * 12, true))} / yr</div>
         </div>
@@ -408,7 +428,9 @@ function ExecutiveHeroSnapshot(p: HeroProps) {
             data-testid="hero-risk-value"
           >
             <Shield className="w-4 h-4" />
-            {p.riskLabel}
+            <AuditableMetric traceId="dashboard:risk-state">
+              {p.riskLabel}
+            </AuditableMetric>
           </div>
           <div className="text-[10px] text-muted-foreground mt-2 tabular-nums">{p.riskScore} / 100</div>
         </div>
@@ -420,7 +442,9 @@ function ExecutiveHeroSnapshot(p: HeroProps) {
           </div>
           {fireYears === null ? (
             <div className="text-sm font-bold leading-tight text-muted-foreground" data-testid="hero-fire-pending">
-              Pending surplus
+              <AuditableMetric traceId="dashboard:fire-timeline">
+                Pending surplus
+              </AuditableMetric>
             </div>
           ) : fireYears === 0 ? (
             <div
@@ -429,7 +453,7 @@ function ExecutiveHeroSnapshot(p: HeroProps) {
               data-testid="hero-fire-value"
             >
               <Flame className="w-4 h-4" />
-              FIRE met
+              <AuditableMetric traceId="dashboard:fire-timeline">FIRE met</AuditableMetric>
             </div>
           ) : (
             <div
@@ -438,7 +462,7 @@ function ExecutiveHeroSnapshot(p: HeroProps) {
               data-testid="hero-fire-value"
             >
               <Flame className="w-4 h-4" />
-              {fireYears} yr
+              <AuditableMetric traceId="dashboard:fire-timeline">{fireYears} yr</AuditableMetric>
             </div>
           )}
           <div className="text-[10px] text-muted-foreground mt-2">
@@ -847,7 +871,7 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
           </p>
         </div>
         <span className="text-[10px] text-muted-foreground tabular-nums" data-testid="deterministic-projection-cagr">
-          CAGR {cagrFinal.toFixed(2)}% · {cagrYears} yr
+          CAGR <AuditableMetric traceId="projection:cagr:overall">{cagrFinal.toFixed(2)}%</AuditableMetric> · {cagrYears} yr
         </span>
       </header>
 
@@ -877,7 +901,9 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
             >
               <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">{layer.label}</p>
               <p className="text-lg font-extrabold tabular-nums leading-tight mt-1" style={{ color: 'hsl(var(--gold))' }} data-testid={`wealth-layer-${layer.id}-value`}>
-                {mv(formatCurrency(layer.value, true))}
+                <AuditableMetric traceId={`dashboard:wealth-layers:${layer.id}`}>
+                  {mv(formatCurrency(layer.value, true))}
+                </AuditableMetric>
               </p>
               <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{layer.blurb}</p>
             </div>
@@ -925,16 +951,24 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
                   {row.year}{idx === 0 ? ' ★' : ''}
                 </td>
                 <td className="px-3 py-2 font-mono font-bold tabular-nums whitespace-nowrap text-right" style={{ color: 'hsl(195,80%,68%)' }}>
-                  {mv(formatCurrency(row.accessibleNetWorth, true))}
+                  <AuditableMetric traceId={`projection:total-nw:${row.year}`}>
+                    {mv(formatCurrency(row.accessibleNetWorth, true))}
+                  </AuditableMetric>
                 </td>
                 <td className="px-3 py-2 font-mono font-bold tabular-nums whitespace-nowrap text-right" style={{ color: 'hsl(43,90%,62%)' }}>
-                  {mv(formatCurrency(row.totalNetWorth, true))}
+                  <AuditableMetric traceId={`projection:total-nw:${row.year}`}>
+                    {mv(formatCurrency(row.totalNetWorth, true))}
+                  </AuditableMetric>
                 </td>
                 <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right" style={{ color: row.cagrPct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
-                  {row.cagrPct.toFixed(2)}%
+                  <AuditableMetric traceId={`projection:cagr:${row.year}`}>
+                    {row.cagrPct.toFixed(2)}%
+                  </AuditableMetric>
                 </td>
                 <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right" style={{ color: row.growth >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
-                  {row.growth >= 0 ? '+' : ''}{mv(formatCurrency(row.growth, true))}
+                  <AuditableMetric traceId={`projection:growth:${row.year}`}>
+                    {row.growth >= 0 ? '+' : ''}{mv(formatCurrency(row.growth, true))}
+                  </AuditableMetric>
                 </td>
                 <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right text-foreground">
                   {mv(formatCurrency(row.cash, true))}
@@ -943,7 +977,9 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
                   −{mv(formatCurrency(Math.abs(row.liabilities), true))}
                 </td>
                 <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right text-foreground">
-                  {mv(formatCurrency(row.propertyEquity, true))}
+                  <AuditableMetric traceId={`projection:property-equity:${row.year}`}>
+                    {mv(formatCurrency(row.propertyEquity, true))}
+                  </AuditableMetric>
                 </td>
                 <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap text-right text-foreground">
                   {mv(formatCurrency(row.stocks, true))}
@@ -1961,6 +1997,161 @@ export default function ExecutiveDashboard(props: ExecutiveDashboardProps) {
     monteCarloFanData: fanData,
     monteCarloSimulations: simulations,
   };
+
+  // ─── Audit Mode — register calculation traces for every key metric ───────
+  // Engines stay untouched; we only translate their canonical outputs into
+  // CalculationTrace records and push them into the global audit registry.
+  // No formula math is re-implemented here.
+  useEffect(() => {
+    const scenarioId = resolved.activeScenario;
+
+    // Hero quartet. Wealth layers (when present) carry the richest canonical
+    // breakdown; we use them to fill components so the trace is decomposed
+    // accurately rather than falling back to dashboard-prop scalars.
+    const layers = resolved.wealthLayers;
+    const layerAssets = layers?.drivers.raw.assets;
+    const layerLiab = layers?.drivers.raw.liabilities;
+    registerTrace(
+      buildNetWorthTrace({
+        netWorth: resolved.netWorth,
+        components: {
+          cashTotal: layerAssets?.cashOffset ?? resolved.totalLiquidCash,
+          superTotal: layerAssets?.super ?? 0,
+          ppor: layerAssets?.ppor ?? resolved.totalPropertyValue,
+          ips: layerAssets?.settledIpValue ?? 0,
+          stocks: layerAssets?.stocks ?? 0,
+          crypto: layerAssets?.crypto ?? 0,
+          cars: layerAssets?.cars ?? 0,
+          iranProperty: layerAssets?.iranProperty ?? 0,
+          otherAssets: layerAssets?.otherAssets ?? 0,
+          mortgage: layerLiab?.ppoMortgage ?? resolved.totalMortgage,
+          ipsLoans: layerLiab?.settledIpLoans ?? 0,
+          otherDebts: layerLiab?.otherDebts ?? 0,
+        },
+        lastCalculatedAt: new Date().toISOString(),
+      }),
+    );
+
+    registerTrace(
+      buildMonthlySurplusTrace({
+        monthlyIncome: resolved.passiveIncome > 0
+          ? resolved.monthlyExpenses + resolved.surplus + resolved.monthlyDebtService - resolved.passiveIncome
+          : resolved.monthlyExpenses + resolved.surplus + resolved.monthlyDebtService,
+        monthlyExpenses: resolved.monthlyExpenses,
+        monthlyDebtService: resolved.monthlyDebtService,
+        passiveIncome: resolved.passiveIncome,
+        surplus: resolved.surplus,
+        scenarioId,
+      }),
+    );
+
+    if (resolved.riskSurface) {
+      registerTrace(
+        buildRiskStateTrace({
+          score: resolved.riskScore,
+          label: resolved.riskLabel,
+          radar: resolved.riskSurface.radar.current,
+          scenarioId,
+        }),
+      );
+      buildRiskAxisTraces(resolved.riskSurface, scenarioId).forEach(registerTrace);
+      registerTrace(buildFireFragilityTrace(resolved.riskSurface.fragility, scenarioId));
+    } else {
+      registerTrace(
+        buildRiskStateTrace({
+          score: resolved.riskScore,
+          label: resolved.riskLabel,
+          radar: [],
+          scenarioId,
+        }),
+      );
+    }
+
+    // FIRE timeline headline.
+    const annualSavings = resolved.surplus * 12;
+    const fireYears: number | null = (() => {
+      if (resolved.fireProgressPct >= 100) return 0;
+      if (resolved.surplus <= 0 || resolved.fireTargetAmt <= 0) return null;
+      const gap = Math.max(0, resolved.fireTargetAmt - resolved.fireCurrentAmt);
+      if (gap <= 0) return 0;
+      const naive = gap / annualSavings;
+      if (!Number.isFinite(naive) || naive <= 0) return null;
+      return Math.round(naive);
+    })();
+    registerTrace(
+      buildFireTimelineTrace({
+        fireYears,
+        fireProgressPct: resolved.fireProgressPct,
+        fireCurrentAmt: resolved.fireCurrentAmt,
+        fireTargetAmt: resolved.fireTargetAmt,
+        surplus: resolved.surplus,
+        annualExpenses: resolved.monthlyExpenses * 12,
+      }),
+    );
+
+    // Wealth layers.
+    if (resolved.wealthLayers) {
+      const layers = buildWealthLayerTraces(resolved.wealthLayers, scenarioId);
+      registerTrace(layers.gross);
+      registerTrace(layers.accessible);
+      registerTrace(layers.liquidatable);
+      registerTrace(layers.fire);
+    }
+
+    // Projection rows.
+    if (resolved.projectionRows && resolved.projectionRows.length > 0) {
+      const traces = buildProjectionRowTraces(
+        resolved.projectionRows,
+        resolved.netWorth,
+        resolved.wealthLayers ?? null,
+      );
+      traces.forEach(registerTrace);
+    }
+
+    // Financial Health (8-axis canonical) — Liquidity / Leverage / Cashflow /
+    // FIRE Progress / Overall headlines. Mirrors the per-axis traces emitted
+    // by buildRiskAxisTraces but pins them under canonical financial-health:*
+    // ids so the Audit Coverage report sees them by their user-facing names.
+    buildAllFinancialHealthTraces(
+      resolved.riskSurface ?? null,
+      { score: resolved.riskScore, label: resolved.riskLabel },
+      scenarioId,
+    ).forEach(registerTrace);
+
+    // Forecast Engine headline traces — single-value cards for Net Worth /
+    // Accessible NW / FIRE Capital / Liquidatable / Property Equity / Cashflow /
+    // CAGR using the canonical projection row + wealth layers.
+    if (resolved.projectionRows && resolved.projectionRows.length > 0) {
+      const finalRow = resolved.projectionRows[resolved.projectionRows.length - 1];
+      buildAllForecastHeadlineTraces({
+        startNetWorth: resolved.netWorth,
+        finalRow,
+        layers: resolved.wealthLayers ?? null,
+        annualCashflow: resolved.surplus * 12,
+        scenarioId,
+      }).forEach(registerTrace);
+    }
+  }, [
+    resolved.netWorth,
+    resolved.surplus,
+    resolved.riskScore,
+    resolved.riskLabel,
+    resolved.fireProgressPct,
+    resolved.fireCurrentAmt,
+    resolved.fireTargetAmt,
+    resolved.monthlyExpenses,
+    resolved.monthlyDebtService,
+    resolved.passiveIncome,
+    resolved.totalLiquidCash,
+    resolved.totalMortgage,
+    resolved.totalPropertyValue,
+    resolved.totalAssets,
+    resolved.totalLiab,
+    resolved.wealthLayers,
+    resolved.riskSurface,
+    resolved.projectionRows,
+    resolved.activeScenario,
+  ]);
 
   return (
     <div className="space-y-4" data-testid="executive-dashboard">

@@ -51,6 +51,9 @@ import {
 } from "@/lib/fireMonteCarlo";
 import { runCashEngine } from "@/lib/cashEngine";
 import SaveButton from "@/components/SaveButton";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
+import { registerTrace } from "@/lib/auditMode/auditRegistry";
+import { buildAllMonteCarloTraces } from "@/lib/auditMode/engineTraces";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -128,14 +131,19 @@ function ProbabilityGauge({ value }: { value: number }) {
 
 // ─── Metric Card ─────────────────────────────────────────────────────────────
 
-function MetricCard({ label, value, sub, trend, color }: {
-  label: string; value: string; sub?: string; trend?: 'up' | 'down' | 'neutral'; color?: string;
+function MetricCard({ label, value, sub, trend, color, traceId }: {
+  label: string; value: string; sub?: string; trend?: 'up' | 'down' | 'neutral'; color?: string; traceId?: string;
 }) {
   const Icon = trend === 'up' ? ArrowUpRight : trend === 'down' ? ArrowDownRight : Minus;
+  const valueEl = (
+    <div className="text-2xl font-bold" style={{ color: color || 'inherit' }}>{value}</div>
+  );
   return (
     <div className="bg-card border border-border rounded-xl p-4 space-y-1">
       <div className="text-xs text-muted-foreground uppercase tracking-wider">{label}</div>
-      <div className="text-2xl font-bold" style={{ color: color || 'inherit' }}>{value}</div>
+      {traceId
+        ? <AuditableMetric traceId={traceId}>{valueEl}</AuditableMetric>
+        : valueEl}
       {sub && (
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           {trend && <Icon className="w-3 h-3"/>}
@@ -450,6 +458,15 @@ export default function MonteCarloDashboard() {
     if (lastResult) setDisplayResult(lastResult);
   }, [lastResult]);
 
+  // ── Audit Mode: register every Monte Carlo metric trace whenever the
+  //    displayed result or its driving settings change. No engine math is
+  //    re-implemented here — buildAllMonteCarloTraces only pins canonical
+  //    engine output (FireMCResult) onto CalculationTrace records.
+  useEffect(() => {
+    if (!displayResult) return;
+    buildAllMonteCarloTraces(displayResult, localSettings).forEach(registerTrace);
+  }, [displayResult, localSettings]);
+
   // ── Save settings ──
   const saveSettings = useCallback(async (s: FireMCSettings) => {
     setSaveStatus('saving');
@@ -720,7 +737,9 @@ export default function MonteCarloDashboard() {
               {/* Gauge + key stats */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
                 <div className="bg-card border border-border rounded-xl p-6 flex flex-col items-center">
-                  <ProbabilityGauge value={displayResult.probFireByTarget}/>
+                  <AuditableMetric traceId="mc:fire-probability">
+                    <ProbabilityGauge value={displayResult.probFireByTarget}/>
+                  </AuditableMetric>
                   <div className="mt-4 w-full grid grid-cols-2 gap-3 text-center">
                     <div>
                       <div className="text-xs text-muted-foreground">Target Age</div>
@@ -743,6 +762,7 @@ export default function MonteCarloDashboard() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <MetricCard
+                    traceId="mc:median-fire-year"
                     label="Median FIRE Year"
                     value={displayResult.medianFireYear ? String(displayResult.medianFireYear) : 'Never (P50)'}
                     sub={displayResult.medianFireYear
@@ -752,18 +772,21 @@ export default function MonteCarloDashboard() {
                     color={displayResult.medianFireYear && displayResult.medianFireYear <= targetYear ? '#22c55e' : '#f59e0b'}
                   />
                   <MetricCard
+                    traceId="mc:p90-fire-year"
                     label="Optimistic (P90)"
                     value={displayResult.p90FireYear ? String(displayResult.p90FireYear) : 'N/A'}
                     sub={displayResult.p90FireYear ? `Age ${localSettings.currentAge + (displayResult.p90FireYear - currentYear)}` : ''}
                     color="#22c55e"
                   />
                   <MetricCard
+                    traceId="mc:p10-fire-year"
                     label="Pessimistic (P10)"
                     value={displayResult.p10FireYear ? String(displayResult.p10FireYear) : 'Never'}
                     sub={displayResult.p10FireYear ? `Age ${localSettings.currentAge + (displayResult.p10FireYear - currentYear)}` : `${displayResult.neverFirePct}% never FIRE`}
                     color="#ef4444"
                   />
                   <MetricCard
+                    traceId="mc:financial-freedom-prob"
                     label="Never FIRE"
                     value={fmtPct(displayResult.neverFirePct)}
                     sub="of simulations"
@@ -771,11 +794,13 @@ export default function MonteCarloDashboard() {
                     color={displayResult.neverFirePct > 30 ? '#ef4444' : '#22c55e'}
                   />
                   <MetricCard
+                    traceId="mc:p50-nw-at-target"
                     label="NW at Target Age (P50)"
                     value={fmtK(displayResult.nwP50AtTarget)}
                     sub={`P10: ${fmtK(displayResult.nwP10AtTarget)} · P90: ${fmtK(displayResult.nwP90AtTarget)}`}
                   />
                   <MetricCard
+                    traceId="mc:cash-shortfall-risk"
                     label="Cash Shortfall Risk"
                     value={fmtPct(displayResult.probCashShortfall)}
                     sub="drop below buffer"
@@ -899,11 +924,38 @@ export default function MonteCarloDashboard() {
 
           {/* NW at target age summary */}
           {displayResult && (
-            <div className="grid grid-cols-3 gap-3">
-              <MetricCard label="P10 NW at FIRE age" value={fmtK(displayResult.nwP10AtTarget)} color="#ef4444"/>
-              <MetricCard label="P50 NW at FIRE age" value={fmtK(displayResult.nwP50AtTarget)} color="#f97316"/>
-              <MetricCard label="P90 NW at FIRE age" value={fmtK(displayResult.nwP90AtTarget)} color="#22c55e"/>
-            </div>
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <MetricCard traceId="mc:p10-nw-at-target" label="P10 NW at FIRE age" value={fmtK(displayResult.nwP10AtTarget)} color="#ef4444"/>
+                <MetricCard traceId="mc:p50-nw-at-target" label="P50 NW at FIRE age" value={fmtK(displayResult.nwP50AtTarget)} color="#f97316"/>
+                <MetricCard traceId="mc:p90-nw-at-target" label="P90 NW at FIRE age" value={fmtK(displayResult.nwP90AtTarget)} color="#22c55e"/>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3">
+                <MetricCard
+                  traceId="mc:confidence-bands"
+                  label="Confidence Band (P10→P90)"
+                  value={fmtK(displayResult.nwP90AtTarget - displayResult.nwP10AtTarget)}
+                  sub="spread at FIRE age"
+                  color="#60a5fa"
+                />
+                <MetricCard
+                  traceId="mc:neg-cashflow-risk"
+                  label="Negative Cashflow Risk"
+                  value={fmtPct(displayResult.probNegCashflow)}
+                  sub={displayResult.biggestRiskDriver || '—'}
+                  trend={displayResult.probNegCashflow > 30 ? 'down' : 'up'}
+                  color={displayResult.probNegCashflow > 30 ? '#ef4444' : '#22c55e'}
+                />
+                <MetricCard
+                  traceId="mc:reach-goal-probabilities"
+                  label="Reach-Goal Curve"
+                  value={`${displayResult.fireProbByAge.length} buckets`}
+                  sub={displayResult.fireProbByAge.length > 0
+                    ? `final ${fmtPct(displayResult.fireProbByAge[displayResult.fireProbByAge.length - 1].probability)}`
+                    : 'run simulation'}
+                />
+              </div>
+            </>
           )}
         </div>
       )}

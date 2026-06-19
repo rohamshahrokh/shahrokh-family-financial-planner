@@ -36,6 +36,9 @@ import { useAppStore } from "@/lib/store";
 import { apiRequest } from "@/lib/queryClient";
 import { runCashEngine } from "@/lib/cashEngine";
 import UnifiedFirePanel from "@/components/UnifiedFirePanel";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
+import { registerTrace } from "@/lib/auditMode/auditRegistry";
+import { buildAllFireTraces } from "@/lib/auditMode/engineTraces";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1028,6 +1031,13 @@ export default function FIREPathPage() {
       })()
     : null;
 
+  // ── Audit Mode: register FIRE Engine traces whenever the canonical result
+  //    changes. No engine math is duplicated.
+  useEffect(() => {
+    if (!result) return;
+    buildAllFireTraces(result, resolvedSettings).forEach(registerTrace);
+  }, [result, resolvedSettings]);
+
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
@@ -1073,7 +1083,9 @@ export default function FIREPathPage() {
             <p className="text-[12px] text-slate-400 mt-1 leading-relaxed max-w-2xl">{result.recommendation}</p>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-3xl font-black text-orange-400">{result.best_fire_year}</p>
+            <p className="text-3xl font-black text-orange-400">
+              <AuditableMetric traceId="fire:date">{result.best_fire_year}</AuditableMetric>
+            </p>
             <p className="text-[11px] text-slate-500">Semi-FIRE: {result.semi_fire_year}</p>
           </div>
         </div>
@@ -1081,15 +1093,19 @@ export default function FIREPathPage() {
         {/* KPI row */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
           {[
-            { label: 'FIRE Target Capital',   value: mv(fmtM(result.target_capital)),        sub: `${pct(resolvedSettings?.safe_withdrawal_rate)} SWR` },
-            { label: 'Current Progress',       value: `${result.current_progress_pct}%`,      sub: `Gap: ${mv(fmtM(result.fire_gap))}` },
-            { label: 'Investable Now',         value: mv(fmtM(result.investable_now)),         sub: 'excl. super + property' },
-            { label: 'Super (locked)',         value: mv(fmtM(result.super_now)),              sub: 'accessible at 60' },
-            { label: 'Strategy Spread',        value: `±${result.fastest_vs_slowest_years}yr`, sub: 'fastest vs slowest' },
-          ].map(({ label, value, sub }) => (
+            { label: 'FIRE Target Capital',   value: mv(fmtM(result.target_capital)),        sub: `${pct(resolvedSettings?.safe_withdrawal_rate)} SWR`, traceId: 'fire:capital-target' },
+            { label: 'Current Progress',       value: `${result.current_progress_pct}%`,      sub: `Gap: ${mv(fmtM(result.fire_gap))}`,                  traceId: 'fire:passive-gap' },
+            { label: 'Investable Now',         value: mv(fmtM(result.investable_now)),         sub: 'excl. super + property',                            traceId: undefined as string | undefined },
+            { label: 'Super (locked)',         value: mv(fmtM(result.super_now)),              sub: 'accessible at 60',                                   traceId: undefined as string | undefined },
+            { label: 'Strategy Spread',        value: `±${result.fastest_vs_slowest_years}yr`, sub: 'fastest vs slowest',                                 traceId: 'fire:time-saved-lost' },
+          ].map(({ label, value, sub, traceId }) => (
             <div key={label} className="bg-black/20 rounded-xl p-3">
               <div className="text-[10px] text-muted-foreground mb-0.5">{label}</div>
-              <div className="text-base font-black text-foreground">{value}</div>
+              <div className="text-base font-black text-foreground">
+                {traceId
+                  ? <AuditableMetric traceId={traceId}>{value}</AuditableMetric>
+                  : value}
+              </div>
               <div className="text-[10px] text-muted-foreground">{sub}</div>
             </div>
           ))}
@@ -1101,7 +1117,9 @@ export default function FIREPathPage() {
         <Info className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
         <div className="text-[11px] text-muted-foreground leading-relaxed">
           <strong className="text-foreground">Target formula:</strong> Desired monthly passive ÷ SWR × 12
-          = {mv(fmtK(result.target_passive_income))}/mo ÷ {pct(resolvedSettings?.safe_withdrawal_rate)} × 12
+          = {mv(fmtK(result.target_passive_income))}/mo ÷{' '}
+          <AuditableMetric traceId="fire:swr-used">{pct(resolvedSettings?.safe_withdrawal_rate)}</AuditableMetric>{' '}
+          × 12
           = <strong className="text-foreground">{mv(fmtM(result.target_capital))}</strong>
           &nbsp;·&nbsp;
           <strong className="text-foreground">Accessible capital:</strong> investable {mv(fmtM(result.investable_now))}

@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   Activity,
 } from "lucide-react";
+import { AuditableMetric } from "@/components/auditMode/AuditableMetric";
 import type {
   CanonicalRiskSurface as CanonicalRiskSurfaceData,
   StressTone,
@@ -254,7 +255,11 @@ function RadarPanel({ surface }: { surface: CanonicalRiskSurfaceData }) {
                 {AXIS_FULL_LABEL[p.axis] ?? p.axis}
               </span>
               {" · "}
-              <span className="tabular-nums">{Math.round(p.score)}/100</span>
+              <AuditableMetric
+                traceId={`risk:axis:${p.axis.toLowerCase().replace(/\s+/g, "-")}`}
+              >
+                <span className="tabular-nums">{Math.round(p.score)}/100</span>
+              </AuditableMetric>
               <span className="block opacity-80">{p.detail}</span>
             </span>
           </li>
@@ -442,7 +447,9 @@ function FragilityGauge({ surface }: { surface: CanonicalRiskSurfaceData }) {
               style={{ color: segment.color }}
               data-testid="risk-fragility-label"
             >
-              {segment.label}
+              <AuditableMetric traceId="risk:fire-fragility">
+                {segment.label}
+              </AuditableMetric>
             </p>
             <p className="text-[10px] text-muted-foreground mt-1">
               Score {Math.round(fragility.score)}/100
