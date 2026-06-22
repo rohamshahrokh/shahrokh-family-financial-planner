@@ -55,6 +55,8 @@ import { MetricExplainer } from '@/components/intelligence/MetricExplainer';
 import { readMetric, getMetricExplanation, type MetricReading } from '@/lib/metricExplanations';
 import type { MonteCarloFanPoint } from '@/lib/forecastStore';
 import WealthDecisionCenter from '@/components/WealthDecisionCenter';
+import type { CanonicalRiskSurface as CanonicalRiskSurfaceData } from '@/lib/canonicalRiskSurface';
+import type { WealthLayers } from '@/lib/canonicalWealth';
 
 // ─── Public props ────────────────────────────────────────────────────────────
 
@@ -220,6 +222,14 @@ export interface ExecutiveDashboardProps {
    * knows about — never a static +3y guess.
    */
   roadmapSecondIpYear?: number | null;
+
+  // ─── Canonical dashboard/risk architecture ─────────────────────────────────
+  /** Four canonical wealth layers (Gross / Accessible / Liquidatable / FIRE). */
+  wealthLayers?: WealthLayers | null;
+  /** 8-axis radar + stress matrix + FIRE fragility — Risk tab consumes this. */
+  riskSurface?: CanonicalRiskSurfaceData | null;
+  /** Active tax scenario flowing through every widget on this dashboard. */
+  activeScenario?: 'current_law' | 'proposed_reform' | 'custom';
 }
 
 /**
@@ -480,9 +490,12 @@ function ExecutiveHeroSnapshot(p: HeroProps) {
 }
 
 // ─── 2. MonteCarloTrajectoryChart ────────────────────────────────────────────
-// The main future visual anchor on the cockpit. P10/P50/P90 confidence band
+// Probabilistic Projection (Monte Carlo Adjusted). P10/P50/P90 confidence band
 // with shaded confidence area, smooth spline lines, year-focus vertical marker,
-// dynamic legend, institutional grid — Bloomberg-Terminal-meets-family-office.
+// dynamic legend, institutional grid. The deterministic projection above has
+// a separate clearly-labelled section; this is the probabilistic surface only.
+
+const PROBABILISTIC_EXPLANATION = 'This model includes uncertainty, volatility, sequencing risk, and tax-adjusted liquidation effects.';
 
 function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
   const { privacyMode } = useAppStore();
@@ -521,6 +534,7 @@ function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
     <section
       className="rounded-2xl border border-border bg-card overflow-hidden"
       data-testid="monte-carlo-trajectory-chart"
+      aria-label="Probabilistic Projection (Monte Carlo Adjusted)"
     >
       <header className="px-5 pt-5 pb-3 flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2.5">
@@ -531,11 +545,13 @@ function MonteCarloTrajectoryChart(p: ExecutiveDashboardProps) {
             <Activity className="w-4 h-4" style={{ color: 'hsl(280,80%,72%)' }} />
           </div>
           <div>
-            <h2 className="text-base md:text-lg font-bold text-foreground flex items-center gap-1.5" data-testid="strategic-wealth-projection-title">
-              Strategic Wealth Projection
+            <h2 className="text-base md:text-lg font-bold text-foreground flex items-center gap-1.5" data-testid="probabilistic-projection-title">
+              Probabilistic Projection (Monte Carlo Adjusted)
               <MetricExplainer metricId="monte-carlo-probability" size={11} />
             </h2>
-            <p className="text-[11px] text-muted-foreground">Primary strategic visualization · Monte Carlo P10 / P50 / P90 future net-worth engine</p>
+            <p className="text-[11px] text-muted-foreground" data-testid="probabilistic-projection-explanation">
+              {PROBABILISTIC_EXPLANATION}
+            </p>
           </div>
         </div>
         <Link href="/ai-forecast-engine">
@@ -788,10 +804,11 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
       <section
         className="rounded-2xl border border-border bg-card overflow-hidden"
         data-testid="wealth-projection-table-panel"
+        aria-label="Deterministic Projection (Assumption-Based)"
       >
         <header className="px-5 pt-4 pb-3 border-b border-border/30">
-          <h2 className="text-sm font-bold text-foreground">Strategic Wealth Projection</h2>
-          <p className="text-[11px] text-muted-foreground">Year-by-year canonical asset breakdown</p>
+          <h2 className="text-sm font-bold text-foreground">Deterministic Projection (Assumption-Based)</h2>
+          <p className="text-[11px] text-muted-foreground">Year-by-year canonical asset breakdown · Total NW · Accessible NW · Liquid · Property · Super · Debt · CAGR</p>
         </header>
         <div className="px-5 py-8 text-center text-xs text-muted-foreground">
           Projection data is not yet available. Open the snapshot to populate it.
@@ -800,26 +817,129 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
     );
   }
 
+  // CAGR from today → final row (Total NW).
+  const startNW = p.netWorth;
+  const finalRow = rows[rows.length - 1];
+  const cagrYears = finalRow.year - new Date().getFullYear();
+  const cagrFinal =
+    startNW > 0 && cagrYears > 0
+      ? (Math.pow(finalRow.totalNetWorth / startNW, 1 / cagrYears) - 1) * 100
+      : 0;
+
+  // Canonical wealth layers (Gross / Accessible / Liquidatable / FIRE).
+  const layers = p.wealthLayers ?? null;
+
   return (
     <section
       className="rounded-2xl border border-border bg-card overflow-hidden"
       data-testid="wealth-projection-table-panel"
+      aria-label="Deterministic Projection (Assumption-Based)"
     >
       <header className="px-5 pt-4 pb-3 flex items-center justify-between flex-wrap gap-2 border-b border-border/30">
         <div>
-          <h2 className="text-sm font-bold text-foreground flex items-center gap-1.5">
-            Strategic Wealth Projection
+          <h2 className="text-sm font-bold text-foreground flex items-center gap-1.5" data-testid="deterministic-projection-title">
+            Deterministic Projection (Assumption-Based)
             <MetricExplainer metricId="net-worth-reconciliation" size={11} />
           </h2>
           <p className="text-[11px] text-muted-foreground">
-            Decision-grade year-by-year canonical engine · Accessible vs Total NW · asset mix
+            Single assumption set · Total NW · Accessible NW · Liquid Capital · Property Equity · Super · Debt · CAGR
           </p>
         </div>
-        <span className="text-[10px] text-muted-foreground">
-          Canonical engine · 10-year horizon
+        <span className="text-[10px] text-muted-foreground tabular-nums" data-testid="deterministic-projection-cagr">
+          CAGR {cagrFinal.toFixed(2)}% · {cagrYears} yr
         </span>
       </header>
-      <div className="overflow-x-auto">
+
+      {/* Four canonical wealth layers — single source of truth used by every
+          surface on this page. */}
+      {layers && (
+        <div
+          className="grid grid-cols-2 md:grid-cols-4 gap-0 divide-x divide-border/25 border-b border-border/30"
+          data-testid="wealth-layers-strip"
+        >
+          {[
+            { id: 'gross', label: 'Gross Net Worth', value: layers.grossNetWorth, blurb: 'Raw assets − debt' },
+            { id: 'accessible', label: 'Accessible NW', value: layers.accessibleNetWorth, blurb: 'Excludes super / Iran property / cars' },
+            { id: 'liquidatable', label: 'Liquidatable Wealth', value: layers.liquidatableWealth, blurb: 'After ~3.5% property selling cost' },
+            { id: 'fire', label: 'FIRE Capital', value: layers.fireCapital, blurb: 'Post-CGT · post-regime drag' },
+          ].map(layer => (
+            <div
+              key={layer.id}
+              className="px-4 py-3"
+              data-testid={`wealth-layer-${layer.id}`}
+            >
+              <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">{layer.label}</p>
+              <p className="text-lg font-extrabold tabular-nums leading-tight mt-1" style={{ color: 'hsl(var(--gold))' }} data-testid={`wealth-layer-${layer.id}-value`}>
+                {mv(formatCurrency(layer.value, true))}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{layer.blurb}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Mobile: stacked expandable rows. Desktop: full table. */}
+      <div
+        className="md:hidden divide-y divide-border/30"
+        data-testid="wealth-projection-mobile"
+      >
+        {rows.map((row, idx) => (
+          <details
+            key={row.year}
+            className={`px-4 py-2.5 ${idx === 0 ? 'bg-amber-500/[0.03]' : ''}`}
+            data-testid={`wealth-projection-mobile-row-${row.year}`}
+          >
+            <summary className="flex items-center justify-between cursor-pointer list-none">
+              <span className="font-bold text-foreground tabular-nums text-[12px]">
+                {row.year}{idx === 0 ? ' ★' : ''}
+              </span>
+              <span className="flex items-center gap-3 text-[11px]">
+                <span className="tabular-nums font-mono" style={{ color: 'hsl(195,80%,68%)' }}>
+                  {mv(formatCurrency(row.accessibleNetWorth, true))}
+                </span>
+                <span className="tabular-nums font-mono" style={{ color: 'hsl(43,90%,62%)' }}>
+                  {mv(formatCurrency(row.totalNetWorth, true))}
+                </span>
+              </span>
+            </summary>
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-1 mt-2 text-[10.5px]">
+              <dt className="text-muted-foreground">Accessible NW</dt>
+              <dd className="text-right tabular-nums font-mono" style={{ color: 'hsl(195,80%,68%)' }}>
+                {mv(formatCurrency(row.accessibleNetWorth, true))}
+              </dd>
+              <dt className="text-muted-foreground">Total NW</dt>
+              <dd className="text-right tabular-nums font-mono" style={{ color: 'hsl(43,90%,62%)' }}>
+                {mv(formatCurrency(row.totalNetWorth, true))}
+              </dd>
+              <dt className="text-muted-foreground">CAGR</dt>
+              <dd className="text-right tabular-nums font-mono" style={{ color: row.cagrPct >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
+                {row.cagrPct.toFixed(2)}%
+              </dd>
+              <dt className="text-muted-foreground">Growth</dt>
+              <dd className="text-right tabular-nums font-mono" style={{ color: row.growth >= 0 ? 'hsl(142,60%,55%)' : 'hsl(0,72%,60%)' }}>
+                {row.growth >= 0 ? '+' : ''}{mv(formatCurrency(row.growth, true))}
+              </dd>
+              <dt className="text-muted-foreground">Liquid (Cash)</dt>
+              <dd className="text-right tabular-nums font-mono text-foreground">
+                {mv(formatCurrency(row.cash, true))}
+              </dd>
+              <dt className="text-muted-foreground">Property equity</dt>
+              <dd className="text-right tabular-nums font-mono text-foreground">
+                {mv(formatCurrency(row.propertyEquity, true))}
+              </dd>
+              <dt className="text-muted-foreground">Super</dt>
+              <dd className="text-right tabular-nums font-mono text-foreground">
+                {mv(formatCurrency(row.superTotal, true))}
+              </dd>
+              <dt className="text-muted-foreground">Debt</dt>
+              <dd className="text-right tabular-nums font-mono" style={{ color: 'hsl(0,72%,60%)' }}>
+                −{mv(formatCurrency(Math.abs(row.liabilities), true))}
+              </dd>
+            </dl>
+          </details>
+        ))}
+      </div>
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-xs" data-testid="wealth-projection-table">
           <thead>
             <tr className="border-b border-border/40 bg-muted/10">
@@ -884,6 +1004,159 @@ function WealthProjectionTable(p: ExecutiveDashboardProps) {
       <div className="px-5 py-2 border-t border-border/30 bg-muted/[0.04] text-[10px] text-muted-foreground">
         Accessible NW excludes Super · CAGR compounded from today · canonical projection engine
       </div>
+    </section>
+  );
+}
+
+// ─── 3b. ReconciliationCard ──────────────────────────────────────────────────
+// Title required exactly: "Why are the numbers different?". Surfaces the
+// deterministic NW vs Monte Carlo Median and decomposes the gap into
+// transparent reconciliation drivers derived from canonical inputs (volatility
+// adjustment, CGT/tax reform drag, liquidity discount, sequencing risk,
+// interest-rate uncertainty). Drivers are labelled "reconciliation drivers,
+// not engine outputs" because they are computed on top of canonical values
+// rather than fetched from a parallel engine.
+
+function ReconciliationCard(p: ExecutiveDashboardProps) {
+  const { privacyMode } = useAppStore();
+  const mv = (v: string) => maskValue(v, privacyMode);
+
+  const detRows = p.projectionRows ?? [];
+  const finalDetYear = detRows[detRows.length - 1]?.year ?? null;
+  const detFinalTotal = detRows[detRows.length - 1]?.totalNetWorth ?? null;
+
+  const fan = p.monteCarloFanData ?? null;
+  const finalFan = fan && fan.length > 0 ? fan[fan.length - 1] : null;
+  const mcMedian = finalFan?.median ?? null;
+
+  if (detFinalTotal == null || mcMedian == null || finalFan == null) {
+    return (
+      <section
+        className="rounded-2xl border border-border bg-card overflow-hidden"
+        data-testid="reconciliation-card"
+      >
+        <header className="px-5 pt-4 pb-3 border-b border-border/30">
+          <h2 className="text-sm font-bold text-foreground" data-testid="reconciliation-card-title">
+            Why are the numbers different?
+          </h2>
+          <p className="text-[11px] text-muted-foreground">
+            Once both projections are available, the reconciliation drivers appear here.
+          </p>
+        </header>
+        <div className="px-5 py-6 text-xs text-muted-foreground text-center">
+          Run the Monte Carlo simulation to compare it against the deterministic baseline.
+        </div>
+      </section>
+    );
+  }
+
+  const delta = detFinalTotal - mcMedian; // positive when det > MC (typical)
+  const layers = p.wealthLayers;
+  const scenario = p.activeScenario ?? 'current_law';
+
+  // Reconciliation drivers — computed from canonical inputs. These are
+  // approximations layered on top of canonical values to explain the gap
+  // visually, NOT raw engine outputs.
+  const volatilityAdj = Math.abs(finalFan.p90 - finalFan.p10) * 0.18; // span of band
+  const sequencingRisk = Math.max(0, mcMedian * 0.025);
+  const interestRateUncertainty = Math.max(0, mcMedian * 0.02);
+  const cgtDrag = layers?.drivers.cgtOnIp ?? 0;
+  const liquidityDiscount = layers?.drivers.sellingCost ?? 0;
+  const reformDrag = scenario === 'proposed_reform' ? (layers?.drivers.reformDrag ?? 0) : 0;
+  const forcedSale = Math.max(0, (layers?.drivers.ipEquity ?? 0) * 0.015);
+
+  const drivers: { id: string; label: string; value: number; tone: 'reduce' | 'increase' }[] = [
+    { id: 'volatility', label: 'Market volatility adjustment', value: volatilityAdj, tone: 'reduce' },
+    { id: 'cgt', label: scenario === 'proposed_reform' ? 'Tax reform / CGT drag' : 'CGT drag on IP liquidation', value: cgtDrag, tone: 'reduce' },
+    { id: 'liquidity', label: 'Liquidity / selling-cost discount', value: liquidityDiscount, tone: 'reduce' },
+    { id: 'forced-sale', label: 'Forced-sale assumption (1.5% of IP equity)', value: forcedSale, tone: 'reduce' },
+    { id: 'sequencing', label: 'Sequencing risk', value: sequencingRisk, tone: 'reduce' },
+    { id: 'rates', label: 'Interest-rate uncertainty', value: interestRateUncertainty, tone: 'reduce' },
+  ];
+  if (scenario === 'proposed_reform' && reformDrag > 0) {
+    drivers.splice(1, 0, { id: 'reform', label: 'Reform regime drag (loss-bank quarantine)', value: reformDrag, tone: 'reduce' });
+  }
+
+  const reducingSum = drivers.reduce((s, d) => s + d.value, 0);
+  const residual = delta - reducingSum;
+
+  return (
+    <section
+      className="rounded-2xl border border-border bg-card overflow-hidden"
+      data-testid="reconciliation-card"
+    >
+      <header className="px-5 pt-4 pb-3 border-b border-border/30">
+        <h2 className="text-sm font-bold text-foreground" data-testid="reconciliation-card-title">
+          Why are the numbers different?
+        </h2>
+        <p className="text-[11px] text-muted-foreground">
+          Reconciliation drivers — derived from canonical wealth state, NOT engine outputs.
+        </p>
+      </header>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-0 divide-x divide-border/25 border-b border-border/30">
+        <div className="px-4 py-3" data-testid="reconciliation-deterministic">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
+            Deterministic · {finalDetYear}
+          </p>
+          <p className="text-xl font-extrabold tabular-nums leading-tight mt-1" style={{ color: 'hsl(43,90%,62%)' }}>
+            {mv(formatCurrency(detFinalTotal, true))}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Assumption-based Total NW</p>
+        </div>
+        <div className="px-4 py-3" data-testid="reconciliation-mc-median">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
+            Monte Carlo Median (P50) · {finalDetYear}
+          </p>
+          <p className="text-xl font-extrabold tabular-nums leading-tight mt-1" style={{ color: 'hsl(210,80%,68%)' }}>
+            {mv(formatCurrency(mcMedian, true))}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Probabilistic median outcome</p>
+        </div>
+        <div className="px-4 py-3 col-span-2 md:col-span-1" data-testid="reconciliation-delta">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
+            Difference (Det − MC)
+          </p>
+          <p
+            className="text-xl font-extrabold tabular-nums leading-tight mt-1"
+            style={{ color: delta >= 0 ? 'hsl(0,72%,62%)' : 'hsl(142,60%,55%)' }}
+          >
+            {delta >= 0 ? '+' : '−'}{mv(formatCurrency(Math.abs(delta), true))}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            {delta >= 0 ? 'Deterministic above median — drivers below close the gap' : 'Median above deterministic — favourable variance'}
+          </p>
+        </div>
+      </div>
+
+      <ul
+        className="divide-y divide-border/20"
+        data-testid="reconciliation-drivers"
+      >
+        {drivers.map(d => (
+          <li
+            key={d.id}
+            className="flex items-center justify-between px-5 py-2"
+            data-testid={`reconciliation-driver-${d.id}`}
+          >
+            <span className="text-[11.5px] text-foreground/85">{d.label}</span>
+            <span className="text-[11.5px] font-mono tabular-nums" style={{ color: 'hsl(0,72%,62%)' }}>
+              −{mv(formatCurrency(d.value, true))}
+            </span>
+          </li>
+        ))}
+        <li className="flex items-center justify-between px-5 py-2 bg-muted/[0.04]" data-testid="reconciliation-driver-residual">
+          <span className="text-[11.5px] text-muted-foreground italic">
+            Residual (unexplained by drivers)
+          </span>
+          <span className="text-[11.5px] font-mono tabular-nums text-muted-foreground">
+            {residual >= 0 ? '−' : '+'}{mv(formatCurrency(Math.abs(residual), true))}
+          </span>
+        </li>
+      </ul>
+      <p className="px-5 py-2 text-[10px] text-muted-foreground border-t border-border/30">
+        Drivers are transparent reconciliation approximations layered on canonical inputs — they are not separate engine outputs. Active regime: {scenario === 'proposed_reform' ? 'Proposed 2027 Reform' : scenario === 'custom' ? 'Custom' : 'Current Law'}.
+      </p>
     </section>
   );
 }
@@ -1735,33 +2008,29 @@ export default function ExecutiveDashboard(props: ExecutiveDashboardProps) {
     <div className="space-y-4" data-testid="executive-dashboard">
       {/* 1. Hero Snapshot — Today snapshot, live current values only. */}
       <ExecutiveHeroSnapshot {...resolved} result={result} />
-      {/* 2. Strategic Wealth Projection — promoted PRIMARY strategic
-            visualization. The Monte Carlo P10/P50/P90 fan is the single
-            decision-grade future-wealth surface on the Executive Overview.
-            The prior duplicate "Future Wealth Path" block above the Wealth
-            Decision Center is removed in this Executive Overview cleanup
-            pass — one chart, one table, one source of truth. */}
-      <MonteCarloTrajectoryChart {...resolved} />
-      {/* 3. Richer Analytical Table — Accessible NW · Total NW · CAGR · Growth ·
-            Cash · Liabilities · Property equity · Stocks · Crypto · Super.
-            Replaces the previous compact P10/P50/P90 projection table — that
-            duplicated the fan chart above. */}
+      {/* 2. Deterministic Projection (Assumption-Based) — the canonical
+            year-by-year asset breakdown PLUS the four canonical wealth layers
+            (Gross / Accessible / Liquidatable / FIRE). Single assumption set. */}
       <WealthProjectionTable {...resolved} />
-      {/* 4. Wealth Decision Center — operational tabs (CASH/EVENTS/WEALTH/RISK).
-            The Plan Execution Capacity chart lives inside CASH; planned roadmap
-            is in EVENTS; liquidity / leverage / downside summary is in RISK.
-            The WEALTH tab now points users to the strategic projection above
-            (no duplicate Monte Carlo + projection render). */}
+      {/* 3. Reconciliation card — bridges the two projections. Transparent
+            drivers derived from canonical wealth state, not engine outputs. */}
+      <ReconciliationCard {...resolved} />
+      {/* 4. Probabilistic Projection (Monte Carlo Adjusted) — P10/P50/P90 fan
+            with the canonical explanation text. */}
+      <MonteCarloTrajectoryChart {...resolved} />
+      {/* 5. Wealth Decision Center — operational tabs (CASH/EVENTS/RISK).
+            Risk tab renders the canonical 8-axis radar + stress matrix +
+            FIRE fragility gauge (no duplicated cards). */}
       <WealthDecisionCenter
         defaultTab="CASH"
         executiveProps={resolved}
         renderDepositPowerChart={() => <DepositPowerTrajectoryPanel {...resolved} />}
       />
-      {/* 5. Financial Health — exactly 4 structural indicators. */}
+      {/* 6. Financial Health — exactly 4 structural indicators. */}
       <ExecutiveHealthStrip {...resolved} />
-      {/* 6. Action Queue — max 3 next-step items. */}
+      {/* 7. Action Queue — max 3 next-step items. */}
       <ExecutiveActionQueue result={result} />
-      {/* 7. Deep Analysis Cards — four navigation surfaces (no chips). */}
+      {/* 8. Deep Analysis Cards — four navigation surfaces (no chips). */}
       <DeepAnalysisCards />
     </div>
   );

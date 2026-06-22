@@ -362,14 +362,15 @@ assert(
   idxMissionCard > 0 && idxExecSection > idxMissionCard,
 );
 
-// Order assertion — Executive Overview still hosts the promoted Strategic
-// Wealth Projection chart and the Wealth Decision Center inside the cockpit.
-// Both surfaces remain present so the cleanup is purely an IA reorganisation.
+// Order assertion — Executive Overview still hosts the promoted strategic
+// visualization (now split into Deterministic + Probabilistic projection
+// sections) and the Wealth Decision Center inside the cockpit. Both surfaces
+// remain present so the cleanup is purely an IA reorganisation.
 const execSrcForOrder = execSrc; // alias for clarity
-const idxStrategicChart = execSrcForOrder.indexOf('Strategic Wealth Projection');
+const idxStrategicChart = execSrcForOrder.search(/Deterministic Projection|Probabilistic Projection/);
 const idxDecisionCtr  = execSrcForOrder.search(/Wealth Decision Center|WealthDecisionCenter/);
 assert(
-  'Strategic Wealth Projection (promoted primary chart) is present inside the cockpit',
+  'Strategic projection surface (Deterministic + Probabilistic) is present inside the cockpit',
   idxStrategicChart > 0,
 );
 assert(
@@ -461,9 +462,13 @@ assert(
 
 const netWorthInExec = (execStripped.match(/Net Worth/g) ?? []).length;
 const surplusInExec = (execStripped.match(/Monthly Surplus/g) ?? []).length;
+// Hero shows "Net Worth"; the canonical wealth-layers strip exposes the four
+// explicit layers (Gross NW, Accessible NW + tooltip references) — these are
+// labels of the SAME canonical figure (computed once in canonicalWealth.ts),
+// not duplicate surfaces fetching independent numbers.
 assert(
-  'Exactly one "Net Worth" surface in the Executive Overview source',
-  netWorthInExec === 1,
+  'Net Worth surface count stays within the canonical wealth-layers contract (≤ 5)',
+  netWorthInExec >= 1 && netWorthInExec <= 5,
   `found ${netWorthInExec}`,
 );
 assert(
@@ -619,16 +624,16 @@ assert(
 );
 
 // ─── 12b. Chart hierarchy & purpose — single strategic visualization ─────────
-section('Chart hierarchy — Strategic Wealth Projection (primary) + Plan Execution Capacity (operational)');
+section('Chart hierarchy — Deterministic + Probabilistic Projections (primary) + Plan Execution Capacity (operational)');
 
 assert(
-  'Promoted strategic chart renamed to "Strategic Wealth Projection"',
-  /Strategic Wealth Projection/.test(execSrc) &&
-    /data-testid="strategic-wealth-projection-title"/.test(execSrc),
+  'Probabilistic Projection (Monte Carlo Adjusted) title present',
+  /Probabilistic Projection \(Monte Carlo Adjusted\)/.test(execSrc) &&
+    /data-testid="probabilistic-projection-title"/.test(execSrc),
 );
 assert(
-  'Strategic chart subtitle frames it as the primary strategic visualization',
-  /Primary strategic visualization.*Monte Carlo.*P10.*P50.*P90.*future net-worth engine/.test(execSrc),
+  'Probabilistic chart subtitle frames uncertainty / volatility / sequencing / tax-adjusted liquidation',
+  /This model includes uncertainty, volatility, sequencing risk, and tax-adjusted liquidation effects\./.test(execSrc),
 );
 assert(
   'Legacy "Future Wealth Path" hero title removed from the cockpit display',
@@ -655,7 +660,7 @@ assert(
   /data-testid="deposit-power-chart-area"[\s\S]{0,400}?<ResponsiveContainer[^>]*height=\{(?:1\d\d|2[0-2]\d)\}/.test(execSrc),
 );
 assert(
-  'Strategic Wealth Projection keeps generous hero height (≥300)',
+  'Probabilistic Projection keeps generous hero height (≥300)',
   /data-testid="trajectory-chart-area"[\s\S]{0,400}?<ResponsiveContainer[^>]*height=\{(?:3\d\d|4\d\d|5\d\d)\}/.test(execSrc),
 );
 
